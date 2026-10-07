@@ -1,0 +1,81 @@
+# ws
+
+Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
+
+- **Bare clones, not re-clones.** Each registered repo is cloned once into
+  `~/workspaces/.bare/<repo>.git`; every workspace gets a `git worktree` of it.
+- **Workspaces hold several repos.** `~/workspaces/ws1/{app,infra}` etc.
+- **Claims.** Each workspace tracks the branch/PR it is on per repo. A branch or PR
+  claimed by one workspace cannot be checked out by another.
+- **Bound Claude.** Every workspace gets a generated `.claude/settings.json` with a
+  `ws guard` PreToolUse hook: no file access in other workspaces, no writes outside
+  its own, no raw `git switch`/`checkout <branch>`/`gh pr checkout`/`git worktree`,
+  no workspace admin commands.
+- **Zellij grid.** `ws up` opens a session with 4 workspaces per tab: Claude on top,
+  shell below, 8 panes per page.
+
+## Quick start
+
+```nu
+ws init
+ws repo add nix-home git@github.com:DavidDudson/nix-home.git
+ws repo add evergreen git@github.com:DavidDudson/evergreen.git
+ws new -r nix-home              # ws1
+ws new -r evergreen -r nix-home # ws2
+ws up
+```
+
+Inside a workspace (shell pane or its Claude):
+
+```nu
+ws checkout nix-home feat/zellij   # claim + switch (new branch off origin/main if needed)
+ws checkout evergreen '#42'        # pick up a PR
+ws pr                              # record PRs for claimed branches
+ws status --all
+ws release nix-home
+```
+
+Run `ws help` for every command.
+
+## Layout
+
+```
+~/workspaces/               ($WS_ROOT)
+  repos.toml                registry: [repos.<name>] url, default_branch?
+  .bare/<repo>.git          bare clones (refspec → refs/remotes/origin/*)
+  .ws/state.json            claims, lock-protected (.ws/state.lock)
+  .ws/layout.kdl            generated zellij layout
+  ws1/
+    CLAUDE.md               generated workspace rules
+    .claude/settings.json   WS_NAME env + guard hook
+    <repo>/                 worktree
+```
+
+## Claude Code plugin
+
+`plugin/` ships skills (`workspace`, `ship-pr`, `workspace-admin`):
+
+```
+/plugin marketplace add ~/repos/ws
+/plugin install ws@ws
+```
+
+## Install
+
+Flake package: `packages.<system>.default` wraps `bun src/cli.ts` and sets `WS_SELF=ws`, so
+generated hooks and layouts call `ws` on PATH instead of a store path.
+
+## Environment
+
+| var          | default        | purpose                                    |
+| ------------ | -------------- | ------------------------------------------ |
+| `WS_ROOT`    | `~/workspaces` | workspaces root                            |
+| `WS_NAME`    | –              | binds the process to a workspace (Claude)  |
+| `WS_SESSION` | `workspaces`   | zellij session name                        |
+| `WS_SELF`    | script path    | how generated hooks/layouts invoke `ws`    |
+
+## Limits
+
+The guard is a guardrail, not a sandbox: Bash is checked by pattern (paths into
+other workspaces, branch-changing git commands), so an obfuscated command can get
+past it.

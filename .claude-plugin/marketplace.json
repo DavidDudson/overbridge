@@ -1,0 +1,11 @@
+{
+  "name": "ws",
+  "owner": { "name": "David Dudson" },
+  "plugins": [
+    {
+      "name": "ws",
+      "source": "./plugin",
+      "description": "Skills for working inside ws workspaces: claiming branches/PRs, shipping PRs, and managing workspaces."
+    }
+  ]
+}

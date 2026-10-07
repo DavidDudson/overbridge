@@ -1,0 +1,23 @@
+---
+name: ship-pr
+description: Commit, push and open (or update) a GitHub PR from a ws workspace, then record the PR against the workspace. Use when the user says "ship it", "open a PR", "raise a PR", "push this up", or "update the PR" inside a ws workspace.
+---
+
+# Ship a PR from a workspace
+
+1. **Check state.** `ws status` — confirm the repo has a claimed branch (not
+   detached, not the default branch). If on the default branch or detached,
+   ask for a branch name and run `ws checkout <repo> <branch>` first; changes carry over.
+2. **Review the diff.** `git -C <repo> status` and `git -C <repo> diff`. Do not
+   commit secrets, `.env` files, or build output. Run the repo's checks if it
+   has them (`just check`, `bun test`, `cargo clippy && cargo test`, …) and fix failures.
+3. **Commit.** Conventional Commits subject (≤ 50 chars), body explains why.
+4. **Push.** `git -C <repo> push -u origin HEAD`.
+5. **PR.** Ask before creating it. Then, from inside the repo dir:
+   ```sh
+   gh pr create --fill          # or --title/--body; add --draft if work in progress
+   ```
+   If a PR already exists for the branch, pushing updated it; skip creation.
+6. **Record it.** `ws pr <repo>` so `ws status` and claim checks know the PR
+   belongs to this workspace.
+7. Report the PR URL (`gh pr view --json url -q .url`).
