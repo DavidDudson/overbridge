@@ -30,6 +30,8 @@ ws add <repo> --ws <name>                 # add another repo to an existing work
 ws rm <name> [--force]                    # refuses with uncommitted changes unless --force
 ws status --all
 
+ws spinup [-p 2]                          # create empty workspaces up to N full pages (default 1 = 4 ws),
+                                          # then rebuild the zellij session (kills running panes)
 ws up [--fresh]                           # zellij session "workspaces": 4 workspaces per tab,
                                           # Claude pane above shell pane per workspace
 ws claude <name>                          # run one bound Claude outside zellij

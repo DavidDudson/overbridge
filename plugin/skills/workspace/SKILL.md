@@ -16,7 +16,10 @@ ws status          # repos in this workspace: claimed branch, PR, actual head, d
 ws status --all    # every workspace (read-only view of other claims)
 ```
 
-Each subdirectory of the workspace is a git worktree of one repo.
+Each subdirectory of the workspace is a git worktree of one repo. A workspace can
+start empty: `ws repo ls` shows registered repos, `ws checkout <repo> <branch>`
+adds the repo to this workspace on first use, and `ws repo add <name> <url>`
+registers a new one (ask the user before registering).
 
 ## Change branch / pick up a PR
 

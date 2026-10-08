@@ -20,11 +20,12 @@ Workspaces
   ws whoami                             workspace for the current dir/session
 
 Branches & PRs (workspace inferred from $WS_NAME or cwd)
-  ws checkout [repo] <branch|#pr|url>   claim + switch; refuses if claimed elsewhere
+  ws checkout [repo] <branch|#pr|url>   claim + switch (adds repo if missing)
   ws release [repo]                     drop claim, detach worktree in place
   ws pr [repo]                          record the open PR for claimed branches
 
 Zellij
+  ws spinup [-p pages]                  ensure N full pages (4 ws each) exist, rebuild session
   ws up [--fresh]                       attach/launch session, 4 workspaces per tab
   ws layout                             print the generated zellij layout
   ws claude <name> [-- args]            run Claude bound to a workspace
@@ -105,6 +106,11 @@ async function main(argv: string[]): Promise<number> {
     case "up": {
       const { values } = opts(rest, { fresh: { type: "boolean" } });
       cmd.up(!!values.fresh);
+      break;
+    }
+    case "spinup": {
+      const { values } = opts(rest, { pages: { type: "string", short: "p" } });
+      cmd.spinup(Number(values.pages ?? 1));
       break;
     }
     case "layout":

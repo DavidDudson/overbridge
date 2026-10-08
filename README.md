@@ -20,15 +20,17 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
 ws init
 ws repo add nix-home git@github.com:DavidDudson/nix-home.git
 ws repo add evergreen git@github.com:DavidDudson/evergreen.git
-ws new -r nix-home              # ws1
-ws new -r evergreen -r nix-home # ws2
-ws up
+ws spinup                       # 4 empty workspaces (ws1-ws4) + fresh zellij grid
+ws spinup -p 2                  # 8 workspaces, two tabs
 ```
+
+`ws spinup` always rebuilds the session, killing running panes. Use `ws up` to just
+attach. Workspaces can also be pre-filled: `ws new -r nix-home -r evergreen`.
 
 Inside a workspace (shell pane or its Claude):
 
 ```nu
-ws checkout nix-home feat/zellij   # claim + switch (new branch off origin/main if needed)
+ws checkout nix-home feat/zellij   # adds repo if missing, claims + switches
 ws checkout evergreen '#42'        # pick up a PR
 ws pr                              # record PRs for claimed branches
 ws status --all

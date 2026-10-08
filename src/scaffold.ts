@@ -30,6 +30,8 @@ You are bound to workspace **${ws}** (\`${dir}\`). A \`ws guard\` hook blocks
 access to other workspaces and direct branch switching. Do not try to work around it.
 
 - Each subdirectory is a git worktree of a repo. Commit, push and run tools there as normal.
+- The workspace may start empty. \`ws repo ls\` lists registered repos; \`ws checkout <repo> <branch>\`
+  adds the repo here if needed. \`ws repo add <name> <url>\` registers a new one.
 - Change branch or pick up a PR only via \`ws checkout <repo> <branch>\` / \`ws checkout <repo> #<pr>\`.
   Never \`git switch\`, \`git checkout <branch>\`, or \`gh pr checkout\`.
 - A branch or PR claimed by another workspace cannot be taken. If \`ws checkout\` refuses, stop and tell the user.

@@ -29,7 +29,7 @@ const BASH_RULES: [RegExp, string][] = [
   ],
   [/\bgh\s+pr\s+checkout\b/, "use `ws checkout <repo> #<number>` so the PR is claimed for this workspace"],
   [new RegExp(GIT + String.raw`worktree\b`), "worktrees are managed by ws; ask the user"],
-  [/\bws\s+(?:new|rm|up|claude|init|layout|repo\s+add)\b/, "workspace admin commands are for the user, not a workspace Claude"],
+  [/\bws\s+(?:new|rm|up|claude|init|layout|spinup)\b/, "workspace admin commands are for the user, not a workspace Claude"],
 ];
 
 // Absolute, home-relative or parent-relative path tokens in a shell command.

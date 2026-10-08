@@ -89,6 +89,13 @@ describe("workflow", () => {
     expect(sh(["git", "branch", "--show-current"], join(root, "ws2", "app"))).toBe("feat");
   });
 
+  test("checkout adds a repo the workspace does not have yet", () => {
+    expect(ws(["new", "empty"]).code).toBe(0);
+    expect(ws(["checkout", "app", "other"], join(root, "empty")).code).toBe(0);
+    expect(sh(["git", "branch", "--show-current"], join(root, "empty", "app"))).toBe("other");
+    expect(ws(["rm", "empty"]).code).toBe(0);
+  });
+
   test("layout has one tab per 4 workspaces", () => {
     for (let i = 0; i < 3; i++) ws(["new"]);
     const kdl = ws(["layout"]).out;

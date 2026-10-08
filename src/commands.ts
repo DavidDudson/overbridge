@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
-import { layoutKdl } from "./layout";
+import { layoutKdl, PER_PAGE } from "./layout";
 import { barePath, currentWorkspace, metaDir, NAME_RE, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { scaffold } from "./scaffold";
 import { claimOwner, getWorkspace, readState, withState } from "./state";
@@ -102,7 +102,7 @@ export function checkout(args: string[], wsOpt?: string) {
     [repo, ref] = [owned[0], repo];
   }
   if (!repo || !ref) fail("usage: ws checkout <repo> <branch|#pr>");
-  if (!owned.includes(repo)) fail(`${repo} is not in ${ws}; run \`ws add ${repo}\``);
+  if (!owned.includes(repo)) addRepo(repo, ws);
 
   const spec = getRepo(repo);
   const wt = worktreePath(ws, repo);
@@ -222,6 +222,16 @@ export function up(fresh: boolean) {
       ? exec(["zellij", "attach", session])
       : exec(["zellij", "--session", session, "--new-session-with-layout", file]),
   );
+}
+
+/** Ensure `pages` full pages of workspaces exist (empty ones are fine), then rebuild the session. */
+export function spinup(pages: number) {
+  if (!Number.isInteger(pages) || pages < 1) fail("--pages must be a positive integer");
+  if (process.env.ZELLIJ) fail("already inside zellij; detach first");
+  init();
+  const missing = pages * PER_PAGE - Object.keys(readState().workspaces).length;
+  for (let i = 0; i < missing; i++) newWorkspace(undefined, []);
+  up(true);
 }
 
 export function claude(ws: string, extra: string[]) {
