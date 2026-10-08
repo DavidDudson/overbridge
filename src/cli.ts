@@ -16,13 +16,14 @@ Workspaces
   ws new [name] [-r repo]...            create a workspace (default name wsN)
   ws add <repo> [--ws name]             add a repo worktree to a workspace
   ws rm <name> [--force]                remove a workspace and its worktrees
-  ws status [--all] [--json]            claims, heads and dirty state
+  ws status [--all] [--json]            claims, heads, gh-stack position, dirty state
   ws whoami                             workspace for the current dir/session
 
 Branches & PRs (workspace inferred from $WS_NAME or cwd)
-  ws checkout [repo] <branch|#pr|url>   claim + switch (adds repo if missing)
+  ws checkout [repo] <branch|#pr|url>   claim + switch (adds repo if missing);
+                                        a stacked PR pulls its whole stack via gh stack
   ws release [repo]                     drop claim, detach worktree in place
-  ws pr [repo]                          record the open PR for claimed branches
+  ws pr [repo]                          record the open PR; claim follows HEAD within a stack
 
 Zellij
   ws spinup [-p pages]                  ensure N full pages (4 ws each) exist, rebuild session

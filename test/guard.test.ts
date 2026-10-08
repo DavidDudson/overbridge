@@ -61,6 +61,11 @@ describe("bash", () => {
     "cd ~/../../w/ws2",
     "ls $HOME/../../w/ws3",
     "cd ../..",
+    "gh stack checkout 42",
+    "cd app && gh stack checkout https://github.com/u/app/pull/3",
+    "gs checkout feat/api",
+    "gh stack trunk",
+    "gs trunk",
   ])("blocks: %s", (cmd) => {
     expect(check(bash(cmd), ctx)).toBeDefined();
   });
@@ -83,6 +88,15 @@ describe("bash", () => {
     "ls /nix/store",
     "cd ..",
     "bun test ./test",
+    "gh stack init feat/auth",
+    "gh stack add feat/api",
+    "gh stack up",
+    "gh stack bottom",
+    "gh stack submit --auto",
+    "gh stack rebase",
+    "gh stack view --json",
+    "gs push",
+    "git commit -m 'gh stack checkout docs'",
   ])("allows: %s", (cmd) => {
     expect(check(bash(cmd), ctx)).toBeUndefined();
   });

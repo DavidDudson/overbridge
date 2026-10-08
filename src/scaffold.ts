@@ -38,6 +38,9 @@ access to other workspaces and direct branch switching. Do not try to work aroun
 - After \`gh pr create\`, run \`ws pr <repo>\` to record the PR against this workspace.
 - \`ws status\` shows this workspace's claims; \`ws status --all\` shows every workspace.
 - \`ws release <repo>\` frees a branch when you are done with it.
+- Stacked PRs (\`gh stack\`): a claim covers every layer of its stack. \`gh stack init/add/up/down/top/bottom\`,
+  \`push\`, \`submit\`, \`rebase\` and \`sync\` work as normal; pull an existing stack with \`ws checkout <repo> #<pr>\`
+  (never \`gh stack checkout\` or \`gh stack trunk\`). Run \`ws pr <repo>\` after moving between layers or submitting.
 
 ## GitHub repos
 

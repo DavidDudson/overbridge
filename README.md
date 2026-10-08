@@ -7,9 +7,14 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
 - **Workspaces hold several repos.** `~/workspaces/ws1/{app,infra}` etc.
 - **Claims.** Each workspace tracks the branch/PR it is on per repo. A branch or PR
   claimed by one workspace cannot be checked out by another.
+- **Stacked PRs.** With [gh-stack](https://github.github.com/gh-stack/), a claim covers
+  the whole stack (read live from the catalog gh-stack keeps in the bare repo).
+  `ws checkout <repo> #<pr>` on a stacked PR runs `gh stack checkout`; `gh stack up/down/add`
+  move within the claim, and `ws pr` moves the claim to the current layer.
 - **Bound Claude.** Every workspace gets a generated `.claude/settings.json` with a
   `ws guard` PreToolUse hook: no file access in other workspaces, no writes outside
-  its own, no raw `git switch`/`checkout <branch>`/`gh pr checkout`/`git worktree`,
+  its own, no raw `git switch`/`checkout <branch>`/`gh pr checkout`/`gh stack checkout`/
+  `gh stack trunk`/`git worktree`,
   no workspace admin commands.
 - **Zellij grid.** `ws up` opens a session with 4 workspaces per tab: Claude on top,
   shell below, 8 panes per page.
@@ -80,4 +85,4 @@ generated hooks and layouts call `ws` on PATH instead of a store path.
 
 The guard is a guardrail, not a sandbox: Bash is checked by pattern (paths into
 other workspaces, branch-changing git commands), so an obfuscated command can get
-past it.
+past it. gh aliases (`gh co`) and custom `gh stack alias` names are not recognised.

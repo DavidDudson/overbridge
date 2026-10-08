@@ -38,6 +38,25 @@ Use `git restore <path>` (or `git checkout -- <path>`) to discard file changes.
 If `ws checkout` says the branch or PR is **claimed by workspace X**: stop and tell
 the user. Do not create a near-duplicate branch name to dodge the claim.
 
+## Stacked PRs (gh stack)
+
+A claim covers a whole [gh-stack](https://github.github.com/gh-stack/) stack: every
+layer, every layer's PR. The stack catalog lives in the shared bare repo, so other
+workspaces see the stack and cannot check out any of its layers.
+
+```sh
+ws checkout <repo> #123          # 123 is stacked → runs `gh stack checkout`, claims every layer
+gh stack init feat/auth          # start a stack here (from a claimed or detached worktree)
+gh stack add feat/api            # new layer on top
+gh stack up | down | top | bottom
+gh stack submit --auto           # push + open/update every PR
+ws pr <repo>                     # claim follows HEAD to the current layer, records its PR
+```
+
+`gh stack checkout` and `gh stack trunk` are blocked: the first bypasses claims, the
+second puts the workspace on the shared default branch. Use the `gh-stack` skill for
+everything else (non-interactive flags, rebase/conflict flow, merge).
+
 ## Branch naming
 
 New branches: short kebab-case with a type prefix, e.g. `feat/zellij-layout`,

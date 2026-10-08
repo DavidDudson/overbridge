@@ -1,6 +1,7 @@
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { metaDir } from "./paths";
+import { type Cover, overlaps } from "./stack";
 import { fail } from "./util";
 
 export type Claim = { branch?: string; pr?: number };
@@ -66,12 +67,19 @@ export function getWorkspace(s: State, ws: string): WorkspaceState {
   return s.workspaces[ws] ?? fail(`no workspace '${ws}'`);
 }
 
-/** Workspace holding a claim on `repo` matching branch or PR, if any. */
-export function claimOwner(s: State, repo: string, want: Claim): string | undefined {
+/**
+ * Another workspace whose claim on `repo` overlaps `want`. `coverOf` widens a
+ * claim to everything it holds (worktree head, whole gh-stack stacks).
+ */
+export function claimOwner(
+  s: State,
+  repo: string,
+  want: Cover,
+  coverOf: (ws: string, c: Claim) => Cover,
+  self: string,
+): string | undefined {
   for (const [ws, w] of Object.entries(s.workspaces)) {
     const c = w.repos[repo];
-    if (!c) continue;
-    if (want.branch && c.branch === want.branch) return ws;
-    if (want.pr && c.pr === want.pr) return ws;
+    if (ws !== self && c && overlaps(coverOf(ws, c), want)) return ws;
   }
 }

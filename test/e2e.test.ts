@@ -119,4 +119,33 @@ describe("workflow", () => {
     expect(existsSync(join(root, "ws1"))).toBe(false);
     expect(sh(["git", "worktree", "list"], join(root, ".bare", "app.git"))).not.toContain("/ws1/");
   });
+
+  test("a gh-stack stack is claimed as a unit", () => {
+    const bare = join(root, ".bare", "app.git");
+    for (const n of ["sa", "sb"]) expect(ws(["new", n, "-r", "app"]).code).toBe(0);
+    const sa = join(root, "sa", "app");
+    // gh-stack keeps its catalog in git's common dir: the shared bare repo.
+    expect(sh(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], sa)).toBe(bare);
+    expect(ws(["checkout", "app", "s1"], sa).code).toBe(0);
+    const layer = (branch: string, pr?: number) => ({ branch, ...(pr && { pullRequest: { number: pr } }) });
+    writeFileSync(
+      join(bare, "gh-stack"),
+      JSON.stringify({ schemaVersion: 1, stacks: [{ trunk: { branch: "main" }, branches: [layer("s1"), layer("s2", 77)] }] }),
+    );
+
+    const steal = ws(["checkout", "app", "s2"], join(root, "sb"));
+    expect(steal.code).toBe(1);
+    expect(steal.err).toContain("claimed by workspace sa");
+
+    // `gh stack add s2` moves HEAD up the stack; `ws pr` moves the claim with it.
+    sh(["git", "switch", "-q", "-c", "s2"], sa);
+    expect(ws(["pr", "app"], sa).code).toBe(0);
+    const row = JSON.parse(ws(["status", "--json"], sa).out)[0];
+    expect([row.branch, row.head, row.stack.layers.length]).toEqual(["s2", "s2", 2]);
+    expect(ws(["status"], sa).out).toContain("local 2/2");
+
+    expect(ws(["checkout", "app", "s1"], join(root, "sb")).code).toBe(1);
+    expect(ws(["release", "app"], sa).code).toBe(0);
+    expect(ws(["checkout", "app", "s1"], join(root, "sb")).code).toBe(0);
+  });
 });
