@@ -5,10 +5,15 @@ import * as git from "./git";
 import { layoutKdl, PER_PAGE } from "./layout";
 import { barePath, currentWorkspace, metaDir, NAME_RE, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { scaffold } from "./scaffold";
-import { claimOwner, getWorkspace, readState, withState } from "./state";
+import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
+import { type Claim, claimOwner, getWorkspace, readState, withState } from "./state";
 import { exec, fail, log, must, naturalSort, run } from "./util";
 
 const SESSION = () => process.env.WS_SESSION ?? "workspaces";
+
+/** What a workspace really holds in `repo`: its claim, its worktree head, and the stacks of either. */
+const holdings = (repo: string, stacks: Stack[]) => (ws: string, c: Claim) =>
+  cover(stacks, [c.branch, git.currentBranch(worktreePath(ws, repo))], [c.pr]);
 
 function requireWs(explicit?: string): string {
   const ws = explicit ?? currentWorkspace();
@@ -110,31 +115,44 @@ export function checkout(args: string[], wsOpt?: string) {
 
   let branch = ref;
   let pr: number | undefined;
+  let prUrl: string | undefined;
   let base = `origin/${git.defaultBranch(spec)}`;
+  let remote: Stack | undefined;
   const selector = git.parsePrRef(ref);
   if (selector) {
     const info = git.prInfo(wt, selector);
     pr = info.number;
+    prUrl = info.url;
     branch = info.headRefName;
     if (info.isCrossRepository) {
       // Fork PR: track the PR head under a local pr-N branch.
       branch = `pr-${pr}`;
       base = `refs/remotes/origin/pr/${pr}`;
       must(["git", "-C", wt, "fetch", "--quiet", "origin", `+pull/${pr}/head:${base}`]);
+    } else {
+      remote = remoteStack(wt, pr);
+      if (remote && !hasGhStack()) {
+        log(`PR #${pr} is part of stack #${remote.number}; install gh-stack to pull every layer`);
+        remote = undefined;
+      }
     }
   } else {
     git.validateBranch(branch);
   }
 
+  const stacks = localStacks(repo);
+  const want = cover(stacks, [branch, ...(remote?.layers.map((l) => l.branch) ?? [])], [pr]);
+
   withState((s) => {
-    const owner = claimOwner(s, repo, { branch, pr });
-    if (owner && owner !== ws) {
-      fail(`${repo} ${pr ? `PR #${pr} (${branch})` : branch} is claimed by workspace ${owner}`);
-    }
-    git.switchTo(wt, branch, base);
+    const owner = claimOwner(s, repo, want, holdings(repo, stacks), ws);
+    if (owner) fail(`${repo} ${pr ? `PR #${pr} (${branch})` : branch} or its stack is claimed by workspace ${owner}`);
+    // A URL, because gh stack reads a bare number as a stack number first.
+    if (remote) must(["gh", "stack", "checkout", prUrl!], { cwd: wt });
+    else git.switchTo(wt, branch, base);
     getWorkspace(s, ws).repos[repo] = { branch, pr: pr ?? git.prForBranch(wt, branch) };
   });
-  log(`${ws}/${repo} → ${branch}${pr ? ` (PR #${pr})` : ""}`);
+  const stack = stackOf(localStacks(repo), branch);
+  log(`${ws}/${repo} → ${branch}${pr ? ` (PR #${pr})` : ""}${stack ? `\nstack: ${chain(stack)}` : ""}`);
 }
 
 export function release(repo: string | undefined, wsOpt?: string) {
@@ -158,6 +176,15 @@ export function recordPr(repo: string | undefined, wsOpt?: string) {
     const w = getWorkspace(s, ws);
     for (const r of repo ? [repo] : Object.keys(w.repos)) {
       const c = w.repos[r] ?? fail(`${r} is not in ${ws}`);
+      // gh stack up/down/init/add move HEAD between layers; the claim follows it within a stack.
+      const stacks = localStacks(r);
+      const head = git.currentBranch(worktreePath(ws, r));
+      const stack = stackOf(stacks, head);
+      if (head && stack && head !== c.branch && (!c.branch || stackOf([stack], c.branch))) {
+        const owner = claimOwner(s, r, cover(stacks, [head]), holdings(r, stacks), ws);
+        if (owner) fail(`${r} stack ${chain(stack)} overlaps a claim by workspace ${owner}`);
+        c.branch = head;
+      }
       if (!c.branch) continue;
       c.pr = git.prForBranch(worktreePath(ws, r), c.branch);
       log(`${ws}/${r} ${c.branch}: ${c.pr ? `PR #${c.pr}` : "no PR"}`);
@@ -171,21 +198,31 @@ export function status(all: boolean, json: boolean) {
   const names = (all || !cur ? Object.keys(s.workspaces) : [cur]).sort(naturalSort);
   const rows = names.flatMap((ws) => {
     const repos = Object.entries(getWorkspace(s, ws).repos);
-    if (!repos.length) return [{ ws, repo: "", branch: "", pr: undefined as number | undefined, head: "", dirty: false }];
+    if (!repos.length)
+      return [{ ws, repo: "", branch: "", pr: undefined as number | undefined, head: "", dirty: false, stack: undefined as Stack | undefined }];
     return repos.map(([repo, c]) => {
       const wt = worktreePath(ws, repo);
-      return { ws, repo, branch: c.branch ?? "", pr: c.pr, head: git.head(wt), dirty: git.isDirty(wt) };
+      const head = git.head(wt);
+      const stacks = localStacks(repo);
+      const stack = stackOf(stacks, head) ?? stackOf(stacks, c.branch);
+      return { ws, repo, branch: c.branch ?? "", pr: c.pr, head, dirty: git.isDirty(wt), stack };
     });
   });
   if (json) return console.log(JSON.stringify(rows, null, 2));
+  const stackCell = (r: (typeof rows)[number]) => {
+    if (!r.stack) return "";
+    const at = r.stack.layers.findIndex((l) => l.branch === r.head);
+    return `${r.stack.number ? `#${r.stack.number}` : "local"} ${at < 0 ? "-" : at + 1}/${r.stack.layers.length}`;
+  };
   table(
-    ["ws", "repo", "claim", "pr", "head", ""],
+    ["ws", "repo", "claim", "pr", "head", "stack", ""],
     rows.map((r) => [
       r.ws === cur ? `${r.ws}*` : r.ws,
       r.repo,
       r.branch || (r.repo ? "-" : ""),
       r.pr ? `#${r.pr}` : "",
       r.head === r.branch ? "" : r.head,
+      stackCell(r),
       r.dirty ? "dirty" : "",
     ]),
   );

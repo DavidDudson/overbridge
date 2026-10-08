@@ -21,6 +21,8 @@ const PATH_KEYS = ["file_path", "path", "notebook_path"];
 const GIT = String.raw`\bgit(?:\s+(?:-[cC]\s+\S+|--?[\w.-]+(?:=\S+)?))*\s+`;
 // Command position: start of line, or after a separator, subshell or backtick; optional path prefix.
 const CMD = String.raw`(?:^|[;&|(\x60\n])\s*(?:\S*/)?`;
+// `gh stack`, or its default `gs` shell alias in command position.
+const GH_STACK = CMD + String.raw`(?:gh\s+stack|gs)\s+`;
 const END =String.raw`(?![^;&|\n]*\s--(?:\s|$))`; // no ` -- ` (pathspec) later in the same command
 
 const BASH_RULES: [RegExp, string][] = [
@@ -30,6 +32,14 @@ const BASH_RULES: [RegExp, string][] = [
     "branch changes go through `ws checkout <repo> <branch|#pr>`; to discard file changes use `git restore <path>` or `git checkout -- <path>`",
   ],
   [/\bgh\s+pr\s+checkout\b/, "use `ws checkout <repo> #<number>` so the PR is claimed for this workspace"],
+  [
+    new RegExp(GH_STACK + String.raw`checkout\b`),
+    "use `ws checkout <repo> #<pr>`; it claims the whole stack and runs `gh stack checkout` for stacked PRs",
+  ],
+  [
+    new RegExp(GH_STACK + String.raw`trunk\b`),
+    "the trunk is shared across workspaces; stay on stack layers (`gh stack bottom`) or `ws release <repo>`",
+  ],
   [new RegExp(GIT + String.raw`worktree\b`), "worktrees are managed by ws; ask the user"],
   [new RegExp(CMD + String.raw`ws\s+(?:new|rm|up|claude|init|layout|spinup)\b`),"workspace admin commands are for the user, not a workspace Claude"],
 ];

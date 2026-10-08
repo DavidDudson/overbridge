@@ -9,4 +9,5 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - `test/e2e.test.ts` drives the real CLI against a temp `WS_ROOT` and a local bare "remote".
 - Generated files (`<ws>/.claude/settings.json`, `<ws>/CLAUDE.md`, layout) come from
   `src/scaffold.ts` / `src/layout.ts`; they must stay idempotent.
+- `src/stack.ts` reads gh-stack's catalog (`<bare>/gh-stack`); claims cover whole stacks via `cover()`.
 - Plugin skills in `plugin/skills/`; keep them in sync with CLI commands/flags.

@@ -59,17 +59,21 @@ export function switchTo(wt: string, branch: string, base: string) {
   else must(["git", "-C", wt, "switch", "--no-track", "-c", branch, base]);
 }
 
+/** Checked-out branch; undefined when detached or missing. */
+export function currentBranch(wt: string): string | undefined {
+  return (existsSync(wt) && run(["git", "-C", wt, "branch", "--show-current"]).stdout) || undefined;
+}
+
 export function head(wt: string): string {
   if (!existsSync(wt)) return "(missing)";
-  const b = run(["git", "-C", wt, "branch", "--show-current"]).stdout;
-  return b || `detached@${run(["git", "-C", wt, "rev-parse", "--short", "HEAD"]).stdout}`;
+  return currentBranch(wt) || `detached@${run(["git", "-C", wt, "rev-parse", "--short", "HEAD"]).stdout}`;
 }
 
 export function isDirty(wt: string): boolean {
   return existsSync(wt) && run(["git", "-C", wt, "status", "--porcelain"]).stdout !== "";
 }
 
-export type PrInfo = { number: number; headRefName: string; isCrossRepository: boolean };
+export type PrInfo = { number: number; url: string; headRefName: string; isCrossRepository: boolean };
 
 /** Accepts `#123`, `pr:123`, or a PR URL. Returns the gh selector, or undefined if `ref` is a branch. */
 export function parsePrRef(ref: string): string | undefined {
@@ -79,7 +83,7 @@ export function parsePrRef(ref: string): string | undefined {
 }
 
 export function prInfo(wt: string, selector: string): PrInfo {
-  return JSON.parse(must(["gh", "pr", "view", selector, "--json", "number,headRefName,isCrossRepository"], { cwd: wt }));
+  return JSON.parse(must(["gh", "pr", "view", selector, "--json", "number,url,headRefName,isCrossRepository"], { cwd: wt }));
 }
 
 /** PR number for a branch, if one is open. */

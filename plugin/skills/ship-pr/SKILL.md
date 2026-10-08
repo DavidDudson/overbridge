@@ -18,6 +18,10 @@ description: Commit, push and open (or update) a GitHub PR from a ws workspace, 
    gh pr create --fill          # or --title/--body; add --draft if work in progress
    ```
    If a PR already exists for the branch, pushing updated it; skip creation.
+
+   **Stacked branch?** If `ws status` shows a `stack` entry, replace steps 4–5 with
+   `gh stack submit --auto` from the repo dir (still ask first): it pushes every
+   layer and opens or updates one PR per layer.
 6. **Record it.** `ws pr <repo>` so `ws status` and claim checks know the PR
    belongs to this workspace.
 7. Report the PR URL (`gh pr view --json url -q .url`).
