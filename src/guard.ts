@@ -19,7 +19,9 @@ const PATH_KEYS = ["file_path", "path", "notebook_path"];
 
 // `git`, optionally followed by global options like `-C dir` or `--no-pager`.
 const GIT = String.raw`\bgit(?:\s+(?:-[cC]\s+\S+|--?[\w.-]+(?:=\S+)?))*\s+`;
-const END = String.raw`(?![^;&|\n]*\s--(?:\s|$))`; // no ` -- ` (pathspec) later in the same command
+// Command position: start of line, or after a separator, subshell or backtick; optional path prefix.
+const CMD = String.raw`(?:^|[;&|(\x60\n])\s*(?:\S*/)?`;
+const END =String.raw`(?![^;&|\n]*\s--(?:\s|$))`; // no ` -- ` (pathspec) later in the same command
 
 const BASH_RULES: [RegExp, string][] = [
   [new RegExp(GIT + String.raw`switch\b`), "branch changes go through `ws checkout <repo> <branch|#pr>`, not `git switch`"],
@@ -29,7 +31,7 @@ const BASH_RULES: [RegExp, string][] = [
   ],
   [/\bgh\s+pr\s+checkout\b/, "use `ws checkout <repo> #<number>` so the PR is claimed for this workspace"],
   [new RegExp(GIT + String.raw`worktree\b`), "worktrees are managed by ws; ask the user"],
-  [/\bws\s+(?:new|rm|up|claude|init|layout|spinup)\b/, "workspace admin commands are for the user, not a workspace Claude"],
+  [new RegExp(CMD + String.raw`ws\s+(?:new|rm|up|claude|init|layout|spinup)\b`),"workspace admin commands are for the user, not a workspace Claude"],
 ];
 
 // Absolute, home-relative or parent-relative path tokens in a shell command.
