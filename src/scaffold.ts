@@ -1,6 +1,6 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { root, selfCommand, wsDir } from "./paths";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { ghReposCache, root, selfCommand, wsDir } from "./paths";
 import { shellQuote } from "./util";
 
 /**
@@ -38,4 +38,30 @@ access to other workspaces and direct branch switching. Do not try to work aroun
 - After \`gh pr create\`, run \`ws pr <repo>\` to record the PR against this workspace.
 - \`ws status\` shows this workspace's claims; \`ws status --all\` shows every workspace.
 - \`ws release <repo>\` frees a branch when you are done with it.
-`;
+
+## GitHub repos
+
+Name → URL map of the user's GitHub repos, cached at \`${ghReposCache()}\`. Refresh with:
+
+\`\`\`
+mkdir -p ${dirname(ghReposCache())} && gh repo list --limit 1000 --json name,url,sshUrl,isFork,isArchived,description > ${ghReposCache()}
+\`\`\`
+
+Register one with \`ws repo add <name> <sshUrl>\`; https clones of private repos fail.
+${repoTable()}`;
+
+type GhRepo = { name: string; url: string; isFork?: boolean; isArchived?: boolean };
+
+/** Markdown table from the `gh repo list` cache, or a hint when there is none yet. */
+function repoTable(): string {
+  let repos: GhRepo[];
+  try {
+    repos = JSON.parse(readFileSync(ghReposCache(), "utf8"));
+  } catch {
+    return "\nNo cache yet; run the refresh command above.\n";
+  }
+  const rows = repos
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
+    .map((r) => `| ${r.name} | ${r.url} | ${[r.isFork && "fork", r.isArchived && "archived"].filter(Boolean).join(", ")} |`);
+  return ["", "| name | url | |", "| --- | --- | --- |", ...rows, ""].join("\n");
+}
