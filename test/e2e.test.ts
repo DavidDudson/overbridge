@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ const env = () => ({
   ...process.env,
   WS_ROOT: root,
   WS_NAME: "",
+  XDG_CACHE_HOME: join(tmp, "cache"),
   GIT_AUTHOR_NAME: "t",
   GIT_AUTHOR_EMAIL: "t@t",
   GIT_COMMITTER_NAME: "t",
@@ -55,7 +56,17 @@ describe("workflow", () => {
 
   test("new workspaces get worktrees and claude scaffolding", () => {
     expect(ws(["new", "-r", "app"]).out.trim()).toBe("ws1");
+    expect(readFileSync(join(root, "ws1", "CLAUDE.md"), "utf8")).toContain("No cache yet");
+    const repos = [
+      { name: "zeta", url: "https://github.com/u/zeta", isFork: true },
+      { name: "Alpha", url: "https://github.com/u/Alpha", isArchived: true },
+    ];
+    mkdirSync(join(tmp, "cache", "ws"), { recursive: true });
+    writeFileSync(join(tmp, "cache", "ws", "github-repos.json"), JSON.stringify(repos));
     expect(ws(["new", "-r", "app"]).out.trim()).toBe("ws2");
+    expect(readFileSync(join(root, "ws2", "CLAUDE.md"), "utf8")).toContain(
+      "| Alpha | https://github.com/u/Alpha | archived |\n| zeta | https://github.com/u/zeta | fork |",
+    );
     expect(existsSync(join(root, "ws1", "app", ".git"))).toBe(true);
     const settings = JSON.parse(readFileSync(join(root, "ws1", ".claude", "settings.json"), "utf8"));
     expect(settings.env.WS_NAME).toBe("ws1");

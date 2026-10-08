@@ -10,6 +10,9 @@ export function root(): string {
 export const metaDir = () => join(root(), ".ws");
 export const reposFile = () => join(root(), "repos.toml");
 export const barePath = (repo: string) => join(root(), ".bare", `${repo}.git`);
+/** `gh repo list` cache; outside WS_ROOT so workspace Claudes may read it. */
+export const ghReposCache = () =>
+  join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "ws", "github-repos.json");
 export const wsDir = (ws: string) => join(root(), ws);
 export const worktreePath = (ws: string, repo: string) => join(wsDir(ws), repo);
 
