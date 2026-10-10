@@ -148,4 +148,18 @@ describe("workflow", () => {
     expect(ws(["release", "app"], sa).code).toBe(0);
     expect(ws(["checkout", "app", "s1"], join(root, "sb")).code).toBe(0);
   });
+
+  test("two branch names for one issue clash", () => {
+    for (const n of ["ia", "ib"]) expect(ws(["new", n, "-r", "app"]).code).toBe(0);
+    expect(ws(["checkout", "app", "fix/383-iwr-rule-elements"], join(root, "ia")).code).toBe(0);
+
+    const twin = ws(["checkout", "app", "fix/383-defences"], join(root, "ib"));
+    expect(twin.code).toBe(1);
+    expect(twin.err).toContain("claimed by workspace ia");
+
+    // Another issue, or a branch with no issue number, is free.
+    expect(ws(["checkout", "app", "fix/384-defences-panel"], join(root, "ib")).code).toBe(0);
+    expect(ws(["release", "app"], join(root, "ia")).code).toBe(0);
+    expect(ws(["checkout", "app", "fix/383-defences"], join(root, "ib")).code).toBe(0);
+  });
 });

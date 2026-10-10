@@ -35,8 +35,10 @@ ws checkout <branch>            # repo omitted when the workspace has exactly on
 Never use `git switch`, `git checkout <branch>`, `gh pr checkout` or `git worktree`.
 Use `git restore <path>` (or `git checkout -- <path>`) to discard file changes.
 
-If `ws checkout` says the branch or PR is **claimed by workspace X**: stop and tell
-the user. Do not create a near-duplicate branch name to dodge the claim.
+If `ws checkout` says the branch, PR or issue is **claimed by workspace X**: stop and tell
+the user. Do not create a near-duplicate branch name to dodge the claim. Name branches
+`<type>/<issue>-<slug>` (`feat/383-iwr`): the issue number is part of the claim, so a
+second branch for the same issue is refused.
 
 ## Stacked PRs (gh stack)
 

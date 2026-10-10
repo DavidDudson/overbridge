@@ -10,7 +10,13 @@ import { run } from "./util";
 
 export type StackLayer = { branch: string; pr?: number };
 export type Stack = { number?: number; trunk: string; layers: StackLayer[] };
-export type Cover = { branches: Set<string>; prs: Set<number> };
+export type Cover = { branches: Set<string>; prs: Set<number>; issues: Set<number> };
+
+/** The issue a `<type>/<n>-<slug>` branch works on (`feat/383-iwr` → 383), so two branch names for one issue clash. */
+export function issueOf(branch: string): number | undefined {
+  const m = /^[a-z]+\/(\d+)-[a-z]/.exec(branch);
+  return m ? Number(m[1]) : undefined;
+}
 
 /**
  * Stacks tracked locally by gh-stack. The catalog lives in git's common dir,
@@ -35,11 +41,13 @@ export function localStacks(repo: string): Stack[] {
 export const stackOf = (stacks: Stack[], branch?: string) =>
   branch ? stacks.find((s) => s.layers.some((l) => l.branch === branch)) : undefined;
 
-/** Branches and PRs covered by `branches`/`prs`, widened to every layer of any stack they touch. */
+/** Branches, PRs and issues covered by `branches`/`prs`, widened to every layer of any stack they touch. */
 export function cover(stacks: Stack[], branches: (string | undefined)[], prs: (number | undefined)[] = []): Cover {
-  const c: Cover = { branches: new Set(), prs: new Set() };
+  const c: Cover = { branches: new Set(), prs: new Set(), issues: new Set() };
   const add = (b?: string, pr?: number) => {
     if (b) c.branches.add(b);
+    const issue = b && issueOf(b);
+    if (issue) c.issues.add(issue);
     if (pr) c.prs.add(pr);
   };
   for (const pr of prs) add(undefined, pr);
@@ -52,7 +60,9 @@ export function cover(stacks: Stack[], branches: (string | undefined)[], prs: (n
 }
 
 export const overlaps = (a: Cover, b: Cover) =>
-  [...a.branches].some((x) => b.branches.has(x)) || [...a.prs].some((x) => b.prs.has(x));
+  [...a.branches].some((x) => b.branches.has(x)) ||
+  [...a.prs].some((x) => b.prs.has(x)) ||
+  [...a.issues].some((x) => b.issues.has(x));
 
 /** One-line chain, gh-stack style: `(main) <- a <- b`. */
 export const chain = (s: Stack) => [`(${s.trunk})`, ...s.layers.map((l) => l.branch)].join(" <- ");

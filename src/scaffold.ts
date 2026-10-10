@@ -34,7 +34,8 @@ access to other workspaces and direct branch switching. Do not try to work aroun
   adds the repo here if needed. \`ws repo add <name> <url>\` registers a new one.
 - Change branch or pick up a PR only via \`ws checkout <repo> <branch>\` / \`ws checkout <repo> #<pr>\`.
   Never \`git switch\`, \`git checkout <branch>\`, or \`gh pr checkout\`.
-- A branch or PR claimed by another workspace cannot be taken. If \`ws checkout\` refuses, stop and tell the user.
+- A branch, PR or issue claimed by another workspace cannot be taken (\`feat/383-x\` claims issue 383, so
+  \`fix/383-y\` elsewhere is refused). If \`ws checkout\` refuses, stop and tell the user.
 - After \`gh pr create\`, run \`ws pr <repo>\` to record the PR against this workspace.
 - \`ws status\` shows this workspace's claims; \`ws status --all\` shows every workspace.
 - \`ws release <repo>\` frees a branch when you are done with it.
