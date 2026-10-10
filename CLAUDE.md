@@ -10,4 +10,6 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - Generated files (`<ws>/.claude/settings.json`, `<ws>/CLAUDE.md`, layout) come from
   `src/scaffold.ts` / `src/layout.ts`; they must stay idempotent.
 - `src/stack.ts` reads gh-stack's catalog (`<bare>/gh-stack`); claims cover whole stacks via `cover()`.
+- Installed from nix-home's `ws` flake input, which is pinned. After a PR merges to `main`, bump it in
+  nix-home (`nix flake update ws`, own commit + PR) or the installed `ws` stays on the old rev.
 - Plugin skills in `plugin/skills/`; keep them in sync with CLI commands/flags.
