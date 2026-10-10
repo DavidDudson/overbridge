@@ -145,7 +145,7 @@ export function checkout(args: string[], wsOpt?: string) {
 
   withState((s) => {
     const owner = claimOwner(s, repo, want, holdings(repo, stacks), ws);
-    if (owner) fail(`${repo} ${pr ? `PR #${pr} (${branch})` : branch} or its stack is claimed by workspace ${owner}`);
+    if (owner) fail(`${repo} ${pr ? `PR #${pr} (${branch})` : branch} (or its stack or issue) is claimed by workspace ${owner}`);
     // A URL, because gh stack reads a bare number as a stack number first.
     if (remote) must(["gh", "stack", "checkout", prUrl!], { cwd: wt });
     else git.switchTo(wt, branch, base);

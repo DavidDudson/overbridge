@@ -6,7 +6,8 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   `~/workspaces/.bare/<repo>.git`; every workspace gets a `git worktree` of it.
 - **Workspaces hold several repos.** `~/workspaces/ws1/{app,infra}` etc.
 - **Claims.** Each workspace tracks the branch/PR it is on per repo. A branch or PR
-  claimed by one workspace cannot be checked out by another.
+  claimed by one workspace cannot be checked out by another. A `<type>/<n>-<slug>` branch
+  also claims issue `<n>`, so `feat/383-a` and `fix/383-b` cannot be worked in two workspaces.
 - **Stacked PRs.** With [gh-stack](https://github.github.com/gh-stack/), a claim covers
   the whole stack (read live from the catalog gh-stack keeps in the bare repo).
   `ws checkout <repo> #<pr>` on a stacked PR runs `gh stack checkout`; `gh stack up/down/add`
