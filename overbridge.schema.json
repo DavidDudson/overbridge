@@ -35,6 +35,26 @@
         }
       }
     },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "lint": { "type": "string", "minLength": 1 },
+        "typecheck": { "type": "string", "minLength": 1 },
+        "test": { "type": "string", "minLength": 1 },
+        "build": { "type": "string", "minLength": 1 },
+        "format": { "type": "string", "minLength": 1 }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "personas": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "exclude": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "local-dir": { "type": "string", "minLength": 1 }
+      }
+    },
     "ide": { "enum": ["vscode", "zed", "webstorm"] }
   }
 }

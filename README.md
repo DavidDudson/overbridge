@@ -107,8 +107,19 @@ project-management:
   project: owner/repo # GitHub: owner/repo or project number; Jira: project key
   # url: https://example.atlassian.net   # optional provider base URL
 apps: []              # launch/teardown commands, see the apps docs when they land
+commands:             # all optional; skills run these to check a change
+  lint: pnpm lint
+  typecheck: pnpm typecheck
+  test: pnpm test
+  build: pnpm build
+  format: pnpm format
+review:
+  personas: [security, code-quality]   # optional; default is auto-select by diff signals
+  exclude: [pr-size]                   # skipped after selection
+  local-dir: .overbridge/personas      # repo-local personas (this is the default)
 ide: vscode           # vscode | zed | webstorm
 ```
 
 `overbridge config check [path]` validates a file (unknown keys get a suggestion);
-`overbridge config show [path]` prints the resolved config as JSON.
+`overbridge config show [path]` prints the resolved config as JSON;
+`overbridge config get <key> [path]` prints one value (`commands.test`, `review.local-dir`) and exits non-zero when it is unset.
