@@ -104,8 +104,33 @@ in the same format as a built-in. A local persona with a built-in's name replace
 
 ## Install
 
-Flake package: `packages.<system>.default` wraps `bun src/cli.ts` and sets `OVERBRIDGE_SELF=overbridge`, so
-generated hooks and layouts call `overbridge` on PATH (`ws` is kept as an alias) instead of a store path.
+overbridge runs on [Bun](https://bun.sh) 1.3 or later and needs `git`, `gh`, and `zellij` on PATH.
+
+### npm, from GitHub Packages
+
+Releases are published as `@daviddudson/overbridge`. GitHub Packages needs a token with `read:packages`, even for a
+public package. `gh auth refresh -s read:packages` adds that scope to the `gh` token. The single quotes below keep
+the token out of `~/.npmrc`: npm reads `GITHUB_TOKEN` from the environment at install time.
+
+```sh
+export GITHUB_TOKEN="$(gh auth token)"
+npm config set '//npm.pkg.github.com/:_authToken' '${GITHUB_TOKEN}'
+npm install -g @daviddudson/overbridge --@daviddudson:registry=https://npm.pkg.github.com
+```
+
+Set `OVERBRIDGE_SELF=overbridge` in your shell profile. Generated hooks and layouts then call `overbridge` on PATH,
+not the installed script's path, which changes on upgrade.
+
+### Nix
+
+`packages.<system>.default` wraps `bun src/cli.ts` and sets `OVERBRIDGE_SELF=overbridge` for you. `ws` is kept as an
+alias.
+
+### Releases
+
+Each merge to `main` can release. [semantic-release](https://semantic-release.gitbook.io) reads the conventional
+commits since the last `v*` tag: `fix:` and `perf:` release a patch, `feat:` a minor, and a `!` after the type a
+major. PRs are squash-merged, so the PR title is the commit it reads.
 
 ## Environment
 
@@ -306,3 +331,7 @@ activate, arrows or Tab to move, `o` open a running app, `L` show its log, `r` r
 `q` quit. Every button shows its key and the key presses it: `i` the work item, `p` the PR (`u`, `y`, `w`, `z` for more),
 `1`-`9` the apps, `e` the editor, `c` `t` `d` claude, terminal and diff, `x` Cleanup. It reads caches and local app records only; `overbridge top refresh` rebuilds
 the cache and the panel runs it every minute.
+
+## Licence
+
+[MIT](LICENSE)

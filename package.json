@@ -1,16 +1,42 @@
 {
-  "name": "overbridge",
-  "version": "0.1.0",
+  "name": "@daviddudson/overbridge",
+  "version": "0.0.0-semantic-release",
   "description": "Multi-repo workspaces with bound Claude sessions in zellij",
+  "license": "MIT",
+  "author": "David Dudson",
   "type": "module",
-  "private": true,
-  "bin": { "overbridge": "src/cli.ts", "ws": "src/cli.ts" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DavidDudson/overbridge.git"
+  },
+  "bin": {
+    "overbridge": "src/cli.ts",
+    "ws": "src/cli.ts"
+  },
+  "files": [
+    "src",
+    "plugin",
+    "plugin-review",
+    ".claude-plugin",
+    "overbridge.schema.json",
+    "config.schema.json",
+    "overbridge.example.yml"
+  ],
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "conventional-changelog-conventionalcommits": "^9.3.1",
+    "semantic-release": "^25.0.9",
     "typescript": "^5"
   }
 }
