@@ -165,11 +165,14 @@ class Problems {
   }
 }
 
-const portOk = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 65535;
+const APP_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const portOk =(n: unknown): n is number => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 65535;
 
 function validateApp(entry: Record<string, unknown>, path: string, p: Problems): AppSpec | undefined {
   p.unknownKeys(entry, APP_KEYS, path);
   const id = p.string(entry, "id", path, true);
+  // the id names the app's record and log files, so it must not be able to leave their directory
+  if (id !== undefined && !APP_ID_RE.test(id)) p.add(`${path}.id`, `'${id}' must start with a letter or digit and use only letters, digits, '.', '_' and '-'`);
   const start = p.string(entry, "start", path, true);
   const label = p.string(entry, "label", path, false);
   const dir = p.string(entry, "dir", path, false);

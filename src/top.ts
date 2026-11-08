@@ -6,7 +6,10 @@ import { providerFor, refreshTitle } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, readState } from "./state";
+import { bold, dim, inverse } from "./term";
 import { run } from "./util";
+
+const ESC = "\x1b";
 
 /**
  * The top panel: a headline, link buttons, an editor button, app toggles and a
@@ -246,6 +249,25 @@ export function layoutTop(snap: TopSnapshot, width: number): Frame {
 export function hit(frame: Frame, col: number, row: number): number | undefined {
   const i = frame.placed.findIndex((p) => p.row === row && col >= p.col && col < p.col + p.width);
   return i < 0 ? undefined : i;
+}
+
+/**
+ * The terminal output that draws `f` with button `cursor` inverse: clear, then each row at its
+ * line, the headline bold and the message row dim.
+ */
+export function paintTop(f: Frame, cursor: number): string {
+  let out = `${ESC}[H${ESC}[2J`;
+  f.rows.forEach((row, y) => {
+    let text = row;
+    // paint buttons from the right so earlier columns keep their offsets
+    for (const [i, p] of [...f.placed.entries()].reverse()) {
+      if (p.row !== y) continue;
+      const label = text.slice(p.col, p.col + p.width);
+      text = text.slice(0, p.col) + (i === cursor ? inverse(label) : label) + text.slice(p.col + p.width);
+    }
+    out += `${ESC}[${y + 1};1H${y === 0 ? bold(text) : y === f.rows.length - 1 ? dim(text) : text}`;
+  });
+  return out;
 }
 
 export interface ActDeps {

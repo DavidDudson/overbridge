@@ -27,23 +27,23 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
 
 ```nu
 overbridge init
-overbridge repo add nix-home git@github.com:DavidDudson/nix-home.git
-overbridge repo add evergreen git@github.com:DavidDudson/evergreen.git
+overbridge repo add app git@github.com:you/app.git
+overbridge repo add infra git@github.com:you/infra.git
 overbridge spinup                       # 4 empty workspaces (ws1-ws4) + fresh zellij session
 overbridge spinup -n 6                  # 6 workspaces, six tabs
 ```
 
 `overbridge spinup` always rebuilds the session, killing running panes. Use `overbridge up` to just
-attach. Workspaces can also be pre-filled: `overbridge new -r nix-home -r evergreen`.
+attach. Workspaces can also be pre-filled: `overbridge new -r app -r infra`.
 
 Inside a workspace (shell pane or its Claude):
 
 ```nu
-overbridge checkout nix-home feat/zellij   # adds repo if missing, claims + switches
-overbridge checkout evergreen '#42'        # pick up a PR
+overbridge checkout app feat/login        # adds repo if missing, claims + switches
+overbridge checkout infra '#42'           # pick up a PR
 overbridge pr                              # record PRs for claimed branches
 overbridge status --all
-overbridge release nix-home
+overbridge release app
 ```
 
 Run `overbridge help` for every command.
@@ -54,8 +54,8 @@ Run `overbridge help` for every command.
 ~/workspaces/               ($OVERBRIDGE_ROOT)
   repos.toml                registry: [repos.<name>] url, default_branch?
   .bare/<repo>.git          bare clones (refspec → refs/remotes/origin/*)
-  .ws/state.json            claims, lock-protected (.ws/state.lock)
-  .ws/layout.kdl            generated zellij layout
+  .overbridge/state.json    claims, lock-protected (.overbridge/state.lock)
+  .overbridge/layout.kdl    generated zellij layout (plus agent/, top/, apps state)
   ws1/
     CLAUDE.md               generated workspace rules
     .claude/settings.json   OVERBRIDGE_NAME env + guard hook
@@ -149,6 +149,64 @@ ide: vscode           # vscode | zed | webstorm
 `overbridge config check [path]` validates a file (unknown keys get a suggestion);
 `overbridge config show [path]` prints the resolved config as JSON;
 `overbridge config get <key> [path]` prints one value (`commands.test`, `review.local-dir`) and exits non-zero when it is unset.
+
+### Keys and defaults
+
+| key | default | meaning |
+| --- | --- | --- |
+| `version` | `1` | schema version; only `1` exists |
+| `project-management.name` | none | `github` or `jira`. Without the block, item features are off |
+| `project-management.project` | none | GitHub: `owner/repo` or a Projects v2 number (issues then come from the repo checked out in the workspace). Jira: the project key |
+| `project-management.url` | none | Jira site, e.g. `https://example.atlassian.net`; needed for ticket links |
+| `project-management.tech-debt` | none | where tech-debt items go: an item id (parent) or `label:<name>`; unset files them with no parent |
+| `apps` | `[]` | launchable apps, see [Apps](#apps) |
+| `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
+| `review.personas` | auto | reviewer personas to run; unset selects by diff signals |
+| `review.exclude` | `[]` | personas to skip, applied after selection |
+| `review.local-dir` | `.overbridge/personas` | repo-local personas, relative to the repo root |
+| `ide` | none | `vscode`, `zed` or `webstorm`; the top panel's editor button opens the workspace folder |
+
+Providers shell out to `gh` (GitHub) and `jira` ([jira-cli](https://github.com/ankitpokhrel/jira-cli), Jira), so there
+is no token to store in the config. A branch names its item when it contains the id: `123-title` or
+`feat/123-title` for GitHub, `feat/ENG-12-title` for Jira (only the configured project's key counts).
+
+### Examples
+
+A GitHub-managed repo, with checks and one app:
+
+```yaml
+version: 1
+project-management:
+  name: github
+  project: owner/repo
+commands:
+  test: npm test
+  lint: npm run lint
+apps:
+  - id: web
+    start: npm run dev -- --port {port}
+    ports: [3000, 3001]
+    ready: { http: "http://localhost:{port}" }
+    open: true
+ide: vscode
+```
+
+A Jira-managed repo with a tech-debt label and no apps:
+
+```yaml
+version: 1
+project-management:
+  name: jira
+  project: ENG
+  url: https://example.atlassian.net
+  tech-debt: label:tech-debt
+commands:
+  test: make test
+review:
+  exclude: [pr-size]
+```
+
+[`overbridge.example.yml`](overbridge.example.yml) is a commented copy of every key.
 
 ### Apps
 
