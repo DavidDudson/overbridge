@@ -73,6 +73,7 @@ describe("workflow", () => {
     expect(settings.env.OVERBRIDGE_NAME).toBe("ws1");
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain("guard");
     expect(settings.plansDirectory).toBe("plans");
+    expect(settings.permissions.allow).toContain("Bash(gh pr ready:*)");
     for (const event of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "PreCompact", "Stop", "SessionEnd"]) {
       expect(settings.hooks[event][0].hooks[0].command).toMatch(/ hook$/);
     }

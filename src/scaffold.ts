@@ -19,6 +19,8 @@ export function scaffold(ws: string) {
     env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
     // plan-mode plans live in the workspace folder, not ~/.claude/plans
     plansDirectory: PLANS_DIR,
+    // auto mode's classifier blocks marking a PR ready as an unrequested action in a connected app
+    permissions: { allow: ["Bash(gh pr ready:*)"] },
     hooks: {
       PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }],
       // agent state for the sidebar: see agent-hook.ts
