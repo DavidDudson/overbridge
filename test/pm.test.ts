@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cachedTitle, refreshTitle } from "../src/pm/cache";
-import { slug } from "../src/pm/provider";
+import { createTechDebtItem, slug } from "../src/pm/provider";
 import { clearProviders, providerFor, registerProvider } from "../src/pm/registry";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -69,6 +69,41 @@ describe("fake provider contract", () => {
     const branch = p.branchName({ id: "12", title: "Add dark mode!" });
     expect(branch).toBe("feat/12-add-dark-mode");
     expect(p.idFromBranch(branch)).toBe("12");
+  });
+});
+
+describe("createItem / updateItemBody", () => {
+  test("create returns the new item, update replaces its body", () => {
+    const p = fakeProvider();
+    const item = p.createItem({ title: "Bump axios", body: "v1", labels: ["deps"] });
+    expect(item).toEqual({ id: "1000", title: "Bump axios", url: "https://fake.test/items/1000" });
+    expect(p.title(item.id)).toBe("Bump axios");
+    p.updateItemBody(item.id, "v2");
+    expect(p.bodies.get(item.id)).toBe("v2");
+  });
+});
+
+describe("createTechDebtItem", () => {
+  const item = { title: "Clean up", body: "b", labels: ["chore"] };
+
+  test("an item id becomes the parent", () => {
+    const p = fakeProvider();
+    createTechDebtItem(p, "42", item);
+    expect(p.created[0]).toMatchObject({ parent: "42", labels: ["chore"] });
+  });
+
+  test("label:<name> is added to the labels, with no parent", () => {
+    const p = fakeProvider();
+    createTechDebtItem(p, "label:tech-debt", item);
+    expect(p.created[0]!.labels).toEqual(["chore", "tech-debt"]);
+    expect(p.created[0]!.parent).toBeUndefined();
+  });
+
+  test("unset files the item as given", () => {
+    const p = fakeProvider();
+    createTechDebtItem(p, undefined, item);
+    expect(p.created[0]).toMatchObject({ title: "Clean up", labels: ["chore"] });
+    expect(p.created[0]!.parent).toBeUndefined();
   });
 });
 
