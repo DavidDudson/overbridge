@@ -56,6 +56,14 @@ export function workspaceOf(dir: string): string | undefined {
   return first.startsWith(".") ? undefined : first;
 }
 
+/** Repo name of the worktree containing `dir` (`<root>/<ws>/<repo>/…`), if any. */
+export function repoOf(dir: string): string | undefined {
+  const rel = relative(root(), resolve(dir));
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return;
+  const [ws, repo] = rel.split(sep);
+  return ws && !ws.startsWith(".") && repo && !repo.startsWith(".") ? repo : undefined;
+}
+
 /**
  * The workspace this process is bound to. OVERBRIDGE_NAME (set for workspace Claude
  * sessions) wins over cwd so a bound Claude stays bound even after `cd`.

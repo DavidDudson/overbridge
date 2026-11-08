@@ -115,12 +115,15 @@ review:
 describe("loadRepoConfig", () => {
   test("missing file means defaults", () => {
     const dir = mkdtempSync(join(tmpdir(), "overbridge-cfg-"));
+    const saved = process.env.OVERBRIDGE_ROOT;
+    process.env.OVERBRIDGE_ROOT = join(dir, "no-root"); // keep a real root config.yml out of the test
     try {
       expect(loadRepoConfig(dir)).toEqual(defaultConfig());
       mkdirSync(join(dir, "sub"));
       writeFileSync(join(dir, "overbridge.yml"), "ide: vscode\n");
       expect(loadRepoConfig(dir).ide).toBe("vscode");
     } finally {
+      saved === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = saved);
       rmSync(dir, { recursive: true, force: true });
     }
   });

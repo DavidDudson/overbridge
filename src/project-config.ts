@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { worktreePath } from "./paths";
+import { repoOf, root, worktreePath } from "./paths";
 import { fail } from "./util";
 
 /** Per-repo rules live in `overbridge.yml` at the repo (worktree) root. */
@@ -73,6 +73,8 @@ export interface ProjectConfig {
   commands: Commands;
   review: ReviewConfig;
   ide?: Ide;
+  /** Top-level `x-<name>` keys, as written. Present only when there are any. */
+  extensions?: Record<string, unknown>;
 }
 
 export const defaultConfig = (): ProjectConfig => ({
@@ -114,15 +116,20 @@ export function suggest(key: string, allowed: readonly string[]): string | undef
   return bestDistance <= Math.max(2, Math.floor(key.length / 3)) ? best : undefined;
 }
 
+/** `x-<name>` keys are left for extensions: overbridge keeps them as written and never reads them. */
+export const isExtensionKey = (key: string) => /^x-[A-Za-z0-9]/.test(key);
+
 class Problems {
   readonly list: string[] = [];
+  /** A partial layer of a merged config: required keys may come from another layer. */
+  constructor(readonly partial = false) {}
   add(path: string, message: string) {
     this.list.push(path ? `${path}: ${message}` : message);
   }
   /** Report every key of `obj` not in `allowed`, suggesting the nearest valid key. */
-  unknownKeys(obj: Record<string, unknown>, allowed: readonly string[], path: string) {
+  unknownKeys(obj: Record<string, unknown>, allowed: readonly string[], path: string, extensions = false) {
     for (const key of Object.keys(obj)) {
-      if (allowed.includes(key)) continue;
+      if (allowed.includes(key) || (extensions && isExtensionKey(key))) continue;
       const hint = suggest(key, allowed);
       this.add(path ? `${path}.${key}` : key, `unknown key${hint ? `, did you mean '${hint}'?` : ` (allowed: ${allowed.join(", ")})`}`);
     }
@@ -131,7 +138,7 @@ class Problems {
     const at = path ? `${path}.${key}` : key;
     const v = obj[key];
     if (v === undefined || v === null) {
-      if (required) this.add(at, "required");
+      if (required && !this.partial) this.add(at, "required");
       return;
     }
     // YAML parses `project: 123` as a number; accept it for ids and project numbers.
@@ -232,14 +239,19 @@ function validateApp(entry: Record<string, unknown>, path: string, p: Problems):
   };
 }
 
-/** Validate parsed YAML. Throws one error naming `file` and every offending key. */
-export function validateConfig(raw: unknown, file = CONFIG_FILE): ProjectConfig {
+/**
+ * Validate parsed YAML. Throws one error naming `file` and every offending key. With `partial`, `raw` is
+ * one layer of a merged config, so a missing required key is not an error.
+ */
+export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = false } = {}): ProjectConfig {
   if (raw === null || raw === undefined) return defaultConfig();
-  const p = new Problems();
+  const p = new Problems(partial);
   const config = defaultConfig();
   if (!isObject(raw)) fail(`${file}: expected a mapping at the top level`);
 
-  p.unknownKeys(raw, TOP_KEYS, "");
+  p.unknownKeys(raw, TOP_KEYS, "", true);
+  const extensions = Object.entries(raw).filter(([key]) => isExtensionKey(key));
+  if (extensions.length) config.extensions = Object.fromEntries(extensions);
 
   if (raw.version !== undefined && raw.version !== CONFIG_VERSION) {
     p.add("version", `unsupported version ${JSON.stringify(raw.version)} (this overbridge reads version ${CONFIG_VERSION})`);
@@ -308,42 +320,132 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE): ProjectConfig 
   return config;
 }
 
-/** Parse YAML text and validate it. */
-export function parseConfig(text: string, file = CONFIG_FILE): ProjectConfig {
-  let raw: unknown;
+/** Parse YAML text, naming `file` when it is not valid YAML. */
+export function parseYaml(text: string, file: string): unknown {
   try {
-    raw = Bun.YAML.parse(text);
+    return Bun.YAML.parse(text);
   } catch (e) {
     fail(`${file}: invalid YAML: ${(e as Error).message}`);
   }
-  return validateConfig(raw, file);
+}
+
+/** Parse YAML text and validate it as a whole config, with no root layers. */
+export function parseConfig(text: string, file = CONFIG_FILE): ProjectConfig {
+  return validateConfig(parseYaml(text, file), file);
 }
 
 export const configPath = (repoDir: string) => join(repoDir, CONFIG_FILE);
 
-/** Load `<repoDir>/overbridge.yml`. A missing file means defaults, not an error. */
-export function loadRepoConfig(repoDir: string): ProjectConfig {
-  const file = configPath(repoDir);
-  if (!existsSync(file)) return defaultConfig();
-  return parseConfig(readFileSync(file, "utf8"), file);
+/** The root config, `<root>/config.yml`: settings that live outside the repos. */
+export const ROOT_CONFIG_FILE = "config.yml";
+export const rootConfigPath = () => join(root(), ROOT_CONFIG_FILE);
+const ROOT_KEYS = ["version", "defaults", "repos"];
+
+/**
+ * The root config's layers. `defaults` goes under every repo's `overbridge.yml`; `repos.<name>` goes
+ * over that repo's file. Both are partial configs in `overbridge.yml`'s format.
+ */
+export interface RootLayers {
+  file: string;
+  defaults?: Record<string, unknown>;
+  repos: Record<string, Record<string, unknown>>;
+}
+
+/** Read and check `<root>/config.yml`. A missing or empty file has no layers. */
+export function loadRootLayers(file = rootConfigPath()): RootLayers {
+  const layers: RootLayers = { file, repos: {} };
+  if (!existsSync(file)) return layers;
+  const raw = parseYaml(readFileSync(file, "utf8"), file);
+  if (raw === null || raw === undefined) return layers;
+  if (!isObject(raw)) fail(`${file}: expected a mapping at the top level`);
+
+  const p = new Problems();
+  p.unknownKeys(raw, ROOT_KEYS, "");
+  if (raw.version !== undefined && raw.version !== CONFIG_VERSION) {
+    p.add("version", `unsupported version ${JSON.stringify(raw.version)} (this overbridge reads version ${CONFIG_VERSION})`);
+  }
+  if (raw.defaults !== undefined && raw.defaults !== null) {
+    if (isObject(raw.defaults)) layers.defaults = raw.defaults;
+    else p.add("defaults", "expected a mapping in overbridge.yml's format");
+  }
+  if (raw.repos !== undefined && raw.repos !== null) {
+    if (!isObject(raw.repos)) p.add("repos", "expected a mapping of repo name to settings");
+    else
+      for (const [name, layer] of Object.entries(raw.repos)) {
+        if (isObject(layer)) layers.repos[name] = layer;
+        else if (layer !== null) p.add(`repos.${name}`, "expected a mapping in overbridge.yml's format");
+      }
+  }
+  if (p.list.length) fail(`${file}:\n${p.list.map((line) => `  ${line}`).join("\n")}`);
+
+  if (layers.defaults) validateConfig(layers.defaults, `${file} (defaults)`, { partial: true });
+  for (const [name, layer] of Object.entries(layers.repos)) validateConfig(layer, `${file} (repos.${name})`, { partial: true });
+  return layers;
+}
+
+/**
+ * Lay `over` on `base`: mappings merge key by key, anything else (lists included) replaces, and a
+ * `null` in `over` removes the key.
+ */
+export function overlay(base: unknown, over: unknown): unknown {
+  if (over === undefined || over === null) return base;
+  if (!isObject(base) || !isObject(over)) return over;
+  const out: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(over)) {
+    if (value === null) delete out[key];
+    else out[key] = overlay(out[key], value);
+  }
+  return out;
+}
+
+/**
+ * The config for `repo`: built-in defaults, then the root `defaults`, then the repo's own file (`repoRaw`,
+ * parsed from `file`; undefined when there is none), then the root's `repos.<repo>`.
+ */
+export function resolveConfig(repoRaw: unknown, repo: string | undefined, file: string, layers = loadRootLayers()): ProjectConfig {
+  if (repoRaw !== undefined && repoRaw !== null) validateConfig(repoRaw, file, { partial: true });
+  const over = repo === undefined ? undefined : layers.repos[repo];
+  const sources = [
+    layers.defaults && `${layers.file} (defaults)`,
+    repoRaw !== undefined && repoRaw !== null && file,
+    over && `${layers.file} (repos.${repo})`,
+  ].filter(Boolean);
+  return validateConfig(overlay(overlay(layers.defaults, repoRaw), over), sources.join(" + ") || file);
+}
+
+/** Load a config file for `repo` with the root layers applied. A missing file means the root layers alone. */
+export function loadConfigFile(file: string, repo: string | undefined): ProjectConfig {
+  const raw = existsSync(file) ? parseYaml(readFileSync(file, "utf8"), file) : undefined;
+  return resolveConfig(raw, repo, file);
+}
+
+/**
+ * Load `<repoDir>/overbridge.yml` with the root layers applied. `repo` defaults to the repo name of the
+ * worktree `repoDir` is in; outside a workspace only the root `defaults` apply.
+ */
+export function loadRepoConfig(repoDir: string, repo = repoOf(repoDir)): ProjectConfig {
+  return loadConfigFile(configPath(repoDir), repo);
 }
 
 /** Config for every repo checked out in `workspace`, keyed by repo name. */
 export function loadWorkspaceConfigs(workspace: string, repos: string[]): Record<string, ProjectConfig> {
-  return Object.fromEntries(repos.map((repo) => [repo, loadRepoConfig(worktreePath(workspace, repo))]));
+  return Object.fromEntries(repos.map((repo) => [repo, loadRepoConfig(worktreePath(workspace, repo), repo)]));
 }
 
 const camel = (key: string) => key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
 
 /**
  * Look up a dotted key (`commands.test`, `project-management.name`, `review.local-dir`) in a resolved
- * config. Keys use the file's spelling. Returns undefined when the key is unset.
+ * config. Keys use the file's spelling. An `x-<name>` key reads an extension's settings as written.
+ * Returns undefined when the key is unset.
  */
 export function getConfigValue(config: ProjectConfig, key: string): unknown {
-  let node: unknown = config;
-  for (const segment of key.split(".")) {
+  const [first = "", ...rest] = key.split(".");
+  const extension = isExtensionKey(first);
+  let node: unknown = extension ? config.extensions?.[first] : config[camel(first) as keyof ProjectConfig];
+  for (const segment of rest) {
     if (!isObject(node)) return;
-    node = node[camel(segment)];
+    node = node[extension ? segment : camel(segment)];
   }
   return node;
 }

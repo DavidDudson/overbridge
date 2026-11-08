@@ -131,7 +131,8 @@ past it. gh aliases (`gh co`) and custom `gh stack alias` names are not recognis
 
 ## overbridge.yml
 
-Per-repo rules live in `overbridge.yml` at the repo root. A missing file means defaults.
+Per-repo rules live in `overbridge.yml` at the repo root. A missing file means defaults, and the
+[root `config.yml`](#root-configyml) can add to or override it without a commit to the repo.
 Editors can use [`overbridge.schema.json`](overbridge.schema.json) for completion.
 
 ```yaml
@@ -155,9 +156,11 @@ review:
 ide: vscode           # vscode | zed | webstorm
 ```
 
-`overbridge config check [path]` validates a file (unknown keys get a suggestion);
-`overbridge config show [path]` prints the resolved config as JSON;
-`overbridge config get <key> [path]` prints one value (`commands.test`, `review.local-dir`) and exits non-zero when it is unset.
+`overbridge config check [path]` validates a repo's file together with the root `config.yml`, or the root
+`config.yml` alone when that is the path. Unknown keys get a suggestion.
+`overbridge config show [path]` prints the resolved config as JSON, and says on stderr which files went into it.
+`overbridge config get <key> [path]` prints one resolved value (`commands.test`, `review.local-dir`) and exits
+non-zero when it is unset.
 
 ### Keys and defaults
 
@@ -178,6 +181,50 @@ ide: vscode           # vscode | zed | webstorm
 Providers shell out to `gh` (GitHub) and `jira` ([jira-cli](https://github.com/ankitpokhrel/jira-cli), Jira), so there
 is no token to store in the config. A branch names its item when it contains the id: `123-title` or
 `feat/123-title` for GitHub, `feat/ENG-12-title` for Jira (only the configured project's key counts).
+
+### Root config.yml
+
+`<OVERBRIDGE_ROOT>/config.yml` holds settings that live outside the repos. Use it for repos you can't or don't
+want to commit an `overbridge.yml` to, and for settings that are yours rather than the repo's.
+[`config.schema.json`](config.schema.json) describes it.
+
+```yaml
+version: 1
+defaults:             # under every repo's overbridge.yml
+  ide: zed
+  project-management:
+    name: jira
+    project: ENG
+    url: https://example.atlassian.net
+repos:                # over one repo's overbridge.yml, by its name in repos.toml
+  app:
+    commands:
+      test: pnpm test --run
+  infra:
+    project-management: ~   # null removes a key
+```
+
+The layers apply in this order, and a later layer wins:
+
+1. Built-in defaults.
+2. `defaults` in the root `config.yml`.
+3. The repo's `overbridge.yml`.
+4. `repos.<name>` in the root `config.yml`.
+
+Mappings merge key by key. Lists, such as `apps` and `review.personas`, replace the list below them whole. A
+`null` (`~`) removes the key. Each layer can be partial: a required key, such as `project-management.project`,
+only has to be set once the layers are merged. `overbridge start` reads the repo's file from its default branch, so
+the root `config.yml` is how to set up a repo that has no `overbridge.yml`.
+
+`repos.<name>` applies inside a workspace, where overbridge knows which repo a directory belongs to. Outside a
+workspace, only `defaults` applies.
+
+### Extension keys
+
+A top-level key that starts with `x-`, such as `x-acme`, passes validation in either file. overbridge keeps it as
+written and never reads it, so skills and tools built on overbridge can keep their own settings next to its
+settings. Read one with `overbridge config get x-acme.squad`. Extension keys merge across layers like any other
+mapping.
 
 ### Examples
 

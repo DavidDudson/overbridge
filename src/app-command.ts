@@ -18,7 +18,7 @@ export async function appCommand(wsOpt: string | undefined, repoOpt: string | un
   const repos = Object.keys(getWorkspace(readState(), ws).repos).filter((r) => !repoOpt || r === repoOpt);
   const found = repos.flatMap((repo) => {
     const dir = worktreePath(ws, repo);
-    return loadRepoConfig(dir).apps.map((spec) => ({ repo, dir, spec }));
+    return loadRepoConfig(dir, repo).apps.map((spec) => ({ repo, dir, spec }));
   });
 
   const describe = async (f: (typeof found)[number]) => {

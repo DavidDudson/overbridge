@@ -2,9 +2,9 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { dirname, join, resolve } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
-import { configPath, getConfigValue, loadRepoConfig, parseConfig } from "./project-config";
+import { configPath, getConfigValue, loadConfigFile, loadRootLayers, rootConfigPath } from "./project-config";
 import { chooseLayout, userLayoutPath } from "./layout";
-import { barePath, currentWorkspace, envVar, metaDir, NAME_RE, root, selfCommand, worktreePath, wsDir } from "./paths";
+import { barePath, currentWorkspace, envVar, metaDir, NAME_RE, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { scaffold } from "./scaffold";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
 import { type Claim, claimOwner, getWorkspace, readState, withState } from "./state";
@@ -306,30 +306,48 @@ function table(header: string[], rows: string[][]) {
   for (const r of all) console.log(r.map((c, i) => (c ?? "").padEnd(widths[i]!)).join("  ").trimEnd());
 }
 
-/** The file or repo dir a `config` command targets: the arg, else the git root of the cwd. */
-function configTarget(arg?: string): { dir: string; file: string } {
+/**
+ * The file a `config` command targets (the arg, else the git root of the cwd) and the repo it belongs to,
+ * which picks the root config's `repos.<name>` layer.
+ */
+function configTarget(arg?: string): { file: string; repo?: string } {
   const given = resolve(arg ?? (run(["git", "rev-parse", "--show-toplevel"]).stdout || process.cwd()));
-  if (existsSync(given) && statSync(given).isFile()) return { dir: dirname(given), file: given };
-  return { dir: given, file: configPath(given) };
+  const isFile = existsSync(given) && statSync(given).isFile();
+  const file = isFile ? given : configPath(given);
+  const repo = repoOf(isFile ? dirname(given) : given);
+  return repo === undefined ? { file } : { file, repo };
 }
 
+/**
+ * Check a repo's config with the root config's layers, or the root `config.yml` alone when that is the
+ * target. Either file may be missing, but not both.
+ */
 export function configCheck(arg?: string) {
-  const { file } = configTarget(arg);
-  if (!existsSync(file)) fail(`${file} does not exist`);
-  parseConfig(readFileSync(file, "utf8"), file);
-  log(`${file}: ok`);
+  const { file, repo } = configTarget(arg);
+  const rootFile = rootConfigPath();
+  if (file === rootFile) {
+    if (!existsSync(file)) fail(`${file} does not exist`);
+    loadRootLayers(file);
+    return log(`${file}: ok`);
+  }
+  const present = [file, rootFile].filter((f) => existsSync(f));
+  if (!present.length) fail(`${file} does not exist`);
+  loadConfigFile(file, repo);
+  log(`${present.join(" + ")}: ok`);
 }
 
+/** The resolved config as JSON. Which files went into it goes to stderr. */
 export function configShow(arg?: string) {
-  const { dir, file } = configTarget(arg);
-  if (!existsSync(file)) log(`${file} not found; showing defaults`);
-  console.log(JSON.stringify(loadRepoConfig(dir), null, 2));
+  const { file, repo } = configTarget(arg);
+  const present = [file, rootConfigPath()].filter((f) => existsSync(f));
+  log(present.length ? `from ${present.join(" + ")}` : `${file} not found; showing defaults`);
+  console.log(JSON.stringify(loadConfigFile(file, repo), null, 2));
 }
 
 /** Print one resolved value: strings bare, everything else as JSON. Exits non-zero when the key is unset. */
 export function configGet(key: string, arg?: string) {
-  const { dir } = configTarget(arg);
-  const value = getConfigValue(loadRepoConfig(dir), key);
+  const { file, repo } = configTarget(arg);
+  const value = getConfigValue(loadConfigFile(file, repo), key);
   if (value === undefined) fail(`${key} is not set`);
   console.log(typeof value === "string" ? value : JSON.stringify(value));
 }
