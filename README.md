@@ -106,6 +106,7 @@ project-management:
   name: github        # github | jira
   project: owner/repo # GitHub: owner/repo or project number; Jira: project key
   # url: https://example.atlassian.net   # optional provider base URL
+  # tech-debt: 42                        # optional: parent item for tech-debt items, or label:tech-debt
 apps: []              # launch/teardown commands, see the apps docs when they land
 commands:             # all optional; skills run these to check a change
   lint: pnpm lint

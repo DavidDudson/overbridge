@@ -38,6 +38,13 @@ ide: zed
     expect(c.ide).toBe("zed");
   });
 
+  test("parses project-management.tech-debt", () => {
+    const pm = (yaml: string) => parseConfig(`project-management: { name: github, project: o/r${yaml} }`).projectManagement;
+    expect(pm(", tech-debt: 42")?.techDebt).toBe("42");
+    expect(pm(", tech-debt: 'label:debt'")?.techDebt).toBe("label:debt");
+    expect(pm("")).not.toHaveProperty("techDebt");
+  });
+
   test("accepts a numeric GitHub project number", () => {
     expect(parseConfig("project-management: { name: github, project: 4 }").projectManagement?.project).toBe("4");
   });

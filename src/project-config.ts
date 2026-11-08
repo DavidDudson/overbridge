@@ -18,6 +18,11 @@ export interface ProjectManagement {
   project: string;
   /** Provider base URL, e.g. a Jira site. */
   url?: string;
+  /**
+   * Where tech-debt items go: the id of a parent item (an epic), or `label:<name>` to tag them instead.
+   * Unset means tech-debt items are filed with no parent.
+   */
+  techDebt?: string;
 }
 
 /** One launchable app. Only the shape is checked here; semantics belong to the apps module. */
@@ -61,7 +66,7 @@ export const defaultConfig = (): ProjectConfig => ({
 
 const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
-const PM_KEYS = ["name", "project", "url"];
+const PM_KEYS = ["name", "project", "url", "tech-debt"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -163,7 +168,10 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE): ProjectConfig 
       const name = p.oneOf(p.string(pm, "name", "project-management", true), PM_NAMES, "project-management.name");
       const project = p.string(pm, "project", "project-management", true);
       const url = p.string(pm, "url", "project-management", false);
-      if (name && project) config.projectManagement = { name, project, ...(url ? { url } : {}) };
+      const techDebt = p.string(pm, "tech-debt", "project-management", false);
+      if (name && project) {
+        config.projectManagement = { name, project, ...(url ? { url } : {}), ...(techDebt ? { techDebt } : {}) };
+      }
     }
   }
 

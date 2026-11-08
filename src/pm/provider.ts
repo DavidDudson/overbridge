@@ -7,6 +7,15 @@ export interface WorkItem {
   url: string;
 }
 
+/** What `createItem` needs to file a new item. */
+export interface NewItem {
+  title: string;
+  body: string;
+  labels?: string[];
+  /** Id of a parent item (an epic). */
+  parent?: string;
+}
+
 /**
  * A project-management backend. Everything else in overbridge talks to this
  * interface and never branches on the provider name. Calls are synchronous like
@@ -24,6 +33,22 @@ export interface Provider {
   assigned(): WorkItem[];
   /** A branch name that follows the provider's convention for `item`. */
   branchName(item: { id: string; title: string }): string;
+  /** File a new item and return it. */
+  createItem(item: NewItem): WorkItem;
+  /** Replace an item's body. */
+  updateItemBody(id: string, body: string): void;
+}
+
+/**
+ * File a tech-debt item where `project-management.tech-debt` says: under that parent item, or
+ * tagged with the label when the value is `label:<name>`. Unset files it with no parent.
+ */
+export function createTechDebtItem(provider: Provider, techDebt: string | undefined, item: NewItem): WorkItem {
+  if (techDebt?.startsWith("label:")) {
+    const label = techDebt.slice("label:".length).trim();
+    return provider.createItem({ ...item, labels: [...(item.labels ?? []), ...(label ? [label] : [])] });
+  }
+  return provider.createItem({ ...item, ...(techDebt ? { parent: techDebt } : {}) });
 }
 
 /** Builds a provider for a repo's `project-management` block; `cwd` is a worktree of that repo. */
