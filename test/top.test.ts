@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AppStatus } from "../src/apps";
@@ -210,7 +210,7 @@ describe("refreshTop", () => {
   const items = [{ id: "12", title: "Add dark mode", url: "x" }];
 
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), "overbridge-top-"));
+    tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-top-")));
     process.env.OVERBRIDGE_ROOT = tmp;
     mkdirSync(join(tmp, "w1", "r"), { recursive: true });
     writeFileSync(join(tmp, "w1", "r", "overbridge.yml"), "version: 1\nproject-management:\n  name: github\n  project: o/r\n");
@@ -290,7 +290,7 @@ describe("cleanable", () => {
     refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson(state) });
 
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), "overbridge-clean-"));
+    tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-clean-")));
     process.env.OVERBRIDGE_ROOT = tmp;
     sh(["git", "init", "-q", "-b", "main", "src"], tmp);
     sh(["git", "commit", "-q", "--allow-empty", "-m", "init"], join(tmp, "src"));

@@ -1,4 +1,4 @@
-import { existsSync, renameSync } from "node:fs";
+import { existsSync, realpathSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -24,8 +24,18 @@ export function envVar(name: "ROOT" | "NAME" | "SELF" | "SESSION"): string | und
   return legacy;
 }
 
+/**
+ * The workspaces root, with symlinks resolved once it exists. `process.cwd()` and the guard's paths are
+ * real paths, so an unresolved root (macOS `/var` → `/private/var`, a symlinked `~/workspaces`) would
+ * place every workspace outside it.
+ */
 export function root(): string {
-  return resolve(envVar("ROOT") ?? join(homedir(), "workspaces"));
+  const dir = resolve(envVar("ROOT") ?? join(homedir(), "workspaces"));
+  try {
+    return realpathSync(dir);
+  } catch {
+    return dir;
+  }
 }
 
 /** State dir. Renames the pre-rename `.ws` dir in place the first time it is seen. */
