@@ -1,0 +1,6 @@
+{
+  "name": "overbridge-review",
+  "version": "0.1.0",
+  "description": "Project-agnostic review panel for overbridge workspaces: mob-review, review-pr and persona reviewers, configured by review.* in overbridge.yml.",
+  "author": { "name": "David Dudson" }
+}

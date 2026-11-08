@@ -6,6 +6,11 @@
       "name": "overbridge",
       "source": "./plugin",
       "description": "Skills for working inside overbridge workspaces: claiming branches/PRs, shipping PRs, and managing workspaces."
+    },
+    {
+      "name": "overbridge-review",
+      "source": "./plugin-review",
+      "description": "Review panel for overbridge workspaces: mob-review, review-pr and persona reviewers, selected by review.* in overbridge.yml."
     }
   ]
 }
