@@ -1,11 +1,11 @@
 ---
 name: workspace-admin
-description: Set up and manage ws workspaces from outside a workspace — register repos, create/remove workspaces, add repos to a workspace, launch the zellij grid. Use when the user says "add repo X to ws", "new workspace", "spin up a workspace for …", "remove ws3", "launch workspaces", or asks how the ws tool works. Not for workspace-bound sessions (the guard blocks admin commands there).
+description: Set up and manage overbridge workspaces from outside a workspace — register repos, create/remove workspaces, add repos to a workspace, launch the zellij grid. Use when the user says "add repo X to overbridge", "new workspace", "spin up a workspace for …", "remove ws3", "launch workspaces", or asks how the overbridge tool works. Not for workspace-bound sessions (the guard blocks admin commands there).
 ---
 
-# Managing ws workspaces
+# Managing overbridge workspaces
 
-Layout under `$WS_ROOT` (default `~/workspaces`):
+Layout under `$OVERBRIDGE_ROOT` (default `~/workspaces`):
 
 ```
 repos.toml          # registry: [repos.<name>] url = "...", default_branch = "..." (optional)
@@ -20,28 +20,28 @@ repos.toml          # registry: [repos.<name>] url = "...", default_branch = "..
 ## Commands
 
 ```sh
-ws init                                   # once
-ws repo add <name> <git-url> [--branch main]
-ws repo ls
-ws sync                                   # fetch all bare repos
+overbridge init                                   # once
+overbridge repo add <name> <git-url> [--branch main]
+overbridge repo ls
+overbridge sync                                   # fetch all bare repos
 
-ws new [name] -r <repo> [-r <repo>...]    # default name ws1, ws2, …
-ws add <repo> --ws <name>                 # add another repo to an existing workspace
-ws rm <name> [--force]                    # refuses with uncommitted changes unless --force
-ws status --all
+overbridge new [name] -r <repo> [-r <repo>...]    # default name ws1, ws2, …
+overbridge add <repo> --ws <name>                 # add another repo to an existing workspace
+overbridge rm <name> [--force]                    # refuses with uncommitted changes unless --force
+overbridge status --all
 
-ws spinup [-p 2]                          # create empty workspaces up to N full pages (default 1 = 4 ws),
+overbridge spinup [-p 2]                          # create empty workspaces up to N full pages (default 1 = 4 ws),
                                           # then rebuild the zellij session (kills running panes)
-ws up [--fresh]                           # zellij session "workspaces": 4 workspaces per tab,
+overbridge up [--fresh]                           # zellij session "workspaces": 4 workspaces per tab,
                                           # Claude pane above shell pane per workspace
-ws claude <name>                          # run one bound Claude outside zellij
+overbridge claude <name>                          # run one bound Claude outside zellij
 ```
 
 ## Notes
 
-- `ws up` attaches if the session exists; new workspaces only show after `ws up --fresh`
+- `overbridge up` attaches if the session exists; new workspaces only show after `overbridge up --fresh`
   (that kills the session, so confirm with the user first).
-- `ws rm --force` discards uncommitted work. Confirm with the user before using it.
+- `overbridge rm --force` discards uncommitted work. Confirm with the user before using it.
 - Repo names: letters, digits, `-`, `_`. URL is anything `git clone` accepts.
 - One branch/PR per repo can be claimed by exactly one workspace. To move work,
-  `ws release <repo> --ws <from>` then `ws checkout <repo> <branch> --ws <to>`.
+  `overbridge release <repo> --ws <from>` then `overbridge checkout <repo> <branch> --ws <to>`.

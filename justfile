@@ -9,5 +9,5 @@ typecheck:
     bunx tsc --noEmit
 
 # Run the CLI from source
-ws *args:
+overbridge *args:
     bun src/cli.ts {{args}}

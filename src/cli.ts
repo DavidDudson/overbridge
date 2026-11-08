@@ -2,37 +2,38 @@
 import { parseArgs } from "node:util";
 import * as cmd from "./commands";
 import { guardMain } from "./guard";
-import { WsError } from "./util";
+import { silenceLegacyWarnings } from "./paths";
+import { OverbridgeError } from "./util";
 
-const HELP = `ws — multi-repo workspaces with bound Claude sessions in zellij
+const HELP = `overbridge (alias: ws) — multi-repo workspaces with bound Claude sessions in zellij
 
 Setup
-  ws init                               create ~/workspaces (or $WS_ROOT)
-  ws repo add <name> <url> [--branch b] register + bare-clone a repo
-  ws repo ls                            list registered repos
-  ws sync                               fetch every bare repo
+  overbridge init                               create ~/workspaces (or $OVERBRIDGE_ROOT)
+  overbridge repo add <name> <url> [--branch b] register + bare-clone a repo
+  overbridge repo ls                            list registered repos
+  overbridge sync                               fetch every bare repo
 
 Workspaces
-  ws new [name] [-r repo]...            create a workspace (default name wsN)
-  ws add <repo> [--ws name]             add a repo worktree to a workspace
-  ws rm <name> [--force]                remove a workspace and its worktrees
-  ws status [--all] [--json]            claims, heads, gh-stack position, dirty state
-  ws whoami                             workspace for the current dir/session
+  overbridge new [name] [-r repo]...            create a workspace (default name wsN)
+  overbridge add <repo> [--ws name]             add a repo worktree to a workspace
+  overbridge rm <name> [--force]                remove a workspace and its worktrees
+  overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty state
+  overbridge whoami                             workspace for the current dir/session
 
-Branches & PRs (workspace inferred from $WS_NAME or cwd)
-  ws checkout [repo] <branch|#pr|url>   claim + switch (adds repo if missing);
+Branches & PRs (workspace inferred from $OVERBRIDGE_NAME or cwd)
+  overbridge checkout [repo] <branch|#pr|url>   claim + switch (adds repo if missing);
                                         a stacked PR pulls its whole stack via gh stack
-  ws release [repo]                     drop claim, detach worktree in place
-  ws pr [repo]                          record the open PR; claim follows HEAD within a stack
+  overbridge release [repo]                     drop claim, detach worktree in place
+  overbridge pr [repo]                          record the open PR; claim follows HEAD within a stack
 
 Zellij
-  ws spinup [-p pages]                  ensure N full pages (4 ws each) exist, rebuild session
-  ws up [--fresh]                       attach/launch session, 4 workspaces per tab
-  ws layout                             print the generated zellij layout
-  ws claude <name> [-- args]            run Claude bound to a workspace
+  overbridge spinup [-p pages]                  ensure N full pages (4 ws each) exist, rebuild session
+  overbridge up [--fresh]                       attach/launch session, 4 workspaces per tab
+  overbridge layout                             print the generated zellij layout
+  overbridge claude <name> [-- args]            run Claude bound to a workspace
 
 Hooks
-  ws guard                              Claude PreToolUse hook (reads JSON on stdin)
+  overbridge guard                              Claude PreToolUse hook (reads JSON on stdin)
 `;
 
 function opts<T extends Record<string, { type: "string" | "boolean"; short?: string; multiple?: boolean }>>(
@@ -53,10 +54,10 @@ async function main(argv: string[]): Promise<number> {
       const [action, ...r] = rest;
       if (action === "add") {
         const { values, positionals } = opts(r, { branch: { type: "string" } });
-        if (positionals.length !== 2) throw new WsError("usage: ws repo add <name> <url> [--branch b]");
+        if (positionals.length !== 2) throw new OverbridgeError("usage: overbridge repo add <name> <url> [--branch b]");
         cmd.repoAdd(positionals[0]!, positionals[1]!, values.branch);
       } else if (action === "ls" || action === "list") cmd.repoList();
-      else throw new WsError("usage: ws repo add|ls");
+      else throw new OverbridgeError("usage: overbridge repo add|ls");
       break;
     }
     case "sync":
@@ -69,13 +70,13 @@ async function main(argv: string[]): Promise<number> {
     }
     case "add": {
       const { values, positionals } = opts(rest, ws);
-      if (positionals.length < 1) throw new WsError("usage: ws add <repo>... [--ws name]");
+      if (positionals.length < 1) throw new OverbridgeError("usage: overbridge add <repo>... [--ws name]");
       for (const r of positionals) cmd.addRepo(r, values.ws);
       break;
     }
     case "rm": {
       const { values, positionals } = opts(rest, { force: { type: "boolean", short: "f" } });
-      if (positionals.length !== 1) throw new WsError("usage: ws rm <name> [--force]");
+      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge rm <name> [--force]");
       cmd.removeWorkspace(positionals[0]!, !!values.force);
       break;
     }
@@ -119,11 +120,12 @@ async function main(argv: string[]): Promise<number> {
       break;
     case "claude": {
       const [name, ...extra] = rest;
-      if (!name) throw new WsError("usage: ws claude <name> [-- claude args]");
+      if (!name) throw new OverbridgeError("usage: overbridge claude <name> [-- claude args]");
       cmd.claude(name, extra[0] === "--" ? extra.slice(1) : extra);
       break;
     }
     case "guard":
+      silenceLegacyWarnings();
       return guardMain();
     case undefined:
     case "help":
@@ -132,7 +134,7 @@ async function main(argv: string[]): Promise<number> {
       console.log(HELP);
       break;
     default:
-      throw new WsError(`unknown command '${sub}'\n\n${HELP}`);
+      throw new OverbridgeError(`unknown command '${sub}'\n\n${HELP}`);
   }
   return 0;
 }
@@ -140,8 +142,8 @@ async function main(argv: string[]): Promise<number> {
 try {
   process.exit(await main(Bun.argv.slice(2)));
 } catch (e) {
-  if (e instanceof WsError || (e as any)?.code?.startsWith?.("ERR_PARSE_ARGS")) {
-    console.error(`ws: ${(e as Error).message}`);
+  if (e instanceof OverbridgeError || (e as any)?.code?.startsWith?.("ERR_PARSE_ARGS")) {
+    console.error(`overbridge: ${(e as Error).message}`);
     process.exit(1);
   }
   throw e;

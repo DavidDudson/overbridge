@@ -10,8 +10,8 @@ let remote: string;
 
 const env = () => ({
   ...process.env,
-  WS_ROOT: root,
-  WS_NAME: "",
+  OVERBRIDGE_ROOT: root,
+  OVERBRIDGE_NAME: "",
   XDG_CACHE_HOME: join(tmp, "cache"),
   GIT_AUTHOR_NAME: "t",
   GIT_AUTHOR_EMAIL: "t@t",
@@ -61,15 +61,15 @@ describe("workflow", () => {
       { name: "zeta", url: "https://github.com/u/zeta", isFork: true },
       { name: "Alpha", url: "https://github.com/u/Alpha", isArchived: true },
     ];
-    mkdirSync(join(tmp, "cache", "ws"), { recursive: true });
-    writeFileSync(join(tmp, "cache", "ws", "github-repos.json"), JSON.stringify(repos));
+    mkdirSync(join(tmp, "cache", "overbridge"), { recursive: true });
+    writeFileSync(join(tmp, "cache", "overbridge", "github-repos.json"), JSON.stringify(repos));
     expect(ws(["new", "-r", "app"]).out.trim()).toBe("ws2");
     expect(readFileSync(join(root, "ws2", "CLAUDE.md"), "utf8")).toContain(
       "| Alpha | https://github.com/u/Alpha | archived |\n| zeta | https://github.com/u/zeta | fork |",
     );
     expect(existsSync(join(root, "ws1", "app", ".git"))).toBe(true);
     const settings = JSON.parse(readFileSync(join(root, "ws1", ".claude", "settings.json"), "utf8"));
-    expect(settings.env.WS_NAME).toBe("ws1");
+    expect(settings.env.OVERBRIDGE_NAME).toBe("ws1");
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain("guard");
   });
 
@@ -137,7 +137,7 @@ describe("workflow", () => {
     expect(steal.code).toBe(1);
     expect(steal.err).toContain("claimed by workspace sa");
 
-    // `gh stack add s2` moves HEAD up the stack; `ws pr` moves the claim with it.
+    // `gh stack add s2` moves HEAD up the stack; `overbridge pr` moves the claim with it.
     sh(["git", "switch", "-q", "-c", "s2"], sa);
     expect(ws(["pr", "app"], sa).code).toBe(0);
     const row = JSON.parse(ws(["status", "--json"], sa).out)[0];

@@ -1,11 +1,11 @@
 {
-  "name": "ws",
+  "name": "overbridge",
   "owner": { "name": "David Dudson" },
   "plugins": [
     {
-      "name": "ws",
+      "name": "overbridge",
       "source": "./plugin",
-      "description": "Skills for working inside ws workspaces: claiming branches/PRs, shipping PRs, and managing workspaces."
+      "description": "Skills for working inside overbridge workspaces: claiming branches/PRs, shipping PRs, and managing workspaces."
     }
   ]
 }

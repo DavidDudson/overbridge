@@ -6,7 +6,7 @@ export type RepoSpec = { name: string; url: string; defaultBranch?: string };
 
 export const REPO_NAME_RE = /^[A-Za-z0-9_-]+$/;
 
-const HEADER = `# ws repo registry. Add with \`ws repo add <name> <url>\`.
+const HEADER = `# overbridge repo registry. Add with \`overbridge repo add <name> <url>\`.
 #
 # [repos.example]
 # url = "git@github.com:you/example.git"
@@ -31,7 +31,7 @@ export function loadRepos(): Record<string, RepoSpec> {
 }
 
 export function getRepo(name: string): RepoSpec {
-  return loadRepos()[name] ?? fail(`unknown repo '${name}'; register it with \`ws repo add ${name} <url>\``);
+  return loadRepos()[name] ?? fail(`unknown repo '${name}'; register it with \`overbridge repo add ${name} <url>\``);
 }
 
 export function appendRepo(spec: RepoSpec) {
