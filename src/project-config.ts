@@ -27,16 +27,40 @@ export interface AppConfig {
   [key: string]: unknown;
 }
 
+/** Shell commands skills run to check a change. Each is optional; a missing one means the repo has none. */
+export const COMMAND_NAMES = ["lint", "typecheck", "test", "build", "format"] as const;
+export type CommandName = (typeof COMMAND_NAMES)[number];
+export type Commands = Partial<Record<CommandName, string>>;
+
+export const DEFAULT_PERSONA_DIR = ".overbridge/personas";
+
+export interface ReviewConfig {
+  /** Reviewer personas to run; unset means auto-select by diff signals. */
+  personas?: string[];
+  /** Personas to skip, applied after `personas` or auto-selection. */
+  exclude: string[];
+  /** Repo-relative directory of repo-local personas. */
+  localDir: string;
+}
+
 export interface ProjectConfig {
   version: typeof CONFIG_VERSION;
   projectManagement?: ProjectManagement;
   apps: AppConfig[];
+  commands: Commands;
+  review: ReviewConfig;
   ide?: Ide;
 }
 
-export const defaultConfig = (): ProjectConfig => ({ version: CONFIG_VERSION, apps: [] });
+export const defaultConfig = (): ProjectConfig => ({
+  version: CONFIG_VERSION,
+  apps: [],
+  commands: {},
+  review: { exclude: [], localDir: DEFAULT_PERSONA_DIR },
+});
 
-const TOP_KEYS = ["version", "project-management", "apps", "ide"];
+const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide"];
+const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
 const PM_KEYS = ["name", "project", "url"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
 
@@ -95,6 +119,22 @@ class Problems {
     }
     return v;
   }
+  /** A list of non-empty strings, or undefined when the key is absent. */
+  stringList(obj: Record<string, unknown>, key: string, path: string): string[] | undefined {
+    const at = `${path}.${key}`;
+    const v = obj[key];
+    if (v === undefined || v === null) return;
+    if (!Array.isArray(v)) {
+      this.add(at, "expected a list of strings");
+      return;
+    }
+    const out: string[] = [];
+    v.forEach((item, i) => {
+      if (typeof item !== "string" || item === "") this.add(`${at}[${i}]`, "expected a non-empty string");
+      else out.push(item);
+    });
+    return out;
+  }
   oneOf<T extends string>(value: string | undefined, choices: readonly T[], path: string): T | undefined {
     if (value === undefined) return;
     if ((choices as readonly string[]).includes(value)) return value as T;
@@ -145,6 +185,30 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE): ProjectConfig 
     }
   }
 
+  const commands = raw.commands;
+  if (commands !== undefined && commands !== null) {
+    if (!isObject(commands)) p.add("commands", "expected a mapping of command name to shell command");
+    else {
+      p.unknownKeys(commands, COMMAND_NAMES, "commands");
+      for (const name of COMMAND_NAMES) {
+        const command = p.string(commands, name, "commands", false);
+        if (command) config.commands[name] = command;
+      }
+    }
+  }
+
+  const review = raw.review;
+  if (review !== undefined && review !== null) {
+    if (!isObject(review)) p.add("review", "expected a mapping");
+    else {
+      p.unknownKeys(review, REVIEW_KEYS, "review");
+      const personas = p.stringList(review, "personas", "review");
+      if (personas) config.review.personas = personas;
+      config.review.exclude = p.stringList(review, "exclude", "review") ?? [];
+      config.review.localDir = p.string(review, "local-dir", "review", false) ?? DEFAULT_PERSONA_DIR;
+    }
+  }
+
   const ide = p.oneOf(p.string(raw, "ide", "", false), IDES, "ide");
   if (ide) config.ide = ide;
 
@@ -175,4 +239,19 @@ export function loadRepoConfig(repoDir: string): ProjectConfig {
 /** Config for every repo checked out in `workspace`, keyed by repo name. */
 export function loadWorkspaceConfigs(workspace: string, repos: string[]): Record<string, ProjectConfig> {
   return Object.fromEntries(repos.map((repo) => [repo, loadRepoConfig(worktreePath(workspace, repo))]));
+}
+
+const camel = (key: string) => key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+
+/**
+ * Look up a dotted key (`commands.test`, `project-management.name`, `review.local-dir`) in a resolved
+ * config. Keys use the file's spelling. Returns undefined when the key is unset.
+ */
+export function getConfigValue(config: ProjectConfig, key: string): unknown {
+  let node: unknown = config;
+  for (const segment of key.split(".")) {
+    if (!isObject(node)) return;
+    node = node[camel(segment)];
+  }
+  return node;
 }

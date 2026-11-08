@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { dirname, join, resolve } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
-import { configPath, loadRepoConfig, parseConfig } from "./project-config";
+import { configPath, getConfigValue, loadRepoConfig, parseConfig } from "./project-config";
 import { layoutKdl, PER_PAGE } from "./layout";
 import { barePath, currentWorkspace, envVar, metaDir, NAME_RE, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { scaffold } from "./scaffold";
@@ -306,4 +306,12 @@ export function configShow(arg?: string) {
   const { dir, file } = configTarget(arg);
   if (!existsSync(file)) log(`${file} not found; showing defaults`);
   console.log(JSON.stringify(loadRepoConfig(dir), null, 2));
+}
+
+/** Print one resolved value: strings bare, everything else as JSON. Exits non-zero when the key is unset. */
+export function configGet(key: string, arg?: string) {
+  const { dir } = configTarget(arg);
+  const value = getConfigValue(loadRepoConfig(dir), key);
+  if (value === undefined) fail(`${key} is not set`);
+  console.log(typeof value === "string" ? value : JSON.stringify(value));
 }
