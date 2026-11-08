@@ -9,6 +9,7 @@ import type { Provider } from "./pm/provider";
 import { type AppSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, readState } from "./state";
 import { boxBottom, boxRow, boxTop, type Color, colorize, fit, inverse, textWidth } from "./term";
+import { REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses } from "./reviewers";
 import { stackOf, localStacks } from "./stack";
 import { run } from "./util";
 
@@ -38,6 +39,8 @@ export interface PrInfo {
   dir: string;
   /** Every PR of the stack this PR belongs to, bottom first; empty when unstacked. */
   stack: number[];
+  /** Copilot and CodeRabbit, as of the last refresh. */
+  reviewers?: ReviewerStatus[];
 }
 
 export interface TopLink {
@@ -52,7 +55,7 @@ export const PR_STATUSES = ["merged", "mergeable", "failing", "conflict", "pendi
 export type PrStatus = (typeof PR_STATUSES)[number];
 
 /** What `gh pr view --json state,mergeable,mergeStateStatus,statusCheckRollup` returns, as far as we read it. */
-export interface PrView {
+export interface PrView extends ReviewerView {
   url?: string;
   title?: string;
   isDraft?: boolean;
@@ -222,7 +225,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       }
     }
     if (claim.pr !== undefined) {
-      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,title,isDraft,state,mergeable,mergeStateStatus,statusCheckRollup"], dir));
+      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,title,isDraft,state,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments"], dir));
       if (view?.url) {
         const layers = stackOf(safeStacks(repo), claim.branch)?.layers ?? [];
         const stack = layers.length > 1 ? layers.flatMap((l) => (l.pr === undefined ? [] : [l.pr])) : [];
@@ -230,7 +233,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
           label: claims.length > 1 ? `${repo} #${claim.pr}` : `PR #${claim.pr}`,
           url: view.url,
           status: classifyPr(view),
-          pr: { repo, number: claim.pr, title: view.title ?? "", draft: view.isDraft === true, dir, stack },
+          pr: { repo, number: claim.pr, title: view.title ?? "", draft: view.isDraft === true, dir, stack, reviewers: reviewerStatuses(view, view.url) },
         });
       }
       else problems.push(`${repo}: no URL for PR #${claim.pr}`);
@@ -421,6 +424,7 @@ export function buttons(snap: TopSnapshot): Button[] {
     });
     if (pr) {
       const row = prRow++;
+      for (const r of pr.reviewers ?? []) out.push({ label: reviewerLabel(r), action: { kind: "link", url: r.url ?? l.url }, side: "right", color: REVIEWER_LOOK[r.state].color, prRow: row });
       if (l.status !== "merged" && l.status !== "closed") {
         out.push({ label: pr.draft ? "✅ Ready" : "📝 Draft", action: { kind: "ready", pr }, side: "right", prRow: row });
         if (l.status === "mergeable" && !pr.draft) out.push({ label: pr.stack.length > 1 ? "🟣 Merge stack" : "🟣 Merge", action: { kind: "merge", pr }, side: "right", color: "purple", prRow: row });

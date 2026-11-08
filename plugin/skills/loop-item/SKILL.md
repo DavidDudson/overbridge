@@ -60,13 +60,12 @@ this PR finishes the item, and `Refs <id>` when it does not. Run the humanizer p
 
 ## 6. Green build
 
-```sh
-gh pr checks --watch
-```
-
-Read each failure's log. Fix failures this branch caused, and rerun a flaky job once. Stop and report
-when a failure is not from this branch or a second rerun fails. Do not loop on human review
-comments: that is `resolve-feedback`, run on its own when the reviews land.
+`ship-pr` step 10 does this; keep going until it ends. Poll the checks (never `gh pr checks --watch`, which
+hangs on an approval gate), read every failure's log, fix what this branch caused, push, and watch
+again. Rerun a flaky job (a 5xx while downloading a tool in a setup step is one) at most twice. Stop
+and report when a failure is not from this branch or the rerun budget is spent, naming each check
+that is not green. Every push after this (a review fix, a merge of main) starts the watch again. Do
+not loop on human review comments: that is `resolve-feedback`, run on its own when the reviews land.
 
 ## Report
 

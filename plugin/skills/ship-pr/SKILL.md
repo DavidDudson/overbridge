@@ -153,7 +153,8 @@ The PR isn't done until CI passes. The push already happened, so CI is running.
    - **Caused by this branch** (merge conflict, type error, test failure from your change): fix it. For a branch behind its base, use the `merge-main` skill on a normal PR. On a stack use `gh stack sync`, never a plain rebase of one mid-stack branch. Commit, push, re-watch.
    - **Suspected flake** (infra timeout, network blip, known-intermittent test, passes on re-run): rerun only the failed job, **up to 2 times** per job: `gh run rerun <run-id> --failed` or `gh run rerun --job <job-id>`. Track a per-job count. After two reruns that still fail, stop and treat it as real: surface it rather than looping.
    - **Unrelated** (pre-existing breakage on the base, an outage affecting every PR): surface it to the user, don't chase it.
-4. Re-watch after every fix or rerun. Loop until every non-gate check is green, a failure is confirmed real and unfixable, or the rerun budget is spent.
+   An outage in a setup step (a 5xx while downloading a tool or action) is infrastructure: rerun it.
+4. Re-watch after every fix or rerun, and after every later push to the PR (review fixes, a merge of main, a rebase). Loop until every non-gate check is green, a failure is confirmed real and unfixable, or the rerun budget is spent.
 5. **Never declare the build green without confirming on GitHub that the checks passed.** Never rerun an approval gate hoping it turns green.
 
 ## 11. Wait for Copilot, then resolve feedback
@@ -312,7 +313,7 @@ Turn one big branch into a stack of smaller PRs, one slice per layer. This rewri
 - **Describe the change, not the process of making it.** The body says what changed and why, in the fewest words that carry it. Never narrate your own investigation and never revise a claim in place: if an earlier reading was wrong, publish the correct one and delete the wrong one. No "I first thought", "turned out to be", "worth flagging". When the body is edited after review feedback or a red build, rewrite the affected section so it reads as though it were always correct.
 - **Cut anything that would not change a reviewer's decision**: long verbatim changelogs, notes about which local check caught what, commentary on how the work went. Keep the diff's intent, the callsites, the risks and the evidence.
 - **Never commit a screenshot.** Never paste an empty or `null` attachment URL into a body. Never drive an SSO or MFA login yourself.
-- **Never declare the build green without confirming the checks passed on GitHub.** Fix branch-caused failures, rerun suspected flakes at most twice per job, surface unrelated ones.
+- **Never declare the build green without confirming the checks passed on GitHub.** Fix branch-caused failures, rerun suspected flakes at most twice per job, surface unrelated ones. The final summary names every check that is not green.
 - **Always wait for Copilot's review and resolve it** with `resolve-feedback` before calling a PR done, unless Copilot review is unavailable (say so).
 - **A base field is not a stack.** Before reporting a stacked PR done, `gh stack view` must show the chain.
 - **Never `gh stack push` over a stale lower branch**, and never plain-rebase one mid-stack branch.

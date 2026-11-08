@@ -96,6 +96,9 @@ gh pr view --json mergeable,mergeStateStatus --jq '"mergeable: \(.mergeable)  st
 
 `BLOCKED` with no conflicts is only CI or approvals gating.
 
+The push starts CI again. If the branch has a PR, watch it as `ship-pr` step 10 does (poll, read each
+failure's log, fix what the merge broke, push, watch again) and report any check that is not green.
+
 ## Rules
 
 - Never resolve a conflict you do not understand. Ask.

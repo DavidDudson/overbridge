@@ -97,6 +97,12 @@ describe("PR rows", () => {
     expect(b.find((x) => x.label === "🟣 Merge")!.key).toBe("m");
   });
 
+  test("the reviewers sit between the PR and its actions", () => {
+    const reviewers = [{ name: "Copilot" as const, state: "none" as const }, { name: "CodeRabbit" as const, state: "limited" as const, detail: "56m" }];
+    const b = buttons(withPr("mergeable", info({ reviewers })));
+    expect(b.filter((x) => x.prRow === 0).map((x) => x.label)).toEqual(["🟢 api #7 feat: add x", "⚪ Copilot", "🚫 CodeRabbit 56m", "📝 Draft", "🟣 Merge"]);
+  });
+
   test("a draft offers Ready and no Merge; merge needs a green PR", () => {
     expect(buttons(withPr("mergeable", info({ draft: true }))).filter((x) => x.prRow === 0).map((x) => x.label)).toEqual(["🟢 api #7 feat: add x", "✅ Ready"]);
     expect(buttons(withPr("failing", info())).map((x) => x.label)).not.toContain("🟣 Merge");
@@ -223,7 +229,7 @@ describe("refreshTop", () => {
     expect(cache.headline).toBe("12 Add dark mode");
     expect(cache.links).toEqual([
       { label: "12", url: "https://fake.test/items/12" },
-      { label: "PR #3", url: "https://host/o/r/pull/3", status: "mergeable", pr: { repo: "r", number: 3, title: "", draft: false, dir: join(tmp, "w1", "r"), stack: [] } },
+      { label: "PR #3", url: "https://host/o/r/pull/3", status: "mergeable", pr: { repo: "r", number: 3, title: "", draft: false, dir: join(tmp, "w1", "r"), stack: [], reviewers: [{ name: "Copilot", state: "none", url: "https://host/o/r/pull/3" }] } },
     ]);
     expect(readTopCache("w1")).toEqual(cache);
   });

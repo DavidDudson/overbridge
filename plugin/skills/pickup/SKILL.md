@@ -79,7 +79,13 @@ is `gh stack sync`). Skip it when `git log --oneline HEAD..origin/<default>` is 
 Run `resolve-feedback` on the PR. It also confirms mergeability and CI. If the PR has no review
 comments it stops after a short note, which is fine.
 
-## 6. Report
+## 6. Watch CI
+
+Anything pushed in steps 4 and 5 starts CI again. Watch it as `ship-pr` step 10 does: poll the checks,
+read each failure's log, fix what this branch caused, push, and watch again. Do not report done on a
+red or still-running build.
+
+## 7. Report
 
 One short block: PR title and URL, branch, how it was brought up to date, what was done with feedback,
 and the CI status. List anything that needs the user: a human thread to answer, an approval gate, a

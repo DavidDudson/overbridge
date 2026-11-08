@@ -122,6 +122,9 @@ git push --force-with-lease
 If it is rejected, someone pushed meanwhile. Fetch, look at what they added, and rebase again. Never
 retry with a bare `--force`.
 
+The push starts CI again. If the branch has a PR, watch it as `ship-pr` step 10 does (poll, read each
+failure's log, fix what the rebase broke, push, watch again) and report any check that is not green.
+
 Delete the backup ref once the push is confirmed and the user is happy:
 `git branch -D "<branch>-pre-rebase-backup"`.
 
