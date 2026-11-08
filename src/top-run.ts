@@ -58,7 +58,7 @@ export async function topPanel(wsOpt?: string) {
   let snap: TopSnapshot = await snapshotTop(ws);
   let cursor = 0;
   let note: string | undefined;
-  let frame = layoutTop(snap, process.stdout.columns ?? 80);
+  let frame = layoutTop(snap, process.stdout.columns ?? 80, process.stdout.rows ?? 0);
 
   const deps: ActDeps = {
     open: openBrowser,
@@ -95,7 +95,7 @@ export async function topPanel(wsOpt?: string) {
   };
 
   const draw = () => {
-    frame = layoutTop({ ...snap, ...(note ? { message: note } : {}) }, process.stdout.columns ?? 80);
+    frame = layoutTop({ ...snap, ...(note ? { message: note } : {}) }, process.stdout.columns ?? 80, process.stdout.rows ?? 0);
     process.stdout.write(paintTop(frame, cursor));
   };
 

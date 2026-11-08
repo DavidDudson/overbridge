@@ -10,7 +10,7 @@ exports[`generated layout two workspaces, one resuming 1`] = `
   }
   tab name="ws1" focus=true {
     pane split_direction="vertical" {
-      pane name="sidebar" command="overbridge" cwd="/ws-root/ws1" size=120 borderless=true focus=true {
+      pane name="sidebar" command="overbridge" cwd="/ws-root/ws1" size=60 borderless=true focus=true {
         args "sidebar" "--ws" "ws1"
       }
       pane split_direction="horizontal" {
@@ -25,7 +25,7 @@ exports[`generated layout two workspaces, one resuming 1`] = `
   }
   tab name="ws2" {
     pane split_direction="vertical" {
-      pane name="sidebar" command="overbridge" cwd="/ws-root/ws2" size=120 borderless=true focus=true {
+      pane name="sidebar" command="overbridge" cwd="/ws-root/ws2" size=60 borderless=true focus=true {
         args "sidebar" "--ws" "ws2"
       }
       pane split_direction="horizontal" {

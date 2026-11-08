@@ -8,7 +8,7 @@ import { providerFor, refreshTitle } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, readState } from "./state";
-import { bold, type Color, colorize, dim, fit, inverse, textWidth } from "./term";
+import { boxBottom, boxRow, boxTop, type Color, colorize, fit, inverse, textWidth } from "./term";
 import { run } from "./util";
 
 const ESC = "\x1b";
@@ -87,10 +87,26 @@ export interface TopApp {
   available: boolean;
 }
 
+const CONVENTIONAL = /^(?:feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(?:\([^)]*\))?!?:\s*/i;
+
+/** A title without its conventional-commit prefix: `feat(scope): add x` is `add x`. */
+export const stripConventional = (title: string): string => title.replace(CONVENTIONAL, "").trim() || title;
+
+/**
+ * What the sidebar shows for a workspace: the item's title with no id and no conventional prefix,
+ * else the workspace name when no title is cached yet.
+ */
+export function sidebarLabel(ws: string, cache: Pick<TopCache, "headline" | "title">): string {
+  const title = cache.title ?? (cache.headline?.includes(" ") ? cache.headline.replace(/^\S+\s+/, "") : undefined);
+  return title ? stripConventional(title) : ws;
+}
+
 export interface TopSnapshot {
   ws: string;
   dir: string;
   headline?: string;
+  /** The task name: the item's title without id or conventional prefix, else the workspace name. */
+  title?: string;
   links: TopLink[];
   ide?: Ide;
   /** `$OVERBRIDGE_IDE`, else `$EDITOR`; used for the editor button when no `ide` is configured. */
@@ -256,6 +272,7 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
     ws,
     dir: wsDir(ws),
     ...(cache.headline ? { headline: cache.headline } : {}),
+    title: sidebarLabel(ws, cache),
     links: cache.links,
     ...(ide ? { ide } : {}),
     ...(editor ? { editor } : {}),
@@ -381,35 +398,44 @@ export interface Placed {
 }
 
 export interface Frame {
-  /** Plain text rows (buttons included, for reading); the cursor and colours are drawn from `placed`. */
+  /** Plain text rows, border included (buttons too, for reading); the cursor and colours are drawn from `placed`. */
   rows: string[];
   placed: Placed[];
+  /** The task name set into the top border. */
+  title: string;
+  /** The note set into the bottom border. */
+  message: string;
+  width: number;
 }
 
 /** The text of a button: its label, then its key hint (when it has one). */
 export const cell = (b: Button) => `[ ${b.label}${b.key ? ` · ${b.key}` : ""} ]`;
 const clip = (s: string, width: number) => fit(s, width).trimEnd();
 
+const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+
 /**
- * Lay the panel out for `width` columns: headline row, then one row of buttons with the left group
- * at the left edge and the right group against the right edge (the right group drops to its own row
- * when both do not fit; either group wraps when it is too wide alone), then the message row.
+ * Lay the panel out for `width` columns inside a rounded frame titled with the task name: one row of
+ * buttons with the left group at the left edge and the right group against the right edge (the right
+ * group drops to its own row when both do not fit; either group wraps when it is too wide alone),
+ * padded to `height` rows, with the message set into the bottom border.
  * Pure, so resizing is just calling it again.
  */
-export function layoutTop(snap: TopSnapshot, width: number): Frame {
-  const rows: string[] = [clip(snap.headline ?? snap.ws, width)];
+export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
+  const inner = Math.max(1, width - 4);
+  const content: string[] = [];
   const placed: Placed[] = [];
   const all = buttons(snap);
-  const cells = (side: "left" | "right") => all.filter((b) => (b.side ?? "left") === side).map((button) => ({ button, text: clip(cell(button), width) }));
+  const cells = (side: "left" | "right") => all.filter((b) => (b.side ?? "left") === side).map((button) => ({ button, text: clip(cell(button), inner) }));
   const widthOf = (items: { text: string }[]) => items.reduce((n, i) => n + textWidth(i.text) + 1, 0) - (items.length ? 1 : 0);
 
-  // wrap `items` into rows of at most `width`, each row starting at `start(rowWidth)`
+  // wrap `items` into rows of at most `inner`, each row starting at `start(rowWidth)`
   const flow = (items: { button: Button; text: string }[], align: "left" | "right", firstRow?: { row: number; used: number }) => {
-    let row = firstRow?.row ?? rows.length;
+    let row = firstRow?.row ?? content.length;
     let line: typeof items = [];
     const flush = () => {
       if (!line.length) return;
-      let col = align === "left" ? (row === firstRow?.row ? firstRow.used : 0) : Math.max(0, width - widthOf(line));
+      let col = align === "left" ? (row === firstRow?.row ? firstRow.used : 0) : Math.max(0, inner - widthOf(line));
       for (const item of line) {
         placed.push({ button: item.button, row, col, width: textWidth(item.text) });
         col += textWidth(item.text) + 1;
@@ -419,7 +445,7 @@ export function layoutTop(snap: TopSnapshot, width: number): Frame {
     };
     for (const item of items) {
       const base = align === "left" && row === firstRow?.row ? firstRow.used : 0;
-      if (line.length && base + widthOf([...line, item]) > width) flush();
+      if (line.length && base + widthOf([...line, item]) > inner) flush();
       line.push(item);
     }
     flush();
@@ -428,23 +454,26 @@ export function layoutTop(snap: TopSnapshot, width: number): Frame {
 
   const left = cells("left");
   const right = cells("right");
-  const buttonRow = rows.length;
-  if (left.length && right.length && widthOf(left) + 2 + widthOf(right) <= width) {
+  if (left.length && right.length && widthOf(left) + 2 + widthOf(right) <= inner) {
     flow(left, "left");
-    flow(right, "right", { row: buttonRow, used: 0 });
+    flow(right, "right", { row: 0, used: 0 });
   } else {
     flow(right, "right", { row: flow(left, "left"), used: 0 });
   }
-  const last = Math.max(buttonRow - 1, ...placed.map((p) => p.row));
-  for (let y = buttonRow; y <= last; y++) {
+  const used = Math.max(0, ...placed.map((p) => p.row + 1));
+  for (let y = 0; y < Math.max(used, height - 2, 1); y++) {
     let text = "";
     for (const p of placed.filter((q) => q.row === y).sort((a, b) => a.col - b.col)) {
-      text += " ".repeat(Math.max(0, p.col - textWidth(text))) + clip(cell(p.button), width);
+      text += " ".repeat(Math.max(0, p.col - textWidth(text))) + clip(cell(p.button), inner);
     }
-    rows.push(text);
+    content.push(text);
   }
-  rows.push(clip(snap.message ?? "", width));
-  return { rows, placed };
+  // inside the frame: one row down for the top border, two columns across for the border and padding
+  const shifted = placed.map((p) => ({ ...p, row: p.row + 1, col: p.col + 2 }));
+  const title = snap.title ?? snap.headline ?? snap.ws;
+  const message = snap.message ?? "";
+  const rows = [plain(boxTop(title, width)), ...content.map((r) => plain(boxRow(fit(r, inner)))), plain(boxBottom(width, message))];
+  return { rows, placed: shifted, title, message, width };
 }
 
 /** The button under a 0-based (col,row) cell, if any. */
@@ -454,15 +483,15 @@ export function hit(frame: Frame, col: number, row: number): number | undefined 
 }
 
 /**
- * The terminal output that draws `f`: clear, then each non-button row at its line (the headline bold,
- * the message row dim) and each button at its cell, in its colour, inverse under `cursor`.
+ * The terminal output that draws `f`: clear, the frame (title bold in the top border, the message in
+ * yellow in the bottom one), then each button at its cell, in its colour, inverse under `cursor`.
  */
 export function paintTop(f: Frame, cursor: number): string {
   let out = `${ESC}[H${ESC}[2J`;
-  const buttonRows = new Set(f.placed.map((p) => p.row));
-  f.rows.forEach((row, y) => {
-    if (buttonRows.has(y)) return;
-    out += `${ESC}[${y + 1};1H${y === 0 ? bold(row) : y === f.rows.length - 1 ? dim(row) : row}`;
+  const last = f.rows.length - 1;
+  const blank = boxRow(" ".repeat(Math.max(1, f.width - 4)));
+  f.rows.forEach((_, y) => {
+    out += `${ESC}[${y + 1};1H${y === 0 ? boxTop(f.title, f.width) : y === last ? boxBottom(f.width, f.message) : blank}`;
   });
   f.placed.forEach((p, i) => {
     const text = clip(cell(p.button), p.width);

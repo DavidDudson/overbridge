@@ -42,37 +42,38 @@ describe("buttons and layout", () => {
     expect(buttons(snap({ apps: [app("web", AppStatus.Stopped, undefined, false)] })).filter((b) => b.action.kind === "app")).toEqual([]);
   });
 
-  test("headline, one button row with links left and launchers right, message row", () => {
-    const f = layoutTop(snap({ headline: "12 Add dark mode", links: [{ label: "PR #3", url: "u" }], message: "oops" }), 80);
+  test("task-name title, one button row with links left and launchers right, message in the bottom border", () => {
+    const f = layoutTop(snap({ title: "Add dark mode", links: [{ label: "PR #3", url: "u" }], message: "oops" }), 80);
     expect(f.rows).toHaveLength(3);
-    expect(f.rows[0]).toBe("12 Add dark mode");
-    expect(f.rows[2]).toBe("oops");
+    expect(f.rows[0]).toMatch(/^╭─ Add dark mode ─+╮$/);
+    expect(f.rows[2]).toMatch(/^╰─ oops ─+╯$/);
     expect(new Set(f.placed.map((p) => p.row))).toEqual(new Set([1]));
-    expect(f.placed[0]!.col).toBe(0);
+    expect(f.placed[0]!.col).toBe(2);
     const last = f.placed.at(-1)!;
-    expect(last.col + last.width).toBe(80);
+    expect(last.col + last.width).toBe(78);
     expect(f.placed.map((p) => p.button.label)).toEqual(["📋 PR #3", "🤖 claude", "💻 terminal", "🔀 diff"]);
   });
 
-  test("falls back to the workspace name without a headline", () => {
-    expect(layoutTop(snap(), 40).rows[0]).toBe("w1");
+  test("falls back to the workspace name without a title", () => {
+    expect(layoutTop(snap(), 40).rows[0]).toMatch(/^╭─ w1 ─+╮$/);
   });
 
-  test("wraps buttons between headline and message and never exceeds the width", () => {
+  test("wraps buttons inside the frame and never exceeds the width", () => {
     const links = ["alpha", "bravo", "charlie", "delta"].map((label) => ({ label, url: label }));
     const f = layoutTop(snap({ links, message: "m" }), 24);
     expect(f.rows.length).toBeGreaterThan(3);
-    expect(f.rows[0]).toBe("w1");
-    expect(f.rows.at(-1)).toBe("m");
+    expect(f.rows[0]).toMatch(/^╭─ w1 ─+╮$/);
+    expect(f.rows.at(-1)).toMatch(/^╰─ m ─+╯$/);
     for (const row of f.rows) expect(textWidth(row)).toBeLessThanOrEqual(24);
-    for (const p of f.placed) expect(p.col + p.width).toBeLessThanOrEqual(24);
+    for (const p of f.placed) expect(p.col + p.width).toBeLessThanOrEqual(22);
     expect(f.placed.map((p) => p.button.label).slice(0, 4)).toEqual(["📋 alpha", "📋 bravo", "📋 charlie", "📋 delta"]);
   });
 
-  test("clips an over-long headline", () => {
-    const f = layoutTop(snap({ headline: "x".repeat(50) }), 10);
-    expect(f.rows[0]).toHaveLength(10);
-    expect(f.rows[0]!.endsWith("…")).toBe(true);
+  test("clips an over-long title inside the border", () => {
+    const f = layoutTop(snap({ title: "x".repeat(50) }), 20);
+    expect(textWidth(f.rows[0]!)).toBe(20);
+    expect(f.rows[0]).toContain("…");
+    expect(f.rows[0]!.endsWith("╮")).toBe(true);
   });
 
   test("hit finds the button under a cell", () => {

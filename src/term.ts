@@ -9,7 +9,7 @@ export const inverse = (s: string) => `${ESC}[7m${s}${ESC}[0m`;
 export const dim = (s: string) => `${ESC}[2m${s}${ESC}[0m`;
 export const bold = (s: string) => `${ESC}[1m${s}${ESC}[0m`;
 
-export const COLORS = { red: 31, green: 32, yellow: 33, blue: 34, purple: 35, cyan: 36, grey: 90 } as const;
+export const COLORS = { red: "31", green: "32", yellow: "33", blue: "34", purple: "35", cyan: "36", grey: "38;5;245" } as const;
 export type Color = keyof typeof COLORS;
 export const colorize = (s: string, color: Color) => `${ESC}[${COLORS[color]}m${s}${ESC}[0m`;
 
@@ -107,10 +107,15 @@ export function decodeInput(data: string): Input[] {
 /** Box-drawing for a rounded, dim frame around a pane. `width` is the full pane width. */
 const edge = (s: string) => colorize(s, "grey");
 export const boxTop = (title: string, width: number) => {
-  const label = title ? ` ${title} ` : "";
-  return edge(`╭─${label}${"─".repeat(Math.max(0, width - 3 - textWidth(label)))}╮`);
+  const label = title ? ` ${fit(title, Math.max(1, width - 6)).trimEnd()} ` : "";
+  return `${edge("╭─")}${bold(label)}${edge(`${"─".repeat(Math.max(0, width - 3 - textWidth(label)))}╮`)}`;
 };
 export const boxDivider = (width: number) => edge(`├${"─".repeat(Math.max(0, width - 2))}┤`);
-export const boxBottom = (width: number) => edge(`╰${"─".repeat(Math.max(0, width - 2))}╯`);
+/** The bottom border, with an optional `label` (a message) set into it in yellow. */
+export const boxBottom = (width: number, label = "") => {
+  if (!label) return edge(`╰${"─".repeat(Math.max(0, width - 2))}╯`);
+  const text = ` ${fit(label, Math.max(1, width - 6)).trimEnd()} `;
+  return `${edge("╰─")}${colorize(text, "yellow")}${edge(`${"─".repeat(Math.max(0, width - 3 - textWidth(text)))}╯`)}`;
+};
 /** A row of content (already styled, fitted to `width - 4`) between the side borders with one column of padding. */
 export const boxRow = (content: string) => `${edge("│")} ${content} ${edge("│")}`;
