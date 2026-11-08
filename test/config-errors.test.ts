@@ -85,4 +85,12 @@ describe("shipped example", () => {
     expect(Object.keys(config.commands).sort()).toEqual(["build", "format", "lint", "test", "typecheck"]);
     expect(config.ide).toBe("vscode");
   });
+
+  test("the repo's own overbridge.yml is valid", () => {
+    const text = readFileSync(join(import.meta.dir, "..", "overbridge.yml"), "utf8");
+    const config = parseConfig(text, "overbridge.yml");
+    expect(config.projectManagement?.name).toBe("github");
+    expect(config.apps).toEqual([]);
+    expect(config.commands.test).toBe("just test");
+  });
 });

@@ -1,0 +1,10 @@
+# overbridge's own config; the repo dogfoods it. Keys: see overbridge.example.yml
+version: 1
+
+project-management:
+  name: github
+  project: DavidDudson/overbridge
+
+commands:
+  typecheck: just typecheck
+  test: just test
