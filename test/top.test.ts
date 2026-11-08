@@ -85,8 +85,20 @@ describe("activate", () => {
   });
 
   test("editor launches the ide on the workspace folder", () => {
-    activate({ label: "z", action: { kind: "editor", ide: "vscode", dir: "/w/w1" } }, deps);
+    activate({ label: "z", action: { kind: "editor", cmd: ["code"], dir: "/w/w1" } }, deps);
     expect(calls).toEqual(["spawn code /w/w1"]);
+  });
+
+  test("with no ide configured, the editor button falls back to $EDITOR", () => {
+    const [b] = buttons(snap({ editor: "/usr/bin/code -w" }));
+    expect(b!.label).toBe("code");
+    activate(b!, deps);
+    expect(calls).toEqual(["spawn /usr/bin/code -w /w/w1"]);
+  });
+
+  test("a configured ide wins over $EDITOR; neither means no editor button", () => {
+    expect(buttons(snap({ ide: "zed", editor: "vim" })).map((b) => b.label)).toEqual(["zed"]);
+    expect(buttons(snap({ editor: "  " }))).toEqual([]);
   });
 
   test("an app toggles: stopped/exited start, starting/running stop", () => {

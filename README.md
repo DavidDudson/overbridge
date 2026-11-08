@@ -163,7 +163,7 @@ ide: vscode           # vscode | zed | webstorm
 | `review.personas` | auto | reviewer personas to run; unset selects by diff signals |
 | `review.exclude` | `[]` | personas to skip, applied after selection |
 | `review.local-dir` | `.overbridge/personas` | repo-local personas, relative to the repo root |
-| `ide` | none | `vscode`, `zed` or `webstorm`; the top panel's editor button opens the workspace folder |
+| `ide` | `$EDITOR` | `vscode`, `zed` or `webstorm`; the top panel's editor button opens the workspace folder. Unset, the button runs `$EDITOR` (personal, so keep it out of the repo file); GUI editors only, as it is launched detached |
 
 Providers shell out to `gh` (GitHub) and `jira` ([jira-cli](https://github.com/ankitpokhrel/jira-cli), Jira), so there
 is no token to store in the config. A branch names its item when it contains the id: `123-title` or

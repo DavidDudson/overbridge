@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { AppStatus, appAvailable, appStatus, appUrl, readRecord } from "./apps";
 import { metaDir, wsDir, worktreePath } from "./paths";
 import { providerFor, refreshTitle } from "./pm";
@@ -46,6 +46,8 @@ export interface TopSnapshot {
   headline?: string;
   links: TopLink[];
   ide?: Ide;
+  /** `$EDITOR`, used for the editor button when no `ide` is configured. */
+  editor?: string;
   apps: TopApp[];
   message?: string;
 }
@@ -137,7 +139,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 }
 
 /** Everything the panel draws, from the cache and local app records. */
-export async function snapshotTop(ws: string): Promise<TopSnapshot> {
+export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.env): Promise<TopSnapshot> {
   const cache = readTopCache(ws);
   const claims = Object.keys(getWorkspace(readState(), ws).repos);
   const apps: TopApp[] = [];
@@ -169,6 +171,7 @@ export async function snapshotTop(ws: string): Promise<TopSnapshot> {
     ...(cache.headline ? { headline: cache.headline } : {}),
     links: cache.links,
     ...(ide ? { ide } : {}),
+    ...(!ide && env.EDITOR?.trim() ? { editor: env.EDITOR.trim() } : {}),
     apps,
     ...(problems.length ? { message: problems.join("; ") } : {}),
   };
@@ -176,7 +179,7 @@ export async function snapshotTop(ws: string): Promise<TopSnapshot> {
 
 export type Action =
   | { kind: "link"; url: string }
-  | { kind: "editor"; ide: Ide; dir: string }
+  | { kind: "editor"; cmd: string[]; dir: string }
   | { kind: "app"; app: TopApp };
 
 export interface Button {
@@ -193,10 +196,17 @@ const MARKS: Record<AppStatus, string> = {
 
 export const appUrlOf = (app: TopApp): string | undefined => appUrl(app.spec, app.port);
 
+/** Split an `$EDITOR` value like `code -w` into a command and a label (its program name). */
+function editorFromEnv(editor: string | undefined): { label: string; cmd: string[] } | undefined {
+  const cmd = editor?.split(/\s+/).filter(Boolean);
+  return cmd?.length ? { label: basename(cmd[0]!), cmd } : undefined;
+}
+
 /** Buttons in display order: links, editor, apps. Apps ruled out by `when:` are left out. */
 export function buttons(snap: TopSnapshot): Button[] {
   const out: Button[] = snap.links.map((l) => ({ label: l.label, action: { kind: "link", url: l.url } }));
-  if (snap.ide) out.push({ label: snap.ide, action: { kind: "editor", ide: snap.ide, dir: snap.dir } });
+  const editor = snap.ide ? { label: snap.ide, cmd: [IDE_COMMANDS[snap.ide]] } : editorFromEnv(snap.editor);
+  if (editor) out.push({ label: editor.label, action: { kind: "editor", cmd: editor.cmd, dir: snap.dir } });
   for (const app of snap.apps) {
     if (!app.available) continue;
     const port = app.status === AppStatus.Stopped || app.port === undefined ? "" : ` :${app.port}`;
@@ -286,7 +296,7 @@ export function activate(button: Button, deps: ActDeps): string | undefined {
       deps.open(a.url);
       return undefined;
     case "editor":
-      deps.spawn([IDE_COMMANDS[a.ide], a.dir]);
+      deps.spawn([...a.cmd, a.dir]);
       return undefined;
     case "app": {
       const live = a.app.status === AppStatus.Running || a.app.status === AppStatus.Starting;
