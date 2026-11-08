@@ -2,7 +2,9 @@
 
 Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 
-- `src/cli.ts` arg dispatch → `src/commands.ts`.
+- `src/cli.ts` is a thin entry with no static imports; `src/main.ts` holds arg dispatch → `src/commands.ts`.
+  `overbridge hook` (`src/agent-hook.ts`) runs on every tool call, so it is dispatched before `main.ts`
+  loads; keep its imports to `paths.ts`, `agent-state.ts` and node builtins.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors.
 - `src/state.ts`: all claim mutations go through `withState()` (lockfile + atomic rename; throw = no write).

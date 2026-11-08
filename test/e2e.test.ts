@@ -72,6 +72,9 @@ describe("workflow", () => {
     const settings = JSON.parse(readFileSync(join(root, "ws1", ".claude", "settings.json"), "utf8"));
     expect(settings.env.OVERBRIDGE_NAME).toBe("ws1");
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain("guard");
+    for (const event of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Stop", "SessionEnd"]) {
+      expect(settings.hooks[event][0].hooks[0].command).toMatch(/ hook$/);
+    }
   });
 
   test("checkout claims, other workspace cannot steal", () => {
