@@ -29,8 +29,16 @@
           "start": { "type": "string", "minLength": 1 },
           "stop": { "type": ["string", "null"] },
           "prepare": { "type": "string" },
-          "ports": { "type": "array", "items": { "type": "integer" } },
-          "ready": { "type": "object" },
+          "ports": { "type": "array", "uniqueItems": true, "items": { "type": "integer", "minimum": 1, "maximum": 65535 } },
+          "ready": {
+            "type": "object",
+            "additionalProperties": false,
+            "oneOf": [{ "required": ["http"] }, { "required": ["tcp"] }],
+            "properties": {
+              "http": { "type": "string", "minLength": 1 },
+              "tcp": { "oneOf": [{ "const": "{port}" }, { "type": "integer", "minimum": 1, "maximum": 65535 }] }
+            }
+          },
           "open": { "type": "boolean" },
           "when": { "enum": ["always", "feature-branch"] }
         }

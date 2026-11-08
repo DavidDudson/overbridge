@@ -16,7 +16,7 @@ const SESSION = () => envVar("SESSION") ?? "workspaces";
 const holdings = (repo: string, stacks: Stack[]) => (ws: string, c: Claim) =>
   cover(stacks, [c.branch, git.currentBranch(worktreePath(ws, repo))], [c.pr]);
 
-function requireWs(explicit?: string): string {
+export function requireWs(explicit?: string): string {
   const ws = explicit ?? currentWorkspace();
   if (!ws) fail("not inside a workspace; cd into one or pass --ws <name>");
   getWorkspace(readState(), ws);

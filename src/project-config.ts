@@ -25,11 +25,29 @@ export interface ProjectManagement {
   techDebt?: string;
 }
 
-/** One launchable app. Only the shape is checked here; semantics belong to the apps module. */
-export interface AppConfig {
+export const APP_WHEN = ["always", "feature-branch"] as const;
+export type AppWhen = (typeof APP_WHEN)[number];
+
+/** How to tell an app is up. A tcp `port` of undefined means the port allocated at start. */
+export type Ready = { kind: "http"; url: string } | { kind: "tcp"; port?: number };
+
+/** One launchable app. `{port}` in `start`, `stop`, `prepare` and the ready url is the allocated port. */
+export interface AppSpec {
   id: string;
+  label: string;
+  /** Working directory, relative to the repo root. */
+  dir: string;
   start: string;
-  [key: string]: unknown;
+  /** Teardown command; absent means signal the whole process group. */
+  stop?: string;
+  /** Runs to completion before `start`. */
+  prepare?: string;
+  /** Pool of ports; at most this many workspaces can run the app at once. Empty when it needs none. */
+  ports: number[];
+  ready?: Ready;
+  /** Open the browser once ready. */
+  open: boolean;
+  when: AppWhen;
 }
 
 /** Shell commands skills run to check a change. Each is optional; a missing one means the repo has none. */
@@ -51,7 +69,7 @@ export interface ReviewConfig {
 export interface ProjectConfig {
   version: typeof CONFIG_VERSION;
   projectManagement?: ProjectManagement;
-  apps: AppConfig[];
+  apps: AppSpec[];
   commands: Commands;
   review: ReviewConfig;
   ide?: Ide;
@@ -147,6 +165,70 @@ class Problems {
   }
 }
 
+const portOk = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 65535;
+
+function validateApp(entry: Record<string, unknown>, path: string, p: Problems): AppSpec | undefined {
+  p.unknownKeys(entry, APP_KEYS, path);
+  const id = p.string(entry, "id", path, true);
+  const start = p.string(entry, "start", path, true);
+  const label = p.string(entry, "label", path, false);
+  const dir = p.string(entry, "dir", path, false);
+  const prepare = p.string(entry, "prepare", path, false);
+
+  // `stop: ~` (or absent) means kill the process group
+  let stop: string | undefined;
+  if (entry.stop !== undefined && entry.stop !== null) stop = p.string(entry, "stop", path, false);
+
+  let ports: number[] = [];
+  if (entry.ports !== undefined) {
+    if (!Array.isArray(entry.ports) || !entry.ports.every(portOk)) p.add(`${path}.ports`, "expected a list of ports (1-65535)");
+    else if (new Set(entry.ports).size !== entry.ports.length) p.add(`${path}.ports`, "duplicate port");
+    else ports = entry.ports;
+  }
+
+  let ready: Ready | undefined;
+  if (entry.ready !== undefined && entry.ready !== null) {
+    const r = entry.ready;
+    if (!isObject(r)) p.add(`${path}.ready`, "expected a mapping with http or tcp");
+    else {
+      p.unknownKeys(r, ["http", "tcp"], `${path}.ready`);
+      if ((r.http === undefined) === (r.tcp === undefined)) p.add(`${path}.ready`, "set exactly one of http or tcp");
+      else if (r.http !== undefined) {
+        const url = p.string(r, "http", `${path}.ready`, true);
+        if (url) ready = { kind: "http", url };
+      } else if (r.tcp === "{port}" || r.tcp === true) ready = { kind: "tcp" };
+      else if (portOk(r.tcp)) ready = { kind: "tcp", port: r.tcp };
+      else p.add(`${path}.ready.tcp`, 'expected a port number or "{port}"');
+    }
+  }
+
+  let open = false;
+  if (entry.open !== undefined) {
+    if (typeof entry.open !== "boolean") p.add(`${path}.open`, "expected true or false");
+    else open = entry.open;
+  }
+
+  const when = p.oneOf(p.string(entry, "when", path, false), APP_WHEN, `${path}.when`) ?? "always";
+
+  const usesPort = [start, stop, prepare, ready?.kind === "http" ? ready.url : undefined].some((s) => s?.includes("{port}"));
+  if (usesPort && ports.length === 0) p.add(`${path}.ports`, "required when a command or ready url uses {port}");
+  if (ready?.kind === "tcp" && ready.port === undefined && ports.length === 0) p.add(`${path}.ready.tcp`, "{port} needs ports");
+
+  if (!id || !start) return;
+  return {
+    id,
+    label: label ?? id,
+    dir: dir ?? ".",
+    start,
+    ...(stop ? { stop } : {}),
+    ...(prepare ? { prepare } : {}),
+    ports,
+    ...(ready ? { ready } : {}),
+    open,
+    when,
+  };
+}
+
 /** Validate parsed YAML. Throws one error naming `file` and every offending key. */
 export function validateConfig(raw: unknown, file = CONFIG_FILE): ProjectConfig {
   if (raw === null || raw === undefined) return defaultConfig();
@@ -183,12 +265,11 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE): ProjectConfig 
       apps.forEach((entry, i) => {
         const path = `apps[${i}]`;
         if (!isObject(entry)) return p.add(path, "expected a mapping");
-        p.unknownKeys(entry, APP_KEYS, path);
-        const id = p.string(entry, "id", path, true);
-        const start = p.string(entry, "start", path, true);
-        if (id && seen.has(id)) p.add(`${path}.id`, `duplicate app id '${id}'`);
-        if (id) seen.add(id);
-        if (id && start) config.apps.push({ ...entry, id, start });
+        const before = p.list.length;
+        const app = validateApp(entry, path, p);
+        if (app && seen.has(app.id)) p.add(`${path}.id`, `duplicate app id '${app.id}'`);
+        if (app) seen.add(app.id);
+        if (app && p.list.length === before) config.apps.push(app);
       });
     }
   }

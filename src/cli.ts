@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { parseArgs } from "node:util";
 import * as cmd from "./commands";
+import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
 import { item } from "./item";
 import { silenceLegacyWarnings } from "./paths";
@@ -14,6 +15,7 @@ Setup
   overbridge repo ls                            list registered repos
   overbridge config check|show [path]           validate / print a repo's overbridge.yml
   overbridge config get <key> [path]            print one value, e.g. commands.test
+  overbridge app [id [action]]                  list or start|stop|restart|status|log repo apps
   overbridge sync                               fetch every bare repo
 
 Work items (the repo's project-management provider)
@@ -79,6 +81,11 @@ async function main(argv: string[]): Promise<number> {
     case "item":
       item(rest);
       break;
+    case "app": {
+      const { values, positionals } = opts(rest, { ...ws, repo: { type: "string" }, "no-wait": { type: "boolean" } });
+      await appCommand(values.ws, values.repo, positionals[0], positionals[1], !!values["no-wait"]);
+      break;
+    }
     case "sync":
       cmd.sync();
       break;

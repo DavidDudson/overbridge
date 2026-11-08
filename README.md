@@ -109,7 +109,7 @@ project-management:
   project: owner/repo # GitHub: owner/repo or project number; Jira: project key
   # url: https://example.atlassian.net   # optional provider base URL
   # tech-debt: 42                        # optional: parent item for tech-debt items, or label:tech-debt
-apps: []              # launch/teardown commands, see the apps docs when they land
+apps: []              # launch/teardown commands, see below
 commands:             # all optional; skills run these to check a change
   lint: pnpm lint
   typecheck: pnpm typecheck
@@ -126,3 +126,39 @@ ide: vscode           # vscode | zed | webstorm
 `overbridge config check [path]` validates a file (unknown keys get a suggestion);
 `overbridge config show [path]` prints the resolved config as JSON;
 `overbridge config get <key> [path]` prints one value (`commands.test`, `review.local-dir`) and exits non-zero when it is unset.
+
+### Apps
+
+`apps` declares what a repo can launch and tear down. `overbridge app` runs them
+from a shell or an agent; the top panel's toggles use the same code.
+
+```yaml
+apps:
+  - id: web
+    label: web                  # defaults to id
+    dir: apps/web               # relative to the repo root, defaults to "."
+    prepare: pnpm build:libs    # optional, runs to completion before start
+    start: pnpm dev --port {port}
+    stop: ~                     # optional; default signals the whole process group
+    ports: [3000, 3001]         # pool: at most this many workspaces run it at once
+    ready: { http: "http://localhost:{port}" }   # or { tcp: "{port}" } / { tcp: 5432 }
+    open: true                  # open the browser once ready
+    when: feature-branch        # always (default) | feature-branch
+```
+
+`{port}` is the port allocated from the pool. Apps run detached in their own
+process group, so they outlive the shell that started them and stop as a whole
+tree. State lives in `<workspace>/.overbridge/apps/<repo>/<id>.json` and the log
+next to it as `<id>.log`. When the pool is used up, the error names the
+workspaces holding the ports.
+
+```nu
+overbridge app                 # list every app in this workspace with its status
+overbridge app web start       # start, wait until ready, open the browser if asked
+overbridge app web stop
+overbridge app web restart
+overbridge app web status      # stopped | starting | running | exited
+overbridge app web log         # print the log path
+```
+
+Use `--repo <name>` when two repos declare the same id and `--no-wait` to skip the ready check.
