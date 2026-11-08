@@ -9,6 +9,18 @@ Commit the work, push the branch, open a PR with the shared body template, get t
 
 `overbridge` owns branch changes. Never `git switch`, `git checkout <branch>` or `gh pr checkout`: the guard blocks them and they bypass the claim. To discard file changes use `git restore <path>`.
 
+## Run to completion
+
+Invoking this skill ("ship it", "open a PR", "stack this") is the approval to commit, push, open the PR as a draft and drive it to a green build, with no question in between. Do steps 1 to 12 in one run. Never stop to ask "want me to push / submit / write the descriptions?" and never end the turn on a list of what is not done yet: do it, or say in the final summary why a step was skipped.
+
+That holds when you own the repo. Check once, at step 1:
+
+```sh
+gh repo view --json viewerPermission,isInOrganization --jq .viewerPermission    # ADMIN or MAINTAIN: yours
+```
+
+`ADMIN` (an owner or org admin) means run without asking, public or private. Anything else is someone else's repo, where a push and a PR are visible to its owners: show the title and the one-line body summary once, and wait for a yes before pushing. The lines below that say "ask" apply only then, or when the input is genuinely ambiguous (no way to infer a branch name, a diverged lower branch).
+
 ## Arguments
 
 - `--with-review`: run `mob-review` (from the `overbridge-review` plugin) before the push without asking. Natural-language equivalents count: "review and open a PR", "mob review then PR".
@@ -66,14 +78,14 @@ If there are uncommitted changes:
 
 - Stage explicit file names, not `git add -A`. Never stage secrets (`.env`, credentials, tokens), build output or screenshots.
 - Draft the message in the repo's convention (its `CLAUDE.md`, or Conventional Commits by default): subject ≤ 50 chars, body explains why, `Refs <id>` when there is an item. End it with the attribution lines the session's instructions specify, and add none if none are specified.
-- Show the message and, in the same prompt, the PR title and the one-line summary of the body (step 9). One question, not two.
+- Commit without asking. On a repo you do not own, show the message, the PR title and the one-line body summary in one question first.
 - Commit with a HEREDOC. If a pre-commit hook fails, fix the cause and make a **new** commit; never amend.
 
 All changes already committed → skip.
 
 ## 5. Review gate
 
-The panel reads the diff a reviewer is about to read. If the `overbridge-review` plugin is installed and this branch has not been through `mob-review` in this session, offer it once, after the commit and before the push: run it now, or open the PR as-is. **Warn, never block**: "as-is" is a legitimate answer. When they proceed unreviewed, say so plainly in the final summary; do not write it into the PR body.
+The panel reads the diff a reviewer is about to read. If the `overbridge-review` plugin is installed and this branch has not been through `mob-review` in this session, do not ask about it: run it only with `--with-review` (or when the user asked for a review). Otherwise open the PR as-is and say plainly in the final summary that it has not been through the panel; do not write that into the PR body.
 
 With `--with-review`, skip the question and invoke `mob-review`. Its own clean-thread check still applies. It may leave a fix commit on the branch; that commit goes out with the push.
 
@@ -97,7 +109,7 @@ A change with a visual surface owes a screenshot. Never block the PR on it.
 - Start the server in the background and poll until it answers, instead of sleeping. If it exits or never answers, read its output and use that as the reason in the summary.
 - Capture with the browser tooling you have (the `claude-in-chrome` skill, or `playwright-cli` if installed). **One image per distinct visual change**, framed on the changed element, not a whole busy page. Before/after when existing UI changed: render the "before" from a throwaway `git worktree add <tmp> origin/<base> --detach` (the stack base for a stacked PR, never a layer below you), never by stashing or switching branches. Drive the UI into the state the change affects (error, empty, hover, disabled), and capture both themes when colours or tokens changed.
 - **Login.** Never drive an SSO or MFA flow yourself and never read credentials out of `.env` files. If the app needs a session, ask the user to sign in once, in their own browser tab or the headed window you opened, and wait. If they are away, skip and say so. A saved storage state holds a live session cookie: keep it outside any repo and never paste it anywhere.
-- **Attach.** There is no stable public upload API for PR images. Leave the `<!-- screenshots -->` marker in the body, create the PR, then tell the user where the PNGs are on disk and ask them to drag them into the PR description; replace the marker once they have. If you have an upload snippet from the repo's own conventions, use it verbatim and read the body back to confirm no URL is `null`.
+- **Attach.** There is no stable public upload API for PR images. Leave the `<!-- screenshots -->` marker in the body, create the PR, then name the PNGs' paths in the final summary so the user can drag them into the description, and remove the marker from the body yourself so no placeholder is left. Do not wait for them. If you have an upload snippet from the repo's own conventions, use it verbatim and read the body back to confirm no URL is `null`.
 - Stop the server, close the browser session (only tabs you opened), delete the PNGs after upload, and **never `git add` a screenshot**. A stray `.png` in `git status` is removed before any later commit.
 
 ## 8. Fill the PR body
@@ -122,7 +134,7 @@ The body summarises in `**Label:** value` lines with no `##` headings and never 
    ```
    If the session's instructions specify a PR-body footer, end the body with exactly that line.
 
-   **Ask before creating** if the user has not already approved the title and body summary in step 4. A stacked branch uses `gh stack submit` instead (see *Stacked PRs*).
+   Create it without asking when you own the repo (see *Run to completion*). A stacked branch uses `gh stack submit` instead (see *Stacked PRs*).
 3. **Record it.** `overbridge pr <repo>` so `overbridge status` and claim checks know the PR belongs to this workspace. On a stack, run it after submitting and after moving between layers.
 4. **Request a Copilot review.** The reviewer is the bot `copilot-pull-request-reviewer[bot]`; `--reviewer` does not accept it, so use the REST API:
    ```sh
@@ -247,7 +259,7 @@ If either check prints `STOP`, don't push. Show the user what it found. A lower 
 
 ### What differs from a normal PR
 
-- **Submit** with `gh stack submit --auto` (confirm first, as for any PR): it pushes every layer, opens or updates one PR per layer with the right base chaining, and injects the navigation table. The PR must end up a **draft** based on `$BASE_BRANCH`; if it opened ready, `gh pr ready --undo <pr>`. Run `gh stack view`: it must show the chain `<default> ← base ← head`. A PR with only a base field is not done.
+- **Submit** with `gh stack submit --auto` (no confirmation needed on a repo you own): it pushes every layer, opens or updates one PR per layer with the right base chaining, and injects the navigation table. The PR must end up a **draft** based on `$BASE_BRANCH`; if it opened ready, `gh pr ready --undo <pr>`. Run `gh stack view`: it must show the chain `<default> ← base ← head`. A PR with only a base field is not done.
 - **Scope every section to this layer.** The change items, the AC table and the Testing block cover only `git diff "$BASE_BRANCH"...HEAD`. An AC delivered by another layer gets a row `Delivered in <PR link>`, not a claim or a drop. A planned test condition proven in another layer belongs in that layer's PR, not this one's **Gaps**.
 - **Related items** includes the base PR's item when it differs, labelled **Stacked on**.
 - **Screenshots**: the "before" is the stack base (`origin/$BASE_BRANCH`), never the default branch: a diff against the default branch credits this PR with the layers below it. Screenshot the layer that owns the visual change; a layer that only moves code gets a written reason, not a duplicate image.
@@ -259,7 +271,7 @@ If either check prints `STOP`, don't push. Show the user what it found. A lower 
 
 ## Splitting an oversized branch
 
-Turn one big branch into a stack of smaller PRs, one slice per layer. This rewrites history into new branches, so **confirm the split plan with the user before building anything**. The `gh-stack` skill covers the generic mechanics; this section is the overbridge-specific safety net.
+Turn one big branch into a stack of smaller PRs, one slice per layer. This rewrites history into new branches, but the `-presplit-backup` branch keeps it recoverable, so state the plan and build it without waiting; stop to ask only when a slice cannot be drawn at file boundaries (a hunk-level split) or the user's own plan conflicts with the dependency order. The `gh-stack` skill covers the generic mechanics; this section is the overbridge-specific safety net.
 
 1. **Preconditions.** `gh stack` installed (see above). A clean tree: commit uncommitted work onto the source branch first, never split a dirty tree. Then:
    ```sh
@@ -272,7 +284,7 @@ Turn one big branch into a stack of smaller PRs, one slice per layer. This rewri
    Tell the user the backup branch name. Keep it until they say the stack is good.
 2. **Get the plan.** Use the user's plan if they gave one (layers and which files go where). Otherwise run `persona-pr-size` from the `overbridge-review` plugin if it is installed: it is not model-invocable, so read its `SKILL.md` and follow it, or hand its path to a subagent, to propose bottom→top slices with branch names, per-slice file scope and dependency order. Without that plugin, propose the layout yourself from the same rules: groundwork (types, helpers, refactors) at the bottom, behaviour on top, a lower layer never importing from a higher one.
 3. **Normalise to file boundaries.** Each layer owns a **disjoint set of whole files**. A plan that needs two layers to touch the same file is a hunk-level split: keep those files together in one layer, or tell the user that layer needs manual `git add -p` staging. Every changed file lands in exactly one layer, verified against `git diff --merge-base "$BASE_REF" HEAD --name-only`.
-4. **Confirm** the layers, branch names, file→layer map and the resulting diagram. Do not build until the user approves.
+4. **State** the layers, branch names, file→layer map and the resulting diagram, then build.
 5. **Build bottom→top.** Check paths out of the source with `git restore`, which the guard allows, not `git checkout <ref> -- <path>`. `git restore --source` cannot record a deletion, so this helper removes what the source deleted:
    ```sh
    bring_in() {
@@ -317,8 +329,9 @@ Turn one big branch into a stack of smaller PRs, one slice per layer. This rewri
 - **Always wait for Copilot's review and resolve it** with `resolve-feedback` before calling a PR done, unless Copilot review is unavailable (say so).
 - **A base field is not a stack.** Before reporting a stacked PR done, `gh stack view` must show the chain.
 - **Never `gh stack push` over a stale lower branch**, and never plain-rebase one mid-stack branch.
-- **Confirm the split plan before building**, keep the `-presplit-backup` branch until the user says otherwise, and require an identical tree at the top of the stack.
-- Ask before committing when the changes or message are ambiguous, and before creating the PR.
+- **State the split plan, then build it**; keep the `-presplit-backup` branch until the user says otherwise, and require an identical tree at the top of the stack.
+- Do not ask before committing, pushing, creating the PR or submitting a stack on a repo you own. Ask only on someone else's repo, or when the input is ambiguous.
+- Never end the turn with a to-do list ("not done yet: submit the stack, write the descriptions, take screenshots"). Do those steps; a skipped one goes in the summary with its reason.
 
 ## Humanizer pass
 

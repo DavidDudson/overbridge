@@ -55,7 +55,7 @@ own diff once for correctness, tests and leftovers before moving on.
 
 ## 5. Ship
 
-Run `ship-pr`. Ask before creating the PR, as that skill does. Put `Closes <id>` in the PR body when
+Run `ship-pr`. It opens the PR without asking on a repo you own, and asks first on anyone else's. Put `Closes <id>` in the PR body when
 this PR finishes the item, and `Refs <id>` when it does not. Run the humanizer pass over the PR body.
 
 ## 6. Green build
