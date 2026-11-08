@@ -19,6 +19,7 @@
     "plugin-review",
     ".claude-plugin",
     "overbridge.schema.json",
+    "config.schema.json",
     "overbridge.example.yml"
   ],
   "engines": {
