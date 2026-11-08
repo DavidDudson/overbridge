@@ -166,6 +166,21 @@ overbridge app web log         # print the log path
 
 Use `--repo <name>` when two repos declare the same id and `--no-wait` to skip the ready check.
 
+### Tab sidebar
+
+`overbridge sidebar` is the pane down the left of every tab. It lists each workspace with
+its agent state glyph (`○` idle, `●` busy, `✔` done, `?` waiting, `✖` ended, `·` unknown)
+and its item id and title when cached. Each tab runs its own copy and marks its own tab.
+Up/Down or `j`/`k` step to the neighbouring tab, a digit (1-9) jumps, a click picks a row;
+the new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
+current tab visible. The width comes from the global config:
+
+```toml
+# repos.toml
+[sidebar]
+width = 28    # 12 to 80
+```
+
 ### Top panel
 
 `overbridge top` is a pane for the top of every tab: the item id and title, a button per
