@@ -65,7 +65,7 @@ Run `overbridge help` for every command.
 ## Claude Code plugin
 
 `plugin/` ships skills: `workspace`, `ship-pr`, `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
-`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`) and the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`). They read the
+`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`) and `read-handoff` (continue from a handoff file after `/clear`). They read the
 repo's `overbridge.yml` (`project-management`, `commands`) and work with work items through `overbridge item`.
 `loop-tech-debt` files items with `overbridge item create --tech-debt`, so set `project-management.tech-debt`.
 `audit-vulns` reads Dependabot alerts, so it needs a GitHub repo. Install:
