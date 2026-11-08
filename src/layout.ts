@@ -1,10 +1,10 @@
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { SIDEBAR_WIDTH, sidebarWidth } from "./config";
 import { wsDir } from "./paths";
 
-/** Columns the sidebar pane takes in every tab. */
-export const SIDEBAR_WIDTH = 28;
+export { SIDEBAR_WIDTH };
 /** Rows the top panel takes: headline, one row of buttons, message. */
 export const TOP_ROWS = 4;
 /** Workspaces `spinup` creates when you do not say how many. */
@@ -85,5 +85,5 @@ export type LayoutChoice = { source: "user"; path: string } | { source: "generat
 /** The layout `up` would use: the user's file when it exists, else the generated one. */
 export function chooseLayout(workspaces: string[], self: string[], userPath = userLayoutPath()): LayoutChoice {
   if (existsSync(userPath)) return { source: "user", path: userPath };
-  return { source: "generated", kdl: layoutKdl(workspaces, self, { resume: resumable(workspaces) }) };
+  return { source: "generated", kdl: layoutKdl(workspaces, self, { resume: resumable(workspaces), sidebarWidth: sidebarWidth() }) };
 }

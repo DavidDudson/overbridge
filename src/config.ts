@@ -11,6 +11,9 @@ const HEADER = `# overbridge repo registry. Add with \`overbridge repo add <name
 # [repos.example]
 # url = "git@github.com:you/example.git"
 # default_branch = "main"   # optional, defaults to the remote HEAD
+#
+# [sidebar]
+# width = 28                # columns of the tab sidebar, 12 to 80
 `;
 
 export function initReposFile() {
@@ -28,6 +31,22 @@ export function loadRepos(): Record<string, RepoSpec> {
     out[name] = { name, url: r.url, defaultBranch: r.default_branch };
   }
   return out;
+}
+
+export const SIDEBAR_WIDTH = 28;
+export const SIDEBAR_WIDTH_RANGE = { min: 12, max: 80 } as const;
+
+/** Columns of the tab sidebar: `[sidebar] width` in repos.toml, else the default. */
+export function sidebarWidth(): number {
+  if (!existsSync(reposFile())) return SIDEBAR_WIDTH;
+  const data = Bun.TOML.parse(readFileSync(reposFile(), "utf8")) as { sidebar?: { width?: unknown } };
+  const width = data.sidebar?.width;
+  if (width === undefined) return SIDEBAR_WIDTH;
+  const { min, max } = SIDEBAR_WIDTH_RANGE;
+  if (typeof width !== "number" || !Number.isInteger(width) || width < min || width > max) {
+    fail(`repos.toml: sidebar.width must be an integer from ${min} to ${max}`);
+  }
+  return width;
 }
 
 export function getRepo(name: string): RepoSpec {
