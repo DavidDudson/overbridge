@@ -2,6 +2,7 @@
 import { parseArgs } from "node:util";
 import * as cmd from "./commands";
 import { guardMain } from "./guard";
+import { item } from "./item";
 import { silenceLegacyWarnings } from "./paths";
 import { OverbridgeError } from "./util";
 
@@ -14,6 +15,9 @@ Setup
   overbridge config check|show [path]           validate / print a repo's overbridge.yml
   overbridge config get <key> [path]            print one value, e.g. commands.test
   overbridge sync                               fetch every bare repo
+
+Work items (the repo's project-management provider)
+  overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
 
 Workspaces
   overbridge new [name] [-r repo]...            create a workspace (default name wsN)
@@ -72,6 +76,9 @@ async function main(argv: string[]): Promise<number> {
       } else throw new OverbridgeError("usage: overbridge config check|show|get [path]");
       break;
     }
+    case "item":
+      item(rest);
+      break;
     case "sync":
       cmd.sync();
       break;

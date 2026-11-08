@@ -61,7 +61,9 @@ Run `overbridge help` for every command.
 
 ## Claude Code plugin
 
-`plugin/` ships skills (`workspace`, `ship-pr`, `workspace-admin`):
+`plugin/` ships skills: `workspace`, `ship-pr`, `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
+`scope-item`). The dev loop reads the repo's `overbridge.yml` (`project-management`, `commands`) and works
+with work items through `overbridge item`. Install:
 
 ```
 /plugin marketplace add ~/repos/overbridge
