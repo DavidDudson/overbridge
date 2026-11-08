@@ -18,7 +18,7 @@ Run only if there is a diff to size up. Skip (return zero findings) unless the d
 
 File count on its own is not a split signal. A shared-library change plus one small config edit per consuming package is a single coherent change however many files it spans: ~200 lines across 15 files is not splittable, because each consumer slice would be a near-empty PR that cannot ship before the library slice. Weigh file count only as a tiebreaker once the line count is already near the threshold.
 
-Language-agnostic: the size heuristics and the split-into-stack recommendation apply regardless of stack. Measure size on source and resource files of any language the same way. For a layered backend, a "feature" is typically controller + service + repository + tests; a groundwork-then-payload stack works the same way (shared types/entities/migrations at the bottom, endpoint/behaviour on top).
+Language-agnostic: the size heuristics and the split recommendation (built by `ship-pr`) apply regardless of stack. Measure size on source and resource files of any language the same way. For a layered backend, a "feature" is typically controller + service + repository + tests; a groundwork-then-payload stack works the same way (shared types/entities/migrations at the bottom, endpoint/behaviour on top).
 
 ## Scope
 
