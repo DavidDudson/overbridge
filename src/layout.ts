@@ -5,8 +5,8 @@ import { SIDEBAR_WIDTH, sidebarWidth } from "./config";
 import { wsDir } from "./paths";
 
 export { SIDEBAR_WIDTH };
-/** Rows the top panel takes: headline, one row of buttons, message. */
-export const TOP_ROWS = 4;
+/** Rows the top panel takes: the frame's two borders, a row per PR (one is typical) and the row of launchers. */
+export const TOP_ROWS = 5;
 const q = (s: string) => JSON.stringify(s); // JSON strings are valid KDL strings
 
 export interface LayoutOptions {

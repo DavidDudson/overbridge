@@ -3,6 +3,7 @@ import { AppStatus, logPath, openBrowser, startApp, stopApp, waitReady } from ".
 import { requireWs } from "./commands";
 import { root, selfCommand } from "./paths";
 import { togglePane } from "./panes";
+import { mergePr, setReady } from "./pr-actions";
 import { ALT_COMMANDS, type ActDeps, activate, type Button, CLEANUP_ARM_MS, cleanable, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
 import { ENTER_SCREEN, LEAVE_SCREEN } from "./term";
 import { log, run } from "./util";
@@ -82,6 +83,13 @@ export async function topPanel(wsOpt?: string) {
     },
     stop: (app: TopApp) => void stopApp(ws, app.repo, app.spec, app.repoDir),
     pane: (pane) => togglePane(ws, pane),
+    ready: (pr, ready) => setReady(pr, ready),
+    merge: (pr) => {
+      const press = pressCleanup(mergeArmed.get(pr.number), Date.now());
+      if (press.armedAt === undefined) mergeArmed.delete(pr.number);
+      else mergeArmed.set(pr.number, press.armedAt);
+      return press.confirmed ? mergePr(pr) : `press Merge again within ${CLEANUP_ARM_MS / 1000}s to merge ${pr.stack.length > 1 ? "the stack" : `PR #${pr.number}`}`;
+    },
     cleanup: () => {
       const press = pressCleanup(armedAt, Date.now());
       armedAt = press.armedAt;
@@ -89,6 +97,7 @@ export async function topPanel(wsOpt?: string) {
     },
   };
   let armedAt: number | undefined;
+  const mergeArmed = new Map<number, number>();
   const snapUrl = (app: TopApp) => {
     const port = app.port ?? "";
     return app.spec.ready?.kind === "http" ? app.spec.ready.url.replaceAll("{port}", String(port)) : "";

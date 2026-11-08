@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
-import { type ActDeps, activate, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "../src/top";
+import { type ActDeps, activate, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type TopApp, type TopLink, type TopSnapshot } from "../src/top";
 import { textWidth } from "../src/term";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -86,6 +86,59 @@ describe("buttons and layout", () => {
   });
 });
 
+describe("PR rows", () => {
+  const info = (over: Partial<PrInfo> = {}): PrInfo => ({ repo: "api", number: 7, title: "feat: add x", draft: false, dir: "/w/w1/api", stack: [], ...over });
+  const withPr = (status: TopLink["status"], pr: PrInfo) => snap({ links: [{ label: "PR #7", url: "u7", status, pr }] });
+
+  test("a PR is named by repo, number and title, with draft and merge actions at its right", () => {
+    const b = buttons(withPr("mergeable", info()));
+    expect(b.filter((x) => x.prRow === 0).map((x) => x.label)).toEqual(["🟢 api #7 feat: add x", "📝 Draft", "🟣 Merge"]);
+    expect(b.find((x) => x.label === "📝 Draft")!.key).toBe("g");
+    expect(b.find((x) => x.label === "🟣 Merge")!.key).toBe("m");
+  });
+
+  test("a draft offers Ready and no Merge; merge needs a green PR", () => {
+    expect(buttons(withPr("mergeable", info({ draft: true }))).filter((x) => x.prRow === 0).map((x) => x.label)).toEqual(["🟢 api #7 feat: add x", "✅ Ready"]);
+    expect(buttons(withPr("failing", info())).map((x) => x.label)).not.toContain("🟣 Merge");
+    expect(buttons(withPr("pending", info())).map((x) => x.label)).not.toContain("🟣 Merge");
+  });
+
+  test("merged and closed PRs have no actions; a stack merges as a stack", () => {
+    expect(buttons(withPr("merged", info())).filter((x) => x.prRow === 0)).toHaveLength(1);
+    expect(buttons(withPr("closed", info())).filter((x) => x.prRow === 0)).toHaveLength(1);
+    expect(buttons(withPr("mergeable", info({ stack: [6, 7] }))).map((x) => x.label)).toContain("🟣 Merge stack");
+  });
+
+  test("each PR gets its own row, actions right-aligned, the launchers below", () => {
+    const s = snap({ links: [{ label: "a #1", url: "u1", status: "mergeable", pr: info({ number: 1 }) }, { label: "b #2", url: "u2", status: "failing", pr: info({ repo: "web", number: 2 }) }], ide: "zed" });
+    const f = layoutTop(s, 100);
+    const rowOf = (label: string) => f.placed.find((p) => p.button.label.includes(label))!;
+    expect(rowOf("api #1").row).toBe(1);
+    expect(rowOf("web #2").row).toBe(2);
+    expect(rowOf("zed").row).toBe(3);
+    const merge = rowOf("Merge");
+    expect(merge.row).toBe(1);
+    expect(merge.col + merge.width).toBe(98);
+    expect(f.placed.filter((p) => p.row === 2).map((p) => p.button.label)).toEqual(["🔴 web #2 feat: add x", "📝 Draft"]);
+  });
+
+  test("a long PR name is clipped to leave room for its actions", () => {
+    const f = layoutTop(withPr("mergeable", info({ title: "x".repeat(100) })), 70);
+    const [main, ...actions] = f.placed.filter((p) => p.row === 1);
+    expect(main!.col + main!.width).toBeLessThan(actions[0]!.col);
+    expect(actions).toHaveLength(2);
+  });
+
+  test("activating the actions calls the deps with the PR", () => {
+    const calls: string[] = [];
+    const deps: ActDeps = { open: () => {}, spawn: () => {}, start: () => {}, stop: () => {}, pane: noPane, cleanup: () => undefined, ready: (p, r) => void calls.push(`ready ${p.number} ${r}`), merge: (p) => void calls.push(`merge ${p.number}`) };
+    activate({ label: "r", action: { kind: "ready", pr: info({ draft: true }) } }, deps);
+    activate({ label: "d", action: { kind: "ready", pr: info() } }, deps);
+    activate({ label: "m", action: { kind: "merge", pr: info() } }, deps);
+    expect(calls).toEqual(["ready 7 true", "ready 7 false", "merge 7"]);
+  });
+});
+
 describe("activate", () => {
   const calls: string[] = [];
   const deps: ActDeps = {
@@ -95,6 +148,8 @@ describe("activate", () => {
     stop: (a) => calls.push(`stop ${a.spec.id}`),
     pane: (p) => void calls.push(`pane ${p}`),
     cleanup: () => void calls.push("cleanup"),
+    ready: (p, r) => void calls.push(`ready ${p.number} ${r}`),
+    merge: (p) => void calls.push(`merge ${p.number}`),
   };
   beforeEach(() => void (calls.length = 0));
 
@@ -164,11 +219,11 @@ describe("refreshTop", () => {
   });
 
   test("caches the headline, the item link and the PR link", () => {
-    const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson() });
+    const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", { title: "" }) });
     expect(cache.headline).toBe("12 Add dark mode");
     expect(cache.links).toEqual([
       { label: "12", url: "https://fake.test/items/12" },
-      { label: "PR #3", url: "https://host/o/r/pull/3", status: "mergeable" },
+      { label: "PR #3", url: "https://host/o/r/pull/3", status: "mergeable", pr: { repo: "r", number: 3, title: "", draft: false, dir: join(tmp, "w1", "r"), stack: [] } },
     ]);
     expect(readTopCache("w1")).toEqual(cache);
   });
@@ -202,7 +257,7 @@ describe("cleanup", () => {
   });
 
   test("activating Cleanup calls the cleanup dep and shows its message", () => {
-    const deps: ActDeps = { open: () => {}, spawn: () => {}, start: () => {}, stop: () => {}, pane: noPane, cleanup: () => "armed" };
+    const deps: ActDeps = { open: () => {}, spawn: () => {}, start: () => {}, stop: () => {}, pane: noPane, cleanup: () => "armed", ready: () => undefined, merge: () => undefined };
     expect(activate({ label: "Cleanup", action: { kind: "cleanup" } }, deps)).toBe("armed");
   });
 

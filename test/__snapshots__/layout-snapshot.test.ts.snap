@@ -14,7 +14,7 @@ exports[`generated layout two workspaces, one resuming 1`] = `
         args "sidebar" "--ws" "ws1"
       }
       pane split_direction="horizontal" {
-        pane name="top" command="overbridge" cwd="/ws-root/ws1" size=4 borderless=true {
+        pane name="top" command="overbridge" cwd="/ws-root/ws1" size=5 borderless=true {
           args "top" "--ws" "ws1"
         }
         pane name="ws1 · claude" command="overbridge" cwd="/ws-root/ws1" {
@@ -29,7 +29,7 @@ exports[`generated layout two workspaces, one resuming 1`] = `
         args "sidebar" "--ws" "ws2"
       }
       pane split_direction="horizontal" {
-        pane name="top" command="overbridge" cwd="/ws-root/ws2" size=4 borderless=true {
+        pane name="top" command="overbridge" cwd="/ws-root/ws2" size=5 borderless=true {
           args "top" "--ws" "ws2"
         }
         pane name="ws2 · claude" command="overbridge" cwd="/ws-root/ws2" {
@@ -56,7 +56,7 @@ exports[`generated layout a wide sidebar and a self command with arguments 1`] =
         args "/opt/overbridge/src/cli.ts" "sidebar" "--ws" "ws1"
       }
       pane split_direction="horizontal" {
-        pane name="top" command="/usr/bin/bun" cwd="/ws-root/ws1" size=4 borderless=true {
+        pane name="top" command="/usr/bin/bun" cwd="/ws-root/ws1" size=5 borderless=true {
           args "/opt/overbridge/src/cli.ts" "top" "--ws" "ws1"
         }
         pane name="ws1 · claude" command="/usr/bin/bun" cwd="/ws-root/ws1" {

@@ -293,8 +293,10 @@ reason. Manual `/compact` is left alone.
 ### Top panel
 
 `overbridge top` is a pane for the top of every tab, in a rounded frame titled with the task name (the
-message, e.g. a refresh error, sits in the bottom border): a button per
-PR and for the item, then at the right the launchers: a toggle per app with its state
+message, e.g. a refresh error, sits in the bottom border): one row per PR, as
+status icon, repo, number and title with its actions at the right (**Ready**/**Draft** flips the PR, or every PR of
+its stack, between draft and ready for review; **Merge** appears once the PR is green and not a draft, asks for a
+second press within five seconds, and merges a stack atomically with `gh stack merge`), a button for the item, then at the right the launchers: a toggle per app with its state
 (⚫ stopped, 🟡 starting, 🟢 running, 🔴 exited) and port, an editor button (`ide`), and the 🤖 claude / 💻 terminal /
 🔀 diff buttons. PR buttons are coloured by status: 🟣 merged, 🟢 mergeable, 🔴 failing build or conflicts,
 🟡 build pending, 🔵 blocked (review or behind), ⚫ closed. Claude focuses the agent; terminal opens a shell in

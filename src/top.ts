@@ -9,7 +9,16 @@ import type { Provider } from "./pm/provider";
 import { type AppSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, readState } from "./state";
 import { boxBottom, boxRow, boxTop, type Color, colorize, fit, inverse, textWidth } from "./term";
+import { stackOf, localStacks } from "./stack";
 import { run } from "./util";
+
+const safeStacks = (repo: string) => {
+  try {
+    return localStacks(repo);
+  } catch {
+    return [];
+  }
+};
 
 const ESC = "\x1b";
 
@@ -19,9 +28,22 @@ const ESC = "\x1b";
  * never the network; `refreshTop` is what fills the cache.
  */
 
+/** What the PR rows and their action buttons need. */
+export interface PrInfo {
+  repo: string;
+  number: number;
+  title: string;
+  draft: boolean;
+  /** The repo worktree the `gh` actions run in. */
+  dir: string;
+  /** Every PR of the stack this PR belongs to, bottom first; empty when unstacked. */
+  stack: number[];
+}
+
 export interface TopLink {
   label: string;
   url: string;
+  pr?: PrInfo;
   /** A PR link's state: drives its colour and icon. */
   status?: PrStatus;
 }
@@ -32,6 +54,8 @@ export type PrStatus = (typeof PR_STATUSES)[number];
 /** What `gh pr view --json state,mergeable,mergeStateStatus,statusCheckRollup` returns, as far as we read it. */
 export interface PrView {
   url?: string;
+  title?: string;
+  isDraft?: boolean;
   state?: string;
   mergeable?: string;
   mergeStateStatus?: string;
@@ -198,8 +222,17 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       }
     }
     if (claim.pr !== undefined) {
-      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,state,mergeable,mergeStateStatus,statusCheckRollup"], dir));
-      if (view?.url) links.push({ label: claims.length > 1 ? `${repo} #${claim.pr}` : `PR #${claim.pr}`, url: view.url, status: classifyPr(view) });
+      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,title,isDraft,state,mergeable,mergeStateStatus,statusCheckRollup"], dir));
+      if (view?.url) {
+        const layers = stackOf(safeStacks(repo), claim.branch)?.layers ?? [];
+        const stack = layers.length > 1 ? layers.flatMap((l) => (l.pr === undefined ? [] : [l.pr])) : [];
+        links.push({
+          label: claims.length > 1 ? `${repo} #${claim.pr}` : `PR #${claim.pr}`,
+          url: view.url,
+          status: classifyPr(view),
+          pr: { repo, number: claim.pr, title: view.title ?? "", draft: view.isDraft === true, dir, stack },
+        });
+      }
       else problems.push(`${repo}: no URL for PR #${claim.pr}`);
       if (view?.state === "OPEN") openPrs++;
     }
@@ -289,6 +322,8 @@ export type Action =
   | { kind: "editor"; cmd: string[]; dir: string }
   | { kind: "app"; app: TopApp }
   | { kind: "pane"; pane: PaneKind }
+  | { kind: "ready"; pr: PrInfo }
+  | { kind: "merge"; pr: PrInfo }
   | { kind: "cleanup" };
 
 export interface Button {
@@ -299,6 +334,8 @@ export interface Button {
   color?: Color;
   /** Launchers (editor, apps, panes) sit at the right; status buttons (links, Cleanup) at the left. */
   side?: "left" | "right";
+  /** Index of the PR this button belongs to: those buttons sit on that PR's own row, the PR first and its actions at the right. */
+  prRow?: number;
 }
 
 const MARKS: Record<AppStatus, string> = {
@@ -337,7 +374,7 @@ function editorFromEnv(editor: string | undefined): { label: string; cmd: string
 
 /**
  * Give each button its key: `i` the work item, `p` the PR (then u, y, w, z), `1` to `9` the apps,
- * `e` the editor, `c` `t` `d` the panes, `x` Cleanup. Buttons past the available keys get none.
+ * `e` the editor, `c` `t` `d` the panes, `x` Cleanup, and on the first PR's row `g` ready/draft, `m` merge. Buttons past the available keys get none.
  */
 function withKeys(list: Button[]): Button[] {
   let app = 0;
@@ -345,6 +382,8 @@ function withKeys(list: Button[]): Button[] {
     const a = b.action;
     let key: string | undefined;
     if (a.kind === "link") return b;
+    else if (a.kind === "ready") key = b.prRow === 0 ? "g" : undefined;
+    else if (a.kind === "merge") key = b.prRow === 0 ? "m" : undefined;
     else if (a.kind === "app") key = app < 9 ? String(++app) : undefined;
     else if (a.kind === "editor") key = "e";
     else if (a.kind === "pane") key = { claude: "c", terminal: "t", diff: "d" }[a.pane];
@@ -364,18 +403,30 @@ const PR_KEYS = ["p", "u", "y", "w", "z"];
 export function buttons(snap: TopSnapshot): Button[] {
   const prKeys = [...PR_KEYS];
   const issueKeys = ["i"];
-  const out: Button[] = snap.links.map((l) => {
+  const out: Button[] = [];
+  let prRow = 0;
+  for (const l of snap.links) {
     const isPr = l.status !== undefined || l.label.includes("#");
     const key = isPr ? prKeys.shift() : issueKeys.shift();
     const look = l.status ? PR_LOOK[l.status] : undefined;
-    return {
-      label: look ? `${look.icon} ${l.label}` : `📋 ${l.label}`,
+    const pr = l.pr;
+    const name = pr ? `${pr.repo} #${pr.number}${pr.title ? ` ${pr.title}` : ""}` : l.label;
+    out.push({
+      label: look ? `${look.icon} ${name}` : `📋 ${name}`,
       action: { kind: "link", url: l.url },
       side: "left",
+      ...(pr ? { prRow } : {}),
       ...(key ? { key } : {}),
       ...(look ? { color: look.color } : {}),
-    };
-  });
+    });
+    if (pr) {
+      const row = prRow++;
+      if (l.status !== "merged" && l.status !== "closed") {
+        out.push({ label: pr.draft ? "✅ Ready" : "📝 Draft", action: { kind: "ready", pr }, side: "right", prRow: row });
+        if (l.status === "mergeable" && !pr.draft) out.push({ label: pr.stack.length > 1 ? "🟣 Merge stack" : "🟣 Merge", action: { kind: "merge", pr }, side: "right", color: "purple", prRow: row });
+      }
+    }
+  }
   if (snap.cleanup) out.push({ label: "🧹 Cleanup", action: { kind: "cleanup" }, side: "left" });
   for (const app of snap.apps) {
     if (!app.available) continue;
@@ -426,12 +477,12 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
   const content: string[] = [];
   const placed: Placed[] = [];
   const all = buttons(snap);
-  const cells = (side: "left" | "right") => all.filter((b) => (b.side ?? "left") === side).map((button) => ({ button, text: clip(cell(button), inner) }));
+  const cells = (side: "left" | "right") => all.filter((b) => b.prRow === undefined && (b.side ?? "left") === side).map((button) => ({ button, text: clip(cell(button), inner) }));
   const widthOf = (items: { text: string }[]) => items.reduce((n, i) => n + textWidth(i.text) + 1, 0) - (items.length ? 1 : 0);
 
   // wrap `items` into rows of at most `inner`, each row starting at `start(rowWidth)`
   const flow = (items: { button: Button; text: string }[], align: "left" | "right", firstRow?: { row: number; used: number }) => {
-    let row = firstRow?.row ?? content.length;
+    let row = firstRow?.row ?? base;
     let line: typeof items = [];
     const flush = () => {
       if (!line.length) return;
@@ -452,11 +503,28 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
     return row;
   };
 
+  // one row per PR: the PR first, its actions against the right edge
+  let base = 0;
+  for (const row of new Set(all.flatMap((b) => (b.prRow === undefined ? [] : [b.prRow])))) {
+    const group = all.filter((b) => b.prRow === row);
+    const main = group.find((b) => b.side !== "right")!;
+    const actions = group.filter((b) => b !== main).map((button) => ({ button, text: clip(cell(button), inner) }));
+    const taken = widthOf(actions) + (actions.length ? 2 : 0);
+    const text = clip(cell(main), Math.max(1, inner - taken));
+    placed.push({ button: main, row: base, col: 0, width: textWidth(text) });
+    let col = inner - widthOf(actions);
+    for (const a of actions) {
+      placed.push({ button: a.button, row: base, col, width: textWidth(a.text) });
+      col += textWidth(a.text) + 1;
+    }
+    base++;
+  }
+
   const left = cells("left");
   const right = cells("right");
   if (left.length && right.length && widthOf(left) + 2 + widthOf(right) <= inner) {
     flow(left, "left");
-    flow(right, "right", { row: 0, used: 0 });
+    flow(right, "right", { row: base, used: 0 });
   } else {
     flow(right, "right", { row: flow(left, "left"), used: 0 });
   }
@@ -464,7 +532,7 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
   for (let y = 0; y < Math.max(used, height - 2, 1); y++) {
     let text = "";
     for (const p of placed.filter((q) => q.row === y).sort((a, b) => a.col - b.col)) {
-      text += " ".repeat(Math.max(0, p.col - textWidth(text))) + clip(cell(p.button), inner);
+      text += " ".repeat(Math.max(0, p.col - textWidth(text))) + clip(cell(p.button), p.width);
     }
     content.push(text);
   }
@@ -511,6 +579,10 @@ export interface ActDeps {
   pane: (pane: PaneKind) => string | undefined;
   /** Wipe the workspace; returns a message for the message row. */
   cleanup: () => string | undefined;
+  /** Turn the PR (or its stack) ready for review, or back to draft. */
+  ready: (pr: PrInfo, ready: boolean) => string | undefined;
+  /** Merge the PR (or its stack); asks for a second press first. */
+  merge: (pr: PrInfo) => string | undefined;
 }
 
 /** Do what a button says; returns a message for the message row, or undefined. */
@@ -527,6 +599,10 @@ export function activate(button: Button, deps: ActDeps): string | undefined {
       return deps.pane(a.pane);
     case "cleanup":
       return deps.cleanup();
+    case "ready":
+      return deps.ready(a.pr, a.pr.draft);
+    case "merge":
+      return deps.merge(a.pr);
     case "app": {
       const live = a.app.status === AppStatus.Running || a.app.status === AppStatus.Starting;
       try {
