@@ -10,12 +10,17 @@ import { shellQuote } from "./util";
 export function scaffold(ws: string) {
   const dir = wsDir(ws);
   mkdirSync(join(dir, ".claude"), { recursive: true });
+  const hook = (sub: string) => ({ type: "command", command: [...selfCommand(), sub].map(shellQuote).join(" ") });
+  const state = [{ hooks: [hook("hook")] }];
   const settings = {
     env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
     hooks: {
-      PreToolUse: [
-        { matcher: "*", hooks: [{ type: "command", command: [...selfCommand(), "guard"].map(shellQuote).join(" ") }] },
-      ],
+      PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }],
+      // agent state for the sidebar: see agent-hook.ts
+      ...Object.fromEntries(
+        ["SessionStart", "UserPromptSubmit", "Notification", "Stop", "SessionEnd"].map((event) => [event, state]),
+      ),
+      PostToolUse: [{ matcher: "*", hooks: [hook("hook")] }],
     },
   };
   writeFileSync(join(dir, ".claude", "settings.json"), JSON.stringify(settings, null, 2) + "\n");

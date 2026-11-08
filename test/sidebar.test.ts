@@ -101,7 +101,7 @@ describe("agent state", () => {
   test("reads the recorded state, ignoring junk", () => {
     expect(readAgentState("w1")).toBeUndefined();
     mkdirSync(join(metaDir(), "agent"), { recursive: true });
-    writeFileSync(agentStateFile("w1"), JSON.stringify({ state: "waiting", at: 1 }));
+    writeFileSync(agentStateFile("w1"), JSON.stringify({ state: "waiting", at: Date.now() }));
     expect(readAgentState("w1")).toBe("waiting");
     writeFileSync(agentStateFile("w1"), JSON.stringify({ state: "nonsense" }));
     expect(readAgentState("w1")).toBeUndefined();

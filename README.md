@@ -181,6 +181,16 @@ current tab visible. The width comes from the global config:
 width = 28    # 12 to 80
 ```
 
+#### Agent state
+
+Each workspace's `.claude/settings.json` registers `overbridge hook` for `SessionStart`,
+`UserPromptSubmit`, `PostToolUse`, `Notification`, `Stop` and `SessionEnd`, next to the guard.
+It records `idle`, `busy`, `waiting`, `done` or `end` in `<meta>/agent/<ws>.json`. The hook
+never blocks or fails the agent and loads none of the rest of the CLI. A `busy` state with no
+update for 10 minutes (the agent died mid-turn) and any state older than a day show as unknown.
+When the top panel's cache is over a minute old, the hook starts one `overbridge top refresh`
+in the background, at most once per 30 seconds.
+
 ### Top panel
 
 `overbridge top` is a pane for the top of every tab: the item id and title, a button per
