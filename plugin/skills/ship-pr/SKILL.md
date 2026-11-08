@@ -9,8 +9,11 @@ description: Commit, push and open (or update) a GitHub PR from an overbridge wo
    detached, not the default branch). If on the default branch or detached,
    ask for a branch name and run `overbridge checkout <repo> <branch>` first; changes carry over.
 2. **Review the diff.** `git -C <repo> status` and `git -C <repo> diff`. Do not
-   commit secrets, `.env` files, or build output. Run the repo's checks if it
-   has them (`just check`, `bun test`, `cargo clippy && cargo test`, …) and fix failures.
+   commit secrets, `.env` files, or build output. Run the repo's checks and fix failures:
+   `overbridge config get commands.<name>` (from the repo dir) prints the command its
+   `overbridge.yml` declares for `lint`, `typecheck`, `test`, `build` and `format`, and exits
+   non-zero when unset. Run the ones that exist; when none are declared, fall back to what the
+   repo documents (`just check`, `bun test`, `cargo clippy && cargo test`, …).
 3. **Commit.** Conventional Commits subject (≤ 50 chars), body explains why.
 4. **Push.** `git -C <repo> push -u origin HEAD`.
 5. **PR.** Ask before creating it. Then, from inside the repo dir:

@@ -1,0 +1,38 @@
+# Every overbridge.yml key, with its default. Copy to the root of a repo and trim.
+# Check it with: overbridge config check overbridge.example.yml
+version: 1
+
+# Where work items live. Omit the block to turn item features off.
+project-management:
+  name: github                 # github | jira
+  project: owner/repo          # GitHub: owner/repo or a Projects v2 number. Jira: the project key, e.g. ENG
+  # url: https://example.atlassian.net   # Jira only: base URL, used for ticket links
+  # tech-debt: label:tech-debt           # an item id (parent), or label:<name>; default: no parent
+
+# Apps `overbridge app` and the top panel can start and stop. Default: none.
+apps:
+  - id: web                    # unique within the repo
+    # label: web                       # shown in the panel; default: id
+    # dir: .                           # working directory relative to the repo root; default: .
+    # prepare: npm run build:libs      # runs to completion before start
+    start: npm run dev -- --port {port}
+    # stop: npm run dev:stop           # default: signal the whole process group
+    ports: [3000, 3001]        # pool: at most this many workspaces run it at once
+    ready: { http: "http://localhost:{port}" }   # or { tcp: "{port}" } / { tcp: 5432 }
+    open: true                 # open the browser once ready; default: false
+    # when: always                     # always | feature-branch; default: always
+
+# Shell commands the skills run to check a change. Each is optional.
+commands:
+  lint: npm run lint
+  typecheck: npm run typecheck
+  test: npm test
+  build: npm run build
+  format: npm run format
+
+review:
+  # personas: [security, code-quality]  # default: auto-select by diff signals
+  # exclude: [pr-size]                  # skipped after selection; default: none
+  local-dir: .overbridge/personas       # repo-local personas; this is the default
+
+ide: vscode                    # vscode | zed | webstorm; default: none

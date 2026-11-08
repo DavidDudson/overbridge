@@ -21,6 +21,14 @@ start empty: `overbridge repo ls` shows registered repos, `overbridge checkout <
 adds the repo to this workspace on first use, and `overbridge repo add <name> <url>`
 registers a new one (ask the user before registering).
 
+## Repo config
+
+Each repo can carry an `overbridge.yml` (work-item provider, apps, check commands, review, ide).
+Read it with `overbridge config show [dir]` or one value with `overbridge config get <key> [dir]`.
+Apps it declares run with `overbridge app` (list), `overbridge app <id> start|stop|restart|status|log`.
+`overbridge item from-branch` names the work item the current branch belongs to.
+The top panel and sidebar show this state; do not edit `.overbridge/` under the workspaces root by hand.
+
 ## Change branch / pick up a PR
 
 Always via `overbridge checkout`. It fetches, checks the claim, switches, and records it.

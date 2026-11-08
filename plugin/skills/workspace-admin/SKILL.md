@@ -1,6 +1,6 @@
 ---
 name: workspace-admin
-description: Set up and manage overbridge workspaces from outside a workspace — register repos, create/remove workspaces, add repos to a workspace, launch the zellij grid. Use when the user says "add repo X to overbridge", "new workspace", "spin up a workspace for …", "remove ws3", "launch workspaces", or asks how the overbridge tool works. Not for workspace-bound sessions (the guard blocks admin commands there).
+description: Set up and manage overbridge workspaces from outside a workspace — register repos, create/remove workspaces, add repos to a workspace, launch the zellij session. Use when the user says "add repo X to overbridge", "new workspace", "spin up a workspace for …", "remove ws3", "launch workspaces", or asks how the overbridge tool works. Not for workspace-bound sessions (the guard blocks admin commands there).
 ---
 
 # Managing overbridge workspaces
@@ -10,10 +10,12 @@ Layout under `$OVERBRIDGE_ROOT` (default `~/workspaces`):
 ```
 repos.toml          # registry: [repos.<name>] url = "...", default_branch = "..." (optional)
 .bare/<repo>.git    # bare clones, fetched not re-cloned
-.ws/state.json      # claims (ws → repo → branch/pr); edit only via ws commands
-.ws/layout.kdl      # generated zellij layout
+.overbridge/state.json   # claims (ws → repo → branch/pr); edit only via overbridge commands
+.overbridge/layout.kdl   # generated zellij layout (a layouts/overbridge.kdl in the zellij config dir replaces it)
+.overbridge/agent/       # per-workspace agent state written by the hook, read by the sidebar
 <ws>/<repo>/        # git worktree per repo per workspace
-<ws>/.claude/       # generated settings binding Claude to the workspace (guard hook)
+<ws>/<repo>/overbridge.yml  # per-repo config: work items, apps, check commands, review, ide
+<ws>/.claude/       # generated settings binding Claude to the workspace (guard + agent state hooks)
 <ws>/CLAUDE.md      # generated workspace instructions
 ```
 
@@ -37,6 +39,12 @@ overbridge up [--fresh]                           # zellij session "workspaces":
 overbridge layout                                 # print the layout `up` would use (stderr says where from)
 overbridge claude <name>                          # run one bound Claude outside zellij
 ```
+
+## Config
+
+Per-repo rules go in the repo's `overbridge.yml` (see the README for every key and
+`overbridge.example.yml` for a commented copy); validate with `overbridge config check`. Global
+settings live in `repos.toml`: `[sidebar] width = 28` sets the tab sidebar width (12 to 80).
 
 ## Notes
 
