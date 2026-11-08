@@ -1,0 +1,48 @@
+name: release
+
+# semantic-release reads the conventional commits since the last v* tag, tags the version,
+# publishes @daviddudson/overbridge to GitHub Packages and writes the GitHub release.
+# It never commits back to main: package.json's version is a placeholder.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # tag + GitHub release
+      packages: write # npm publish to GitHub Packages
+      issues: write # release comments on linked issues
+      pull-requests: write # "released in vX.Y.Z" comments on merged PRs
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # semantic-release walks the history back to the last tag.
+          fetch-depth: 0
+
+      # semantic-release and npm publish run on Node.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # @semantic-release/npm authenticates against publishConfig.registry with this.
+          NPM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx --no-install semantic-release
