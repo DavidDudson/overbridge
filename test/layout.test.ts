@@ -26,13 +26,12 @@ describe("layoutKdl", () => {
     for (const n of [1, 4, 5, 9]) expect(tabs(layoutKdl(Array.from({ length: n }, (_, i) => `w${i}`), self))).toBe(n);
   });
 
-  test("every tab has sidebar, top panel, agent and shell in the workspace dir", () => {
+  test("every tab has sidebar, top panel, and agent in the workspace dir", () => {
     const kdl = layoutKdl(["a", "b"], self);
     for (const ws of ["a", "b"]) {
       expect(kdl).toContain(`args "sidebar" "--ws" "${ws}"`);
       expect(kdl).toContain(`args "top" "--ws" "${ws}"`);
       expect(kdl).toContain(`args "claude" "${ws}"`);
-      expect(kdl).toContain(`name="${ws} · shell" cwd="${wsDir(ws)}"`);
     }
     expect(kdl).toContain(`size=${SIDEBAR_WIDTH}`);
     expect(kdl).toContain(`size=${TOP_ROWS}`);

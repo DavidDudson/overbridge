@@ -26,7 +26,7 @@ export interface TabOptions {
 
 /**
  * One workspace's tab: the sidebar down the left; the rest holds the top panel across the
- * top, then the agent above a shell, both in the workspace dir.
+ * top, then the agent. Terminal and diff panes open to the agent's right from the top panel's buttons.
  */
 export function tabKdl(ws: string, self: string[], opts: TabOptions = {}): string {
   const [cmd, ...baseArgs] = self;
@@ -43,10 +43,9 @@ export function tabKdl(ws: string, self: string[], opts: TabOptions = {}): strin
         pane name=${q("top")} command=${q(cmd!)} cwd=${q(wsDir(ws))} size=${TOP_ROWS} borderless=true {
           args ${args("top", "--ws", ws)}
         }
-        pane name=${q(`${ws} · claude`)} command=${q(cmd!)} cwd=${q(wsDir(ws))} size="65%" {
+        pane name=${q(`${ws} · claude`)} command=${q(cmd!)} cwd=${q(wsDir(ws))} {
           args ${agent}
         }
-        pane name=${q(`${ws} · shell`)} cwd=${q(wsDir(ws))}
       }
     }
   }`;

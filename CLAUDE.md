@@ -4,7 +4,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 
 - `src/cli.ts` is a thin entry with no static imports; `src/main.ts` holds arg dispatch → `src/commands.ts`.
   `overbridge hook` (`src/agent-hook.ts`) runs on every tool call, so it is dispatched before `main.ts`
-  loads; keep its imports to `paths.ts`, `agent-state.ts` and node builtins.
+  loads; keep its imports to `paths.ts`, `agent-state.ts`, `bg-tasks.ts` and node builtins.
 - Per-repo config: `src/project-config.ts` parses and validates `overbridge.yml` (`overbridge.schema.json` and
   `overbridge.example.yml` must track its keys); global config is `repos.toml` (`src/config.ts`, e.g. `[sidebar] width`).
   Keep code generic: no repo names, ports, URLs or branch conventions outside that config.
@@ -13,7 +13,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   Providers and apps take injectable runners so tests never need `gh`, `jira` or real processes.
 - Apps: `src/apps.ts` (launch, teardown, port pool, status) and `src/app-command.ts` (`overbridge app`).
 - Panes: `src/top.ts` (pure model, layout, cache) + `src/top-run.ts` (tty loop); `src/sidebar.ts`; shared terminal
-  helpers in `src/term.ts`; `src/agent-state.ts` reads what `src/agent-hook.ts` writes. Pure parts are unit-tested.
+  helpers in `src/term.ts`; `src/agent-state.ts` reads what `src/agent-hook.ts` writes; `src/panes.ts` is the terminal/diff/claude pane toggles and `overbridge diff`; `src/next.ts` picks the next tab needing attention; `src/limits.ts` reads the usage limits Claude's statusline writes. Pure parts are unit-tested.
 - `src/layout.ts` builds the zellij layout (one tab per workspace, `tabKdl`); a user `layouts/overbridge.kdl` replaces it.
 - `src/start.ts` is `overbridge start <repo> <id>`: one workspace per work item, named by `Provider.workspaceName`,
   added to the running session with `openTab`. Cleanup (`cleanable`, `pressCleanup` in `src/top.ts`, `wipe` in `src/top-run.ts`)

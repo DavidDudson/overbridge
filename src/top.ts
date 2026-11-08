@@ -1,13 +1,14 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { AppStatus, appAvailable, appStatus, appUrl, readRecord } from "./apps";
+import { readAgentState } from "./agent-state";
 import * as git from "./git";
 import { metaDir, wsDir, worktreePath } from "./paths";
 import { providerFor, refreshTitle } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, readState } from "./state";
-import { bold, dim, inverse } from "./term";
+import { bold, type Color, colorize, dim, fit, inverse, textWidth } from "./term";
 import { run } from "./util";
 
 const ESC = "\x1b";
@@ -21,11 +22,54 @@ const ESC = "\x1b";
 export interface TopLink {
   label: string;
   url: string;
+  /** A PR link's state: drives its colour and icon. */
+  status?: PrStatus;
 }
+
+export const PR_STATUSES = ["merged", "mergeable", "failing", "conflict", "pending", "blocked", "closed", "unknown"] as const;
+export type PrStatus = (typeof PR_STATUSES)[number];
+
+/** What `gh pr view --json state,mergeable,mergeStateStatus,statusCheckRollup` returns, as far as we read it. */
+export interface PrView {
+  url?: string;
+  state?: string;
+  mergeable?: string;
+  mergeStateStatus?: string;
+  statusCheckRollup?: { status?: string; conclusion?: string; state?: string }[];
+}
+
+const FAILED = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]);
+const PENDING = new Set(["PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"]);
+
+/** Merged, failing build, conflicts, pending build, then whether it can merge: the first that applies. */
+export function classifyPr(pr: PrView): PrStatus {
+  if (pr.state === "MERGED") return "merged";
+  if (pr.state === "CLOSED") return "closed";
+  const checks = pr.statusCheckRollup ?? [];
+  if (checks.some((c) => FAILED.has(c.conclusion ?? "") || FAILED.has(c.state ?? ""))) return "failing";
+  if (pr.mergeable === "CONFLICTING" || pr.mergeStateStatus === "DIRTY") return "conflict";
+  if (checks.some((c) => PENDING.has(c.state ?? "") || (c.status !== undefined && c.status !== "COMPLETED"))) return "pending";
+  if (["CLEAN", "UNSTABLE", "HAS_HOOKS"].includes(pr.mergeStateStatus ?? "")) return "mergeable";
+  if (["BLOCKED", "BEHIND", "DRAFT"].includes(pr.mergeStateStatus ?? "")) return "blocked";
+  return pr.mergeable === "MERGEABLE" ? "mergeable" : "unknown";
+}
+
+export const PR_LOOK: Record<PrStatus, { icon: string; color: Color }> = {
+  merged: { icon: "🟣", color: "purple" },
+  mergeable: { icon: "🟢", color: "green" },
+  failing: { icon: "🔴", color: "red" },
+  conflict: { icon: "🔴", color: "red" },
+  pending: { icon: "🟡", color: "yellow" },
+  blocked: { icon: "🔵", color: "blue" },
+  closed: { icon: "⚫", color: "grey" },
+  unknown: { icon: "⚪", color: "grey" },
+};
 
 /** What `refreshTop` stores. `message` is the last problem it hit, shown on the message row. */
 export interface TopCache {
   headline?: string;
+  /** The item's title alone, without its id. */
+  title?: string;
   links: TopLink[];
   /** Every claimed repo's PR is open (and there is at least one claim). Half of what makes a workspace cleanable. */
   prsOpen?: boolean;
@@ -76,6 +120,14 @@ function writeTopCache(ws: string, cache: TopCache) {
   renameSync(tmp, cacheFile(ws));
 }
 
+function parsePrView(out: string | undefined): PrView | undefined {
+  try {
+    return out ? (JSON.parse(out) as PrView) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface RefreshDeps {
   provider?: (pm: ProjectManagement, dir: string) => Provider;
   /** Run a command in `cwd`; returns trimmed stdout, or undefined on failure. */
@@ -102,6 +154,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   const claimed = claims.filter(([, c]) => c.branch).length;
   let openPrs = 0;
   let headline: string | undefined;
+  let itemTitle: string | undefined;
   let itemLink: TopLink | undefined;
 
   for (const [repo, claim] of claims) {
@@ -121,6 +174,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
         if (id) {
           const title = refreshTitle(p, pm.project, id);
           headline = title ? `${id} ${title}` : id;
+          itemTitle = title || undefined;
           itemLink = { label: id, url: p.link(id) };
         }
       } catch (e) {
@@ -128,16 +182,17 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       }
     }
     if (claim.pr !== undefined) {
-      const url = exec(["gh", "pr", "view", String(claim.pr), "--json", "url", "--jq", ".url"], dir);
-      if (url) links.push({ label: claims.length > 1 ? `${repo} #${claim.pr}` : `PR #${claim.pr}`, url });
+      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,state,mergeable,mergeStateStatus,statusCheckRollup"], dir));
+      if (view?.url) links.push({ label: claims.length > 1 ? `${repo} #${claim.pr}` : `PR #${claim.pr}`, url: view.url, status: classifyPr(view) });
       else problems.push(`${repo}: no URL for PR #${claim.pr}`);
-      if (exec(["gh", "pr", "view", String(claim.pr), "--json", "state", "--jq", ".state"], dir) === "OPEN") openPrs++;
+      if (view?.state === "OPEN") openPrs++;
     }
   }
 
   const cache: TopCache = {
     // keep the previous values when this run found nothing, so the panel never goes blank on an outage
     ...(headline ?? old.headline ? { headline: headline ?? old.headline } : {}),
+    ...(itemTitle ?? old.title ? { title: itemTitle ?? old.title } : {}),
     links: itemLink || links.length ? [...(itemLink ? [itemLink] : []), ...links] : old.links,
     // released repos hold no branch, so only claimed branches need an open PR
     prsOpen: claimed > 0 && openPrs === claimed,
@@ -149,11 +204,11 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 }
 
 /**
- * Whether `ws` can be wiped: every claimed branch has an open PR (from the cache) and no repo
+ * Whether `ws` can be wiped: its agent is empty (just started or cleared), or every claimed branch has an open PR (from the cache), and no repo
  * holds uncommitted changes or unpushed commits (read from git now, so it is never stale).
  */
 export function cleanable(ws: string): boolean {
-  if (!readTopCache(ws).prsOpen) return false;
+  if (!readTopCache(ws).prsOpen && readAgentState(ws) !== "empty") return false;
   return Object.keys(getWorkspace(readState(), ws).repos).every((repo) => {
     const wt = worktreePath(ws, repo);
     return !git.isDirty(wt) && !git.hasUnpushed(wt);
@@ -210,23 +265,47 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
   };
 }
 
+export type PaneKind = "claude" | "terminal" | "diff";
+
 export type Action =
   | { kind: "link"; url: string }
   | { kind: "editor"; cmd: string[]; dir: string }
   | { kind: "app"; app: TopApp }
+  | { kind: "pane"; pane: PaneKind }
   | { kind: "cleanup" };
 
 export interface Button {
   label: string;
   action: Action;
+  /** The key that presses it while the panel is focused; shown in the button. */
+  key?: string;
+  color?: Color;
+  /** Launchers (editor, apps, panes) sit at the right; status buttons (links, Cleanup) at the left. */
+  side?: "left" | "right";
 }
 
 const MARKS: Record<AppStatus, string> = {
-  [AppStatus.Stopped]: "○",
-  [AppStatus.Starting]: "◐",
-  [AppStatus.Running]: "●",
-  [AppStatus.Exited]: "✖",
+  [AppStatus.Stopped]: "⚫",
+  [AppStatus.Starting]: "🟡",
+  [AppStatus.Running]: "🟢",
+  [AppStatus.Exited]: "🔴",
 };
+
+const APP_COLORS: Record<AppStatus, Color | undefined> = {
+  [AppStatus.Stopped]: undefined,
+  [AppStatus.Starting]: "yellow",
+  [AppStatus.Running]: "green",
+  [AppStatus.Exited]: "red",
+};
+
+export const PANE_BUTTONS: { pane: PaneKind; label: string }[] = [
+  { pane: "claude", label: "🤖 claude" },
+  { pane: "terminal", label: "💻 terminal" },
+  { pane: "diff", label: "🔀 diff" },
+];
+
+/** Where the editor commands live when the usual name is not on PATH (nixpkgs ships Zed as `zeditor`). */
+export const ALT_COMMANDS: Record<string, string> = { zed: "zeditor" };
 
 export const appUrlOf = (app: TopApp): string | undefined => appUrl(app.spec, app.port);
 
@@ -239,18 +318,58 @@ function editorFromEnv(editor: string | undefined): { label: string; cmd: string
   return { label: basename(name), cmd };
 }
 
-/** Buttons in display order: links, editor, apps, then Cleanup when the workspace can be wiped. Apps ruled out by `when:` are left out. */
+/**
+ * Give each button its key: `i` the work item, `p` the PR (then u, y, w, z), `1` to `9` the apps,
+ * `e` the editor, `c` `t` `d` the panes, `x` Cleanup. Buttons past the available keys get none.
+ */
+function withKeys(list: Button[]): Button[] {
+  let app = 0;
+  return list.map((b) => {
+    const a = b.action;
+    let key: string | undefined;
+    if (a.kind === "link") return b;
+    else if (a.kind === "app") key = app < 9 ? String(++app) : undefined;
+    else if (a.kind === "editor") key = "e";
+    else if (a.kind === "pane") key = { claude: "c", terminal: "t", diff: "d" }[a.pane];
+    else key = "x";
+    return key ? { ...b, key } : b;
+  });
+}
+
+/**
+ * Buttons in display order. Left: work item and PR links (coloured by PR status), then Cleanup when the
+ * workspace can be wiped. Right: apps, the editor, then the claude / terminal / diff pane toggles.
+ * Apps ruled out by `when:` are left out.
+ */
+/** Keys for extra PR buttons after `p`; none clash with the panel's own keys. */
+const PR_KEYS = ["p", "u", "y", "w", "z"];
+
 export function buttons(snap: TopSnapshot): Button[] {
-  const out: Button[] = snap.links.map((l) => ({ label: l.label, action: { kind: "link", url: l.url } }));
-  const editor = snap.ide ? { label: snap.ide, cmd: [IDE_COMMANDS[snap.ide]] } : editorFromEnv(snap.editor);
-  if (editor) out.push({ label: editor.label, action: { kind: "editor", cmd: editor.cmd, dir: snap.dir } });
+  const prKeys = [...PR_KEYS];
+  const issueKeys = ["i"];
+  const out: Button[] = snap.links.map((l) => {
+    const isPr = l.status !== undefined || l.label.includes("#");
+    const key = isPr ? prKeys.shift() : issueKeys.shift();
+    const look = l.status ? PR_LOOK[l.status] : undefined;
+    return {
+      label: look ? `${look.icon} ${l.label}` : `📋 ${l.label}`,
+      action: { kind: "link", url: l.url },
+      side: "left",
+      ...(key ? { key } : {}),
+      ...(look ? { color: look.color } : {}),
+    };
+  });
+  if (snap.cleanup) out.push({ label: "🧹 Cleanup", action: { kind: "cleanup" }, side: "left" });
   for (const app of snap.apps) {
     if (!app.available) continue;
     const port = app.status === AppStatus.Stopped || app.port === undefined ? "" : ` :${app.port}`;
-    out.push({ label: `${MARKS[app.status]} ${app.spec.label}${port}`, action: { kind: "app", app } });
+    const color = APP_COLORS[app.status];
+    out.push({ label: `${MARKS[app.status]} ${app.spec.label}${port}`, action: { kind: "app", app }, side: "right", ...(color ? { color } : {}) });
   }
-  if (snap.cleanup) out.push({ label: "Cleanup", action: { kind: "cleanup" } });
-  return out;
+  const editor = snap.ide ? { label: snap.ide, cmd: [IDE_COMMANDS[snap.ide]] } : editorFromEnv(snap.editor);
+  if (editor) out.push({ label: `📝 ${editor.label}`, action: { kind: "editor", cmd: editor.cmd, dir: snap.dir }, side: "right" });
+  for (const p of PANE_BUTTONS) out.push({ label: p.label, action: { kind: "pane", pane: p.pane }, side: "right" });
+  return withKeys(out);
 }
 
 export interface Placed {
@@ -262,33 +381,68 @@ export interface Placed {
 }
 
 export interface Frame {
-  /** Plain text rows; the cursor is drawn by the caller from `placed`. */
+  /** Plain text rows (buttons included, for reading); the cursor and colours are drawn from `placed`. */
   rows: string[];
   placed: Placed[];
 }
 
-const cell = (label: string) => `[ ${label} ]`;
-const clip = (s: string, width: number) => (s.length > width ? `${s.slice(0, Math.max(0, width - 1))}…` : s);
+/** The text of a button: its label, then its key hint (when it has one). */
+export const cell = (b: Button) => `[ ${b.label}${b.key ? ` · ${b.key}` : ""} ]`;
+const clip = (s: string, width: number) => fit(s, width).trimEnd();
 
 /**
- * Lay the panel out for `width` columns: headline row, button rows (wrapping), message row.
+ * Lay the panel out for `width` columns: headline row, then one row of buttons with the left group
+ * at the left edge and the right group against the right edge (the right group drops to its own row
+ * when both do not fit; either group wraps when it is too wide alone), then the message row.
  * Pure, so resizing is just calling it again.
  */
 export function layoutTop(snap: TopSnapshot, width: number): Frame {
   const rows: string[] = [clip(snap.headline ?? snap.ws, width)];
   const placed: Placed[] = [];
-  let line = "";
-  const flush = () => {
-    if (line) rows.push(line.trimEnd());
-    line = "";
+  const all = buttons(snap);
+  const cells = (side: "left" | "right") => all.filter((b) => (b.side ?? "left") === side).map((button) => ({ button, text: clip(cell(button), width) }));
+  const widthOf = (items: { text: string }[]) => items.reduce((n, i) => n + textWidth(i.text) + 1, 0) - (items.length ? 1 : 0);
+
+  // wrap `items` into rows of at most `width`, each row starting at `start(rowWidth)`
+  const flow = (items: { button: Button; text: string }[], align: "left" | "right", firstRow?: { row: number; used: number }) => {
+    let row = firstRow?.row ?? rows.length;
+    let line: typeof items = [];
+    const flush = () => {
+      if (!line.length) return;
+      let col = align === "left" ? (row === firstRow?.row ? firstRow.used : 0) : Math.max(0, width - widthOf(line));
+      for (const item of line) {
+        placed.push({ button: item.button, row, col, width: textWidth(item.text) });
+        col += textWidth(item.text) + 1;
+      }
+      row++;
+      line = [];
+    };
+    for (const item of items) {
+      const base = align === "left" && row === firstRow?.row ? firstRow.used : 0;
+      if (line.length && base + widthOf([...line, item]) > width) flush();
+      line.push(item);
+    }
+    flush();
+    return row;
   };
-  for (const button of buttons(snap)) {
-    const text = clip(cell(button.label), width);
-    if (line && line.length + text.length > width) flush();
-    placed.push({ button, row: rows.length, col: line.length, width: text.length });
-    line += `${text} `;
+
+  const left = cells("left");
+  const right = cells("right");
+  const buttonRow = rows.length;
+  if (left.length && right.length && widthOf(left) + 2 + widthOf(right) <= width) {
+    flow(left, "left");
+    flow(right, "right", { row: buttonRow, used: 0 });
+  } else {
+    flow(right, "right", { row: flow(left, "left"), used: 0 });
   }
-  flush();
+  const last = Math.max(buttonRow - 1, ...placed.map((p) => p.row));
+  for (let y = buttonRow; y <= last; y++) {
+    let text = "";
+    for (const p of placed.filter((q) => q.row === y).sort((a, b) => a.col - b.col)) {
+      text += " ".repeat(Math.max(0, p.col - textWidth(text))) + clip(cell(p.button), width);
+    }
+    rows.push(text);
+  }
   rows.push(clip(snap.message ?? "", width));
   return { rows, placed };
 }
@@ -300,20 +454,20 @@ export function hit(frame: Frame, col: number, row: number): number | undefined 
 }
 
 /**
- * The terminal output that draws `f` with button `cursor` inverse: clear, then each row at its
- * line, the headline bold and the message row dim.
+ * The terminal output that draws `f`: clear, then each non-button row at its line (the headline bold,
+ * the message row dim) and each button at its cell, in its colour, inverse under `cursor`.
  */
 export function paintTop(f: Frame, cursor: number): string {
   let out = `${ESC}[H${ESC}[2J`;
+  const buttonRows = new Set(f.placed.map((p) => p.row));
   f.rows.forEach((row, y) => {
-    let text = row;
-    // paint buttons from the right so earlier columns keep their offsets
-    for (const [i, p] of [...f.placed.entries()].reverse()) {
-      if (p.row !== y) continue;
-      const label = text.slice(p.col, p.col + p.width);
-      text = text.slice(0, p.col) + (i === cursor ? inverse(label) : label) + text.slice(p.col + p.width);
-    }
-    out += `${ESC}[${y + 1};1H${y === 0 ? bold(text) : y === f.rows.length - 1 ? dim(text) : text}`;
+    if (buttonRows.has(y)) return;
+    out += `${ESC}[${y + 1};1H${y === 0 ? bold(row) : y === f.rows.length - 1 ? dim(row) : row}`;
+  });
+  f.placed.forEach((p, i) => {
+    const text = clip(cell(p.button), p.width);
+    const shown = i === cursor ? inverse(text) : p.button.color ? colorize(text, p.button.color) : text;
+    out += `${ESC}[${p.row + 1};${p.col + 1}H${shown}`;
   });
   return out;
 }
@@ -324,6 +478,8 @@ export interface ActDeps {
   spawn: (cmd: string[]) => void;
   start: (app: TopApp) => void;
   stop: (app: TopApp) => void;
+  /** Toggle a pane; returns a message for the message row. */
+  pane: (pane: PaneKind) => string | undefined;
   /** Wipe the workspace; returns a message for the message row. */
   cleanup: () => string | undefined;
 }
@@ -338,6 +494,8 @@ export function activate(button: Button, deps: ActDeps): string | undefined {
     case "editor":
       deps.spawn([...a.cmd, a.dir]);
       return undefined;
+    case "pane":
+      return deps.pane(a.pane);
     case "cleanup":
       return deps.cleanup();
     case "app": {

@@ -6,8 +6,8 @@ import { agentStateFile, glyphFor, readAgentState, UNKNOWN_GLYPH } from "../src/
 import { sidebarWidth } from "../src/config";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { clampScroll, type Entry, entryAt, scrollFor, sidebarRows, switchTab, targetFor } from "../src/sidebar";
-import type { Input } from "../src/term";
+import { clampScroll, type Entry, entryAt, entryLines, renderSidebar, scrollFor, sidebarLabel, stripConventional, switchTab, targetFor, visibleEntries } from "../src/sidebar";
+import { type Input, textWidth } from "../src/term";
 
 const entry = (ws: string, glyph = "○", label = ws): Entry => ({ ws, glyph, label });
 const key = (k: string): Input => ({ kind: "key", key: k });
@@ -26,22 +26,33 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-describe("rows", () => {
-  test("digit, glyph and label, fitted to the width; current is inverse", () => {
-    const rows = sidebarRows([entry("a", "●", "12 Add dark mode"), entry("b")], 0, 0, 5, 14);
-    expect(rows[0]).toBe("\x1b[7m1 ● 12 Add da…\x1b[0m");
-    expect(rows[1]).toBe("2 ○ b         ");
+describe("entry cards", () => {
+  test("title line has key, glyph and label; status line the state; current is inverse", () => {
+    const [title, sub] = entryLines({ ...entry("a", "●", "12 Add dark mode"), state: "waiting" }, 0, false, 22);
+    expect(title!.trimEnd()).toBe("⌥1 ● 12 Add dark mode");
+    expect(sub!).toContain("needs your input");
+    expect(sub!).toContain("\x1b[33m");
+    expect(entryLines(entry("b"), 1, true, 12)[0]).toBe("\x1b[7m⌥2 ○ b      \x1b[0m");
   });
 
-  test("only the first nine rows get a digit", () => {
-    const rows = sidebarRows(list, 0, 0, 12, 8);
-    expect(rows[8]!.startsWith("9 ")).toBe(true);
-    expect(rows[9]!.startsWith("  ")).toBe(true);
+  test("only the first nine entries get a key", () => {
+    expect(entryLines(entry("x"), 8, false, 10)[0]!.startsWith("⌥9 ")).toBe(true);
+    expect(entryLines(entry("x"), 9, false, 10)[0]!.startsWith("   ")).toBe(true);
   });
 
-  test("shows only the window", () => {
-    expect(sidebarRows(list, 0, 3, 2, 8)).toHaveLength(2);
-    expect(sidebarRows(list, 0, 3, 2, 8)[0]).toContain("4 ");
+  test("a frame fits the height and width exactly, with a card per entry and the limits inside", () => {
+    const rows = renderSidebar(list, 0, 0, 20, 30, undefined, 0);
+    expect(rows).toHaveLength(20);
+    for (const r of rows) expect(textWidth(r.replace(/\x1b\[[0-9;]*m/g, ""))).toBe(30);
+    expect(rows[0]).toContain("Workspaces");
+    expect(rows.at(-1)).toContain("╰");
+    expect(rows.join("\n")).toContain("Hourly");
+    expect(visibleEntries(20)).toBe(7);
+  });
+
+  test("a window starts at the offset", () => {
+    const rows = renderSidebar(list, 3, 3, 12, 30, undefined, 0);
+    expect(rows[1]).toContain("⌥4 ");
   });
 });
 
@@ -58,10 +69,13 @@ describe("scrolling", () => {
     expect(clampScroll(3, 4, 10)).toBe(0);
   });
 
-  test("entryAt maps screen rows through the offset", () => {
-    expect(entryAt(0, 3, 12)).toBe(3);
-    expect(entryAt(2, 10, 12)).toBeUndefined();
-    expect(entryAt(-1, 0, 12)).toBeUndefined();
+  test("entryAt maps two-row cards through the offset, skipping the border and the footer", () => {
+    expect(entryAt(0, 3, 12)).toBeUndefined();
+    expect(entryAt(1, 3, 12)).toBe(3);
+    expect(entryAt(2, 3, 12)).toBe(3);
+    expect(entryAt(3, 3, 12)).toBe(4);
+    expect(entryAt(5, 10, 12)).toBeUndefined();
+    expect(entryAt(9, 0, 12, 3)).toBeUndefined();
   });
 });
 
@@ -83,7 +97,7 @@ describe("targetFor", () => {
   });
 
   test("a click picks the row under it, through the scroll offset", () => {
-    expect(targetFor({ kind: "click", col: 3, row: 1 }, 0, 4, 12)).toBe(5);
+    expect(targetFor({ kind: "click", col: 3, row: 3 }, 0, 4, 12)).toBe(5);
     expect(targetFor({ kind: "click", col: 3, row: 40 }, 0, 0, 12)).toBeUndefined();
   });
 
@@ -94,7 +108,9 @@ describe("targetFor", () => {
 
 describe("agent state", () => {
   test("glyphs for known states, a dot for none", () => {
-    expect(glyphFor("busy")).toBe("●");
+    expect(glyphFor("busy")).toBe("🔄");
+    expect(glyphFor("waiting")).toBe("❓");
+    expect(glyphFor("bg")).toBe("⏳");
     expect(glyphFor(undefined)).toBe(UNKNOWN_GLYPH);
   });
 
@@ -133,7 +149,7 @@ describe("sidebar width", () => {
     writeFileSync(reposFile(), "[sidebar]\nwidth = 36\n");
     expect(sidebarWidth()).toBe(36);
     writeFileSync(reposFile(), "[sidebar]\nwidth = 3\n");
-    expect(() => sidebarWidth()).toThrow("sidebar.width must be an integer from 12 to 80");
+    expect(() => sidebarWidth()).toThrow("sidebar.width must be an integer from 12 to 200");
     writeFileSync(reposFile(), '[sidebar]\nwidth = "wide"\n');
     expect(() => sidebarWidth()).toThrow("sidebar.width");
   });
@@ -143,3 +159,16 @@ describe("sidebar width", () => {
   });
 });
 
+
+describe("sidebarLabel", () => {
+  test("drops the item id and a conventional prefix", () => {
+    expect(sidebarLabel("w1", { headline: "ENG-12 feat(top): add dark mode", title: "feat(top): add dark mode" })).toBe("add dark mode");
+    expect(sidebarLabel("w1", { headline: "12 Fix!: login loop" })).toBe("login loop");
+    expect(sidebarLabel("w1", { title: "Refactor the parser" })).toBe("Refactor the parser");
+  });
+  test("falls back to the workspace name without a title, and keeps a title that is only a prefix", () => {
+    expect(sidebarLabel("w1", {})).toBe("w1");
+    expect(sidebarLabel("w1", { headline: "12" })).toBe("w1");
+    expect(stripConventional("fix:")).toBe("fix:");
+  });
+});

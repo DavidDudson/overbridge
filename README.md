@@ -20,7 +20,7 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   `gh stack trunk`/`git worktree`,
   no workspace admin commands.
 - **Zellij tabs.** `overbridge up` opens a session with one tab per workspace: a sidebar down the
-  left, the top panel across the top, then the agent above a shell. The agent resumes with
+  left, the top panel across the top, then the agent. Terminal and diff panes open on demand to the agent's right (top panel buttons). The agent resumes with
   `--continue` when Claude has a transcript for the workspace dir. A file at
   `<zellij config dir>/layouts/overbridge.kdl` replaces the generated layout;
   `overbridge layout` prints what would be used and where it came from.
@@ -256,8 +256,8 @@ Use `--repo <name>` when two repos declare the same id and `--no-wait` to skip t
 ### Tab sidebar
 
 `overbridge sidebar` is the pane down the left of every tab. It lists each workspace with
-its agent state glyph (`○` idle, `●` busy, `✔` done, `?` waiting, `✖` ended, `·` unknown)
-and its item id and title when cached. Each tab runs its own copy and marks its own tab.
+its agent state emoji (🆕 empty: just started or cleared, 💤 idle, 🔄 busy, ✅ done, ⏳ done but background tasks still running, ❓ waiting for you, ❌ ended, `·` unknown)
+and its item title when cached (no id, no conventional-commit prefix; the workspace name until then), with the key that jumps to it (`⌥1` to `⌥9`, in tab order). Each tab runs its own copy and marks its own tab.
 Up/Down or `j`/`k` step to the neighbouring tab, a digit (1-9) jumps, a click picks a row;
 the new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. The width comes from the global config:
@@ -265,24 +265,41 @@ current tab visible. The width comes from the global config:
 ```toml
 # repos.toml
 [sidebar]
-width = 28    # 12 to 80
+width = 120   # 12 to 200
 ```
 
+At the foot sit Claude's usage limits (Hourly = 5-hour window, Weekly), coloured green, yellow or red by
+projected usage at reset, and a key legend. Claude's statusline script writes them to
+`<meta>/limits.json` as `{"at": <ms>, "fiveHour": {"pct", "resetsAt"}, "weekly": {...}}` (`resetsAt` in epoch
+seconds); unknown or over six hours old shows `–`.
+
+`overbridge next` (the `n` key in the sidebar, and a zellij binding) goes to the next tab that needs you:
+waiting for input first, then finished, then finished with background tasks running, cycling from the current tab.
 #### Agent state
 
 Each workspace's `.claude/settings.json` registers `overbridge hook` for `SessionStart`,
-`UserPromptSubmit`, `PostToolUse`, `Notification`, `Stop` and `SessionEnd`, next to the guard.
-It records `idle`, `busy`, `waiting`, `done` or `end` in `<meta>/agent/<ws>.json`. The hook
+`UserPromptSubmit`, `PostToolUse`, `Notification`, `PreCompact`, `Stop` and `SessionEnd`, next to the guard.
+It records `empty` (a session just started or cleared; Claude's later idle notification does not turn it into `waiting`, and the workspace becomes a Cleanup candidate if nothing is uncommitted or unpushed), `idle`, `busy`, `waiting`, `done` or `end` in `<meta>/agent/<ws>.json`. On `Stop` it also records the pids of shells still running under the session (background tasks); `done` reads as `bg` while any is alive. Plan-mode plans are written to `<ws>/plans/` (`plansDirectory` in the generated settings), not `~/.claude/plans`.
+The hook
 never blocks or fails the agent and loads none of the rest of the CLI. A `busy` state with no
 update for 10 minutes (the agent died mid-turn) and any state older than a day show as unknown.
 When the top panel's cache is over a minute old, the hook starts one `overbridge top refresh`
 in the background, at most once per 30 seconds.
 
+An agent that stops right after an *automatic* compaction (`PreCompact` with trigger `auto`, then `Stop` with no
+tool call or prompt between) is restarted: the `Stop` hook blocks the stop once with a "continue where you left off"
+reason. Manual `/compact` is left alone.
+
 ### Top panel
 
 `overbridge top` is a pane for the top of every tab: the item id and title, a button per
-PR and for the item, an editor button (`ide`), and a toggle per app with its state
-(`○` stopped, `◐` starting, `●` running, `✖` exited) and port. Click or Enter to
+PR and for the item, then at the right the launchers: a toggle per app with its state
+(⚫ stopped, 🟡 starting, 🟢 running, 🔴 exited) and port, an editor button (`ide`), and the 🤖 claude / 💻 terminal /
+🔀 diff buttons. PR buttons are coloured by status: 🟣 merged, 🟢 mergeable, 🔴 failing build or conflicts,
+🟡 build pending, 🔵 blocked (review or behind), ⚫ closed. Claude focuses the agent; terminal opens a shell in
+the first repo and diff opens the changes since the default branch (whitespace ignored, rendered by `delta`
+from your git config) in a column to the agent's right, and a second press closes them. Click or Enter to
 activate, arrows or Tab to move, `o` open a running app, `L` show its log, `r` refresh,
-`q` quit. It reads caches and local app records only; `overbridge top refresh` rebuilds
+`q` quit. Every button shows its key and the key presses it: `i` the work item, `p` the PR (`u`, `y`, `w`, `z` for more),
+`1`-`9` the apps, `e` the editor, `c` `t` `d` claude, terminal and diff, `x` Cleanup. It reads caches and local app records only; `overbridge top refresh` rebuilds
 the cache and the panel runs it every minute.

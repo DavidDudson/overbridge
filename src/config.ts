@@ -13,7 +13,7 @@ const HEADER = `# overbridge repo registry. Add with \`overbridge repo add <name
 # default_branch = "main"   # optional, defaults to the remote HEAD
 #
 # [sidebar]
-# width = 28                # columns of the tab sidebar, 12 to 80
+# width = 120               # columns of the tab sidebar, 12 to 200
 `;
 
 export function initReposFile() {
@@ -33,8 +33,8 @@ export function loadRepos(): Record<string, RepoSpec> {
   return out;
 }
 
-export const SIDEBAR_WIDTH = 28;
-export const SIDEBAR_WIDTH_RANGE = { min: 12, max: 80 } as const;
+export const SIDEBAR_WIDTH = 120;
+export const SIDEBAR_WIDTH_RANGE = { min: 12, max: 200 } as const;
 
 /** Columns of the tab sidebar: `[sidebar] width` in repos.toml, else the default. */
 export function sidebarWidth(): number {

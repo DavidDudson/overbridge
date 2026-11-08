@@ -3,6 +3,9 @@ import { dirname, join } from "node:path";
 import { ghReposCache, root, selfCommand, wsDir } from "./paths";
 import { shellQuote } from "./util";
 
+/** Where plan-mode plans are written, relative to the workspace folder. */
+export const PLANS_DIR = "plans";
+
 /**
  * (Re)write the files that bind a Claude session to workspace `ws`.
  * Idempotent; run on every launch so the hook path tracks the installed binary.
@@ -14,11 +17,13 @@ export function scaffold(ws: string) {
   const state = [{ hooks: [hook("hook")] }];
   const settings = {
     env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
+    // plan-mode plans live in the workspace folder, not ~/.claude/plans
+    plansDirectory: PLANS_DIR,
     hooks: {
       PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }],
       // agent state for the sidebar: see agent-hook.ts
       ...Object.fromEntries(
-        ["SessionStart", "UserPromptSubmit", "Notification", "Stop", "SessionEnd"].map((event) => [event, state]),
+        ["SessionStart", "UserPromptSubmit", "Notification", "PreCompact", "Stop", "SessionEnd"].map((event) => [event, state]),
       ),
       PostToolUse: [{ matcher: "*", hooks: [hook("hook")] }],
     },
