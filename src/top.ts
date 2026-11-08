@@ -46,7 +46,7 @@ export interface TopSnapshot {
   headline?: string;
   links: TopLink[];
   ide?: Ide;
-  /** `$EDITOR`, used for the editor button when no `ide` is configured. */
+  /** `$OVERBRIDGE_IDE`, else `$EDITOR`; used for the editor button when no `ide` is configured. */
   editor?: string;
   apps: TopApp[];
   message?: string;
@@ -165,13 +165,14 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
       problems.push(`${repo}: ${(e as Error).message}`);
     }
   }
+  const editor = ide ? undefined : env.OVERBRIDGE_IDE?.trim() || env.EDITOR?.trim() || undefined;
   return {
     ws,
     dir: wsDir(ws),
     ...(cache.headline ? { headline: cache.headline } : {}),
     links: cache.links,
     ...(ide ? { ide } : {}),
-    ...(!ide && env.EDITOR?.trim() ? { editor: env.EDITOR.trim() } : {}),
+    ...(editor ? { editor } : {}),
     apps,
     ...(problems.length ? { message: problems.join("; ") } : {}),
   };
@@ -196,10 +197,13 @@ const MARKS: Record<AppStatus, string> = {
 
 export const appUrlOf = (app: TopApp): string | undefined => appUrl(app.spec, app.port);
 
-/** Split an `$EDITOR` value like `code -w` into a command and a label (its program name). */
+/** Split an editor env value like `code -w` (or an ide name like `zed`) into a command and a label. */
 function editorFromEnv(editor: string | undefined): { label: string; cmd: string[] } | undefined {
   const cmd = editor?.split(/\s+/).filter(Boolean);
-  return cmd?.length ? { label: basename(cmd[0]!), cmd } : undefined;
+  if (!cmd?.length) return undefined;
+  const name = cmd[0]!;
+  if (cmd.length === 1 && name in IDE_COMMANDS) return { label: name, cmd: [IDE_COMMANDS[name as Ide]] };
+  return { label: basename(name), cmd };
 }
 
 /** Buttons in display order: links, editor, apps. Apps ruled out by `when:` are left out. */

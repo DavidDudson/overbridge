@@ -35,4 +35,4 @@ review:
   # exclude: [pr-size]                  # skipped after selection; default: none
   local-dir: .overbridge/personas       # repo-local personas; this is the default
 
-ide: vscode                    # vscode | zed | webstorm; default: $EDITOR (personal; usually leave unset)
+ide: vscode                    # vscode | zed | webstorm; default: $OVERBRIDGE_IDE, then $EDITOR (personal; usually leave unset)
