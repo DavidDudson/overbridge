@@ -5,8 +5,14 @@ import { join } from "node:path";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
-import { type ActDeps, activate, buttons, CLEANUP_ARM_MS, cleanable, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "../src/top";
+import { type ActDeps, activate, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "../src/top";
+import { textWidth } from "../src/term";
 import { fakeProvider } from "./helpers/fake-provider";
+
+const prJson = (state = "OPEN", extra: Record<string, unknown> = {}) =>
+  JSON.stringify({ url: "https://host/o/r/pull/3", state, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", statusCheckRollup: [], ...extra });
+const noPane = () => undefined;
+const editorButton = (s: TopSnapshot) => buttons(s).find((b) => b.action.kind === "editor");
 
 const spec = (id: string): AppSpec => ({ id, label: id, dir: ".", start: "x", ports: [], open: false, when: "always" });
 const app = (id: string, status: AppStatus, port?: number, available = true): TopApp => ({
@@ -20,22 +26,32 @@ const app = (id: string, status: AppStatus, port?: number, available = true): To
 const snap = (over: Partial<TopSnapshot> = {}): TopSnapshot => ({ ws: "w1", dir: "/w/w1", links: [], apps: [], ...over });
 
 describe("buttons and layout", () => {
-  test("orders links, editor, then apps with state marks and ports", () => {
+  test("links at the left; apps, editor and pane toggles at the right, with state marks and ports", () => {
     const s = snap({
       links: [{ label: "PR #3", url: "u3" }],
       ide: "zed",
       apps: [app("web", AppStatus.Running, 3000), app("db", AppStatus.Stopped), app("api", AppStatus.Starting, 3001), app("job", AppStatus.Exited, 3002)],
     });
-    expect(buttons(s).map((b) => b.label)).toEqual(["PR #3", "zed", "● web :3000", "○ db", "◐ api :3001", "✖ job :3002"]);
+    expect(buttons(s).map((b) => b.label)).toEqual(["📋 PR #3", "🟢 web :3000", "⚫ db", "🟡 api :3001", "🔴 job :3002", "📝 zed", "🤖 claude", "💻 terminal", "🔀 diff"]);
+    expect(buttons(s).filter((b) => b.side === "left")).toHaveLength(1);
+    expect(buttons(s).find((b) => b.label.includes("web"))!.color).toBe("green");
+    expect(buttons(s).find((b) => b.label.includes("job"))!.color).toBe("red");
   });
 
   test("leaves out apps ruled out by `when`", () => {
-    expect(buttons(snap({ apps: [app("web", AppStatus.Stopped, undefined, false)] }))).toEqual([]);
+    expect(buttons(snap({ apps: [app("web", AppStatus.Stopped, undefined, false)] })).filter((b) => b.action.kind === "app")).toEqual([]);
   });
 
-  test("headline, button row, message row", () => {
-    const f = layoutTop(snap({ headline: "12 Add dark mode", links: [{ label: "PR #3", url: "u" }], message: "oops" }), 60);
-    expect(f.rows).toEqual(["12 Add dark mode", "[ PR #3 ]", "oops"]);
+  test("headline, one button row with links left and launchers right, message row", () => {
+    const f = layoutTop(snap({ headline: "12 Add dark mode", links: [{ label: "PR #3", url: "u" }], message: "oops" }), 80);
+    expect(f.rows).toHaveLength(3);
+    expect(f.rows[0]).toBe("12 Add dark mode");
+    expect(f.rows[2]).toBe("oops");
+    expect(new Set(f.placed.map((p) => p.row))).toEqual(new Set([1]));
+    expect(f.placed[0]!.col).toBe(0);
+    const last = f.placed.at(-1)!;
+    expect(last.col + last.width).toBe(80);
+    expect(f.placed.map((p) => p.button.label)).toEqual(["📋 PR #3", "🤖 claude", "💻 terminal", "🔀 diff"]);
   });
 
   test("falls back to the workspace name without a headline", () => {
@@ -48,9 +64,9 @@ describe("buttons and layout", () => {
     expect(f.rows.length).toBeGreaterThan(3);
     expect(f.rows[0]).toBe("w1");
     expect(f.rows.at(-1)).toBe("m");
-    for (const row of f.rows) expect(row.length).toBeLessThanOrEqual(24);
-    expect(f.placed.map((p) => p.button.label)).toEqual(["alpha", "bravo", "charlie", "delta"]);
-    for (const p of f.placed) expect(f.rows[p.row]!.slice(p.col, p.col + p.width)).toBe(`[ ${p.button.label} ]`);
+    for (const row of f.rows) expect(textWidth(row)).toBeLessThanOrEqual(24);
+    for (const p of f.placed) expect(p.col + p.width).toBeLessThanOrEqual(24);
+    expect(f.placed.map((p) => p.button.label).slice(0, 4)).toEqual(["📋 alpha", "📋 bravo", "📋 charlie", "📋 delta"]);
   });
 
   test("clips an over-long headline", () => {
@@ -76,6 +92,7 @@ describe("activate", () => {
     spawn: (c) => calls.push(`spawn ${c.join(" ")}`),
     start: (a) => calls.push(`start ${a.spec.id}`),
     stop: (a) => calls.push(`stop ${a.spec.id}`),
+    pane: (p) => void calls.push(`pane ${p}`),
     cleanup: () => void calls.push("cleanup"),
   };
   beforeEach(() => void (calls.length = 0));
@@ -91,20 +108,20 @@ describe("activate", () => {
   });
 
   test("with no ide configured, the editor button falls back to $EDITOR", () => {
-    const [b] = buttons(snap({ editor: "/usr/bin/code -w" }));
-    expect(b!.label).toBe("code");
+    const b = editorButton(snap({ editor: "/usr/bin/code -w" }));
+    expect(b!.label).toBe("📝 code");
     activate(b!, deps);
     expect(calls).toEqual(["spawn /usr/bin/code -w /w/w1"]);
   });
 
   test("an ide name in the env maps to its command", () => {
-    const [b] = buttons(snap({ editor: "webstorm" }));
+    const b = editorButton(snap({ editor: "webstorm" }));
     expect(b!.action).toEqual({ kind: "editor", cmd: ["webstorm"], dir: "/w/w1" });
   });
 
   test("a configured ide wins over $EDITOR; neither means no editor button", () => {
-    expect(buttons(snap({ ide: "zed", editor: "vim" })).map((b) => b.label)).toEqual(["zed"]);
-    expect(buttons(snap({ editor: "  " }))).toEqual([]);
+    expect(editorButton(snap({ ide: "zed", editor: "vim" }))!.label).toBe("📝 zed");
+    expect(editorButton(snap({ editor: "  " }))).toBeUndefined();
   });
 
   test("an app toggles: stopped/exited start, starting/running stop", () => {
@@ -146,11 +163,11 @@ describe("refreshTop", () => {
   });
 
   test("caches the headline, the item link and the PR link", () => {
-    const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => "https://host/o/r/pull/3" });
+    const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson() });
     expect(cache.headline).toBe("12 Add dark mode");
     expect(cache.links).toEqual([
       { label: "12", url: "https://fake.test/items/12" },
-      { label: "PR #3", url: "https://host/o/r/pull/3" },
+      { label: "PR #3", url: "https://host/o/r/pull/3", status: "mergeable" },
     ]);
     expect(readTopCache("w1")).toEqual(cache);
   });
@@ -167,7 +184,7 @@ describe("refreshTop", () => {
   });
 
   test("a failed lookup keeps the old values and reports a message", () => {
-    refreshTop("w1", { provider: () => fakeProvider(items), exec: () => "https://host/o/r/pull/3" });
+    refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson() });
     const cache = refreshTop("w1", { provider: () => { throw new Error("offline"); }, exec: () => undefined });
     expect(cache.headline).toBe("12 Add dark mode");
     expect(cache.links).toHaveLength(2);
@@ -177,14 +194,14 @@ describe("refreshTop", () => {
 });
 
 describe("cleanup", () => {
-  test("Cleanup is the last button, and only when the workspace can be wiped", () => {
+  test("Cleanup follows the links at the left, and only when the workspace can be wiped", () => {
     const base = snap({ links: [{ label: "PR #3", url: "u3" }], ide: "zed", apps: [app("web", AppStatus.Stopped)] });
-    expect(buttons(base).map((b) => b.label)).not.toContain("Cleanup");
-    expect(buttons({ ...base, cleanup: true }).map((b) => b.label)).toEqual(["PR #3", "zed", "○ web", "Cleanup"]);
+    expect(buttons(base).map((b) => b.label)).not.toContain("🧹 Cleanup");
+    expect(buttons({ ...base, cleanup: true }).filter((b) => b.side === "left").map((b) => b.label)).toEqual(["📋 PR #3", "🧹 Cleanup"]);
   });
 
   test("activating Cleanup calls the cleanup dep and shows its message", () => {
-    const deps: ActDeps = { open: () => {}, spawn: () => {}, start: () => {}, stop: () => {}, cleanup: () => "armed" };
+    const deps: ActDeps = { open: () => {}, spawn: () => {}, start: () => {}, stop: () => {}, pane: noPane, cleanup: () => "armed" };
     expect(activate({ label: "Cleanup", action: { kind: "cleanup" } }, deps)).toBe("armed");
   });
 
@@ -208,7 +225,7 @@ describe("cleanable", () => {
   const items = [{ id: "12", title: "Add dark mode", url: "x" }];
   /** Cache the PR state as `gh` would report it. */
   const cachePr = (state: string) =>
-    refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => (cmd.includes("state") ? state : "https://host/o/r/pull/3") });
+    refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson(state) });
 
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "overbridge-clean-"));
@@ -244,6 +261,16 @@ describe("cleanable", () => {
     expect(cleanable("w1")).toBe(false);
   });
 
+  test("a just-cleared agent makes it a candidate even without an open PR, but dirty trees still block", () => {
+    cachePr("MERGED");
+    expect(cleanable("w1")).toBe(false);
+    mkdirSync(join(tmp, ".overbridge", "agent"), { recursive: true });
+    writeFileSync(join(tmp, ".overbridge", "agent", "w1.json"), JSON.stringify({ state: "empty", at: Date.now() }));
+    expect(cleanable("w1")).toBe(true);
+    writeFileSync(join(wt, "scratch.txt"), "x");
+    expect(cleanable("w1")).toBe(false);
+  });
+
   test("uncommitted changes block it", () => {
     cachePr("OPEN");
     writeFileSync(join(wt, "scratch.txt"), "x");
@@ -268,5 +295,60 @@ describe("cleanable", () => {
     expect((await snapshotTop("w1", {})).cleanup).toBe(true);
     writeFileSync(join(wt, "scratch.txt"), "x");
     expect((await snapshotTop("w1", {})).cleanup).toBeUndefined();
+  });
+});
+
+describe("classifyPr", () => {
+  const run = (conclusion: string, status = "COMPLETED") => ({ statusCheckRollup: [{ status, conclusion }] });
+  test("merged and closed come first", () => {
+    expect(classifyPr({ state: "MERGED", ...run("FAILURE") })).toBe("merged");
+    expect(classifyPr({ state: "CLOSED" })).toBe("closed");
+  });
+  test("a failing check is failing, even with conflicts or others pending", () => {
+    expect(classifyPr({ state: "OPEN", mergeable: "CONFLICTING", statusCheckRollup: [{ status: "COMPLETED", conclusion: "FAILURE" }, { status: "IN_PROGRESS" }] })).toBe("failing");
+    expect(classifyPr({ state: "OPEN", statusCheckRollup: [{ state: "ERROR" }] })).toBe("failing");
+  });
+  test("conflicts, then pending, then mergeability", () => {
+    expect(classifyPr({ state: "OPEN", mergeable: "CONFLICTING" })).toBe("conflict");
+    expect(classifyPr({ state: "OPEN", statusCheckRollup: [{ status: "IN_PROGRESS" }] })).toBe("pending");
+    expect(classifyPr({ state: "OPEN", statusCheckRollup: [{ state: "PENDING" }] })).toBe("pending");
+    expect(classifyPr({ state: "OPEN", mergeStateStatus: "CLEAN", ...run("SUCCESS") })).toBe("mergeable");
+    expect(classifyPr({ state: "OPEN", mergeStateStatus: "BLOCKED", ...run("SUCCESS") })).toBe("blocked");
+    expect(classifyPr({ state: "OPEN" })).toBe("unknown");
+  });
+  test("PR links are coloured by status", () => {
+    const b = buttons(snap({ links: [{ label: "PR #3", url: "u", status: "merged" }] }))[0]!;
+    expect(b).toMatchObject({ label: "🟣 PR #3", color: "purple" });
+  });
+});
+
+describe("button keys", () => {
+  test("issue i, PR p, apps 1-9, editor e, panes c t d, cleanup x, shown in the button", () => {
+    const s = snap({
+      links: [{ label: "12", url: "ui" }, { label: "PR #3", url: "up", status: "mergeable" }],
+      ide: "zed",
+      cleanup: true,
+      apps: [app("web", AppStatus.Running, 3000), app("db", AppStatus.Stopped)],
+    });
+    const keys = Object.fromEntries(buttons(s).map((b) => [b.label, b.key]));
+    expect(keys).toEqual({
+      "📋 12": "i",
+      "🟢 PR #3": "p",
+      "🧹 Cleanup": "x",
+      "🟢 web :3000": "1",
+      "⚫ db": "2",
+      "📝 zed": "e",
+      "🤖 claude": "c",
+      "💻 terminal": "t",
+      "🔀 diff": "d",
+    });
+    expect(cell(buttons(s)[1]!)).toBe("[ 🟢 PR #3 · p ]");
+  });
+
+  test("several PRs get p, u, y...; no key clashes with the panel's own", () => {
+    const links = ["a #1", "b #2", "c #3"].map((label) => ({ label, url: label, status: "pending" as const }));
+    const keys = buttons(snap({ links })).map((b) => b.key).slice(0, 3);
+    expect(keys).toEqual(["p", "u", "y"]);
+    for (const k of ["q", "r", "o", "l", "h", "L"]) expect(buttons(snap({ links, ide: "zed", cleanup: true })).map((b) => b.key)).not.toContain(k);
   });
 });

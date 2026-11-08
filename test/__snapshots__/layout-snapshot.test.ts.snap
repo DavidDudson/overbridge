@@ -10,33 +10,31 @@ exports[`generated layout two workspaces, one resuming 1`] = `
   }
   tab name="ws1" focus=true {
     pane split_direction="vertical" {
-      pane name="sidebar" command="overbridge" cwd="/ws-root/ws1" size=28 borderless=true focus=true {
+      pane name="sidebar" command="overbridge" cwd="/ws-root/ws1" size=120 borderless=true focus=true {
         args "sidebar" "--ws" "ws1"
       }
       pane split_direction="horizontal" {
         pane name="top" command="overbridge" cwd="/ws-root/ws1" size=4 borderless=true {
           args "top" "--ws" "ws1"
         }
-        pane name="ws1 · claude" command="overbridge" cwd="/ws-root/ws1" size="65%" {
+        pane name="ws1 · claude" command="overbridge" cwd="/ws-root/ws1" {
           args "claude" "ws1"
         }
-        pane name="ws1 · shell" cwd="/ws-root/ws1"
       }
     }
   }
   tab name="ws2" {
     pane split_direction="vertical" {
-      pane name="sidebar" command="overbridge" cwd="/ws-root/ws2" size=28 borderless=true focus=true {
+      pane name="sidebar" command="overbridge" cwd="/ws-root/ws2" size=120 borderless=true focus=true {
         args "sidebar" "--ws" "ws2"
       }
       pane split_direction="horizontal" {
         pane name="top" command="overbridge" cwd="/ws-root/ws2" size=4 borderless=true {
           args "top" "--ws" "ws2"
         }
-        pane name="ws2 · claude" command="overbridge" cwd="/ws-root/ws2" size="65%" {
+        pane name="ws2 · claude" command="overbridge" cwd="/ws-root/ws2" {
           args "claude" "ws2" "--continue"
         }
-        pane name="ws2 · shell" cwd="/ws-root/ws2"
       }
     }
   }
@@ -61,10 +59,9 @@ exports[`generated layout a wide sidebar and a self command with arguments 1`] =
         pane name="top" command="/usr/bin/bun" cwd="/ws-root/ws1" size=4 borderless=true {
           args "/opt/overbridge/src/cli.ts" "top" "--ws" "ws1"
         }
-        pane name="ws1 · claude" command="/usr/bin/bun" cwd="/ws-root/ws1" size="65%" {
+        pane name="ws1 · claude" command="/usr/bin/bun" cwd="/ws-root/ws1" {
           args "/opt/overbridge/src/cli.ts" "claude" "ws1"
         }
-        pane name="ws1 · shell" cwd="/ws-root/ws1"
       }
     }
   }

@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { AppStatus, logPath, openBrowser, startApp, stopApp, waitReady } from "./apps";
 import { requireWs } from "./commands";
 import { root, selfCommand } from "./paths";
-import { type ActDeps, activate, type Button, CLEANUP_ARM_MS, cleanable, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
+import { togglePane } from "./panes";
+import { ALT_COMMANDS, type ActDeps, activate, type Button, CLEANUP_ARM_MS, cleanable, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
 import { ENTER_SCREEN, LEAVE_SCREEN } from "./term";
 import { log, run } from "./util";
 
@@ -25,7 +26,7 @@ export function topRefresh(wsOpt?: string) {
  */
 function wipe(ws: string, apps: TopApp[]): string | undefined {
   refreshTop(ws);
-  if (!cleanable(ws)) return `${ws} is no longer clean (open PR, nothing uncommitted or unpushed); not wiping`;
+  if (!cleanable(ws)) return `${ws} is no longer clean (empty agent or open PR, nothing uncommitted or unpushed); not wiping`;
   try {
     for (const app of apps) if (app.status === AppStatus.Running || app.status === AppStatus.Starting) stopApp(ws, app.repo, app.spec, app.repoDir);
   } catch (e) {
@@ -63,7 +64,10 @@ export async function topPanel(wsOpt?: string) {
     open: openBrowser,
     spawn: (cmd) => {
       try {
-        Bun.spawn({ cmd, stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
+        const head = cmd[0]!;
+        const alt = ALT_COMMANDS[head];
+        const resolved = !Bun.which(head) && alt && Bun.which(alt) ? [alt, ...cmd.slice(1)] : cmd;
+        Bun.spawn({ cmd: resolved, stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
       } catch {
         note = `${cmd[0]} is not installed`;
       }
@@ -77,6 +81,7 @@ export async function topPanel(wsOpt?: string) {
       }
     },
     stop: (app: TopApp) => void stopApp(ws, app.repo, app.spec, app.repoDir),
+    pane: (pane) => togglePane(ws, pane),
     cleanup: () => {
       const press = pressCleanup(armedAt, Date.now());
       armedAt = press.armedAt;
@@ -145,6 +150,11 @@ export async function topPanel(wsOpt?: string) {
       note = undefined;
       const n = frame.placed.length;
       if (key === "q" || key === "\x03") return quit();
+      const byKey = key.length === 1 ? frame.placed.findIndex((p) => p.button.key === key) : -1;
+      if (byKey >= 0) {
+        cursor = byKey;
+        return void act(current());
+      }
       if (key === `${ESC}[C` || key === "l" || key === "\t") cursor = n ? (cursor + 1) % n : 0;
       else if (key === `${ESC}[D` || key === "h" || key === `${ESC}[Z`) cursor = n ? (cursor + n - 1) % n : 0;
       else if (key === "\r" || key === " ") return void act(current());

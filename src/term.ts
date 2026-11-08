@@ -9,12 +9,33 @@ export const inverse = (s: string) => `${ESC}[7m${s}${ESC}[0m`;
 export const dim = (s: string) => `${ESC}[2m${s}${ESC}[0m`;
 export const bold = (s: string) => `${ESC}[1m${s}${ESC}[0m`;
 
+export const COLORS = { red: 31, green: 32, yellow: 33, blue: 34, purple: 35, cyan: 36, grey: 90 } as const;
+export type Color = keyof typeof COLORS;
+export const colorize = (s: string, color: Color) => `${ESC}[${COLORS[color]}m${s}${ESC}[0m`;
+
+/** Emoji below U+1F000 that terminals draw two columns wide. Every other emoji the panes use is astral. */
+const WIDE_BMP = new Set([0x23f3, 0x2705, 0x2753, 0x274c, 0x26aa, 0x26ab]);
+
+/** Columns one code point takes: 2 for emoji, 0 for variation selectors and joiners, else 1. */
+const cpWidth = (cp: number) => (cp === 0xfe0f || cp === 0x200d ? 0 : cp >= 0x1f000 || WIDE_BMP.has(cp) ? 2 : 1);
+
+/** Terminal columns `text` takes (no escape sequences). */
+export const textWidth = (text: string): number => [...text].reduce((n, ch) => n + cpWidth(ch.codePointAt(0)!), 0);
+
 /** `text` cut or padded to exactly `width` columns; a cut ends in an ellipsis. */
 export function fit(text: string, width: number): string {
   if (width <= 0) return "";
-  const chars = [...text];
-  if (chars.length <= width) return text + " ".repeat(width - chars.length);
-  return `${chars.slice(0, width - 1).join("")}…`;
+  const full = textWidth(text);
+  if (full <= width) return text + " ".repeat(width - full);
+  let out = "";
+  let used = 0;
+  for (const ch of text) {
+    const w = cpWidth(ch.codePointAt(0)!);
+    if (used + w > width - 1) break;
+    out += ch;
+    used += w;
+  }
+  return `${out}…${" ".repeat(width - 1 - used)}`;
 }
 
 /**
@@ -82,3 +103,14 @@ export function decodeInput(data: string): Input[] {
   }
   return out;
 }
+
+/** Box-drawing for a rounded, dim frame around a pane. `width` is the full pane width. */
+const edge = (s: string) => colorize(s, "grey");
+export const boxTop = (title: string, width: number) => {
+  const label = title ? ` ${title} ` : "";
+  return edge(`╭─${label}${"─".repeat(Math.max(0, width - 3 - textWidth(label)))}╮`);
+};
+export const boxDivider = (width: number) => edge(`├${"─".repeat(Math.max(0, width - 2))}┤`);
+export const boxBottom = (width: number) => edge(`╰${"─".repeat(Math.max(0, width - 2))}╯`);
+/** A row of content (already styled, fitted to `width - 4`) between the side borders with one column of padding. */
+export const boxRow = (content: string) => `${edge("│")} ${content} ${edge("│")}`;

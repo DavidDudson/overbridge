@@ -3,7 +3,9 @@ import * as cmd from "./commands";
 import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
 import { item } from "./item";
-import { sidebar } from "./sidebar";
+import { next } from "./next";
+import { diff } from "./panes";
+import { currentTab, sidebar } from "./sidebar";
 import { start } from "./start";
 import { topPanel, topRefresh } from "./top-run";
 import { silenceLegacyWarnings } from "./paths";
@@ -18,7 +20,10 @@ Setup
   overbridge config check|show [path]           validate / print a repo's overbridge.yml
   overbridge config get <key> [path]            print one value, e.g. commands.test
   overbridge app [id [action]]                  list or start|stop|restart|status|log repo apps
-  overbridge sync                               fetch every bare repo
+  overbridge next                               go to the next tab needing you: waiting for input, then finished,
+                                        then finished with background tasks (zellij binds it to a key)
+  overbridge diff [--ws name]                   changes since the default branch, whitespace ignored, via delta
+  overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name]                tab sidebar pane (run by the generated layout)
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
 
@@ -96,6 +101,14 @@ async function main(argv: string[]): Promise<number> {
     case "sidebar": {
       const { values } = opts(rest, ws);
       await sidebar(values.ws);
+      break;
+    }
+    case "next":
+      console.log(next(currentTab()));
+      break;
+    case "diff": {
+      const { values } = opts(rest, ws);
+      diff(cmd.requireWs(values.ws));
       break;
     }
     case "top": {

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
-import { type Entry, sidebarRows } from "../src/sidebar";
+import { type Entry, renderSidebar } from "../src/sidebar";
 import { ENTER_SCREEN, frame, LEAVE_SCREEN } from "../src/term";
-import { layoutTop, paintTop, type TopApp, type TopSnapshot } from "../src/top";
+import { cell, layoutTop, paintTop, type TopApp, type TopSnapshot } from "../src/top";
 import { Screen } from "./helpers/screen";
 
 const entry = (ws: string, glyph: string, label = ws): Entry => ({ ws, glyph, label });
@@ -25,33 +25,42 @@ describe("virtual screen", () => {
 });
 
 describe("sidebar on screen", () => {
-  const list = [entry("ws1", "●", "12 Add dark mode"), entry("ws2", "?"), entry("ws3", "·"), entry("ws4", "✔", "7 Fix the login redirect loop")];
-  const draw = (current: number, offset: number, height: number, width: number) =>
-    new Screen(width, height).write(frame(sidebarRows(list, current, offset, height, width), height, width));
+  const list: Entry[] = [
+    { ...entry("ws1", "●", "12 Add dark mode"), state: "busy" },
+    { ...entry("ws2", "?"), state: "waiting" },
+    entry("ws3", "·"),
+    { ...entry("ws4", "✔", "7 Fix the login redirect loop"), state: "done" },
+  ];
+  const draw = (current: number, offset: number, height: number, width: number, items = list) =>
+    new Screen(width, height).write(frame(renderSidebar(items, current, offset, height, width, undefined, 0), height, width));
 
-  test("shows digit, glyph and label per row with the current tab inverse", () => {
-    const s = draw(1, 0, 6, 24);
-    expect(s.lines()).toEqual(["1 ● 12 Add dark mode", "2 ? ws2", "3 · ws3", "4 ✔ 7 Fix the login red…"]);
-    expect(s.inverseRows()).toEqual([1]);
-    expect(s.inverseText(1)).toBe("2 ? ws2");
+  test("a rounded frame with a padded two-line card per workspace; the current card is inverse", () => {
+    const s = draw(1, 0, 16, 34);
+    expect(s.line(0)).toMatch(/^╭─ Workspaces ─+╮$/);
+    expect(s.line(1)).toMatch(/^│ ⌥1 ● 12 Add dark mode +│$/);
+    expect(s.line(2)).toMatch(/^│ +working +│$/);
+    expect(s.line(3)).toMatch(/^│ ⌥2 \? ws2 +│$/);
+    expect(s.line(4)).toMatch(/^│ +needs your input +│$/);
+    expect(s.inverseRows()).toEqual([3, 4]);
+    expect(s.line(15)).toMatch(/^╰─+╯$/);
   });
 
-  test("every row fills the pane width and nothing spills past it", () => {
-    const s = draw(0, 0, 6, 16);
-    for (let y = 0; y < 4; y++) expect(s.line(y).length).toBeLessThanOrEqual(16);
-    expect(s.line(3)).toBe("4 ✔ 7 Fix the l…");
+  test("long labels are cut inside the padding, never over the border", () => {
+    const s = draw(0, 0, 16, 24);
+    expect(s.line(7)).toBe("│ ⌥4 ✔ 7 Fix the logi… │");
+    for (let y = 0; y < 16; y++) expect(s.line(y).length).toBeLessThanOrEqual(24);
   });
 
-  test("a scrolled window starts at the offset and blanks the rest", () => {
-    const s = draw(3, 2, 5, 24);
-    expect(s.lines()).toEqual(["3 · ws3", "4 ✔ 7 Fix the login red…"]);
-    expect(s.inverseRows()).toEqual([1]);
+  test("a scrolled window starts at the offset", () => {
+    const s = draw(3, 2, 10, 30);
+    expect(s.line(1)).toContain("⌥3 · ws3");
+    expect(s.line(3)).toContain("⌥4 ✔");
   });
 
-  test("a shorter list leaves no rows behind from a longer one", () => {
-    const s = draw(0, 0, 6, 24);
-    s.write(frame(sidebarRows(list.slice(0, 1), 0, 0, 6, 24), 6, 24));
-    expect(s.lines()).toEqual(["1 ● 12 Add dark mode"]);
+  test("a shorter list leaves no cards behind from a longer one", () => {
+    const s = draw(0, 0, 16, 30);
+    s.write(frame(renderSidebar(list.slice(0, 1), 0, 0, 16, 30, undefined, 0), 16, 30));
+    expect(s.lines().join("\n")).not.toContain("ws2");
   });
 });
 
@@ -80,30 +89,35 @@ describe("top panel on screen", () => {
   };
 
   test("headline, one row of buttons, message", () => {
-    const { s } = draw(80, 0);
-    expect(s.lines()).toEqual(["12 Add dark mode", "[ 12 ] [ PR #3 ] [ zed ] [ ● web :3000 ] [ ○ db ]", "refresh failed"]);
+    const { f, s } = draw(160, 0);
+    expect(f.rows).toHaveLength(3);
+    expect(s.line(0)).toBe("12 Add dark mode");
+    expect(s.line(2)).toBe("refresh failed");
+    expect(new Set(f.placed.map((p) => p.row))).toEqual(new Set([1]));
+    expect(f.placed.map((p) => p.button.label)).toEqual(["📋 12", "📋 PR #3", "🟢 web :3000", "⚫ db", "📝 zed", "🤖 claude", "💻 terminal", "🔀 diff"]);
+    for (const p of f.placed) expect(s.line(1)).toContain(cell(p.button));
   });
 
   test("the cursor button is the only inverse text", () => {
-    const { s } = draw(80, 3);
+    const { s } = draw(160, 2);
     expect(s.inverseRows()).toEqual([1]);
-    expect(s.inverseText(1)).toBe("[ ● web :3000 ]");
+    expect(s.inverseText(1)).toBe("[ 🟢 web :3000 · 1 ]");
   });
 
   test("headline is bold and the message dim", () => {
-    const { s } = draw(80, 0);
+    const { s } = draw(160, 0);
     expect(s.cells[0]![0]!.bold).toBe(true);
     expect(s.cells[2]![0]!.dim).toBe(true);
     expect(s.cells[1]![0]!.bold).toBe(false);
   });
 
   test("narrow panes wrap buttons between headline and message without clipping them", () => {
-    const { f, s } = draw(24, 0);
+    const { f, s } = draw(24, 0, 20);
     const rows = s.lines();
     expect(rows[0]).toBe("12 Add dark mode");
     expect(rows.at(-1)).toBe("refresh failed");
     expect(rows.length).toBeGreaterThan(3);
-    for (const p of f.placed) expect(s.line(p.row).slice(p.col, p.col + p.width)).toBe(`[ ${p.button.label} ]`);
+    for (const p of f.placed) expect(s.line(p.row)).toContain(cell(p.button));
   });
 
   test("resizing is a redraw: wide to narrow to wide gives the same screen as drawing wide", () => {

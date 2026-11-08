@@ -1,12 +1,15 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { glyphFor, readAgentState } from "./agent-state";
+import { type AgentState, glyphFor, readAgentState } from "./agent-state";
 import { requireWs } from "./commands";
 import { metaDir } from "./paths";
+import { type Limits, limitRows, readLimits } from "./limits";
+import { next } from "./next";
 import { readState } from "./state";
-import { decodeInput, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN } from "./term";
-import { readTopCache } from "./top";
+import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
+import { readTopCache, type TopCache } from "./top";
 import { naturalSort, run } from "./util";
+export const LEGEND = "⌥1-9 go  ⌥w next";
 
 /**
  * The vertical tab sidebar. Every tab runs its own copy, which marks its own tab as current.
@@ -20,15 +23,45 @@ export interface Entry {
   ws: string;
   /** Agent state glyph. */
   glyph: string;
+  state?: AgentState | undefined;
   /** Item id and title when known, else the workspace name. */
   label: string;
 }
 
-/** Entries for every workspace, in tab order. */
-export function entries(): Entry[] {
-  return Object.keys(readState().workspaces)
-    .sort(naturalSort)
-    .map((ws) => ({ ws, glyph: glyphFor(readAgentState(ws)), label: readTopCache(ws).headline ?? ws }));
+const CONVENTIONAL = /^(?:feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(?:\([^)]*\))?!?:\s*/i;
+
+/** A title without its conventional-commit prefix: `feat(scope): add x` is `add x`. */
+export const stripConventional = (title: string): string => title.replace(CONVENTIONAL, "").trim() || title;
+
+/**
+ * What the sidebar shows for a workspace: the item's title with no id and no conventional prefix,
+ * else the workspace name when no title is cached yet.
+ */
+export function sidebarLabel(ws: string, cache: Pick<TopCache, "headline" | "title">): string {
+  const title = cache.title ?? (cache.headline?.includes(" ") ? cache.headline.replace(/^\S+\s+/, "") : undefined);
+  return title ? stripConventional(title) : ws;
+}
+
+/** Workspace names in zellij's tab order; empty outside zellij. */
+export function tabOrder(exec: (cmd: string[]) => { ok: boolean; stdout: string } = (cmd) => run(cmd)): string[] {
+  const r = exec(["zellij", "action", "query-tab-names"]);
+  return r.ok ? r.stdout.split("\n").map((s) => s.trim()).filter(Boolean) : [];
+}
+
+/** The workspace whose tab is focused; undefined outside zellij. */
+export function currentTab(exec: (cmd: string[]) => { ok: boolean; stdout: string } = (cmd) => run(cmd)): string | undefined {
+  const r = exec(["zellij", "action", "current-tab-info"]);
+  return r.ok ? /^name: (.+)$/m.exec(r.stdout)?.[1]?.trim() : undefined;
+}
+
+/** Entries for every workspace, in tab order so the Alt+digit keys match the digits shown. */
+export function entries(order: string[] = tabOrder()): Entry[] {
+  const names = Object.keys(readState().workspaces).sort(naturalSort);
+  const rank = (ws: string) => { const i = order.indexOf(ws); return i < 0 ? order.length : i; };
+  return [...names].sort((a, b) => rank(a) - rank(b)).map((ws) => {
+    const state = readAgentState(ws);
+    return { ws, glyph: glyphFor(state), state, label: sidebarLabel(ws, readTopCache(ws)) };
+  });
 }
 
 /** The scroll offset closest to `offset` that shows row `selected` in a window of `height` rows. */
@@ -42,29 +75,71 @@ export function scrollFor(selected: number, offset: number, height: number): num
 /** Keep `offset` valid for a list of `count` rows in `height` rows. */
 export const clampScroll = (offset: number, count: number, height: number) => Math.max(0, Math.min(offset, count - height));
 
-/** The visible rows, styled: the current tab inverse, a digit (1-9) to jump to each of the first nine. */
-export function sidebarRows(list: Entry[], current: number, offset: number, height: number, width: number): string[] {
-  return list.slice(offset, offset + height).map((e, i) => {
-    const index = offset + i;
-    const digit = index < 9 ? String(index + 1) : " ";
-    const text = fit(`${digit} ${e.glyph} ${e.label}`, width);
-    return index === current ? inverse(text) : text;
-  });
+/** Screen rows one workspace takes: its title line and a status line. */
+export const ENTRY_ROWS = 2;
+/** Rows above the list (top border) and below it (divider, two limit rows, key legend, bottom border). */
+export const CHROME_TOP = 1;
+export const CHROME_BOTTOM = 5;
+
+/** Workspaces that fit in a pane `height` rows tall; always at least one. */
+export const visibleEntries = (height: number) => Math.max(1, Math.floor((height - CHROME_TOP - CHROME_BOTTOM) / ENTRY_ROWS));
+
+const STATE_TEXT: Record<AgentState, { text: string; color: Color }> = {
+  waiting: { text: "needs your input", color: "yellow" },
+  empty: { text: "empty · can clean up", color: "grey" },
+  done: { text: "finished", color: "green" },
+  bg: { text: "finished · tasks running", color: "cyan" },
+  busy: { text: "working", color: "blue" },
+  idle: { text: "idle", color: "grey" },
+  end: { text: "ended", color: "red" },
+};
+
+/** The two lines of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line. */
+export function entryLines(e: Entry, index: number, selected: boolean, inner: number): string[] {
+  const digit = index < 9 ? `⌥${index + 1}` : "  ";
+  const title = fit(`${digit} ${e.glyph} ${e.label}`, inner);
+  const status = e.state ? STATE_TEXT[e.state] : undefined;
+  const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
+  const sub = fit(`${indent}${status?.text ?? ""}`, inner);
+  if (selected) return [inverse(title), inverse(sub)];
+  return [title, status ? colorize(sub, status.color) : sub];
 }
 
-/** The entry index shown on screen row `row`, if any. */
-export function entryAt(row: number, offset: number, count: number): number | undefined {
-  const index = offset + row;
-  return row >= 0 && index < count ? index : undefined;
+/**
+ * The whole sidebar as `height` rows of `width` columns: a rounded frame titled "Workspaces" with
+ * a padded two-line card per workspace, then a divider, the usage limits and the key legend.
+ */
+export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now()): string[] {
+  const inner = Math.max(0, width - 4);
+  const bodyRows = Math.max(0, height - CHROME_TOP - CHROME_BOTTOM);
+  const body = list
+    .slice(offset, offset + visibleEntries(height))
+    .flatMap((e, i) => entryLines(e, offset + i, offset + i === current, inner));
+  while (body.length < bodyRows) body.push(" ".repeat(inner));
+  return [
+    boxTop("Workspaces", width),
+    ...body.slice(0, bodyRows).map(boxRow),
+    boxDivider(width),
+    ...limitRows(limits, inner, now).map(boxRow),
+    boxRow(dim(fit(LEGEND, inner))),
+    boxBottom(width),
+  ];
+}
+
+/** The entry index under screen row `row`, if any; `visible` is how many entries are on screen. */
+export function entryAt(row: number, offset: number, count: number, visible = count): number | undefined {
+  const slot = Math.floor((row - CHROME_TOP) / ENTRY_ROWS);
+  const index = offset + slot;
+  return row >= CHROME_TOP && slot < visible && index < count ? index : undefined;
 }
 
 /**
  * Which tab an input asks for, as an entry index; undefined for none or for the current one.
  * Up/`k` and down/`j` step (no wrap), a digit jumps, a click picks a row.
  */
-export function targetFor(input: Input, current: number, offset: number, count: number): number | undefined {
+export function targetFor(input: Input, current: number, offset: number, count: number, visible = count): number | undefined {
   let target: number | undefined;
-  if (input.kind === "click") target = entryAt(input.row, offset, count);
+  if (input.kind === "click") target = entryAt(input.row, offset, count, visible);
   else if (input.key === "up" || input.key === "k") target = current - 1;
   else if (input.key === "down" || input.key === "j") target = current + 1;
   else if (/^[1-9]$/.test(input.key)) target = Number(input.key) - 1;
@@ -108,9 +183,9 @@ export async function sidebar(wsOpt?: string) {
     const list = entries();
     const current = Math.max(0, list.findIndex((e) => e.ws === self));
     const { height, width } = size();
-    offset = clampScroll(scrollFor(current, offset, height), list.length, height);
-    const rows = sidebarRows(list, current, offset, height, width);
-    process.stdout.write(frame(rows, height, width));
+    const visible = visibleEntries(height);
+    offset = clampScroll(scrollFor(current, offset, visible), list.length, visible);
+    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits()), height, width));
   };
 
   await new Promise<void>((resolve) => {
@@ -127,9 +202,13 @@ export async function sidebar(wsOpt?: string) {
     process.stdin.on("data", (buf) => {
       for (const input of decodeInput(buf.toString())) {
         if (input.kind === "key" && (input.key === "q" || input.key === "ctrl-c")) return quit();
+        if (input.kind === "key" && input.key === "n") {
+          next(self);
+          continue;
+        }
         const list = entries();
         const current = list.findIndex((e) => e.ws === self);
-        const target = targetFor(input, current, offset, list.length);
+        const target = targetFor(input, current, offset, list.length, visibleEntries(size().height));
         if (target !== undefined) switchTab(list[target]!.ws);
       }
     });
