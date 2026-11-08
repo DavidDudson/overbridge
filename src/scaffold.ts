@@ -7,6 +7,25 @@ import { shellQuote } from "./util";
 export const PLANS_DIR = "plans";
 
 /**
+ * Commands the overbridge skills run that auto mode's classifier otherwise blocks as unrequested writes to a
+ * connected app. Merging a PR (`gh pr merge`, `gh stack merge`) stays gated: the user merges.
+ */
+export const ALLOWED_COMMANDS = [
+  "Bash(overbridge:*)",
+  "Bash(gh pr create:*)",
+  "Bash(gh pr edit:*)",
+  "Bash(gh pr ready:*)",
+  ...["init", "add", "link", "push", "submit", "sync", "rebase"].map((sub) => `Bash(gh stack ${sub}:*)`),
+];
+
+/** Intent rules for the classifier: actions a command pattern cannot express. */
+export const AUTO_MODE_ALLOW = [
+  "Requesting a Copilot review on the user's own PR (POST requested_reviewers) is allowed.",
+  "Replying to and resolving review threads left by automated reviewers (Copilot and other bots) on the user's own PR is allowed. Never resolve a human's thread.",
+  "Force-pushing with --force-with-lease to a feature branch of the user's own open PR, including through gh stack push, is allowed. Never force-push the default branch or another person's branch, and never use bare --force.",
+];
+
+/**
  * (Re)write the files that bind a Claude session to workspace `ws`.
  * Idempotent; run on every launch so the hook path tracks the installed binary.
  */
@@ -19,8 +38,8 @@ export function scaffold(ws: string) {
     env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
     // plan-mode plans live in the workspace folder, not ~/.claude/plans
     plansDirectory: PLANS_DIR,
-    // auto mode's classifier blocks marking a PR ready as an unrequested action in a connected app
-    permissions: { allow: ["Bash(gh pr ready:*)"] },
+    permissions: { allow: ALLOWED_COMMANDS },
+    autoMode: { allow: ["$defaults", ...AUTO_MODE_ALLOW] },
     hooks: {
       PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }],
       // agent state for the sidebar: see agent-hook.ts
