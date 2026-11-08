@@ -1,0 +1,94 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { wsDir } from "../src/paths";
+import { chooseLayout, layoutKdl, resumable, SIDEBAR_WIDTH, TOP_ROWS, transcriptDir, userLayoutPath, zellijConfigDir } from "../src/layout";
+
+const self = ["overbridge"];
+const tabs = (kdl: string) => kdl.match(/\btab name=/g)?.length ?? 0;
+
+let tmp: string;
+const savedRoot = process.env.OVERBRIDGE_ROOT;
+
+beforeEach(() => {
+  tmp = mkdtempSync(join(tmpdir(), "overbridge-layout-"));
+  process.env.OVERBRIDGE_ROOT = tmp;
+});
+
+afterEach(() => {
+  savedRoot === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = savedRoot);
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+describe("layoutKdl", () => {
+  test("one tab per workspace, however many there are", () => {
+    for (const n of [1, 4, 5, 9]) expect(tabs(layoutKdl(Array.from({ length: n }, (_, i) => `w${i}`), self))).toBe(n);
+  });
+
+  test("every tab has sidebar, top panel, agent and shell in the workspace dir", () => {
+    const kdl = layoutKdl(["a", "b"], self);
+    for (const ws of ["a", "b"]) {
+      expect(kdl).toContain(`args "sidebar" "--ws" "${ws}"`);
+      expect(kdl).toContain(`args "top" "--ws" "${ws}"`);
+      expect(kdl).toContain(`args "claude" "${ws}"`);
+      expect(kdl).toContain(`name="${ws} · shell" cwd="${wsDir(ws)}"`);
+    }
+    expect(kdl).toContain(`size=${SIDEBAR_WIDTH}`);
+    expect(kdl).toContain(`size=${TOP_ROWS}`);
+  });
+
+  test("the horizontal tab bar is gone, the status bar stays", () => {
+    const kdl = layoutKdl(["a"], self);
+    expect(kdl).not.toContain("tab-bar");
+    expect(kdl).toContain("status-bar");
+  });
+
+  test("the sidebar takes focus in its tab", () => {
+    expect(layoutKdl(["a"], self)).toMatch(/name="sidebar"[^\n]*focus=true/);
+  });
+
+  test("only workspaces with a transcript start the agent with --continue", () => {
+    const kdl = layoutKdl(["a", "b"], self, { resume: new Set(["b"]) });
+    expect(kdl).toContain('args "claude" "a"\n');
+    expect(kdl).toContain('args "claude" "b" "--continue"');
+  });
+
+  test("sidebar width is configurable", () => {
+    expect(layoutKdl(["a"], self, { sidebarWidth: 40 })).toContain("size=40");
+  });
+
+  test("is idempotent", () => {
+    expect(layoutKdl(["a", "b"], self)).toBe(layoutKdl(["a", "b"], self));
+  });
+});
+
+describe("transcripts", () => {
+  test("resumable sees a .jsonl transcript for the workspace dir", () => {
+    const home = join(tmp, "home");
+    mkdirSync(transcriptDir(wsDir("a"), home), { recursive: true });
+    writeFileSync(join(transcriptDir(wsDir("a"), home), "s.jsonl"), "{}\n");
+    mkdirSync(transcriptDir(wsDir("b"), home), { recursive: true });
+    expect([...resumable(["a", "b", "c"], home)]).toEqual(["a"]);
+  });
+});
+
+describe("user layout", () => {
+  test("config dir: ZELLIJ_CONFIG_DIR, then XDG_CONFIG_HOME, then ~/.config", () => {
+    expect(zellijConfigDir({ ZELLIJ_CONFIG_DIR: "/z" }, "/h")).toBe("/z");
+    expect(zellijConfigDir({ XDG_CONFIG_HOME: "/x" }, "/h")).toBe("/x/zellij");
+    expect(zellijConfigDir({}, "/h")).toBe("/h/.config/zellij");
+  });
+
+  test("a user file wins over the generated layout", () => {
+    const path = join(tmp, "layouts", "overbridge.kdl");
+    expect(chooseLayout(["a"], self, path).source).toBe("generated");
+    mkdirSync(join(tmp, "layouts"));
+    writeFileSync(path, "layout {}\n");
+    expect(chooseLayout(["a"], self, path)).toEqual({ source: "user", path });
+  });
+
+  test("the user path is layouts/overbridge.kdl in the config dir", () => {
+    expect(userLayoutPath("/z")).toBe("/z/layouts/overbridge.kdl");
+  });
+});

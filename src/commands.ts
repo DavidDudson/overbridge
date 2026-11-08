@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
 import { configPath, getConfigValue, loadRepoConfig, parseConfig } from "./project-config";
-import { layoutKdl, PER_PAGE } from "./layout";
+import { chooseLayout, userLayoutPath } from "./layout";
 import { barePath, currentWorkspace, envVar, metaDir, NAME_RE, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { scaffold } from "./scaffold";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
@@ -235,16 +235,29 @@ function workspaceNames(): string[] {
   return names;
 }
 
+/** Print the layout `up` would use; stderr says whether it is the user's file or the generated one. */
 export function layout() {
-  process.stdout.write(layoutKdl(workspaceNames(), selfCommand()));
+  const choice = chooseLayout(workspaceNames(), selfCommand());
+  if (choice.source === "user") {
+    log(`layout: ${choice.path} (user file, replaces the generated layout)`);
+    process.stdout.write(readFileSync(choice.path, "utf8"));
+  } else {
+    log(`layout: generated (a file at ${userLayoutPath()} would replace it)`);
+    process.stdout.write(choice.kdl);
+  }
 }
 
 export function up(fresh: boolean) {
   if (process.env.ZELLIJ) fail("already inside zellij; detach first");
   const names = workspaceNames();
   names.forEach(scaffold);
-  const file = join(metaDir(), "layout.kdl");
-  writeFileSync(file, layoutKdl(names, selfCommand()));
+  const choice = chooseLayout(names, selfCommand());
+  let file: string;
+  if (choice.source === "user") file = choice.path;
+  else {
+    file = join(metaDir(), "layout.kdl");
+    writeFileSync(file, choice.kdl);
+  }
 
   const session = SESSION();
   const sessions = run(["zellij", "list-sessions", "--short", "--no-formatting"]).stdout.split("\n");
@@ -262,12 +275,12 @@ export function up(fresh: boolean) {
   );
 }
 
-/** Ensure `pages` full pages of workspaces exist (empty ones are fine), then rebuild the session. */
-export function spinup(pages: number) {
-  if (!Number.isInteger(pages) || pages < 1) fail("--pages must be a positive integer");
+/** Ensure `count` workspaces exist (empty ones are fine), then rebuild the session. */
+export function spinup(count: number) {
+  if (!Number.isInteger(count) || count < 1) fail("--count must be a positive integer");
   if (process.env.ZELLIJ) fail("already inside zellij; detach first");
   init();
-  const missing = pages * PER_PAGE - Object.keys(readState().workspaces).length;
+  const missing = count - Object.keys(readState().workspaces).length;
   for (let i = 0; i < missing; i++) newWorkspace(undefined, []);
   up(true);
 }

@@ -3,7 +3,9 @@ import { parseArgs } from "node:util";
 import * as cmd from "./commands";
 import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
+import { DEFAULT_SPINUP } from "./layout";
 import { item } from "./item";
+import { sidebar } from "./sidebar";
 import { topPanel, topRefresh } from "./top-run";
 import { silenceLegacyWarnings } from "./paths";
 import { OverbridgeError } from "./util";
@@ -18,6 +20,7 @@ Setup
   overbridge config get <key> [path]            print one value, e.g. commands.test
   overbridge app [id [action]]                  list or start|stop|restart|status|log repo apps
   overbridge sync                               fetch every bare repo
+  overbridge sidebar [--ws name]                tab sidebar pane (run by the generated layout)
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
 
 Work items (the repo's project-management provider)
@@ -37,8 +40,8 @@ Branches & PRs (workspace inferred from $OVERBRIDGE_NAME or cwd)
   overbridge pr [repo]                          record the open PR; claim follows HEAD within a stack
 
 Zellij
-  overbridge spinup [-p pages]                  ensure N full pages (4 ws each) exist, rebuild session
-  overbridge up [--fresh]                       attach/launch session, 4 workspaces per tab
+  overbridge spinup [-n count]                  ensure N workspaces exist (default 4), rebuild session
+  overbridge up [--fresh]                       attach/launch session, one tab per workspace
   overbridge layout                             print the generated zellij layout
   overbridge claude <name> [-- args]            run Claude bound to a workspace
 
@@ -86,6 +89,11 @@ async function main(argv: string[]): Promise<number> {
     case "app": {
       const { values, positionals } = opts(rest, { ...ws, repo: { type: "string" }, "no-wait": { type: "boolean" } });
       await appCommand(values.ws, values.repo, positionals[0], positionals[1], !!values["no-wait"]);
+      break;
+    }
+    case "sidebar": {
+      const { values } = opts(rest, ws);
+      await sidebar(values.ws);
       break;
     }
     case "top": {
@@ -146,8 +154,8 @@ async function main(argv: string[]): Promise<number> {
       break;
     }
     case "spinup": {
-      const { values } = opts(rest, { pages: { type: "string", short: "p" } });
-      cmd.spinup(Number(values.pages ?? 1));
+      const { values } = opts(rest, { count: { type: "string", short: "n" } });
+      cmd.spinup(Number(values.count ?? DEFAULT_SPINUP));
       break;
     }
     case "layout":

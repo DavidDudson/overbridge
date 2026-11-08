@@ -17,8 +17,11 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   its own, no raw `git switch`/`checkout <branch>`/`gh pr checkout`/`gh stack checkout`/
   `gh stack trunk`/`git worktree`,
   no workspace admin commands.
-- **Zellij grid.** `overbridge up` opens a session with 4 workspaces per tab: Claude on top,
-  shell below, 8 panes per page.
+- **Zellij tabs.** `overbridge up` opens a session with one tab per workspace: a sidebar down the
+  left, the top panel across the top, then the agent above a shell. The agent resumes with
+  `--continue` when Claude has a transcript for the workspace dir. A file at
+  `<zellij config dir>/layouts/overbridge.kdl` replaces the generated layout;
+  `overbridge layout` prints what would be used and where it came from.
 
 ## Quick start
 
@@ -26,8 +29,8 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
 overbridge init
 overbridge repo add nix-home git@github.com:DavidDudson/nix-home.git
 overbridge repo add evergreen git@github.com:DavidDudson/evergreen.git
-overbridge spinup                       # 4 empty workspaces (ws1-ws4) + fresh zellij grid
-overbridge spinup -p 2                  # 8 workspaces, two tabs
+overbridge spinup                       # 4 empty workspaces (ws1-ws4) + fresh zellij session
+overbridge spinup -n 6                  # 6 workspaces, six tabs
 ```
 
 `overbridge spinup` always rebuilds the session, killing running panes. Use `overbridge up` to just

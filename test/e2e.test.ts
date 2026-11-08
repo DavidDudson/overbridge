@@ -11,6 +11,7 @@ let remote: string;
 const env = () => ({
   ...process.env,
   OVERBRIDGE_ROOT: root,
+  ZELLIJ_CONFIG_DIR: join(root, "zellij-config"), // keep a real user layout out of the tests
   OVERBRIDGE_NAME: "",
   XDG_CACHE_HOME: join(tmp, "cache"),
   GIT_AUTHOR_NAME: "t",
@@ -107,11 +108,13 @@ describe("workflow", () => {
     expect(ws(["rm", "empty"]).code).toBe(0);
   });
 
-  test("layout has one tab per 4 workspaces", () => {
+  test("layout has one tab per workspace, each with sidebar and top panel", () => {
     for (let i = 0; i < 3; i++) ws(["new"]);
     const kdl = ws(["layout"]).out;
-    expect(kdl.match(/\btab name=/g)?.length).toBe(2);
+    expect(kdl.match(/\btab name=/g)?.length).toBe(5);
     expect(kdl).toContain('"claude" "ws5"');
+    expect(kdl).toContain('"sidebar" "--ws" "ws5"');
+    expect(kdl).toContain('"top" "--ws" "ws5"');
   });
 
   test("rm removes worktree and state", () => {
