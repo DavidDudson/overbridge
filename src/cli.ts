@@ -11,6 +11,7 @@ Setup
   overbridge init                               create ~/workspaces (or $OVERBRIDGE_ROOT)
   overbridge repo add <name> <url> [--branch b] register + bare-clone a repo
   overbridge repo ls                            list registered repos
+  overbridge config check|show [path]           validate / print a repo's overbridge.yml
   overbridge sync                               fetch every bare repo
 
 Workspaces
@@ -58,6 +59,13 @@ async function main(argv: string[]): Promise<number> {
         cmd.repoAdd(positionals[0]!, positionals[1]!, values.branch);
       } else if (action === "ls" || action === "list") cmd.repoList();
       else throw new OverbridgeError("usage: overbridge repo add|ls");
+      break;
+    }
+    case "config": {
+      const [action, target] = rest;
+      if (action === "check") cmd.configCheck(target);
+      else if (action === "show") cmd.configShow(target);
+      else throw new OverbridgeError("usage: overbridge config check|show [path]");
       break;
     }
     case "sync":

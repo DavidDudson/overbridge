@@ -94,3 +94,21 @@ past it. gh aliases (`gh co`) and custom `gh stack alias` names are not recognis
 - `WS_ROOT`, `WS_NAME`, `WS_SELF` and `WS_SESSION` still work but warn. Use the `OVERBRIDGE_*` names.
 - `<root>/.ws/` is renamed to `<root>/.overbridge/` automatically on first use.
 - The `gh repo list` cache moved to `~/.cache/overbridge/github-repos.json`; refresh it with the command in a workspace's `CLAUDE.md`.
+
+## overbridge.yml
+
+Per-repo rules live in `overbridge.yml` at the repo root. A missing file means defaults.
+Editors can use [`overbridge.schema.json`](overbridge.schema.json) for completion.
+
+```yaml
+version: 1
+project-management:
+  name: github        # github | jira
+  project: owner/repo # GitHub: owner/repo or project number; Jira: project key
+  # url: https://example.atlassian.net   # optional provider base URL
+apps: []              # launch/teardown commands, see the apps docs when they land
+ide: vscode           # vscode | zed | webstorm
+```
+
+`overbridge config check [path]` validates a file (unknown keys get a suggestion);
+`overbridge config show [path]` prints the resolved config as JSON.
