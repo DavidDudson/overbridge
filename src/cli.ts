@@ -4,6 +4,7 @@ import * as cmd from "./commands";
 import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
 import { item } from "./item";
+import { topPanel, topRefresh } from "./top-run";
 import { silenceLegacyWarnings } from "./paths";
 import { OverbridgeError } from "./util";
 
@@ -17,6 +18,7 @@ Setup
   overbridge config get <key> [path]            print one value, e.g. commands.test
   overbridge app [id [action]]                  list or start|stop|restart|status|log repo apps
   overbridge sync                               fetch every bare repo
+  overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
 
 Work items (the repo's project-management provider)
   overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
@@ -84,6 +86,13 @@ async function main(argv: string[]): Promise<number> {
     case "app": {
       const { values, positionals } = opts(rest, { ...ws, repo: { type: "string" }, "no-wait": { type: "boolean" } });
       await appCommand(values.ws, values.repo, positionals[0], positionals[1], !!values["no-wait"]);
+      break;
+    }
+    case "top": {
+      const { values, positionals } = opts(rest, ws);
+      if (positionals[0] === "refresh") topRefresh(values.ws);
+      else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh] [--ws name]");
+      else await topPanel(values.ws);
       break;
     }
     case "sync":

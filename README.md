@@ -162,3 +162,12 @@ overbridge app web log         # print the log path
 ```
 
 Use `--repo <name>` when two repos declare the same id and `--no-wait` to skip the ready check.
+
+### Top panel
+
+`overbridge top` is a pane for the top of every tab: the item id and title, a button per
+PR and for the item, an editor button (`ide`), and a toggle per app with its state
+(`○` stopped, `◐` starting, `●` running, `✖` exited) and port. Click or Enter to
+activate, arrows or Tab to move, `o` open a running app, `L` show its log, `r` refresh,
+`q` quit. It reads caches and local app records only; `overbridge top refresh` rebuilds
+the cache and the panel runs it every minute.
