@@ -41,6 +41,12 @@ describe("owner/repo project", () => {
     expect(calls).toEqual([]);
   });
 
+  test("workspaceName is gh-<repo>-<number>", () => {
+    const p = githubProvider(repoCfg, "/w", stub({}).runner);
+    expect(p.workspaceName("12", "overbridge")).toBe("gh-overbridge-12");
+    expect(p.workspaceName("#12", "overbridge")).toBe("gh-overbridge-12");
+  });
+
   test("title asks gh for that issue", () => {
     const { runner, calls } = stub({ "issue view": { stdout: "Fix login" } });
     expect(githubProvider(repoCfg, "/w", runner).title("12")).toBe("Fix login");

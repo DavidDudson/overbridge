@@ -81,6 +81,8 @@ describe("bash", () => {
     "overbridge status --all",
     "overbridge pr app",
     "overbridge add infra",
+    "overbridge start app 12",
+    "overbridge start app ENG-12 --prompt '/start-item ENG-12'",
     "overbridge checkout overbridge claude-md-map",
     "overbridge checkout app new-ui",
     "overbridge repo add infra git@github.com:u/infra.git",

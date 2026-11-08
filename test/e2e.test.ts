@@ -56,7 +56,7 @@ describe("workflow", () => {
   });
 
   test("new workspaces get worktrees and claude scaffolding", () => {
-    expect(ws(["new", "-r", "app"]).out.trim()).toBe("ws1");
+    expect(ws(["new", "ws1", "-r", "app"]).out.trim()).toBe("ws1");
     expect(readFileSync(join(root, "ws1", "CLAUDE.md"), "utf8")).toContain("No cache yet");
     const repos = [
       { name: "zeta", url: "https://github.com/u/zeta", isFork: true },
@@ -64,7 +64,7 @@ describe("workflow", () => {
     ];
     mkdirSync(join(tmp, "cache", "overbridge"), { recursive: true });
     writeFileSync(join(tmp, "cache", "overbridge", "github-repos.json"), JSON.stringify(repos));
-    expect(ws(["new", "-r", "app"]).out.trim()).toBe("ws2");
+    expect(ws(["new", "ws2", "-r", "app"]).out.trim()).toBe("ws2");
     expect(readFileSync(join(root, "ws2", "CLAUDE.md"), "utf8")).toContain(
       "| Alpha | https://github.com/u/Alpha | archived |\n| zeta | https://github.com/u/zeta | fork |",
     );
@@ -112,7 +112,7 @@ describe("workflow", () => {
   });
 
   test("layout has one tab per workspace, each with sidebar and top panel", () => {
-    for (let i = 0; i < 3; i++) ws(["new"]);
+    for (const n of ["ws3", "ws4", "ws5"]) ws(["new", n]);
     const kdl = ws(["layout"]).out;
     expect(kdl.match(/\btab name=/g)?.length).toBe(5);
     expect(kdl).toContain('"claude" "ws5"');
@@ -124,6 +124,23 @@ describe("workflow", () => {
     expect(ws(["rm", "ws1"]).code).toBe(0);
     expect(existsSync(join(root, "ws1"))).toBe(false);
     expect(sh(["git", "worktree", "list"], join(root, ".bare", "app.git"))).not.toContain("/ws1/");
+  });
+
+  test("new needs a name: workspaces are named for their work, not numbered", () => {
+    const r = ws(["new", "-r", "app"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("usage: overbridge new <name>");
+  });
+
+  test("rm clears per-workspace files kept outside the workspace dir", () => {
+    expect(ws(["new", "gone", "-r", "app"]).code).toBe(0);
+    const files = ["top/gone.json", "agent/gone.json", "sidebars/gone", "tabs/gone.kdl"].map((f) => join(root, ".overbridge", f));
+    for (const f of files) {
+      mkdirSync(join(f, ".."), { recursive: true });
+      writeFileSync(f, "x");
+    }
+    expect(ws(["rm", "gone"]).code).toBe(0);
+    for (const f of files) expect(existsSync(f)).toBe(false);
   });
 
   test("a gh-stack stack is claimed as a unit", () => {

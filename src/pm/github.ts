@@ -59,6 +59,8 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
 
     branchName: (item) => `${item.id.replace(/^#/, "")}-${slug(item.title)}`,
 
+    workspaceName: (id, repoName) => `gh-${repoName}-${id.replace(/^#/, "")}`,
+
     createItem(item) {
       const args = ["issue", "create", "-R", repo(), "--title", item.title, "--body", item.body];
       for (const label of item.labels ?? []) args.push("--label", label);

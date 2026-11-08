@@ -50,6 +50,11 @@ describe("links and names", () => {
     expect(branch).toBe("feat/ENG-42-fix-the-login-bug");
     expect(p.idFromBranch(branch)).toBe("ENG-42");
   });
+
+  test("workspaceName is the normalised ticket key", () => {
+    expect(p.workspaceName("42", "app")).toBe("ENG-42");
+    expect(p.workspaceName("eng-42", "app")).toBe("ENG-42");
+  });
 });
 
 describe("jira-cli calls", () => {

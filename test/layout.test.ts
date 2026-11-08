@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { wsDir } from "../src/paths";
-import { chooseLayout, layoutKdl, resumable, SIDEBAR_WIDTH, TOP_ROWS, transcriptDir, userLayoutPath, zellijConfigDir } from "../src/layout";
+import { chooseLayout, layoutKdl, newTabKdl, resumable, SIDEBAR_WIDTH, TOP_ROWS, transcriptDir, userLayoutPath, zellijConfigDir } from "../src/layout";
 
 const self = ["overbridge"];
 const tabs = (kdl: string) => kdl.match(/\btab name=/g)?.length ?? 0;
@@ -90,5 +90,22 @@ describe("user layout", () => {
 
   test("the user path is layouts/overbridge.kdl in the config dir", () => {
     expect(userLayoutPath("/z")).toBe("/z/layouts/overbridge.kdl");
+  });
+});
+
+describe("newTabKdl", () => {
+  test("holds exactly one tab, focused, with the same panes as the full layout", () => {
+    const kdl = newTabKdl("gh-app-12", self, { focus: true });
+    expect(tabs(kdl)).toBe(1);
+    expect(kdl).toContain('tab name="gh-app-12" focus=true');
+    expect(kdl).toContain('"sidebar" "--ws" "gh-app-12"');
+    expect(kdl).toContain("zellij:status-bar");
+  });
+
+  test("a prompt reaches the agent after `--`; resuming wins over it", () => {
+    expect(newTabKdl("ENG-1", self, { prompt: "/start-item ENG-1" })).toContain('args "claude" "ENG-1" "--" "/start-item ENG-1"');
+    const resumed = newTabKdl("ENG-1", self, { prompt: "/start-item ENG-1", resume: true });
+    expect(resumed).toContain('"--continue"');
+    expect(resumed).not.toContain("/start-item");
   });
 });

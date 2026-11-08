@@ -54,12 +54,14 @@ export function sync() {
 }
 
 export function newWorkspace(name: string | undefined, repos: string[]) {
+  if (!name) fail("usage: overbridge new <name> [-r repo]... (name it for its work item, e.g. ENG-123 or gh-app-12)");
+  createWorkspace(name, repos);
+  console.log(name);
+}
+
+/** Create workspace `name` holding a worktree of each of `repos`. */
+export function createWorkspace(name: string, repos: string[]) {
   const state = readState();
-  if (!name) {
-    let n = 1;
-    while (state.workspaces[`ws${n}`] || existsSync(wsDir(`ws${n}`))) n++;
-    name = `ws${n}`;
-  }
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}'`);
   if (state.workspaces[name] || existsSync(wsDir(name))) fail(`workspace '${name}' already exists`);
   for (const r of repos) getRepo(r);
@@ -69,7 +71,6 @@ export function newWorkspace(name: string | undefined, repos: string[]) {
   });
   scaffold(name);
   for (const r of repos) addRepo(r, name);
-  console.log(name);
 }
 
 export function addRepo(repo: string, wsOpt?: string) {
@@ -93,6 +94,9 @@ export function removeWorkspace(ws: string, force: boolean) {
   }
   for (const r of Object.keys(w.repos)) git.removeWorktree(getRepo(r), worktreePath(ws, r), force);
   rmSync(wsDir(ws), { recursive: true, force: true });
+  // per-workspace files outside the workspace dir: top cache, agent state, sidebar pane, tab layout
+  for (const f of [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("sidebars", ws), join("tabs", `${ws}.kdl`)])
+    rmSync(join(metaDir(), f), { force: true });
   withState((s) => {
     delete s.workspaces[ws];
   });
@@ -275,13 +279,14 @@ export function up(fresh: boolean) {
   );
 }
 
-/** Ensure `count` workspaces exist (empty ones are fine), then rebuild the session. */
-export function spinup(count: number) {
-  if (!Number.isInteger(count) || count < 1) fail("--count must be a positive integer");
+/** Name of the empty workspace `spinup` creates when there are none. */
+export const SCRATCH = "scratch";
+
+/** Rebuild the session over the existing workspaces; with none, create an empty scratch one first. */
+export function spinup() {
   if (process.env.ZELLIJ) fail("already inside zellij; detach first");
   init();
-  const missing = count - Object.keys(readState().workspaces).length;
-  for (let i = 0; i < missing; i++) newWorkspace(undefined, []);
+  if (!Object.keys(readState().workspaces).length) createWorkspace(SCRATCH, []);
   up(true);
 }
 

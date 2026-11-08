@@ -44,6 +44,8 @@ access to other workspaces and direct branch switching. Do not try to work aroun
 - After \`gh pr create\`, run \`overbridge pr <repo>\` to record the PR against this workspace.
 - \`overbridge status\` shows this workspace's claims; \`overbridge status --all\` shows every workspace.
 - \`overbridge release <repo>\` frees a branch when you are done with it.
+- One workspace per work item. To start a different item, run \`overbridge start <repo> <id>\` (it opens the
+  item's own workspace and tab) rather than switching this one.
 - Stacked PRs (\`gh stack\`): a claim covers every layer of its stack. \`gh stack init/add/up/down/top/bottom\`,
   \`push\`, \`submit\`, \`rebase\` and \`sync\` work as normal; pull an existing stack with \`overbridge checkout <repo> #<pr>\`
   (never \`gh stack checkout\` or \`gh stack trunk\`). Run \`overbridge pr <repo>\` after moving between layers or submitting.

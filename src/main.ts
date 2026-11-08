@@ -2,9 +2,9 @@ import { parseArgs } from "node:util";
 import * as cmd from "./commands";
 import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
-import { DEFAULT_SPINUP } from "./layout";
 import { item } from "./item";
 import { sidebar } from "./sidebar";
+import { start } from "./start";
 import { topPanel, topRefresh } from "./top-run";
 import { silenceLegacyWarnings } from "./paths";
 import { OverbridgeError } from "./util";
@@ -26,9 +26,12 @@ Work items (the repo's project-management provider)
   overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
 
 Workspaces
-  overbridge new [name] [-r repo]...            create a workspace (default name wsN)
+  overbridge start <repo> <id> [--prompt text]  workspace named for a work item (ENG-123, gh-app-12), on its
+                                        branch, in a new tab running /start-item; focuses an existing one
+  overbridge new <name> [-r repo]...            create a workspace
   overbridge add <repo> [--ws name]             add a repo worktree to a workspace
-  overbridge rm <name> [--force]                remove a workspace and its worktrees
+  overbridge rm <name> [--force]                remove a workspace and its worktrees (the top panel's
+                                        Cleanup button does this once the PR is open and nothing is unpushed)
   overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty state
   overbridge whoami                             workspace for the current dir/session
 
@@ -39,7 +42,7 @@ Branches & PRs (workspace inferred from $OVERBRIDGE_NAME or cwd)
   overbridge pr [repo]                          record the open PR; claim follows HEAD within a stack
 
 Zellij
-  overbridge spinup [-n count]                  ensure N workspaces exist (default 4), rebuild session
+  overbridge spinup                             rebuild the session (creates an empty 'scratch' workspace if none)
   overbridge up [--fresh]                       attach/launch session, one tab per workspace
   overbridge layout                             print the generated zellij layout
   overbridge claude <name> [-- args]            run Claude bound to a workspace
@@ -152,9 +155,14 @@ async function main(argv: string[]): Promise<number> {
       cmd.up(!!values.fresh);
       break;
     }
-    case "spinup": {
-      const { values } = opts(rest, { count: { type: "string", short: "n" } });
-      cmd.spinup(Number(values.count ?? DEFAULT_SPINUP));
+    case "spinup":
+      opts(rest, {});
+      cmd.spinup();
+      break;
+    case "start": {
+      const { values, positionals } = opts(rest, { prompt: { type: "string" } });
+      if (positionals.length !== 2) throw new OverbridgeError("usage: overbridge start <repo> <id> [--prompt text]");
+      start(positionals[0]!, positionals[1]!, values.prompt);
       break;
     }
     case "layout":
