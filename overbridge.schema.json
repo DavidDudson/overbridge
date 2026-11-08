@@ -12,7 +12,8 @@
       "properties": {
         "name": { "enum": ["github", "jira"] },
         "project": { "type": ["string", "integer"], "minLength": 1 },
-        "url": { "type": "string", "minLength": 1 }
+        "url": { "type": "string", "minLength": 1 },
+        "tech-debt": { "type": ["string", "integer"], "minLength": 1 }
       }
     },
     "apps": {
