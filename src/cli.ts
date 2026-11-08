@@ -12,6 +12,7 @@ Setup
   overbridge repo add <name> <url> [--branch b] register + bare-clone a repo
   overbridge repo ls                            list registered repos
   overbridge config check|show [path]           validate / print a repo's overbridge.yml
+  overbridge config get <key> [path]            print one value, e.g. commands.test
   overbridge sync                               fetch every bare repo
 
 Workspaces
@@ -65,7 +66,10 @@ async function main(argv: string[]): Promise<number> {
       const [action, target] = rest;
       if (action === "check") cmd.configCheck(target);
       else if (action === "show") cmd.configShow(target);
-      else throw new OverbridgeError("usage: overbridge config check|show [path]");
+      else if (action === "get") {
+        if (!target) throw new OverbridgeError("usage: overbridge config get <key> [path]");
+        cmd.configGet(target, rest[2]);
+      } else throw new OverbridgeError("usage: overbridge config check|show|get [path]");
       break;
     }
     case "sync":

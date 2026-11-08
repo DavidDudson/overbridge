@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultConfig, loadRepoConfig, parseConfig, suggest } from "../src/project-config";
+import { defaultConfig, getConfigValue, loadRepoConfig, parseConfig, suggest } from "../src/project-config";
 
 const err = (yaml: string): string => {
   try {
@@ -49,7 +49,7 @@ ide: zed
   });
 
   test("lists allowed keys when nothing is close", () => {
-    expect(err("zzzzzzzzzz: 1")).toContain("allowed: version, project-management, apps, ide");
+    expect(err("zzzzzzzzzz: 1")).toContain("allowed: version, project-management, apps, commands, review, ide");
   });
 
   test("names the key for a bad provider", () => {
@@ -70,6 +70,34 @@ ide: zed
     expect(m).toContain("apps[0].start: required");
     expect(m).toContain("apps[1].stat: unknown key, did you mean 'start'?");
     expect(m).toContain("apps[2].id: duplicate app id 'b'");
+  });
+
+  test("parses commands and review", () => {
+    const c = parseConfig(`
+commands:
+  test: pnpm test
+  format: pnpm format
+review:
+  personas: [security, naming]
+  exclude: [pr-size]
+  local-dir: .review
+`);
+    expect(c.commands).toEqual({ test: "pnpm test", format: "pnpm format" });
+    expect(c.review).toEqual({ personas: ["security", "naming"], exclude: ["pr-size"], localDir: ".review" });
+  });
+
+  test("review defaults: auto-select personas, no excludes, standard local dir", () => {
+    expect(parseConfig("review: {}").review).toEqual({ exclude: [], localDir: ".overbridge/personas" });
+  });
+
+  test("validates commands and review", () => {
+    const m = err("commands:\n  tset: x\n  lint: ''\nreview:\n  personas: security\n  exclude: [a, 1]\n  dir: x");
+    expect(m).toContain("commands.tset: unknown key, did you mean 'test'?");
+    expect(m).toContain("commands.lint: expected a non-empty string");
+    expect(m).toContain("review.personas: expected a list of strings");
+    expect(m).toContain("review.exclude[1]: expected a non-empty string");
+    expect(m).toContain("review.dir: unknown key");
+    expect(err("commands: pnpm test")).toContain("commands: expected a mapping");
   });
 
   test("invalid YAML names the file", () => {
@@ -95,5 +123,20 @@ describe("suggest", () => {
   test("finds near misses only", () => {
     expect(suggest("aps", ["apps", "ide"])).toBe("apps");
     expect(suggest("qqqqqq", ["apps", "ide"])).toBeUndefined();
+  });
+});
+
+describe("getConfigValue", () => {
+  const c = parseConfig("project-management: { name: github, project: o/r }\ncommands: { test: pnpm test }");
+  test("reads dotted keys in file spelling", () => {
+    expect(getConfigValue(c, "commands.test")).toBe("pnpm test");
+    expect(getConfigValue(c, "project-management.name")).toBe("github");
+    expect(getConfigValue(c, "review.local-dir")).toBe(".overbridge/personas");
+    expect(getConfigValue(c, "review.exclude")).toEqual([]);
+  });
+  test("unset or missing paths are undefined", () => {
+    expect(getConfigValue(c, "commands.build")).toBeUndefined();
+    expect(getConfigValue(c, "nope.deeper")).toBeUndefined();
+    expect(getConfigValue(c, "commands.test.deeper")).toBeUndefined();
   });
 });
