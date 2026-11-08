@@ -3,13 +3,13 @@ import { join } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
 import { layoutKdl, PER_PAGE } from "./layout";
-import { barePath, currentWorkspace, metaDir, NAME_RE, root, selfCommand, worktreePath, wsDir } from "./paths";
+import { barePath, currentWorkspace, envVar, metaDir, NAME_RE, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { scaffold } from "./scaffold";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
 import { type Claim, claimOwner, getWorkspace, readState, withState } from "./state";
 import { exec, fail, log, must, naturalSort, run } from "./util";
 
-const SESSION = () => process.env.WS_SESSION ?? "workspaces";
+const SESSION = () => envVar("SESSION") ?? "workspaces";
 
 /** What a workspace really holds in `repo`: its claim, its worktree head, and the stacks of either. */
 const holdings = (repo: string, stacks: Stack[]) => (ws: string, c: Claim) =>
@@ -103,10 +103,10 @@ export function checkout(args: string[], wsOpt?: string) {
   let [repo, ref] = args;
   const owned = Object.keys(getWorkspace(readState(), ws).repos);
   if (repo && ref === undefined) {
-    if (owned.length !== 1) fail("usage: ws checkout <repo> <branch|#pr>");
+    if (owned.length !== 1) fail("usage: overbridge checkout <repo> <branch|#pr>");
     [repo, ref] = [owned[0], repo];
   }
-  if (!repo || !ref) fail("usage: ws checkout <repo> <branch|#pr>");
+  if (!repo || !ref) fail("usage: overbridge checkout <repo> <branch|#pr>");
   if (!owned.includes(repo)) addRepo(repo, ws);
 
   const spec = getRepo(repo);
@@ -230,7 +230,7 @@ export function status(all: boolean, json: boolean) {
 
 function workspaceNames(): string[] {
   const names = Object.keys(readState().workspaces).sort(naturalSort);
-  if (!names.length) fail("no workspaces yet; create one with `ws new`");
+  if (!names.length) fail("no workspaces yet; create one with `overbridge new`");
   return names;
 }
 
@@ -253,7 +253,7 @@ export function up(fresh: boolean) {
     run(["zellij", "delete-session", "--force", session]);
     exists = false;
   }
-  if (exists) log(`attaching to ${session} (use \`ws up --fresh\` to rebuild the layout)`);
+  if (exists) log(`attaching to ${session} (use \`overbridge up --fresh\` to rebuild the layout)`);
   process.exit(
     exists
       ? exec(["zellij", "attach", session])
@@ -274,7 +274,7 @@ export function spinup(pages: number) {
 export function claude(ws: string, extra: string[]) {
   getWorkspace(readState(), ws);
   scaffold(ws);
-  process.exit(exec(["claude", ...extra], { cwd: wsDir(ws), env: { WS_NAME: ws, WS_ROOT: root() } }));
+  process.exit(exec(["claude", ...extra], { cwd: wsDir(ws), env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() } }));
 }
 
 export function whoami() {

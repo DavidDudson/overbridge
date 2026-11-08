@@ -1,7 +1,7 @@
-export class WsError extends Error {}
+export class OverbridgeError extends Error {}
 
 export function fail(msg: string): never {
-  throw new WsError(msg);
+  throw new OverbridgeError(msg);
 }
 
 export type RunResult = { ok: boolean; code: number; stdout: string; stderr: string };

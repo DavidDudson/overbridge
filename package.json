@@ -1,10 +1,10 @@
 {
-  "name": "ws",
+  "name": "overbridge",
   "version": "0.1.0",
   "description": "Multi-repo workspaces with bound Claude sessions in zellij",
   "type": "module",
   "private": true,
-  "bin": { "ws": "src/cli.ts" },
+  "bin": { "overbridge": "src/cli.ts", "ws": "src/cli.ts" },
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit"

@@ -1,7 +1,7 @@
 /**
  * Claude Code PreToolUse hook. Installed into every workspace's
  * .claude/settings.json; keeps a workspace Claude inside its workspace and
- * routes branch changes through `ws checkout` so claims stay authoritative.
+ * routes branch changes through `overbridge checkout` so claims stay authoritative.
  *
  * Exit 2 blocks the tool call and shows stderr to Claude.
  */
@@ -26,22 +26,22 @@ const GH_STACK = CMD + String.raw`(?:gh\s+stack|gs)\s+`;
 const END =String.raw`(?![^;&|\n]*\s--(?:\s|$))`; // no ` -- ` (pathspec) later in the same command
 
 const BASH_RULES: [RegExp, string][] = [
-  [new RegExp(GIT + String.raw`switch\b`), "branch changes go through `ws checkout <repo> <branch|#pr>`, not `git switch`"],
+  [new RegExp(GIT + String.raw`switch\b`), "branch changes go through `overbridge checkout <repo> <branch|#pr>`, not `git switch`"],
   [
     new RegExp(GIT + String.raw`checkout\b` + END),
-    "branch changes go through `ws checkout <repo> <branch|#pr>`; to discard file changes use `git restore <path>` or `git checkout -- <path>`",
+    "branch changes go through `overbridge checkout <repo> <branch|#pr>`; to discard file changes use `git restore <path>` or `git checkout -- <path>`",
   ],
-  [/\bgh\s+pr\s+checkout\b/, "use `ws checkout <repo> #<number>` so the PR is claimed for this workspace"],
+  [/\bgh\s+pr\s+checkout\b/, "use `overbridge checkout <repo> #<number>` so the PR is claimed for this workspace"],
   [
     new RegExp(GH_STACK + String.raw`checkout\b`),
-    "use `ws checkout <repo> #<pr>`; it claims the whole stack and runs `gh stack checkout` for stacked PRs",
+    "use `overbridge checkout <repo> #<pr>`; it claims the whole stack and runs `gh stack checkout` for stacked PRs",
   ],
   [
     new RegExp(GH_STACK + String.raw`trunk\b`),
-    "the trunk is shared across workspaces; stay on stack layers (`gh stack bottom`) or `ws release <repo>`",
+    "the trunk is shared across workspaces; stay on stack layers (`gh stack bottom`) or `overbridge release <repo>`",
   ],
-  [new RegExp(GIT + String.raw`worktree\b`), "worktrees are managed by ws; ask the user"],
-  [new RegExp(CMD + String.raw`ws\s+(?:new|rm|up|claude|init|layout|spinup)\b`),"workspace admin commands are for the user, not a workspace Claude"],
+  [new RegExp(GIT + String.raw`worktree\b`), "worktrees are managed by overbridge; ask the user"],
+  [new RegExp(CMD + String.raw`(?:overbridge|ws)\s+(?:new|rm|up|claude|init|layout|spinup)\b`),"workspace admin commands are for the user, not a workspace Claude"],
 ];
 
 // Absolute, home-relative or parent-relative path tokens in a shell command.
@@ -78,7 +78,7 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
       const abs = expand(p);
       if (WRITE_TOOLS.has(tool)) {
         if (!isInside(abs, wsPath)) return `${tool} on ${abs} is outside workspace ${ctx.ws} (${wsPath})`;
-        if (isInside(abs, join(wsPath, ".claude"))) return "workspace .claude config is managed by ws";
+        if (isInside(abs, join(wsPath, ".claude"))) return "workspace .claude config is managed by overbridge";
       } else if (foreign(abs)) {
         return `${abs} is outside workspace ${ctx.ws}; only ${wsPath} is accessible`;
       }
@@ -105,10 +105,10 @@ export async function guardMain(): Promise<number> {
     if (!ws) return 0;
     const reason = check(input, { root: root(), ws, home: homedir() });
     if (!reason) return 0;
-    console.error(`ws guard: ${reason}`);
+    console.error(`overbridge guard: ${reason}`);
     return 2;
   } catch (e) {
-    console.error(`ws guard: internal error, blocking to be safe: ${e}`);
+    console.error(`overbridge guard: internal error, blocking to be safe: ${e}`);
     return 2;
   }
 }
