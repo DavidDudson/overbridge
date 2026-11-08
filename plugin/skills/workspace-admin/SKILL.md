@@ -30,10 +30,11 @@ overbridge add <repo> --ws <name>                 # add another repo to an exist
 overbridge rm <name> [--force]                    # refuses with uncommitted changes unless --force
 overbridge status --all
 
-overbridge spinup [-p 2]                          # create empty workspaces up to N full pages (default 1 = 4 ws),
+overbridge spinup [-n 6]                          # create empty workspaces up to N (default 4),
                                           # then rebuild the zellij session (kills running panes)
-overbridge up [--fresh]                           # zellij session "workspaces": 4 workspaces per tab,
-                                          # Claude pane above shell pane per workspace
+overbridge up [--fresh]                           # zellij session "workspaces": one tab per workspace with a
+                                          # sidebar, a top panel, and the agent above a shell
+overbridge layout                                 # print the layout `up` would use (stderr says where from)
 overbridge claude <name>                          # run one bound Claude outside zellij
 ```
 
