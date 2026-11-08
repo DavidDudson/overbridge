@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "overbridge.yml",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "project-management": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "project"],
+      "properties": {
+        "name": { "enum": ["github", "jira"] },
+        "project": { "type": ["string", "integer"], "minLength": 1 },
+        "url": { "type": "string", "minLength": 1 }
+      }
+    },
+    "apps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "start"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "label": { "type": "string" },
+          "dir": { "type": "string" },
+          "start": { "type": "string", "minLength": 1 },
+          "stop": { "type": ["string", "null"] },
+          "prepare": { "type": "string" },
+          "ports": { "type": "array", "items": { "type": "integer" } },
+          "ready": { "type": "object" },
+          "open": { "type": "boolean" },
+          "when": { "enum": ["always", "feature-branch"] }
+        }
+      }
+    },
+    "ide": { "enum": ["vscode", "zed", "webstorm"] }
+  }
+}
