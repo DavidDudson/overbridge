@@ -83,9 +83,9 @@ overbridge config get commands.test
 
 An unset command means the repo has none. Run the smallest scope that covers the change.
 
-Wait for the user's answer on each Ask item, then apply what they approve.
+Do not block on the Ask items. Apply the Fix items, push and watch CI (step 4), then list each Ask item in the summary with your analysis and recommendation. Apply one later if the user answers.
 
-For each bot comment actually fixed (Fix items and approved Ask items), reply and resolve:
+For each bot comment actually fixed (Fix items, and Ask items once the user has approved them), reply and resolve:
 
 ```sh
 gh api -X POST "repos/<owner>/<repo>/pulls/<n>/comments/<commentId>/replies" -f body="Claude says: Resolved"

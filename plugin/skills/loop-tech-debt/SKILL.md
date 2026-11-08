@@ -40,7 +40,7 @@ Investigate briefly so the item is concrete and the fix well framed:
 
 Keep it tight: this is framing, not the implementation. The detailed plan happens inside `loop-item`.
 
-**Confirm the summary and acceptance criteria with the user before filing.**
+File it without asking. The one exception is an item the investigation could not bound: run `scope-item` first, and on `SPLIT` or `CLARIFY` stop and wait.
 
 If this workspace already holds a branch with local work or an open PR for this repo, say so before filing. `overbridge checkout` will move this workspace, and the item would be left filed with nowhere to work. Resolve that with the user first (finish or release the branch with `overbridge release <repo>`, or use another workspace).
 
@@ -64,12 +64,12 @@ The command prints `{id,title,url}`. Report the id, title and URL as a link. Rea
 
 Invoke **`loop-item`** with the new id.
 
-That handles: start-item (scope gate included) → plan-approval gate → implement → self-review → ship-pr → green build. The plan-approval pause still applies: implementation does not start until the user approves the plan.
+That handles: start-item (scope gate included) → plan → implement → self-review → ship-pr → green build, with no stop except the scope gate.
 
 ## Rules
 
 - Always file through `overbridge item create --tech-debt`. Never create a stray tech-debt item.
 - The Phase 1 investigation is a measurement, not a guess.
 - Delegate the lifecycle to `loop-item`.
-- Confirm the framing with the user before filing, and respect `loop-item`'s plan gate before coding.
+- Do not ask before filing or before coding. The only stop is the scope gate (`SPLIT` or `CLARIFY`).
 - Commit messages and code comments are exempt from the humanizer pass.

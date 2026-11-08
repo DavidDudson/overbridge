@@ -113,7 +113,7 @@ unset one means the repo has none). Compare the result with the backup so nothin
 git range-diff origin/<default>...<branch>-pre-rebase-backup origin/<default>...HEAD
 ```
 
-Then push with a lease and ask the user first, since this rewrites a branch other people may have:
+Then push with a lease. The user asked for the rebase, so do not ask again; only stop if the lease is rejected (someone else pushed):
 
 ```sh
 git push --force-with-lease
@@ -125,12 +125,12 @@ retry with a bare `--force`.
 The push starts CI again. If the branch has a PR, watch it as `ship-pr` step 10 does (poll, read each
 failure's log, fix what the rebase broke, push, watch again) and report any check that is not green.
 
-Delete the backup ref once the push is confirmed and the user is happy:
-`git branch -D "<branch>-pre-rebase-backup"`.
+Leave the backup ref in place and name it in the report, with `git branch -D "<branch>-pre-rebase-backup"` as the
+line that removes it. Do not wait for the user to say they are happy.
 
 ## Rules
 
 - Never resolve a conflict you do not understand. Ask.
 - Never take one side wholesale without reading the other.
-- Never force-push without a lease, and never without asking.
+- Never force-push without a lease. The user asking for the rebase is the approval to push it.
 - Report what you resolved, commit by commit, with anything you were unsure of called out.
