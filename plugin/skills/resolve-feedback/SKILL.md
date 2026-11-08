@@ -83,9 +83,9 @@ overbridge config get commands.test
 
 An unset command means the repo has none. Run the smallest scope that covers the change.
 
-Wait for the user's answer on each Ask item, then apply what they approve.
+Do not block on the Ask items. Apply the Fix items, push and watch CI (step 4), then list each Ask item in the summary with your analysis and recommendation. Apply one later if the user answers.
 
-For each bot comment actually fixed (Fix items and approved Ask items), reply and resolve:
+For each bot comment actually fixed (Fix items, and Ask items once the user has approved them), reply and resolve:
 
 ```sh
 gh api -X POST "repos/<owner>/<repo>/pulls/<n>/comments/<commentId>/replies" -f body="Claude says: Resolved"
@@ -110,8 +110,9 @@ gh pr checks <n> --json name,bucket --jq '{unfinished: [.[]|select(.bucket=="pen
 
 Repoll about every 30 seconds. A pending check that needs a person's approval does not block: tell the
 user it is waiting on them. For a failure, read it with `gh run view <run-id> --log-failed`. Fix what
-this branch caused, commit, push, and recheck. Report failures from elsewhere (flaky infrastructure,
-a broken default branch) instead of chasing them. Never call the build green without seeing the checks
+this branch caused, commit, push, and recheck. Rerun a flaky job (a 5xx downloading a tool in a setup
+step) at most twice per job, as `ship-pr` step 10 does. Report failures from elsewhere (a broken
+default branch, a job still failing after its reruns) instead of chasing them. Never call the build green without seeing the checks
 pass on GitHub.
 
 ## 5. Summary

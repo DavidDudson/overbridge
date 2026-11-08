@@ -1,6 +1,6 @@
 ---
 name: start-item
-description: Start work on a work item (GitHub issue or Jira ticket). Reads the item, runs the scope check, claims a branch named for it in this workspace, then enters plan mode to design the change. Use when the user says "start 123", "pick up ENG-123", "work on issue 123", "begin this item", or passes an item id and wants to start.
+description: Start work on a work item (GitHub issue or Jira ticket). Reads the item, runs the scope check, claims a branch named for it in this workspace, then enters plan mode to design the change and waits for the user to approve the plan and its scope. When `loop-item` calls it, it writes the plan and carries on. Use when the user says "start 123", "pick up ENG-123", "work on issue 123", "begin this item", or passes an item id and wants to start.
 ---
 
 # Start an item
@@ -45,7 +45,7 @@ stop and offer `pickup` instead of starting again.
 ## 3. Scope gate (STOP on SPLIT or CLARIFY)
 
 Run the `scope-item` skill on the id. `SPLIT` and `CLARIFY` are hard stops: surface them and wait.
-On `SPLIT`, continue with the first slice's id only.
+On `SPLIT`, continue with the first slice's id only. Keep the verdict and its one-line reason for the plan.
 
 ## 4. Claim the branch, in a workspace of its own
 
@@ -81,6 +81,7 @@ If the branch already exists with commits, say so and ask whether to continue on
 
 Enter plan mode. The plan has these sections:
 
+- **Scope**: the scope verdict and its reason, so approving the plan approves the scope.
 - **Goal**: one sentence.
 - **Acceptance criteria**: the lettered list, copied from the item.
 - **Approach**: ordered steps, riskiest first. Name the files and modules touched.
@@ -89,4 +90,6 @@ Enter plan mode. The plan has these sections:
   `overbridge config get commands.test` and `commands.typecheck` (unset means the repo has none).
 - **Open questions**: anything you could not settle from the item.
 
-Do not start implementing. The plan ends at the user's approval.
+Do not start implementing. The plan ends at the user's approval, which covers the plan and its scope.
+
+**Called from `loop-item`:** skip plan mode. Write the same sections as a short text block, then return to the loop without waiting. A `SPLIT` or `CLARIFY` verdict still stops it.

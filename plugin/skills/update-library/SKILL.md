@@ -111,7 +111,7 @@ Given an existing item id: update its body with the filled template, then invoke
 
 Otherwise invoke **`loop-tech-debt`** with the filled template as the problem description and item body. It files the item under the repo's tech-debt container (`project-management.tech-debt`), then drives `loop-item`. Because the template is already the full body, pass it as the item description rather than the usual minimal problem plus acceptance criteria, and tell `loop-tech-debt` to skip its Phase 1 investigation.
 
-The **plan-approval gate inside `loop-item` still applies**: implementation does not start until the user approves the plan. Present the migration plan (Phase 5) as that plan.
+`loop-item` runs without a plan-approval stop: write the migration plan (Phase 5) as its plan and go on. Stop only for its scope gate (`SPLIT` or `CLARIFY`).
 
 ## Phase 5: Implement (bump, migrate, judge deprecations)
 
@@ -128,7 +128,7 @@ During the implement phase:
    - **Small, mechanical, localised** (few callsites, no behaviour change, no design decision): apply it now, in this PR.
    - **Large** (many callsites, behaviour change, or needs a design decision): **do not** balloon this PR. Recommend a **separate tech-debt item** per deprecation cluster, and record the recommendation in the template's Deprecations and Migration plan sections. Optionally file those items (`overbridge item create --tech-debt`) and link them. Leave a `// TODO(<item link>): migrate off <deprecated API>` at the callsites, naming the follow-up item.
    - State the reasoning for each apply-vs-defer decision in the template.
-5. Verify with the **smallest** scope that proves it: the repo's `commands.typecheck`, then `commands.test` on the touched files or project only. Do not run an expensive full suite without asking.
+5. Verify with the **smallest** scope that proves it: the repo's `commands.typecheck`, then `commands.test` on the touched files or project only. Run the full suite once at the end.
 
 The outcome is always: **the mandatory breaking-change-only code change ships**, plus whatever small deprecations you judged safe. Large deprecations become recommended or filed follow-up items, not scope creep.
 
@@ -154,7 +154,7 @@ One-line summary: library (or, for a batch, each library), from→to, the item a
 - Breaking-change migrations that affect us are **mandatory**; deprecation migrations are **optional** and decided per cluster (apply small, defer large).
 - Never let deprecation work bloat the upgrade PR: defer and recommend instead.
 - Every run ends with a dedupe and drops the policy exceptions that no longer apply (Phase 5, step 2), so the tree never needs a dedupe item of its own.
-- Respect `loop-item`'s plan-approval gate, and the registry-access rule for installs.
+- Respect `loop-item`'s scope gate (its only stop), and the registry-access rule for installs.
 
 ## Humanizer pass
 

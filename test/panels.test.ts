@@ -45,10 +45,12 @@ describe("sidebar on screen", () => {
     expect(s.line(15)).toMatch(/^╰─+╯$/);
   });
 
-  test("long labels are cut inside the padding, never over the border", () => {
-    const s = draw(0, 0, 16, 24);
-    expect(s.line(7)).toBe("│ ⌥4 ✔ 7 Fix the logi… │");
-    for (let y = 0; y < 16; y++) expect(s.line(y).length).toBeLessThanOrEqual(24);
+  test("long labels wrap under their text inside the padding, never over the border", () => {
+    const s = draw(3, 3, 20, 24);
+    expect(s.line(1)).toBe("│ ⌥4 ✔ 7 Fix the login │");
+    expect(s.line(2)).toBe("│      redirect loop   │");
+    expect(s.line(3)).toMatch(/^│ +finished +│$/);
+    for (let y = 0; y < 20; y++) expect(s.line(y).length).toBeLessThanOrEqual(24);
   });
 
   test("a scrolled window starts at the offset", () => {
@@ -78,21 +80,23 @@ describe("top panel on screen", () => {
     ws: "w1",
     dir: "/w/w1",
     headline: "12 Add dark mode",
+    title: "Add dark mode",
     links: [{ label: "12", url: "u" }, { label: "PR #3", url: "u3" }],
     ide: "zed",
     apps: [app("web", AppStatus.Running, 3000), app("db", AppStatus.Stopped)],
     message: "refresh failed",
   };
   const draw = (width: number, cursor: number, height = 8) => {
-    const f = layoutTop(snap, width);
+    const f = layoutTop(snap, width, height);
     return { f, s: new Screen(width, height).write(paintTop(f, cursor)) };
   };
 
-  test("headline, one row of buttons, message", () => {
-    const { f, s } = draw(160, 0);
+  test("a frame titled with the task name, one row of buttons, the message in the bottom border", () => {
+    const { f, s } = draw(160, 0, 3);
     expect(f.rows).toHaveLength(3);
-    expect(s.line(0)).toBe("12 Add dark mode");
-    expect(s.line(2)).toBe("refresh failed");
+    expect(s.line(0)).toMatch(/^╭─ Add dark mode ─+╮$/);
+    expect(s.line(1)).toMatch(/^│ \[ 📋 12.*\] +│$/);
+    expect(s.line(2)).toMatch(/^╰─ refresh failed ─+╯$/);
     expect(new Set(f.placed.map((p) => p.row))).toEqual(new Set([1]));
     expect(f.placed.map((p) => p.button.label)).toEqual(["📋 12", "📋 PR #3", "🟢 web :3000", "⚫ db", "📝 zed", "🤖 claude", "💻 terminal", "🔀 diff"]);
     for (const p of f.placed) expect(s.line(1)).toContain(cell(p.button));
@@ -104,18 +108,23 @@ describe("top panel on screen", () => {
     expect(s.inverseText(1)).toBe("[ 🟢 web :3000 · 1 ]");
   });
 
-  test("headline is bold and the message dim", () => {
-    const { s } = draw(160, 0);
-    expect(s.cells[0]![0]!.bold).toBe(true);
-    expect(s.cells[2]![0]!.dim).toBe(true);
-    expect(s.cells[1]![0]!.bold).toBe(false);
+  test("the title is bold", () => {
+    const { s } = draw(160, 0, 3);
+    expect(s.cells[0]![3]!.bold).toBe(true);
+    expect(s.cells[0]![0]!.bold).toBe(false);
   });
 
-  test("narrow panes wrap buttons between headline and message without clipping them", () => {
+  test("a taller pane pads the frame so the bottom border sits on the last row", () => {
+    const { s } = draw(160, 0, 6);
+    expect(s.line(5)).toMatch(/^╰─ refresh failed ─+╯$/);
+    expect(s.line(4)).toMatch(/^│ +│$/);
+  });
+
+  test("narrow panes wrap buttons inside the frame without clipping them", () => {
     const { f, s } = draw(24, 0, 20);
     const rows = s.lines();
-    expect(rows[0]).toBe("12 Add dark mode");
-    expect(rows.at(-1)).toBe("refresh failed");
+    expect(rows[0]).toMatch(/^╭─ Add dark mode ─+╮$/);
+    expect(rows.at(-1)).toMatch(/^╰─ refresh failed ─+╯$/);
     expect(rows.length).toBeGreaterThan(3);
     for (const p of f.placed) expect(s.line(p.row)).toContain(cell(p.button));
   });
@@ -123,8 +132,8 @@ describe("top panel on screen", () => {
   test("resizing is a redraw: wide to narrow to wide gives the same screen as drawing wide", () => {
     const wide = draw(80, 0).s.lines();
     const s = new Screen(80, 8);
-    s.write(paintTop(layoutTop(snap, 24), 0));
-    s.write(paintTop(layoutTop(snap, 80), 0));
+    s.write(paintTop(layoutTop(snap, 24, 8), 0));
+    s.write(paintTop(layoutTop(snap, 80, 8), 0));
     expect(s.lines()).toEqual(wide);
   });
 });

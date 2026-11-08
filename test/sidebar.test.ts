@@ -6,7 +6,7 @@ import { agentStateFile, glyphFor, readAgentState, UNKNOWN_GLYPH } from "../src/
 import { sidebarWidth } from "../src/config";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { clampScroll, type Entry, entryAt, entryLines, renderSidebar, scrollFor, sidebarLabel, stripConventional, switchTab, targetFor, visibleEntries } from "../src/sidebar";
+import { clampScroll, type Entry, entryAt, entryLines, renderSidebar, scrollFor, sidebarLabel, stripConventional, switchTab, targetFor, wrapText } from "../src/sidebar";
 import { type Input, textWidth } from "../src/term";
 
 const entry = (ws: string, glyph = "○", label = ws): Entry => ({ ws, glyph, label });
@@ -47,7 +47,6 @@ describe("entry cards", () => {
     expect(rows[0]).toContain("Workspaces");
     expect(rows.at(-1)).toContain("╰");
     expect(rows.join("\n")).toContain("Hourly");
-    expect(visibleEntries(20)).toBe(7);
   });
 
   test("a window starts at the offset", () => {
@@ -57,52 +56,75 @@ describe("entry cards", () => {
 });
 
 describe("scrolling", () => {
-  test("keeps the selected row visible", () => {
-    expect(scrollFor(2, 0, 5)).toBe(0);
-    expect(scrollFor(7, 0, 5)).toBe(3);
-    expect(scrollFor(1, 4, 5)).toBe(1);
-    expect(scrollFor(5, 3, 3)).toBe(3);
+  const h12 = Array(12).fill(2);
+  test("keeps the selected entry visible", () => {
+    expect(scrollFor(2, 0, h12, 10)).toBe(0);
+    expect(scrollFor(7, 0, h12, 10)).toBe(3);
+    expect(scrollFor(1, 4, h12, 10)).toBe(1);
+  });
+
+  test("taller cards scroll sooner", () => {
+    expect(scrollFor(3, 0, [3, 3, 3, 3], 8)).toBe(2);
   });
 
   test("clamps to the list", () => {
-    expect(clampScroll(9, 12, 5)).toBe(7);
-    expect(clampScroll(3, 4, 10)).toBe(0);
+    expect(clampScroll(9, h12, 10)).toBe(7);
+    expect(clampScroll(3, Array(4).fill(2), 20)).toBe(0);
   });
 
-  test("entryAt maps two-row cards through the offset, skipping the border and the footer", () => {
-    expect(entryAt(0, 3, 12)).toBeUndefined();
-    expect(entryAt(1, 3, 12)).toBe(3);
-    expect(entryAt(2, 3, 12)).toBe(3);
-    expect(entryAt(3, 3, 12)).toBe(4);
-    expect(entryAt(5, 10, 12)).toBeUndefined();
-    expect(entryAt(9, 0, 12, 3)).toBeUndefined();
+  test("entryAt maps cards of any height through the offset, skipping the border and the footer", () => {
+    expect(entryAt(0, 0, [3, 2, 2], 20)).toBeUndefined();
+    expect(entryAt(1, 0, [3, 2, 2], 20)).toBe(0);
+    expect(entryAt(3, 0, [3, 2, 2], 20)).toBe(0);
+    expect(entryAt(4, 0, [3, 2, 2], 20)).toBe(1);
+    expect(entryAt(6, 0, [3, 2, 2], 20)).toBe(2);
+    expect(entryAt(8, 0, [3, 2, 2], 20)).toBeUndefined();
+    expect(entryAt(1, 1, [3, 2, 2], 20)).toBe(1);
+    expect(entryAt(5, 0, [3, 2, 2], 4)).toBeUndefined();
+  });
+});
+
+describe("wrapping", () => {
+  test("wraps at spaces and splits over-long words", () => {
+    expect(wrapText("add the thing now", 9)).toEqual(["add the", "thing now"]);
+    expect(wrapText("abcdefghij", 4)).toEqual(["abcd", "efgh", "ij"]);
+    expect(wrapText("", 4)).toEqual([""]);
+  });
+
+  test("a long title wraps under its text, the status line last", () => {
+    const lines = entryLines(entry("add a rather long title here"), 0, false, 20).map((l) => l.replace(/\x1b\[[0-9;]*m/g, ""));
+    expect(lines.length).toBeGreaterThan(2);
+    for (const l of lines) expect(textWidth(l)).toBe(20);
+    expect(lines[0]!.startsWith("⌥1 ")).toBe(true);
+    expect(lines[1]!.startsWith("   ")).toBe(true);
   });
 });
 
 describe("targetFor", () => {
+  const h = Array(12).fill(2);
   test("up/down and j/k step without wrapping", () => {
-    expect(targetFor(key("down"), 2, 0, 12)).toBe(3);
-    expect(targetFor(key("j"), 2, 0, 12)).toBe(3);
-    expect(targetFor(key("up"), 2, 0, 12)).toBe(1);
-    expect(targetFor(key("k"), 2, 0, 12)).toBe(1);
-    expect(targetFor(key("up"), 0, 0, 12)).toBeUndefined();
-    expect(targetFor(key("down"), 11, 0, 12)).toBeUndefined();
+    expect(targetFor(key("down"), 2, 0, h, 20)).toBe(3);
+    expect(targetFor(key("j"), 2, 0, h, 20)).toBe(3);
+    expect(targetFor(key("up"), 2, 0, h, 20)).toBe(1);
+    expect(targetFor(key("k"), 2, 0, h, 20)).toBe(1);
+    expect(targetFor(key("up"), 0, 0, h, 20)).toBeUndefined();
+    expect(targetFor(key("down"), 11, 0, h, 20)).toBeUndefined();
   });
 
   test("a digit jumps, out of range or the current tab does nothing", () => {
-    expect(targetFor(key("5"), 0, 0, 12)).toBe(4);
-    expect(targetFor(key("9"), 0, 0, 4)).toBeUndefined();
-    expect(targetFor(key("1"), 0, 0, 12)).toBeUndefined();
-    expect(targetFor(key("0"), 0, 0, 12)).toBeUndefined();
+    expect(targetFor(key("5"), 0, 0, h, 20)).toBe(4);
+    expect(targetFor(key("9"), 0, 0, Array(4).fill(2), 20)).toBeUndefined();
+    expect(targetFor(key("1"), 0, 0, h, 20)).toBeUndefined();
+    expect(targetFor(key("0"), 0, 0, h, 20)).toBeUndefined();
   });
 
   test("a click picks the row under it, through the scroll offset", () => {
-    expect(targetFor({ kind: "click", col: 3, row: 3 }, 0, 4, 12)).toBe(5);
-    expect(targetFor({ kind: "click", col: 3, row: 40 }, 0, 0, 12)).toBeUndefined();
+    expect(targetFor({ kind: "click", col: 3, row: 3 }, 0, 4, h, 20)).toBe(5);
+    expect(targetFor({ kind: "click", col: 3, row: 40 }, 0, 0, h, 20)).toBeUndefined();
   });
 
   test("other keys do nothing", () => {
-    expect(targetFor(key("x"), 0, 0, 12)).toBeUndefined();
+    expect(targetFor(key("x"), 0, 0, h, 20)).toBeUndefined();
   });
 });
 

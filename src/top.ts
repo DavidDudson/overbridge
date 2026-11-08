@@ -8,8 +8,18 @@ import { providerFor, refreshTitle } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, readState } from "./state";
-import { bold, type Color, colorize, dim, fit, inverse, textWidth } from "./term";
+import { boxBottom, boxRow, boxTop, type Color, colorize, fit, inverse, textWidth } from "./term";
+import { REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses } from "./reviewers";
+import { stackOf, localStacks } from "./stack";
 import { run } from "./util";
+
+const safeStacks = (repo: string) => {
+  try {
+    return localStacks(repo);
+  } catch {
+    return [];
+  }
+};
 
 const ESC = "\x1b";
 
@@ -19,9 +29,24 @@ const ESC = "\x1b";
  * never the network; `refreshTop` is what fills the cache.
  */
 
+/** What the PR rows and their action buttons need. */
+export interface PrInfo {
+  repo: string;
+  number: number;
+  title: string;
+  draft: boolean;
+  /** The repo worktree the `gh` actions run in. */
+  dir: string;
+  /** Every PR of the stack this PR belongs to, bottom first; empty when unstacked. */
+  stack: number[];
+  /** Copilot and CodeRabbit, as of the last refresh. */
+  reviewers?: ReviewerStatus[];
+}
+
 export interface TopLink {
   label: string;
   url: string;
+  pr?: PrInfo;
   /** A PR link's state: drives its colour and icon. */
   status?: PrStatus;
 }
@@ -30,8 +55,10 @@ export const PR_STATUSES = ["merged", "mergeable", "failing", "conflict", "pendi
 export type PrStatus = (typeof PR_STATUSES)[number];
 
 /** What `gh pr view --json state,mergeable,mergeStateStatus,statusCheckRollup` returns, as far as we read it. */
-export interface PrView {
+export interface PrView extends ReviewerView {
   url?: string;
+  title?: string;
+  isDraft?: boolean;
   state?: string;
   mergeable?: string;
   mergeStateStatus?: string;
@@ -87,10 +114,26 @@ export interface TopApp {
   available: boolean;
 }
 
+const CONVENTIONAL = /^(?:feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(?:\([^)]*\))?!?:\s*/i;
+
+/** A title without its conventional-commit prefix: `feat(scope): add x` is `add x`. */
+export const stripConventional = (title: string): string => title.replace(CONVENTIONAL, "").trim() || title;
+
+/**
+ * What the sidebar shows for a workspace: the item's title with no id and no conventional prefix,
+ * else the workspace name when no title is cached yet.
+ */
+export function sidebarLabel(ws: string, cache: Pick<TopCache, "headline" | "title">): string {
+  const title = cache.title ?? (cache.headline?.includes(" ") ? cache.headline.replace(/^\S+\s+/, "") : undefined);
+  return title ? stripConventional(title) : ws;
+}
+
 export interface TopSnapshot {
   ws: string;
   dir: string;
   headline?: string;
+  /** The task name: the item's title without id or conventional prefix, else the workspace name. */
+  title?: string;
   links: TopLink[];
   ide?: Ide;
   /** `$OVERBRIDGE_IDE`, else `$EDITOR`; used for the editor button when no `ide` is configured. */
@@ -182,8 +225,17 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       }
     }
     if (claim.pr !== undefined) {
-      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,state,mergeable,mergeStateStatus,statusCheckRollup"], dir));
-      if (view?.url) links.push({ label: claims.length > 1 ? `${repo} #${claim.pr}` : `PR #${claim.pr}`, url: view.url, status: classifyPr(view) });
+      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,title,isDraft,state,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments"], dir));
+      if (view?.url) {
+        const layers = stackOf(safeStacks(repo), claim.branch)?.layers ?? [];
+        const stack = layers.length > 1 ? layers.flatMap((l) => (l.pr === undefined ? [] : [l.pr])) : [];
+        links.push({
+          label: claims.length > 1 ? `${repo} #${claim.pr}` : `PR #${claim.pr}`,
+          url: view.url,
+          status: classifyPr(view),
+          pr: { repo, number: claim.pr, title: view.title ?? "", draft: view.isDraft === true, dir, stack, reviewers: reviewerStatuses(view, view.url) },
+        });
+      }
       else problems.push(`${repo}: no URL for PR #${claim.pr}`);
       if (view?.state === "OPEN") openPrs++;
     }
@@ -256,6 +308,7 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
     ws,
     dir: wsDir(ws),
     ...(cache.headline ? { headline: cache.headline } : {}),
+    title: sidebarLabel(ws, cache),
     links: cache.links,
     ...(ide ? { ide } : {}),
     ...(editor ? { editor } : {}),
@@ -272,6 +325,8 @@ export type Action =
   | { kind: "editor"; cmd: string[]; dir: string }
   | { kind: "app"; app: TopApp }
   | { kind: "pane"; pane: PaneKind }
+  | { kind: "ready"; pr: PrInfo }
+  | { kind: "merge"; pr: PrInfo }
   | { kind: "cleanup" };
 
 export interface Button {
@@ -282,6 +337,8 @@ export interface Button {
   color?: Color;
   /** Launchers (editor, apps, panes) sit at the right; status buttons (links, Cleanup) at the left. */
   side?: "left" | "right";
+  /** Index of the PR this button belongs to: those buttons sit on that PR's own row, the PR first and its actions at the right. */
+  prRow?: number;
 }
 
 const MARKS: Record<AppStatus, string> = {
@@ -320,7 +377,7 @@ function editorFromEnv(editor: string | undefined): { label: string; cmd: string
 
 /**
  * Give each button its key: `i` the work item, `p` the PR (then u, y, w, z), `1` to `9` the apps,
- * `e` the editor, `c` `t` `d` the panes, `x` Cleanup. Buttons past the available keys get none.
+ * `e` the editor, `c` `t` `d` the panes, `x` Cleanup, and on the first PR's row `g` ready/draft, `m` merge. Buttons past the available keys get none.
  */
 function withKeys(list: Button[]): Button[] {
   let app = 0;
@@ -328,6 +385,8 @@ function withKeys(list: Button[]): Button[] {
     const a = b.action;
     let key: string | undefined;
     if (a.kind === "link") return b;
+    else if (a.kind === "ready") key = b.prRow === 0 ? "g" : undefined;
+    else if (a.kind === "merge") key = b.prRow === 0 ? "m" : undefined;
     else if (a.kind === "app") key = app < 9 ? String(++app) : undefined;
     else if (a.kind === "editor") key = "e";
     else if (a.kind === "pane") key = { claude: "c", terminal: "t", diff: "d" }[a.pane];
@@ -347,18 +406,31 @@ const PR_KEYS = ["p", "u", "y", "w", "z"];
 export function buttons(snap: TopSnapshot): Button[] {
   const prKeys = [...PR_KEYS];
   const issueKeys = ["i"];
-  const out: Button[] = snap.links.map((l) => {
+  const out: Button[] = [];
+  let prRow = 0;
+  for (const l of snap.links) {
     const isPr = l.status !== undefined || l.label.includes("#");
     const key = isPr ? prKeys.shift() : issueKeys.shift();
     const look = l.status ? PR_LOOK[l.status] : undefined;
-    return {
-      label: look ? `${look.icon} ${l.label}` : `📋 ${l.label}`,
+    const pr = l.pr;
+    const name = pr ? `${pr.repo} #${pr.number}${pr.title ? ` ${pr.title}` : ""}` : l.label;
+    out.push({
+      label: look ? `${look.icon} ${name}` : `📋 ${name}`,
       action: { kind: "link", url: l.url },
       side: "left",
+      ...(pr ? { prRow } : {}),
       ...(key ? { key } : {}),
       ...(look ? { color: look.color } : {}),
-    };
-  });
+    });
+    if (pr) {
+      const row = prRow++;
+      for (const r of pr.reviewers ?? []) out.push({ label: reviewerLabel(r), action: { kind: "link", url: r.url ?? l.url }, side: "right", color: REVIEWER_LOOK[r.state].color, prRow: row });
+      if (l.status !== "merged" && l.status !== "closed") {
+        out.push({ label: pr.draft ? "✅ Ready" : "📝 Draft", action: { kind: "ready", pr }, side: "right", prRow: row });
+        if (l.status === "mergeable" && !pr.draft) out.push({ label: pr.stack.length > 1 ? "🟣 Merge stack" : "🟣 Merge", action: { kind: "merge", pr }, side: "right", color: "purple", prRow: row });
+      }
+    }
+  }
   if (snap.cleanup) out.push({ label: "🧹 Cleanup", action: { kind: "cleanup" }, side: "left" });
   for (const app of snap.apps) {
     if (!app.available) continue;
@@ -381,35 +453,44 @@ export interface Placed {
 }
 
 export interface Frame {
-  /** Plain text rows (buttons included, for reading); the cursor and colours are drawn from `placed`. */
+  /** Plain text rows, border included (buttons too, for reading); the cursor and colours are drawn from `placed`. */
   rows: string[];
   placed: Placed[];
+  /** The task name set into the top border. */
+  title: string;
+  /** The note set into the bottom border. */
+  message: string;
+  width: number;
 }
 
 /** The text of a button: its label, then its key hint (when it has one). */
 export const cell = (b: Button) => `[ ${b.label}${b.key ? ` · ${b.key}` : ""} ]`;
 const clip = (s: string, width: number) => fit(s, width).trimEnd();
 
+const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+
 /**
- * Lay the panel out for `width` columns: headline row, then one row of buttons with the left group
- * at the left edge and the right group against the right edge (the right group drops to its own row
- * when both do not fit; either group wraps when it is too wide alone), then the message row.
+ * Lay the panel out for `width` columns inside a rounded frame titled with the task name: one row of
+ * buttons with the left group at the left edge and the right group against the right edge (the right
+ * group drops to its own row when both do not fit; either group wraps when it is too wide alone),
+ * padded to `height` rows, with the message set into the bottom border.
  * Pure, so resizing is just calling it again.
  */
-export function layoutTop(snap: TopSnapshot, width: number): Frame {
-  const rows: string[] = [clip(snap.headline ?? snap.ws, width)];
+export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
+  const inner = Math.max(1, width - 4);
+  const content: string[] = [];
   const placed: Placed[] = [];
   const all = buttons(snap);
-  const cells = (side: "left" | "right") => all.filter((b) => (b.side ?? "left") === side).map((button) => ({ button, text: clip(cell(button), width) }));
+  const cells = (side: "left" | "right") => all.filter((b) => b.prRow === undefined && (b.side ?? "left") === side).map((button) => ({ button, text: clip(cell(button), inner) }));
   const widthOf = (items: { text: string }[]) => items.reduce((n, i) => n + textWidth(i.text) + 1, 0) - (items.length ? 1 : 0);
 
-  // wrap `items` into rows of at most `width`, each row starting at `start(rowWidth)`
+  // wrap `items` into rows of at most `inner`, each row starting at `start(rowWidth)`
   const flow = (items: { button: Button; text: string }[], align: "left" | "right", firstRow?: { row: number; used: number }) => {
-    let row = firstRow?.row ?? rows.length;
+    let row = firstRow?.row ?? base;
     let line: typeof items = [];
     const flush = () => {
       if (!line.length) return;
-      let col = align === "left" ? (row === firstRow?.row ? firstRow.used : 0) : Math.max(0, width - widthOf(line));
+      let col = align === "left" ? (row === firstRow?.row ? firstRow.used : 0) : Math.max(0, inner - widthOf(line));
       for (const item of line) {
         placed.push({ button: item.button, row, col, width: textWidth(item.text) });
         col += textWidth(item.text) + 1;
@@ -419,32 +500,52 @@ export function layoutTop(snap: TopSnapshot, width: number): Frame {
     };
     for (const item of items) {
       const base = align === "left" && row === firstRow?.row ? firstRow.used : 0;
-      if (line.length && base + widthOf([...line, item]) > width) flush();
+      if (line.length && base + widthOf([...line, item]) > inner) flush();
       line.push(item);
     }
     flush();
     return row;
   };
 
+  // one row per PR: the PR first, its actions against the right edge
+  let base = 0;
+  for (const row of new Set(all.flatMap((b) => (b.prRow === undefined ? [] : [b.prRow])))) {
+    const group = all.filter((b) => b.prRow === row);
+    const main = group.find((b) => b.side !== "right")!;
+    const actions = group.filter((b) => b !== main).map((button) => ({ button, text: clip(cell(button), inner) }));
+    const taken = widthOf(actions) + (actions.length ? 2 : 0);
+    const text = clip(cell(main), Math.max(1, inner - taken));
+    placed.push({ button: main, row: base, col: 0, width: textWidth(text) });
+    let col = inner - widthOf(actions);
+    for (const a of actions) {
+      placed.push({ button: a.button, row: base, col, width: textWidth(a.text) });
+      col += textWidth(a.text) + 1;
+    }
+    base++;
+  }
+
   const left = cells("left");
   const right = cells("right");
-  const buttonRow = rows.length;
-  if (left.length && right.length && widthOf(left) + 2 + widthOf(right) <= width) {
+  if (left.length && right.length && widthOf(left) + 2 + widthOf(right) <= inner) {
     flow(left, "left");
-    flow(right, "right", { row: buttonRow, used: 0 });
+    flow(right, "right", { row: base, used: 0 });
   } else {
     flow(right, "right", { row: flow(left, "left"), used: 0 });
   }
-  const last = Math.max(buttonRow - 1, ...placed.map((p) => p.row));
-  for (let y = buttonRow; y <= last; y++) {
+  const used = Math.max(0, ...placed.map((p) => p.row + 1));
+  for (let y = 0; y < Math.max(used, height - 2, 1); y++) {
     let text = "";
     for (const p of placed.filter((q) => q.row === y).sort((a, b) => a.col - b.col)) {
-      text += " ".repeat(Math.max(0, p.col - textWidth(text))) + clip(cell(p.button), width);
+      text += " ".repeat(Math.max(0, p.col - textWidth(text))) + clip(cell(p.button), p.width);
     }
-    rows.push(text);
+    content.push(text);
   }
-  rows.push(clip(snap.message ?? "", width));
-  return { rows, placed };
+  // inside the frame: one row down for the top border, two columns across for the border and padding
+  const shifted = placed.map((p) => ({ ...p, row: p.row + 1, col: p.col + 2 }));
+  const title = snap.title ?? snap.headline ?? snap.ws;
+  const message = snap.message ?? "";
+  const rows = [plain(boxTop(title, width)), ...content.map((r) => plain(boxRow(fit(r, inner)))), plain(boxBottom(width, message))];
+  return { rows, placed: shifted, title, message, width };
 }
 
 /** The button under a 0-based (col,row) cell, if any. */
@@ -454,15 +555,15 @@ export function hit(frame: Frame, col: number, row: number): number | undefined 
 }
 
 /**
- * The terminal output that draws `f`: clear, then each non-button row at its line (the headline bold,
- * the message row dim) and each button at its cell, in its colour, inverse under `cursor`.
+ * The terminal output that draws `f`: clear, the frame (title bold in the top border, the message in
+ * yellow in the bottom one), then each button at its cell, in its colour, inverse under `cursor`.
  */
 export function paintTop(f: Frame, cursor: number): string {
   let out = `${ESC}[H${ESC}[2J`;
-  const buttonRows = new Set(f.placed.map((p) => p.row));
-  f.rows.forEach((row, y) => {
-    if (buttonRows.has(y)) return;
-    out += `${ESC}[${y + 1};1H${y === 0 ? bold(row) : y === f.rows.length - 1 ? dim(row) : row}`;
+  const last = f.rows.length - 1;
+  const blank = boxRow(" ".repeat(Math.max(1, f.width - 4)));
+  f.rows.forEach((_, y) => {
+    out += `${ESC}[${y + 1};1H${y === 0 ? boxTop(f.title, f.width) : y === last ? boxBottom(f.width, f.message) : blank}`;
   });
   f.placed.forEach((p, i) => {
     const text = clip(cell(p.button), p.width);
@@ -482,6 +583,10 @@ export interface ActDeps {
   pane: (pane: PaneKind) => string | undefined;
   /** Wipe the workspace; returns a message for the message row. */
   cleanup: () => string | undefined;
+  /** Turn the PR (or its stack) ready for review, or back to draft. */
+  ready: (pr: PrInfo, ready: boolean) => string | undefined;
+  /** Merge the PR (or its stack); asks for a second press first. */
+  merge: (pr: PrInfo) => string | undefined;
 }
 
 /** Do what a button says; returns a message for the message row, or undefined. */
@@ -498,6 +603,10 @@ export function activate(button: Button, deps: ActDeps): string | undefined {
       return deps.pane(a.pane);
     case "cleanup":
       return deps.cleanup();
+    case "ready":
+      return deps.ready(a.pr, a.pr.draft);
+    case "merge":
+      return deps.merge(a.pr);
     case "app": {
       const live = a.app.status === AppStatus.Running || a.app.status === AppStatus.Starting;
       try {

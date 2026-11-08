@@ -1,12 +1,12 @@
 ---
 name: loop-item
-description: Run a work item (GitHub issue or Jira ticket) end to end: start it, plan, implement, self-review, open the PR and get it to a green build. Pauses for plan approval before any code. Use when the user wants the whole lifecycle driven in one go ("loop 123", "run ENG-123 end to end", "take this issue through to a PR", "do the full process on this item").
+description: Run a work item (GitHub issue or Jira ticket) end to end: start it, plan, implement, self-review, open the PR and get it to a green build. Runs without stopping, except when the scope gate says the item is too big or unclear. Use when the user wants the whole lifecycle driven in one go ("loop 123", "run ENG-123 end to end", "take this issue through to a PR", "do the full process on this item").
 ---
 
 # Loop an item
 
 ```
-start-item (incl. scope gate) → [plan approval] → implement → commit → self-review → ship-pr → green build
+start-item (incl. scope gate) → plan → implement → commit → self-review → ship-pr → green build
 ```
 
 This skill chains other skills and adds the glue. It does not redo their steps: invoke `start-item`
@@ -18,14 +18,15 @@ An item id (`123`, `#123`, `ENG-123`). Ask for it if missing.
 
 ## 1. Start
 
-Run `start-item` with the id. It orients, scope-checks, claims the branch and ends in plan mode.
-Its scope gate is a hard stop: on `SPLIT` or `CLARIFY`, wait for the user. If the item splits, this
-loop runs the first slice only. The rest are separate runs, stacked with `gh stack add`.
+Run `start-item` with the id, in loop mode: it orients, scope-checks, claims the branch and writes the
+plan as text, without entering plan mode or waiting for approval.
+The scope gate is the one stop in this loop: on `SPLIT` or `CLARIFY`, wait for the user. If the item
+splits, this loop runs the first slice only. The rest are separate runs, stacked with `gh stack add`.
 
-## 2. Plan approval (STOP)
+## 2. Plan (no stop)
 
-Do not auto-approve the plan. Wait for the user to accept it or change it. Code is expensive to
-change and a plan is not.
+The plan from step 1 is your own working order, not a gate. Go straight on to implementing. Keep it
+for the PR body's summary, and for the check in step 3 that the work has not outgrown it.
 
 ## 3. Implement
 
@@ -39,9 +40,11 @@ change and a plan is not.
   overbridge config get commands.lint
   overbridge config get commands.format
   ```
-  Run a single file or project before the whole suite. Do not run an expensive full suite without
-  asking.
-- If the work shows the plan was wrong, stop and re-confirm. Do not diverge quietly.
+  Run a single file or project before the whole suite; run the whole suite once at the end
+  without asking.
+- If the work shows the plan was wrong, re-plan in place and carry on. Stop only when the item has
+  outgrown its scope (it now touches work the scope check would have called a `SPLIT`): put that to the
+  user and wait.
 
 ## 4. Commit, then self-review
 
@@ -55,18 +58,17 @@ own diff once for correctness, tests and leftovers before moving on.
 
 ## 5. Ship
 
-Run `ship-pr`. Ask before creating the PR, as that skill does. Put `Closes <id>` in the PR body when
+Run `ship-pr`. It opens the PR without asking on a repo you own, and asks first on anyone else's. Put `Closes <id>` in the PR body when
 this PR finishes the item, and `Refs <id>` when it does not. Run the humanizer pass over the PR body.
 
 ## 6. Green build
 
-```sh
-gh pr checks --watch
-```
-
-Read each failure's log. Fix failures this branch caused, and rerun a flaky job once. Stop and report
-when a failure is not from this branch or a second rerun fails. Do not loop on human review
-comments: that is `resolve-feedback`, run on its own when the reviews land.
+`ship-pr` step 10 does this; keep going until it ends. Poll the checks (never `gh pr checks --watch`, which
+hangs on an approval gate), read every failure's log, fix what this branch caused, push, and watch
+again. Rerun a flaky job (a 5xx while downloading a tool in a setup step is one) at most twice. Stop
+and report when a failure is not from this branch or the rerun budget is spent, naming each check
+that is not green. Every push after this (a review fix, a merge of main) starts the watch again. Do
+not loop on human review comments: that is `resolve-feedback`, run on its own when the reviews land.
 
 ## Report
 
@@ -74,7 +76,8 @@ One line: item id, branch, PR URL, build status, and what the review left for th
 
 ## Rules
 
-- Never skip the scope gate or the plan approval.
+- Never skip the scope gate. Apart from it, do not stop to ask: not for plan approval, for the PR, or for
+  the build.
 - Never push or open the PR before the self-review.
 - Never switch branches with `git switch` or `git checkout`; use `overbridge checkout`.
 - Write files and commands for the shell the user runs. Do not assume bash for anything you tell the
