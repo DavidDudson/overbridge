@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
-import { type ActDeps, activate, buttons, hit, layoutTop, openTarget, readTopCache, refreshTop, type TopApp, type TopSnapshot } from "../src/top";
+import { type ActDeps, activate, buttons, hit, layoutTop, openTarget, readTopCache, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "../src/top";
 import { fakeProvider } from "./helpers/fake-provider";
 
 const spec = (id: string): AppSpec => ({ id, label: id, dir: ".", start: "x", ports: [], open: false, when: "always" });
@@ -85,8 +85,25 @@ describe("activate", () => {
   });
 
   test("editor launches the ide on the workspace folder", () => {
-    activate({ label: "z", action: { kind: "editor", ide: "vscode", dir: "/w/w1" } }, deps);
+    activate({ label: "z", action: { kind: "editor", cmd: ["code"], dir: "/w/w1" } }, deps);
     expect(calls).toEqual(["spawn code /w/w1"]);
+  });
+
+  test("with no ide configured, the editor button falls back to $EDITOR", () => {
+    const [b] = buttons(snap({ editor: "/usr/bin/code -w" }));
+    expect(b!.label).toBe("code");
+    activate(b!, deps);
+    expect(calls).toEqual(["spawn /usr/bin/code -w /w/w1"]);
+  });
+
+  test("an ide name in the env maps to its command", () => {
+    const [b] = buttons(snap({ editor: "webstorm" }));
+    expect(b!.action).toEqual({ kind: "editor", cmd: ["webstorm"], dir: "/w/w1" });
+  });
+
+  test("a configured ide wins over $EDITOR; neither means no editor button", () => {
+    expect(buttons(snap({ ide: "zed", editor: "vim" })).map((b) => b.label)).toEqual(["zed"]);
+    expect(buttons(snap({ editor: "  " }))).toEqual([]);
   });
 
   test("an app toggles: stopped/exited start, starting/running stop", () => {
@@ -135,6 +152,17 @@ describe("refreshTop", () => {
       { label: "PR #3", url: "https://host/o/r/pull/3" },
     ]);
     expect(readTopCache("w1")).toEqual(cache);
+  });
+
+  test("snapshotTop prefers $OVERBRIDGE_IDE over $EDITOR, and a configured ide over both", async () => {
+    expect((await snapshotTop("w1", { OVERBRIDGE_IDE: "zed", EDITOR: "vim" })).editor).toBe("zed");
+    expect((await snapshotTop("w1", { EDITOR: "vim" })).editor).toBe("vim");
+    expect((await snapshotTop("w1", { OVERBRIDGE_IDE: " ", EDITOR: "vim" })).editor).toBe("vim");
+    expect((await snapshotTop("w1", {})).editor).toBeUndefined();
+    writeFileSync(join(tmp, "w1", "r", "overbridge.yml"), "version: 1\nide: vscode\n");
+    const s = await snapshotTop("w1", { OVERBRIDGE_IDE: "zed" });
+    expect(s.ide).toBe("vscode");
+    expect(s.editor).toBeUndefined();
   });
 
   test("a failed lookup keeps the old values and reports a message", () => {

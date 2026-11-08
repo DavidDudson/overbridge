@@ -8,6 +8,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - Per-repo config: `src/project-config.ts` parses and validates `overbridge.yml` (`overbridge.schema.json` and
   `overbridge.example.yml` must track its keys); global config is `repos.toml` (`src/config.ts`, e.g. `[sidebar] width`).
   Keep code generic: no repo names, ports, URLs or branch conventions outside that config.
+  This repo dogfoods its own `overbridge.yml` (checked by `test/config-errors.test.ts`).
 - Work items: `src/pm/` (`Provider` interface, `github.ts`, `jira.ts`, title cache); `src/item.ts` is `overbridge item`.
   Providers and apps take injectable runners so tests never need `gh`, `jira` or real processes.
 - Apps: `src/apps.ts` (launch, teardown, port pool, status) and `src/app-command.ts` (`overbridge app`).
