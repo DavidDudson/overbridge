@@ -11,7 +11,7 @@ let tmp: string;
 const saved = { ...process.env };
 
 const sh = (cmd: string[], cwd: string) => {
-  const p = Bun.spawnSync({ cmd, cwd, stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawnSync({ cmd, cwd, env: process.env, stdout: "pipe", stderr: "pipe" });
   if (p.exitCode !== 0) throw new Error(`${cmd.join(" ")}: ${p.stderr}`);
 };
 
