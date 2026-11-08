@@ -57,6 +57,23 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
     },
 
     branchName: (item) => `feat/${normalize(item.id)}-${slug(item.title)}`,
+
+    createItem(item) {
+      const args = ["issue", "create", "-p", key, "-t", "Task", "-s", item.title, "-b", item.body, "--no-input"];
+      for (const label of item.labels ?? []) args.push("-l", label);
+      if (item.parent) args.push("-P", normalize(item.parent));
+      const r = jira(args);
+      if (!r.ok) fail(`jira: creating the ticket failed: ${r.stderr || r.stdout}`);
+      // jira-cli prints the new ticket's browse URL on the last line
+      const id = /\b([A-Z][A-Z0-9_]*-\d+)\s*$/.exec(r.stdout)?.[1];
+      if (!id) fail(`jira: jira-cli created a ticket but printed no key: ${r.stdout}`);
+      return { id, title: item.title, url: base ? `${base}/browse/${id}` : "" };
+    },
+
+    updateItemBody(id, body) {
+      const r = jira(["issue", "edit", normalize(id), "-b", body, "--no-input"]);
+      if (!r.ok) fail(`jira: updating ${normalize(id)} failed: ${r.stderr || r.stdout}`);
+    },
   };
 }
 

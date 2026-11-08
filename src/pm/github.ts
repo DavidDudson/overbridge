@@ -58,6 +58,31 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
     },
 
     branchName: (item) => `${item.id.replace(/^#/, "")}-${slug(item.title)}`,
+
+    createItem(item) {
+      const args = ["issue", "create", "-R", repo(), "--title", item.title, "--body", item.body];
+      for (const label of item.labels ?? []) args.push("--label", label);
+      const created = gh(args);
+      if (!created.ok) fail(`github: creating the issue failed: ${created.stderr || created.stdout}`);
+      const url = created.stdout.trim().split("\n").pop()!;
+      const id = /\/issues\/(\d+)$/.exec(url)?.[1];
+      if (!id) fail(`github: gh created an issue but printed no issue URL: ${created.stdout}`);
+      if (item.parent) {
+        const parent = item.parent.replace(/^#/, "");
+        // sub-issue links take the issue's database id, not its number
+        const dbId = gh(["api", `repos/${repo()}/issues/${id}`, "-q", ".id"]);
+        const link = dbId.ok
+          ? gh(["api", "-X", "POST", `repos/${repo()}/issues/${parent}/sub_issues`, "-F", `sub_issue_id=${dbId.stdout}`])
+          : dbId;
+        if (!link.ok) fail(`github: created ${url} but could not attach it to #${parent}: ${link.stderr || link.stdout}`);
+      }
+      return { id, title: item.title, url };
+    },
+
+    updateItemBody(id, body) {
+      const r = gh(["issue", "edit", id.replace(/^#/, ""), "-R", repo(), "--body", body]);
+      if (!r.ok) fail(`github: updating #${id.replace(/^#/, "")} failed: ${r.stderr || r.stdout}`);
+    },
   };
 }
 
