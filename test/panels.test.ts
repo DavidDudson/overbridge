@@ -1,0 +1,116 @@
+import { describe, expect, test } from "bun:test";
+import { AppStatus } from "../src/apps";
+import type { AppSpec } from "../src/project-config";
+import { type Entry, sidebarRows } from "../src/sidebar";
+import { ENTER_SCREEN, frame, LEAVE_SCREEN } from "../src/term";
+import { layoutTop, paintTop, type TopApp, type TopSnapshot } from "../src/top";
+import { Screen } from "./helpers/screen";
+
+const entry = (ws: string, glyph: string, label = ws): Entry => ({ ws, glyph, label });
+
+describe("virtual screen", () => {
+  test("addresses cells, clears, and tracks styles", () => {
+    const s = new Screen(10, 3).write("\x1b[2;3Hab\x1b[7mcd\x1b[0me\x1b[1;1Hx");
+    expect(s.line(0)).toBe("x");
+    expect(s.line(1)).toBe("  abcde");
+    expect(s.inverseText(1)).toBe("cd");
+    s.write("\x1b[2J");
+    expect(s.lines()).toEqual([]);
+  });
+
+  test("ignores mode switches and clips instead of wrapping", () => {
+    const s = new Screen(4, 2).write(`${ENTER_SCREEN}\x1b[1;1Habcdefgh${LEAVE_SCREEN}`);
+    expect(s.lines()).toEqual(["abcd"]);
+  });
+});
+
+describe("sidebar on screen", () => {
+  const list = [entry("ws1", "●", "12 Add dark mode"), entry("ws2", "?"), entry("ws3", "·"), entry("ws4", "✔", "7 Fix the login redirect loop")];
+  const draw = (current: number, offset: number, height: number, width: number) =>
+    new Screen(width, height).write(frame(sidebarRows(list, current, offset, height, width), height, width));
+
+  test("shows digit, glyph and label per row with the current tab inverse", () => {
+    const s = draw(1, 0, 6, 24);
+    expect(s.lines()).toEqual(["1 ● 12 Add dark mode", "2 ? ws2", "3 · ws3", "4 ✔ 7 Fix the login red…"]);
+    expect(s.inverseRows()).toEqual([1]);
+    expect(s.inverseText(1)).toBe("2 ? ws2");
+  });
+
+  test("every row fills the pane width and nothing spills past it", () => {
+    const s = draw(0, 0, 6, 16);
+    for (let y = 0; y < 4; y++) expect(s.line(y).length).toBeLessThanOrEqual(16);
+    expect(s.line(3)).toBe("4 ✔ 7 Fix the l…");
+  });
+
+  test("a scrolled window starts at the offset and blanks the rest", () => {
+    const s = draw(3, 2, 5, 24);
+    expect(s.lines()).toEqual(["3 · ws3", "4 ✔ 7 Fix the login red…"]);
+    expect(s.inverseRows()).toEqual([1]);
+  });
+
+  test("a shorter list leaves no rows behind from a longer one", () => {
+    const s = draw(0, 0, 6, 24);
+    s.write(frame(sidebarRows(list.slice(0, 1), 0, 0, 6, 24), 6, 24));
+    expect(s.lines()).toEqual(["1 ● 12 Add dark mode"]);
+  });
+});
+
+describe("top panel on screen", () => {
+  const spec = (id: string): AppSpec => ({ id, label: id, dir: ".", start: "x", ports: [], open: false, when: "always" });
+  const app = (id: string, status: AppStatus, port?: number): TopApp => ({
+    repo: "r",
+    spec: spec(id),
+    repoDir: "/w/r",
+    status,
+    available: true,
+    ...(port === undefined ? {} : { port }),
+  });
+  const snap: TopSnapshot = {
+    ws: "w1",
+    dir: "/w/w1",
+    headline: "12 Add dark mode",
+    links: [{ label: "12", url: "u" }, { label: "PR #3", url: "u3" }],
+    ide: "zed",
+    apps: [app("web", AppStatus.Running, 3000), app("db", AppStatus.Stopped)],
+    message: "refresh failed",
+  };
+  const draw = (width: number, cursor: number, height = 8) => {
+    const f = layoutTop(snap, width);
+    return { f, s: new Screen(width, height).write(paintTop(f, cursor)) };
+  };
+
+  test("headline, one row of buttons, message", () => {
+    const { s } = draw(80, 0);
+    expect(s.lines()).toEqual(["12 Add dark mode", "[ 12 ] [ PR #3 ] [ zed ] [ ● web :3000 ] [ ○ db ]", "refresh failed"]);
+  });
+
+  test("the cursor button is the only inverse text", () => {
+    const { s } = draw(80, 3);
+    expect(s.inverseRows()).toEqual([1]);
+    expect(s.inverseText(1)).toBe("[ ● web :3000 ]");
+  });
+
+  test("headline is bold and the message dim", () => {
+    const { s } = draw(80, 0);
+    expect(s.cells[0]![0]!.bold).toBe(true);
+    expect(s.cells[2]![0]!.dim).toBe(true);
+    expect(s.cells[1]![0]!.bold).toBe(false);
+  });
+
+  test("narrow panes wrap buttons between headline and message without clipping them", () => {
+    const { f, s } = draw(24, 0);
+    const rows = s.lines();
+    expect(rows[0]).toBe("12 Add dark mode");
+    expect(rows.at(-1)).toBe("refresh failed");
+    expect(rows.length).toBeGreaterThan(3);
+    for (const p of f.placed) expect(s.line(p.row).slice(p.col, p.col + p.width)).toBe(`[ ${p.button.label} ]`);
+  });
+
+  test("resizing is a redraw: wide to narrow to wide gives the same screen as drawing wide", () => {
+    const wide = draw(80, 0).s.lines();
+    const s = new Screen(80, 8);
+    s.write(paintTop(layoutTop(snap, 24), 0));
+    s.write(paintTop(layoutTop(snap, 80), 0));
+    expect(s.lines()).toEqual(wide);
+  });
+});

@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { AppStatus, logPath, openBrowser, startApp, stopApp, waitReady } from "./apps";
 import { requireWs } from "./commands";
 import { selfCommand } from "./paths";
-import { type ActDeps, activate, type Button, hit, layoutTop, openTarget, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
+import { type ActDeps, activate, type Button, hit, layoutTop, openTarget, paintTop, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
+import { ENTER_SCREEN, LEAVE_SCREEN } from "./term";
 import { log } from "./util";
 
 const POLL_MS = 2_000;
@@ -10,10 +11,6 @@ const REFRESH_MS = 60_000;
 const READY_TIMEOUT_MS = 60_000;
 
 const ESC = "\x1b";
-const REVERSE = `${ESC}[7m`;
-const RESET = `${ESC}[0m`;
-const DIM = `${ESC}[2m`;
-const BOLD = `${ESC}[1m`;
 
 /** `overbridge top refresh [--ws]`: update the cache the panel reads. */
 export function topRefresh(wsOpt?: string) {
@@ -68,18 +65,7 @@ export async function topPanel(wsOpt?: string) {
 
   const draw = () => {
     frame = layoutTop({ ...snap, ...(note ? { message: note } : {}) }, process.stdout.columns ?? 80);
-    let out = `${ESC}[H${ESC}[2J`;
-    frame.rows.forEach((row, y) => {
-      let text = row;
-      // paint buttons from the right so earlier columns keep their offsets
-      for (const [i, p] of [...frame.placed.entries()].reverse()) {
-        if (p.row !== y) continue;
-        const label = text.slice(p.col, p.col + p.width);
-        text = text.slice(0, p.col) + (i === cursor ? `${REVERSE}${label}${RESET}` : label) + text.slice(p.col + p.width);
-      }
-      out += `${ESC}[${y + 1};1H${y === 0 ? BOLD : y === frame.rows.length - 1 ? DIM : ""}${text}${RESET}`;
-    });
-    process.stdout.write(out);
+    process.stdout.write(paintTop(frame, cursor));
   };
 
   const reload = async () => {
@@ -109,11 +95,11 @@ export async function topPanel(wsOpt?: string) {
 
   const done = new Promise<void>((resolve) => {
     const quit = () => {
-      process.stdout.write(`${ESC}[?1000l${ESC}[?1006l${ESC}[?25h${ESC}[?1049l`);
+      process.stdout.write(LEAVE_SCREEN);
       process.stdin.setRawMode(false);
       resolve();
     };
-    process.stdout.write(`${ESC}[?1049h${ESC}[?25l${ESC}[?1000h${ESC}[?1006h`);
+    process.stdout.write(ENTER_SCREEN);
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.on("data", (buf) => {
