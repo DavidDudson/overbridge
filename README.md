@@ -70,6 +70,23 @@ with work items through `overbridge item`. Install:
 /plugin install overbridge@overbridge
 ```
 
+`plugin-review/` is a second plugin, `overbridge-review`, with the review panel: `mob-review`, `review-pr`,
+`update-personas` and the `persona-*` reviewers (security, code-quality, naming, comments, error-handling,
+architecture, test-design, integration-test, performance, resilience, pr-size, api-design, database,
+github-actions, shell, typing, a11y, async-state, ac-check, production-protector, skills). It reads `review.*`
+from `overbridge.yml` (see below). Install it next to the first:
+
+```
+/plugin install overbridge-review@overbridge
+```
+
+`mob-review` uses only the built-in `code-review` skill. `review-pr` claims the PR with `overbridge checkout`.
+`loop-item` calls `mob-review` when this plugin is installed. Nothing in it needs `pickup`; `merge-main` and
+`resolve-feedback` from `overbridge` are optional extras.
+
+Repo-local personas go in `review.local-dir` (default `.overbridge/personas`) as `<name>/SKILL.md` or `<name>.md`,
+in the same format as a built-in. A local persona with a built-in's name replaces it.
+
 ## Install
 
 Flake package: `packages.<system>.default` wraps `bun src/cli.ts` and sets `OVERBRIDGE_SELF=overbridge`, so

@@ -13,3 +13,5 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - Installed from nix-home's `ws` flake input (to be renamed `overbridge`), which is pinned. After a PR merges to `main`, bump it in
   nix-home (`nix flake update ws`, own commit + PR) or the installed `ws` stays on the old rev.
 - Plugin skills in `plugin/skills/`; keep them in sync with CLI commands/flags.
+- Review panel is a second plugin, `plugin-review/` (`overbridge-review`): `mob-review`, `review-pr`, `update-personas`,
+  `persona-*`. A new persona needs a row in `mob-review`'s panel table; keep its README list in sync.
