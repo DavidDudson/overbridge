@@ -58,6 +58,8 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
 
     branchName: (item) => `feat/${normalize(item.id)}-${slug(item.title)}`,
 
+    workspaceName: (id) => normalize(id),
+
     createItem(item) {
       const args = ["issue", "create", "-p", key, "-t", "Task", "-s", item.title, "-b", item.body, "--no-input"];
       for (const label of item.labels ?? []) args.push("-l", label);

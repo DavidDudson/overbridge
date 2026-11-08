@@ -67,6 +67,13 @@ overbridge pr <repo>                     # claim follows HEAD to the current lay
 second puts the workspace on the shared default branch. Use the `gh-stack` skill for
 everything else (non-interactive flags, rebase/conflict flow, merge).
 
+## One workspace per item
+
+Workspaces are named for the work item they exist for (`ENG-123`, `gh-app-12`). To start a different
+item, do not switch this workspace: `overbridge start <repo> <id>` makes the item's own workspace and tab
+(see `start-item`). Once a workspace's PRs are open and nothing is uncommitted or unpushed, the top panel
+shows a Cleanup button; wiping a workspace is the user's call, so never run `overbridge rm` yourself.
+
 ## Branch naming
 
 New branches: short kebab-case with a type prefix, e.g. `feat/zellij-layout`,

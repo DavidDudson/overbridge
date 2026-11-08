@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { AppStatus, appAvailable, appStatus, appUrl, readRecord } from "./apps";
+import * as git from "./git";
 import { metaDir, wsDir, worktreePath } from "./paths";
 import { providerFor, refreshTitle } from "./pm";
 import type { Provider } from "./pm/provider";
@@ -26,6 +27,8 @@ export interface TopLink {
 export interface TopCache {
   headline?: string;
   links: TopLink[];
+  /** Every claimed repo's PR is open (and there is at least one claim). Half of what makes a workspace cleanable. */
+  prsOpen?: boolean;
   message?: string;
   at: number;
 }
@@ -49,6 +52,8 @@ export interface TopSnapshot {
   /** `$OVERBRIDGE_IDE`, else `$EDITOR`; used for the editor button when no `ide` is configured. */
   editor?: string;
   apps: TopApp[];
+  /** The workspace can be wiped: PRs open, nothing uncommitted, nothing unpushed. */
+  cleanup?: boolean;
   message?: string;
 }
 
@@ -94,6 +99,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   const claims = Object.entries(getWorkspace(readState(), ws).repos);
   const links: TopLink[] = [];
   const problems: string[] = [];
+  const claimed = claims.filter(([, c]) => c.branch).length;
+  let openPrs = 0;
   let headline: string | undefined;
   let itemLink: TopLink | undefined;
 
@@ -124,6 +131,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       const url = exec(["gh", "pr", "view", String(claim.pr), "--json", "url", "--jq", ".url"], dir);
       if (url) links.push({ label: claims.length > 1 ? `${repo} #${claim.pr}` : `PR #${claim.pr}`, url });
       else problems.push(`${repo}: no URL for PR #${claim.pr}`);
+      if (exec(["gh", "pr", "view", String(claim.pr), "--json", "state", "--jq", ".state"], dir) === "OPEN") openPrs++;
     }
   }
 
@@ -131,11 +139,34 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     // keep the previous values when this run found nothing, so the panel never goes blank on an outage
     ...(headline ?? old.headline ? { headline: headline ?? old.headline } : {}),
     links: itemLink || links.length ? [...(itemLink ? [itemLink] : []), ...links] : old.links,
+    // released repos hold no branch, so only claimed branches need an open PR
+    prsOpen: claimed > 0 && openPrs === claimed,
     ...(problems.length ? { message: problems.join("; ") } : {}),
     at: Date.now(),
   };
   writeTopCache(ws, cache);
   return cache;
+}
+
+/**
+ * Whether `ws` can be wiped: every claimed branch has an open PR (from the cache) and no repo
+ * holds uncommitted changes or unpushed commits (read from git now, so it is never stale).
+ */
+export function cleanable(ws: string): boolean {
+  if (!readTopCache(ws).prsOpen) return false;
+  return Object.keys(getWorkspace(readState(), ws).repos).every((repo) => {
+    const wt = worktreePath(ws, repo);
+    return !git.isDirty(wt) && !git.hasUnpushed(wt);
+  });
+}
+
+/** Presses of Cleanup within this long of the first one confirm it. */
+export const CLEANUP_ARM_MS = 5_000;
+
+/** The first press arms Cleanup; a second within `CLEANUP_ARM_MS` confirms. Pure so the timing is testable. */
+export function pressCleanup(armedAt: number | undefined, now: number): { confirmed: boolean; armedAt: number | undefined } {
+  if (armedAt !== undefined && now - armedAt <= CLEANUP_ARM_MS) return { confirmed: true, armedAt: undefined };
+  return { confirmed: false, armedAt: now };
 }
 
 /** Everything the panel draws, from the cache and local app records. */
@@ -174,6 +205,7 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
     ...(ide ? { ide } : {}),
     ...(editor ? { editor } : {}),
     apps,
+    ...(cleanable(ws) ? { cleanup: true } : {}),
     ...(problems.length ? { message: problems.join("; ") } : {}),
   };
 }
@@ -181,7 +213,8 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
 export type Action =
   | { kind: "link"; url: string }
   | { kind: "editor"; cmd: string[]; dir: string }
-  | { kind: "app"; app: TopApp };
+  | { kind: "app"; app: TopApp }
+  | { kind: "cleanup" };
 
 export interface Button {
   label: string;
@@ -206,7 +239,7 @@ function editorFromEnv(editor: string | undefined): { label: string; cmd: string
   return { label: basename(name), cmd };
 }
 
-/** Buttons in display order: links, editor, apps. Apps ruled out by `when:` are left out. */
+/** Buttons in display order: links, editor, apps, then Cleanup when the workspace can be wiped. Apps ruled out by `when:` are left out. */
 export function buttons(snap: TopSnapshot): Button[] {
   const out: Button[] = snap.links.map((l) => ({ label: l.label, action: { kind: "link", url: l.url } }));
   const editor = snap.ide ? { label: snap.ide, cmd: [IDE_COMMANDS[snap.ide]] } : editorFromEnv(snap.editor);
@@ -216,6 +249,7 @@ export function buttons(snap: TopSnapshot): Button[] {
     const port = app.status === AppStatus.Stopped || app.port === undefined ? "" : ` :${app.port}`;
     out.push({ label: `${MARKS[app.status]} ${app.spec.label}${port}`, action: { kind: "app", app } });
   }
+  if (snap.cleanup) out.push({ label: "Cleanup", action: { kind: "cleanup" } });
   return out;
 }
 
@@ -290,6 +324,8 @@ export interface ActDeps {
   spawn: (cmd: string[]) => void;
   start: (app: TopApp) => void;
   stop: (app: TopApp) => void;
+  /** Wipe the workspace; returns a message for the message row. */
+  cleanup: () => string | undefined;
 }
 
 /** Do what a button says; returns a message for the message row, or undefined. */
@@ -302,6 +338,8 @@ export function activate(button: Button, deps: ActDeps): string | undefined {
     case "editor":
       deps.spawn([...a.cmd, a.dir]);
       return undefined;
+    case "cleanup":
+      return deps.cleanup();
     case "app": {
       const live = a.app.status === AppStatus.Running || a.app.status === AppStatus.Starting;
       try {

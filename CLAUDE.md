@@ -14,7 +14,10 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - Apps: `src/apps.ts` (launch, teardown, port pool, status) and `src/app-command.ts` (`overbridge app`).
 - Panes: `src/top.ts` (pure model, layout, cache) + `src/top-run.ts` (tty loop); `src/sidebar.ts`; shared terminal
   helpers in `src/term.ts`; `src/agent-state.ts` reads what `src/agent-hook.ts` writes. Pure parts are unit-tested.
-- `src/layout.ts` builds the zellij layout (one tab per workspace); a user `layouts/overbridge.kdl` replaces it.
+- `src/layout.ts` builds the zellij layout (one tab per workspace, `tabKdl`); a user `layouts/overbridge.kdl` replaces it.
+- `src/start.ts` is `overbridge start <repo> <id>`: one workspace per work item, named by `Provider.workspaceName`,
+  added to the running session with `openTab`. Cleanup (`cleanable`, `pressCleanup` in `src/top.ts`, `wipe` in `src/top-run.ts`)
+  offers to remove a workspace whose PRs are open with nothing uncommitted or unpushed.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors.
 - `src/state.ts`: all claim mutations go through `withState()` (lockfile + atomic rename; throw = no write).

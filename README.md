@@ -4,7 +4,9 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
 
 - **Bare clones, not re-clones.** Each registered repo is cloned once into
   `~/workspaces/.bare/<repo>.git`; every workspace gets a `git worktree` of it.
-- **Workspaces hold several repos.** `~/workspaces/ws1/{app,infra}` etc.
+- **One workspace per work item.** Named for the item (`ENG-123` for Jira, `gh-app-12` for GitHub issue 12 of
+  `app`), created by `overbridge start`, wiped when its PR is open and nothing is left locally.
+- **Workspaces hold several repos.** `~/workspaces/ENG-123/{app,infra}` etc.
 - **Claims.** Each workspace tracks the branch/PR it is on per repo. A branch or PR
   claimed by one workspace cannot be checked out by another. A `<type>/<n>-<slug>` branch
   also claims issue `<n>`, so `feat/383-a` and `fix/383-b` cannot be worked in two workspaces.
@@ -29,12 +31,19 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
 overbridge init
 overbridge repo add app git@github.com:you/app.git
 overbridge repo add infra git@github.com:you/infra.git
-overbridge spinup                       # 4 empty workspaces (ws1-ws4) + fresh zellij session
-overbridge spinup -n 6                  # 6 workspaces, six tabs
+overbridge spinup                       # fresh zellij session over the existing workspaces ('scratch' if none)
+overbridge start app 12                 # workspace gh-app-12 on the issue's branch, in a new tab running /start-item
+overbridge start app ENG-123            # a Jira item: workspace ENG-123
 ```
 
 `overbridge spinup` always rebuilds the session, killing running panes. Use `overbridge up` to just
-attach. Workspaces can also be pre-filled: `overbridge new -r app -r infra`.
+attach. `overbridge start` adds a tab to the running session; an item that already has a workspace is
+focused instead of started again. Workspaces can also be made by hand: `overbridge new <name> -r app -r infra`.
+
+**Cleanup.** A workspace whose claimed branches all have an open PR, with no uncommitted changes and no
+unpushed commits, shows a **Cleanup** button in its top panel. Press it twice within five seconds: it
+re-checks, stops the workspace's apps, runs `overbridge rm` and closes the tab. Merged or closed PRs do
+not count; the button needs an open one.
 
 Inside a workspace (shell pane or its Claude):
 
@@ -56,7 +65,7 @@ Run `overbridge help` for every command.
   .bare/<repo>.git          bare clones (refspec → refs/remotes/origin/*)
   .overbridge/state.json    claims, lock-protected (.overbridge/state.lock)
   .overbridge/layout.kdl    generated zellij layout (plus agent/, top/, apps state)
-  ws1/
+  <ws>/                     named for its work item, e.g. gh-app-12
     CLAUDE.md               generated workspace rules
     .claude/settings.json   OVERBRIDGE_NAME env + guard hook
     <repo>/                 worktree

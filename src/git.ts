@@ -73,6 +73,16 @@ export function isDirty(wt: string): boolean {
   return existsSync(wt) && run(["git", "-C", wt, "status", "--porcelain"]).stdout !== "";
 }
 
+/**
+ * True when HEAD holds commits no remote branch has. Fails safe: a missing worktree is not
+ * unpushed (nothing to lose), but any git error counts as unpushed.
+ */
+export function hasUnpushed(wt: string): boolean {
+  if (!existsSync(wt)) return false;
+  const r = run(["git", "-C", wt, "rev-list", "--count", "HEAD", "--not", "--remotes"]);
+  return !r.ok || r.stdout !== "0";
+}
+
 export type PrInfo = { number: number; url: string; headRefName: string; isCrossRepository: boolean };
 
 /** Accepts `#123`, `pr:123`, or a PR URL. Returns the gh selector, or undefined if `ref` is a branch. */

@@ -7,9 +7,6 @@ import { wsDir } from "./paths";
 export { SIDEBAR_WIDTH };
 /** Rows the top panel takes: headline, one row of buttons, message. */
 export const TOP_ROWS = 4;
-/** Workspaces `spinup` creates when you do not say how many. */
-export const DEFAULT_SPINUP = 4;
-
 const q = (s: string) => JSON.stringify(s); // JSON strings are valid KDL strings
 
 export interface LayoutOptions {
@@ -18,18 +15,26 @@ export interface LayoutOptions {
   sidebarWidth?: number;
 }
 
+export interface TabOptions {
+  /** Resume the agent's last conversation (`claude --continue`). */
+  resume?: boolean;
+  sidebarWidth?: number;
+  /** First message for the agent, e.g. `/start-item 51`. Ignored when `resume` is set. */
+  prompt?: string;
+  focus?: boolean;
+}
+
 /**
- * Zellij layout: one tab per workspace. Each tab has the sidebar down the left; the rest holds
- * the top panel across the top, then the agent above a shell, both in the workspace dir.
- * A pure function of its arguments, so regenerating it is idempotent.
+ * One workspace's tab: the sidebar down the left; the rest holds the top panel across the
+ * top, then the agent above a shell, both in the workspace dir.
  */
-export function layoutKdl(workspaces: string[], self: string[], opts: LayoutOptions = {}): string {
+export function tabKdl(ws: string, self: string[], opts: TabOptions = {}): string {
   const [cmd, ...baseArgs] = self;
   const width = opts.sidebarWidth ?? SIDEBAR_WIDTH;
   const args = (...rest: string[]) => [...baseArgs, ...rest].map(q).join(" ");
-  const tabs = workspaces.map((ws, i) => {
-    const agent = args("claude", ws, ...(opts.resume?.has(ws) ? ["--continue"] : []));
-    return `  tab name=${q(ws)}${i === 0 ? " focus=true" : ""} {
+  const extra = opts.resume ? ["--continue"] : opts.prompt ? ["--", opts.prompt] : [];
+  const agent = args("claude", ws, ...extra);
+  return `  tab name=${q(ws)}${opts.focus ? " focus=true" : ""} {
     pane split_direction="vertical" {
       pane name=${q("sidebar")} command=${q(cmd!)} cwd=${q(wsDir(ws))} size=${width} borderless=true focus=true {
         args ${args("sidebar", "--ws", ws)}
@@ -45,15 +50,39 @@ export function layoutKdl(workspaces: string[], self: string[], opts: LayoutOpti
       }
     }
   }`;
-  });
-  return `layout {
-  default_tab_template {
+}
+
+const TAB_TEMPLATE = `  default_tab_template {
     children
     pane size=1 borderless=true {
       plugin location="zellij:status-bar"
     }
-  }
+  }`;
+
+/**
+ * Zellij layout: one tab per workspace, see `tabKdl`.
+ * A pure function of its arguments, so regenerating it is idempotent.
+ */
+export function layoutKdl(workspaces: string[], self: string[], opts: LayoutOptions = {}): string {
+  const tabs = workspaces.map((ws, i) =>
+    tabKdl(ws, self, {
+      resume: opts.resume?.has(ws) ?? false,
+      ...(opts.sidebarWidth === undefined ? {} : { sidebarWidth: opts.sidebarWidth }),
+      focus: i === 0,
+    }),
+  );
+  return `layout {
+${TAB_TEMPLATE}
 ${tabs.join("\n")}
+}
+`;
+}
+
+/** A layout holding just `ws`'s tab, for `zellij action new-tab --layout`. */
+export function newTabKdl(ws: string, self: string[], opts: TabOptions = {}): string {
+  return `layout {
+${TAB_TEMPLATE}
+${tabKdl(ws, self, opts)}
 }
 `;
 }

@@ -33,6 +33,8 @@ export interface Provider {
   assigned(): WorkItem[];
   /** A branch name that follows the provider's convention for `item`. */
   branchName(item: { id: string; title: string }): string;
+  /** Workspace name for an item in `repo`: valid as a directory name and a zellij tab name. */
+  workspaceName(id: string, repo: string): string;
   /** File a new item and return it. */
   createItem(item: NewItem): WorkItem;
   /** Replace an item's body. */

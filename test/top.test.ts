@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
-import { type ActDeps, activate, buttons, hit, layoutTop, openTarget, readTopCache, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "../src/top";
+import { type ActDeps, activate, buttons, CLEANUP_ARM_MS, cleanable, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "../src/top";
 import { fakeProvider } from "./helpers/fake-provider";
 
 const spec = (id: string): AppSpec => ({ id, label: id, dir: ".", start: "x", ports: [], open: false, when: "always" });
@@ -76,6 +76,7 @@ describe("activate", () => {
     spawn: (c) => calls.push(`spawn ${c.join(" ")}`),
     start: (a) => calls.push(`start ${a.spec.id}`),
     stop: (a) => calls.push(`stop ${a.spec.id}`),
+    cleanup: () => void calls.push("cleanup"),
   };
   beforeEach(() => void (calls.length = 0));
 
@@ -172,5 +173,100 @@ describe("refreshTop", () => {
     expect(cache.links).toHaveLength(2);
     expect(cache.message).toContain("offline");
     expect(cache.message).toContain("no URL for PR #3");
+  });
+});
+
+describe("cleanup", () => {
+  test("Cleanup is the last button, and only when the workspace can be wiped", () => {
+    const base = snap({ links: [{ label: "PR #3", url: "u3" }], ide: "zed", apps: [app("web", AppStatus.Stopped)] });
+    expect(buttons(base).map((b) => b.label)).not.toContain("Cleanup");
+    expect(buttons({ ...base, cleanup: true }).map((b) => b.label)).toEqual(["PR #3", "zed", "○ web", "Cleanup"]);
+  });
+
+  test("activating Cleanup calls the cleanup dep and shows its message", () => {
+    const deps: ActDeps = { open: () => {}, spawn: () => {}, start: () => {}, stop: () => {}, cleanup: () => "armed" };
+    expect(activate({ label: "Cleanup", action: { kind: "cleanup" } }, deps)).toBe("armed");
+  });
+
+  test("the first press arms, a second within the window confirms, a late one re-arms", () => {
+    const first = pressCleanup(undefined, 1_000);
+    expect(first).toEqual({ confirmed: false, armedAt: 1_000 });
+    expect(pressCleanup(first.armedAt, 1_000 + CLEANUP_ARM_MS)).toEqual({ confirmed: true, armedAt: undefined });
+    expect(pressCleanup(first.armedAt, 1_000 + CLEANUP_ARM_MS + 1)).toEqual({ confirmed: false, armedAt: 1_000 + CLEANUP_ARM_MS + 1 });
+  });
+});
+
+describe("cleanable", () => {
+  let tmp: string;
+  let wt: string;
+  const savedRoot = process.env.OVERBRIDGE_ROOT;
+  const gitEnv = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", GIT_CONFIG_GLOBAL: "/dev/null" };
+  const sh = (cmd: string[], cwd: string) => {
+    const p = Bun.spawnSync({ cmd, cwd, env: gitEnv, stdout: "pipe", stderr: "pipe" });
+    if (p.exitCode !== 0) throw new Error(`${cmd.join(" ")}: ${p.stderr}`);
+  };
+  const items = [{ id: "12", title: "Add dark mode", url: "x" }];
+  /** Cache the PR state as `gh` would report it. */
+  const cachePr = (state: string) =>
+    refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => (cmd.includes("state") ? state : "https://host/o/r/pull/3") });
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), "overbridge-clean-"));
+    process.env.OVERBRIDGE_ROOT = tmp;
+    sh(["git", "init", "-q", "-b", "main", "src"], tmp);
+    sh(["git", "commit", "-q", "--allow-empty", "-m", "init"], join(tmp, "src"));
+    sh(["git", "clone", "-q", "--bare", "src", "remote.git"], tmp);
+    mkdirSync(join(tmp, "w1"));
+    sh(["git", "clone", "-q", join(tmp, "remote.git"), "r"], join(tmp, "w1"));
+    wt = join(tmp, "w1", "r");
+    sh(["git", "switch", "-q", "-c", "feat/12-dark-mode"], wt);
+    sh(["git", "commit", "-q", "--allow-empty", "-m", "work"], wt);
+    sh(["git", "push", "-q", "-u", "origin", "feat/12-dark-mode"], wt);
+    withState((s) => {
+      s.workspaces.w1 = { created: "now", repos: { r: { branch: "feat/12-dark-mode", pr: 3 } } };
+    });
+  });
+
+  afterEach(() => {
+    savedRoot === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = savedRoot);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("an open PR with a clean, pushed tree is a candidate", () => {
+    expect(cachePr("OPEN").prsOpen).toBe(true);
+    expect(cleanable("w1")).toBe(true);
+  });
+
+  test("a merged, closed or missing PR is not", () => {
+    expect(cachePr("MERGED").prsOpen).toBe(false);
+    expect(cleanable("w1")).toBe(false);
+    expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: () => undefined }).prsOpen).toBe(false);
+    expect(cleanable("w1")).toBe(false);
+  });
+
+  test("uncommitted changes block it", () => {
+    cachePr("OPEN");
+    writeFileSync(join(wt, "scratch.txt"), "x");
+    expect(cleanable("w1")).toBe(false);
+  });
+
+  test("an unpushed commit blocks it", () => {
+    cachePr("OPEN");
+    sh(["git", "commit", "-q", "--allow-empty", "-m", "more"], wt);
+    expect(cleanable("w1")).toBe(false);
+  });
+
+  test("a branch that was never pushed blocks it", () => {
+    cachePr("OPEN");
+    sh(["git", "switch", "-q", "-c", "feat/local-only"], wt);
+    sh(["git", "commit", "-q", "--allow-empty", "-m", "local"], wt);
+    expect(cleanable("w1")).toBe(false);
+  });
+
+  test("snapshotTop offers Cleanup only for a candidate", async () => {
+    cachePr("OPEN");
+    expect((await snapshotTop("w1", {})).cleanup).toBe(true);
+    writeFileSync(join(wt, "scratch.txt"), "x");
+    expect((await snapshotTop("w1", {})).cleanup).toBeUndefined();
   });
 });

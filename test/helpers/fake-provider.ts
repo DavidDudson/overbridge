@@ -25,6 +25,7 @@ export function fakeProvider(
     },
     assigned: () => items,
     branchName: (item) => `feat/${item.id}-${slug(item.title)}`,
+    workspaceName: (id, repo) => (name === "jira" ? id : `gh-${repo}-${id}`),
     createItem(item) {
       const id = String(next++);
       const work = { id, title: item.title, url: `https://fake.test/items/${id}` };
