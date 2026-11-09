@@ -9,14 +9,14 @@
     "defaults": {
       "description": "Applied under every repo's overbridge.yml.",
       "type": "object",
-      "properties": { "hooks": { "$ref": "#/$defs/hooks" } }
+      "properties": { "hooks": { "$ref": "#/$defs/hooks" }, "buttons": { "$ref": "#/$defs/buttons" } }
     },
     "repos": {
       "description": "Per repo, by its name in repos.toml: applied over that repo's overbridge.yml.",
       "type": "object",
       "additionalProperties": {
         "type": ["object", "null"],
-        "properties": { "hooks": { "$ref": "#/$defs/hooks" } }
+        "properties": { "hooks": { "$ref": "#/$defs/hooks" }, "buttons": { "$ref": "#/$defs/buttons" } }
       }
     },
     "skill-extensions": {
@@ -51,6 +51,24 @@
     }
   },
   "$defs": {
+    "buttons": {
+      "description": "Top panel buttons. Only allowed in the root config.yml.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+          "label": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1, "description": "Run in the worktree on each refresh. Prints text, or {\"text\", \"color\"}; printing nothing hides the button." },
+          "run": { "type": "string", "minLength": 1, "description": "Run in the worktree, detached, when the button is pressed." },
+          "url": { "type": "string", "minLength": 1, "description": "Opened when the button is pressed. {ws}, {repo}, {branch} and {pr} are filled in." },
+          "side": { "enum": ["left", "right"] }
+        },
+        "not": { "required": ["run", "url"] }
+      }
+    },
     "command": {
       "oneOf": [
         { "type": "string", "minLength": 1 },

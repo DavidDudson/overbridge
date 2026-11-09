@@ -314,6 +314,39 @@ anyway.
 Hooks are only read from the root `config.yml`. A repo's own `overbridge.yml` can't declare them, because then
 checking out someone's branch would run whatever that branch says.
 
+### Top panel buttons
+
+`buttons` in the root `config.yml` adds buttons to the top panel, for each repo the workspace holds. They can sit
+under `defaults` or `repos.<name>`.
+
+```yaml
+defaults:
+  buttons:
+    - id: chromatic
+      label: 🎨 Chromatic
+      status: my-tool chromatic-status        # optional: run on each refresh
+      url: https://example.com/{repo}/{branch}
+    - id: docs
+      label: 📚 Docs
+      run: pnpm docs:open                     # run when pressed
+      side: left
+```
+
+- **`id`** and **`label`**: required. The id must be unique within the list.
+- **`url`**: opened when the button is pressed. `{ws}`, `{repo}`, `{branch}`, and `{pr}` are filled in and URL-encoded.
+- **`run`**: a shell command run in the worktree, detached, when the button is pressed. Set `run` or `url`, not both.
+- **`status`**: a shell command run in the worktree each time the panel refreshes (every minute, or `r`). It prints
+  the text shown after the label, or a JSON object `{ "text": "…", "color": "green" }`. The colours are `red`,
+  `green`, `yellow`, `blue`, `purple`, `cyan`, and `grey`. A button with a `status` stays hidden until its command
+  prints something, so a command that fails or prints nothing hides it.
+- **`side`**: `right` (the default) with the launchers, or `left` with the links.
+
+The commands get `OVERBRIDGE_NAME`, `OVERBRIDGE_REPO`, `OVERBRIDGE_BRANCH`, and `OVERBRIDGE_PR`. When a workspace
+holds more than one repo, each button's label starts with its repo. The buttons have no keys, because the panel's
+keys are taken.
+
+Like hooks, buttons are only read from the root `config.yml`, because `status` runs without anyone pressing anything.
+
 ### Guard additions
 
 A top-level `guard` block in the root `config.yml` adjusts the workspace guard for every workspace. A repo's
