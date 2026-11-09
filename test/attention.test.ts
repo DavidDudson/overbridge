@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentStateFile, readAgentState } from "../src/agent-state";
@@ -71,7 +71,7 @@ describe("agent state with background tasks", () => {
   let tmp: string;
   const saved = process.env.OVERBRIDGE_ROOT;
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), "overbridge-bg-"));
+    tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-bg-")));
     process.env.OVERBRIDGE_ROOT = tmp;
     mkdirSync(join(tmp, ".overbridge"), { recursive: true });
   });
@@ -96,7 +96,7 @@ describe("pane toggles", () => {
   let tmp: string;
   const saved = process.env.OVERBRIDGE_ROOT;
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), "overbridge-panes-"));
+    tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-panes-")));
     process.env.OVERBRIDGE_ROOT = tmp;
     withState((s) => {
       s.workspaces.w1 = { created: "now", repos: { r: { branch: "b" }, q: { branch: "c" } } };
@@ -177,7 +177,7 @@ describe("nextState", () => {
 describe("auto-compact restart", () => {
   let meta: string;
   beforeEach(() => {
-    meta = mkdtempSync(join(tmpdir(), "overbridge-compact-"));
+    meta = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-compact-")));
   });
   afterEach(() => rmSync(meta, { recursive: true, force: true }));
 

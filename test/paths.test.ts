@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { currentWorkspace, envVar, metaDir, root } from "../src/paths";
@@ -11,7 +11,7 @@ let tmp: string;
 beforeEach(() => {
   saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
   for (const k of KEYS) delete process.env[k];
-  tmp = mkdtempSync(join(tmpdir(), "overbridge-paths-"));
+  tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-paths-")));
 });
 
 afterEach(() => {
@@ -52,5 +52,22 @@ describe("state dir migration", () => {
     mkdirSync(join(tmp, ".overbridge"));
     metaDir();
     expect(existsSync(join(tmp, ".ws"))).toBe(true);
+  });
+});
+
+describe("symlinked root", () => {
+  test("root resolves symlinks so a real cwd inside it names the workspace", () => {
+    const real = join(tmp, "real");
+    mkdirSync(join(real, "ws1", "app"), { recursive: true });
+    const link = join(tmp, "link");
+    symlinkSync(real, link);
+    process.env.OVERBRIDGE_ROOT = link;
+    expect(root()).toBe(real);
+    expect(currentWorkspace(join(real, "ws1", "app"))).toBe("ws1");
+  });
+
+  test("a root that does not exist yet is returned as given", () => {
+    process.env.OVERBRIDGE_ROOT = join(tmp, "missing");
+    expect(root()).toBe(join(tmp, "missing"));
   });
 });

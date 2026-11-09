@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,7 +33,7 @@ function sh(cmd: string[], cwd: string) {
 }
 
 beforeAll(() => {
-  tmp = mkdtempSync(join(tmpdir(), "ws-test-"));
+  tmp = realpathSync(mkdtempSync(join(tmpdir(), "ws-test-")));
   root = join(tmp, "workspaces");
   const src = join(tmp, "src");
   sh(["git", "init", "-q", "-b", "main", src], tmp);
