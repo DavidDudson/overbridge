@@ -50,7 +50,9 @@ export const barePath = (repo: string) => join(root(), ".bare", `${repo}.git`);
 /** `gh repo list` cache; outside OVERBRIDGE_ROOT so workspace Claudes may read it. */
 export const ghReposCache = () =>
   join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "overbridge", "github-repos.json");
-export const wsDir = (ws: string) => join(root(), ws);
+/** Resolved dev shell envs (`src/shell.ts`); outside OVERBRIDGE_ROOT like `ghReposCache`. */
+export const shellCacheDir = () => join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "overbridge", "shell");
+export const wsDir =(ws: string) => join(root(), ws);
 export const worktreePath = (ws: string, repo: string) => join(wsDir(ws), repo);
 
 export function isInside(child: string, parent: string): boolean {

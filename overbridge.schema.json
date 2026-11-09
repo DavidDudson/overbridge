@@ -85,6 +85,22 @@
         "local-dir": { "type": "string", "minLength": 1 }
       }
     },
-    "ide": { "enum": ["vscode", "zed", "webstorm"] }
+    "ide": { "enum": ["vscode", "zed", "webstorm"] },
+    "shell": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enter"],
+          "properties": {
+            "enter": { "type": "string", "minLength": 1 },
+            "env": { "type": "string", "minLength": 1 },
+            "key": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          },
+          "dependentRequired": { "key": ["env"] }
+        }
+      ]
+    }
   }
 }

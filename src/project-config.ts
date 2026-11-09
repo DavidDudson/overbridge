@@ -82,6 +82,18 @@ export const HOOK_NAMES = ["post-add", "post-checkout", "post-pr", "pre-remove"]
 export type HookName = (typeof HOOK_NAMES)[number];
 export type Hooks = Partial<Record<HookName, string[]>>;
 
+/**
+ * How to enter a repo's dev shell. `enter` is a command prefix (the command to run is appended). With `env`
+ * (a command printing NUL-separated KEY=VALUE pairs, as `env -0` does) overbridge caches the resolved env,
+ * keyed on the hash of the `key` files, and runs commands directly with it instead of through `enter`.
+ */
+export interface ShellSpec {
+  enter: string;
+  env?: string;
+  /** Repo-relative files whose contents key the cached env. */
+  key: string[];
+}
+
 export const DEFAULT_PERSONA_DIR = ".overbridge/personas";
 
 export interface ReviewConfig {
@@ -100,6 +112,8 @@ export interface ProjectConfig {
   commands: Commands;
   review: ReviewConfig;
   ide?: Ide;
+  /** The repo's dev shell, if it declares one. */
+  shell?: ShellSpec;
   /** Lifecycle hooks, from the root `config.yml` only. Present only when there are any. */
   hooks?: Hooks;
   /** Top panel buttons, from the root `config.yml` only. */
@@ -116,7 +130,8 @@ export const defaultConfig = (): ProjectConfig => ({
   buttons: [],
 });
 
-const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "hooks", "buttons"];
+const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "shell", "hooks", "buttons"];
+const SHELL_KEYS = ["enter", "env", "key"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
 const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
@@ -435,6 +450,22 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
 
   const ide = p.oneOf(p.string(raw, "ide", "", false), IDES, "ide");
   if (ide) config.ide = ide;
+
+  const shell = raw.shell;
+  if (shell !== undefined && shell !== null) {
+    if (typeof shell === "string") {
+      if (shell === "") p.add("shell", "expected a non-empty string or a mapping");
+      else config.shell = { enter: shell, key: [] };
+    } else if (!isObject(shell)) p.add("shell", "expected a command prefix or a mapping with enter, env, key");
+    else {
+      p.unknownKeys(shell, SHELL_KEYS, "shell");
+      const enter = p.string(shell, "enter", "shell", true);
+      const env = p.string(shell, "env", "shell", false);
+      const key = p.stringList(shell, "key", "shell") ?? [];
+      if (key.length && !env) p.add("shell.key", "needs shell.env: the key only invalidates a cached env");
+      if (enter) config.shell = { enter, ...(env ? { env } : {}), key };
+    }
+  }
 
   if (p.list.length) fail(`${file}:\n${p.list.map((line) => `  ${line}`).join("\n")}`);
   return config;

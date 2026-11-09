@@ -76,6 +76,22 @@ describe("config validation messages", () => {
   });
 });
 
+describe("shell", () => {
+  test("a string is a command prefix; a mapping adds the env command and key files", () => {
+    expect(parseConfig("shell: nix develop --command\n", "f.yml").shell).toEqual({ enter: "nix develop --command", key: [] });
+    expect(parseConfig("shell:\n  enter: e\n  env: v\n  key: [a, b]\n", "f.yml").shell).toEqual({ enter: "e", env: "v", key: ["a", "b"] });
+    expect(parseConfig("version: 1\n", "f.yml").shell).toBeUndefined();
+  });
+
+  test("bad shapes name the key", () => {
+    expect(problems("shell: 3\n")).toEqual(["shell: expected a command prefix or a mapping with enter, env, key"]);
+    expect(problems("shell:\n  env: v\n")).toEqual(["shell.enter: required"]);
+    expect(problems("shell:\n  enter: e\n  key: [a]\n")).toEqual(["shell.key: needs shell.env: the key only invalidates a cached env"]);
+    expect(problems("shell:\n  enter: e\n  entr: x\n")).toEqual(["shell.entr: unknown key, did you mean 'enter'?"]);
+    expect(problems("shell:\n  enter: e\n  env: v\n  key: [1, '']\n")).toHaveLength(2);
+  });
+});
+
 describe("shipped example", () => {
   test("overbridge.example.yml is valid and exercises every top-level key", () => {
     const text = readFileSync(join(import.meta.dir, "..", "overbridge.example.yml"), "utf8");
@@ -84,6 +100,7 @@ describe("shipped example", () => {
     expect(config.apps.map((a) => a.id)).toEqual(["web"]);
     expect(Object.keys(config.commands).sort()).toEqual(["build", "format", "lint", "test", "typecheck"]);
     expect(config.ide).toBe("vscode");
+    expect(config.shell).toEqual({ enter: "direnv exec .", key: [] });
   });
 
   test("the repo's own overbridge.yml is valid", () => {

@@ -89,6 +89,8 @@ overbridge config get commands.typecheck
 overbridge config get commands.test
 ```
 
+Run each through the repo's dev shell: `overbridge shell <repo> -- <command>` (it runs the command as it is when the repo declares no `shell`).
+
 An unset command means the repo has none. Run the smallest scope that covers the change.
 
 Do not block on the Ask items. Apply the Fix items, push and watch CI (step 4), then list each Ask item in the summary with your analysis and recommendation. Apply one later if the user answers.

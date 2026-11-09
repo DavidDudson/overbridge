@@ -107,7 +107,7 @@ backup ref from step 1 also restores the old tip.
 ## 5. Verify and push
 
 Run the repo's checks on what changed (`overbridge config get commands.typecheck`, `commands.test`; an
-unset one means the repo has none). Compare the result with the backup so nothing was lost:
+unset one means the repo has none), each through `overbridge shell <repo> -- <command>` (the repo's dev shell; it runs the command as it is when there is none). Compare the result with the backup so nothing was lost:
 
 ```sh
 git range-diff origin/<default>...<branch>-pre-rebase-backup origin/<default>...HEAD

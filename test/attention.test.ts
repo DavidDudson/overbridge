@@ -143,6 +143,17 @@ describe("pane toggles", () => {
     expect(closing.calls[1]).toEqual(["close-pane", "--pane-id", "terminal_5"]);
   });
 
+  test("a terminal in a repo with a dev shell runs the user's shell through overbridge shell", () => {
+    mkdirSync(join(tmp, "w1", "r"), { recursive: true });
+    writeFileSync(join(tmp, "w1", "r", "overbridge.yml"), "shell: wrap\n");
+    const f = fake([pane(1, "claude")]);
+    togglePane("w1", "terminal", f.deps);
+    const open = f.calls[2]!;
+    expect(open).toContain(join(tmp, "w1", "r"));
+    expect(open.slice(open.indexOf("--") + 1, -1)).toEqual(["ob", "shell", "r", "--ws", "w1", "--"]);
+    expect(open.at(-1)).toBe(process.env.SHELL || "sh");
+  });
+
   test("diff stacks below an open terminal and runs the diff command", () => {
     const f = fake([pane(1, "claude"), pane(5, "terminal")]);
     togglePane("w1", "diff", f.deps);

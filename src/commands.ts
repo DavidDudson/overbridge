@@ -2,11 +2,12 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { dirname, join, resolve } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
-import { configPath, getConfigValue, loadConfigFile, loadRootLayers, rootConfigPath } from "./project-config";
+import { configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, rootConfigPath } from "./project-config";
 import { chooseLayout, userLayoutPath } from "./layout";
-import { barePath, currentWorkspace, envVar, metaDir, NAME_RE, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
+import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
 import { scaffold } from "./scaffold";
+import { shellInvocation } from "./shell";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
 import { type Claim, claimOwner, getWorkspace, readState, withState } from "./state";
 import { exec, fail, log, must, naturalSort, run } from "./util";
@@ -85,7 +86,23 @@ export function addRepo(repo: string, wsOpt?: string) {
   withState((s) => {
     getWorkspace(s, ws).repos[repo] = {};
   });
+  warnShellLeak(ws, repo);
+  scaffold(ws);
   runHooks("post-add", { ws, repo });
+}
+
+/** Which repo's dev shell the workspace's agent was launched in, if any (written by `claude()`). */
+const agentShellFile = (ws: string) => join(metaDir(), "agent", `${ws}.shell`);
+const agentShell = (ws: string) => (existsSync(agentShellFile(ws)) ? readFileSync(agentShellFile(ws), "utf8").trim() : undefined);
+
+/** A repo added to a workspace whose agent runs inside another repo's shell: that env leaks into the agent. */
+function warnShellLeak(ws: string, added: string) {
+  const inside = agentShell(ws);
+  if (!inside || inside === added) return;
+  log(
+    `warning: the agent in ${ws} runs inside ${inside}'s dev shell, so that env leaks into work on ${added}. ` +
+      `Use \`overbridge shell ${added} -- <cmd>\` for ${added}'s own tools.`,
+  );
 }
 
 export function removeWorkspace(ws: string, force: boolean) {
@@ -101,7 +118,7 @@ export function removeWorkspace(ws: string, force: boolean) {
   for (const r of Object.keys(w.repos)) git.removeWorktree(getRepo(r), worktreePath(ws, r), force);
   rmSync(wsDir(ws), { recursive: true, force: true });
   // per-workspace files outside the workspace dir: top cache, agent state, sidebar pane, tab layout
-  for (const f of [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("sidebars", ws), join("tabs", `${ws}.kdl`)])
+  for (const f of [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("sidebars", ws), join("tabs", `${ws}.kdl`)])
     rmSync(join(metaDir(), f), { force: true });
   withState((s) => {
     delete s.workspaces[ws];
@@ -302,10 +319,31 @@ export function spinup() {
   up(true);
 }
 
+/**
+ * Launch the agent. With exactly one repo that declares a dev shell it starts inside it, cwd still the workspace
+ * root; with several it starts plain and the workspace CLAUDE.md points it at `overbridge shell`.
+ */
 export function claude(ws: string, extra: string[]) {
-  getWorkspace(readState(), ws);
+  const repos = Object.keys(getWorkspace(readState(), ws).repos);
   scaffold(ws);
-  process.exit(exec(["claude", ...extra], { cwd: wsDir(ws), env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() } }));
+  const [only] = repos;
+  const spec = repos.length === 1 && only ? loadRepoConfig(worktreePath(ws, only), only).shell : undefined;
+  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, ["claude", ...extra], wsDir(ws));
+  mkdirSync(dirname(agentShellFile(ws)), { recursive: true });
+  if (spec && only) writeFileSync(agentShellFile(ws), only);
+  else rmSync(agentShellFile(ws), { force: true });
+  process.exit(exec(inv.cmd, { cwd: inv.cwd, env: { ...inv.env, OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() } }));
+}
+
+/** `overbridge shell <repo> -- <cmd>`: run `cmd` in the repo's dev shell, or as it is when the repo has none. */
+export function shell(repo: string, cmd: string[], wsOpt?: string) {
+  const ws = requireWs(wsOpt);
+  if (!getWorkspace(readState(), ws).repos[repo]) fail(`${repo} is not in ${ws}`);
+  if (!cmd.length) fail("usage: overbridge shell <repo> [--ws name] -- <cmd>...");
+  const dir = worktreePath(ws, repo);
+  const here = process.cwd();
+  const inv = shellInvocation(repo, dir, loadRepoConfig(dir, repo).shell, cmd, isInside(here, dir) ? here : dir);
+  process.exit(exec(inv.cmd, { cwd: inv.cwd, env: inv.env }));
 }
 
 export function whoami() {

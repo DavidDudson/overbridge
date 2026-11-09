@@ -1,6 +1,7 @@
 import { getRepo } from "./config";
 import * as git from "./git";
 import { selfCommand, worktreePath, wsDir } from "./paths";
+import { loadRepoConfig } from "./project-config";
 import { getWorkspace, readState } from "./state";
 import type { PaneKind } from "./top";
 import { run } from "./util";
@@ -28,8 +29,22 @@ export function findPane(panes: ZellijPane[], ws: string, kind: PaneKind): Zelli
 
 /** Where a terminal opens: the first claimed repo's worktree, else the workspace dir. */
 export function terminalDir(ws: string): string {
-  const repo = Object.keys(getWorkspace(readState(), ws).repos)[0];
+  const repo = terminalRepo(ws);
   return repo ? worktreePath(ws, repo) : wsDir(ws);
+}
+
+const terminalRepo = (ws: string): string | undefined => Object.keys(getWorkspace(readState(), ws).repos)[0];
+
+/** The terminal's command: the user's shell inside the repo's dev shell, or nothing (zellij's default shell). */
+function terminalCommand(ws: string, deps: PaneDeps): string[] {
+  const repo = terminalRepo(ws);
+  if (!repo) return [];
+  try {
+    if (!loadRepoConfig(worktreePath(ws, repo), repo).shell) return [];
+  } catch {
+    return [];
+  }
+  return ["--", ...deps.self, "shell", repo, "--ws", ws, "--", process.env.SHELL || "sh"];
 }
 
 export interface PaneDeps {
@@ -80,6 +95,7 @@ export function togglePane(ws: string, kind: PaneKind, deps: PaneDeps = defaultD
   deps.zellij(["focus-pane-id", target(anchor)]);
   const args = ["new-pane", "--direction", other ? "down" : "right", "--name", paneTitle(ws, kind), "--cwd", terminalDir(ws)];
   if (kind === "diff") args.push("--close-on-exit", "--", ...deps.self, "diff", "--ws", ws);
+  else args.push(...terminalCommand(ws, deps));
   return deps.zellij(args) === undefined ? `could not open ${kind}` : undefined;
 }
 

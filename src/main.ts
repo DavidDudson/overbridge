@@ -42,7 +42,9 @@ Workspaces
                                         branch, in a new tab running /start-item; focuses an existing one
   overbridge new <name> [-r repo]...            create a workspace
   overbridge add <repo> [--ws name]             add a repo worktree to a workspace
-  overbridge rm <name> [--force]                remove a workspace and its worktrees (the top panel's
+  overbridge shell <repo> [--ws name] -- <cmd>  run a command in the repo's dev shell (its shell key in
+                                        overbridge.yml); as it is when the repo has none
+  overbridge rm <name> [--force]               remove a workspace and its worktrees (the top panel's
                                         Cleanup button does this once the PR is open and nothing is unpushed)
   overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty state
   overbridge whoami                             workspace for the current dir/session
@@ -199,6 +201,16 @@ async function main(argv: string[]): Promise<number> {
       const [name, ...extra] = rest;
       if (!name) throw new OverbridgeError("usage: overbridge claude <name> [-- claude args]");
       cmd.claude(name, extra[0] === "--" ? extra.slice(1) : extra);
+      break;
+    }
+    case "shell": {
+      // everything after `--` belongs to the child: never parse its flags
+      const cut = rest.indexOf("--");
+      const mine = cut < 0 ? rest : rest.slice(0, cut);
+      const { values, positionals } = opts(mine, ws);
+      if (positionals.length !== 1 || cut < 0 || cut === rest.length - 1)
+        throw new OverbridgeError("usage: overbridge shell <repo> [--ws name] -- <cmd>...");
+      cmd.shell(positionals[0]!, rest.slice(cut + 1), values.ws);
       break;
     }
     case "guard":

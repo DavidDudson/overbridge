@@ -58,6 +58,8 @@ Everything below says "the manifest", "the lockfile" and "the package manager". 
 
 A monorepo can hold several. Say which one the library lives in. Use `overbridge config get commands.<x>` for the repo's own install, typecheck, lint, test and build commands (`commands.build`, `commands.test`, …). A key that is unset means the repo has none: say so rather than guessing.
 
+Run every install, package-manager, typecheck, lint, test and build command through `overbridge shell <repo> -- <command>`, so it sees the repo's dev shell (it runs the command as it is when the repo declares no `shell`).
+
 ## Batch mode: several libraries, one item, one PR
 
 A batch is allowed only when **every** bump in it is non-breaking for us:

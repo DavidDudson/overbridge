@@ -280,6 +280,7 @@ Then, for everything you applied:
    overbridge config get commands.format
    overbridge config get commands.test      # a single file or project first; ask before a full suite
    ```
+   Run each through the repo's dev shell: `overbridge shell <repo> -- <command>` (it runs the command as it is when the repo declares no `shell`).
    A key that is unset means the repo has no such command: say so rather than guessing one. Follow the repo's `CLAUDE.md`/`AGENTS.md` for how to scope a run.
 3. **Re-review your own fixes: narrowly.** The panel read the original diff; your fix commit went in unreviewed, and a fix is where a fresh defect lands (a moved symbol, a weakened assertion, a rename that missed a caller). But this round is the most expensive thing the panel does: it fires at the deepest context of the session, so it is scoped to where a fix can actually go wrong, not re-run across the board.
 
