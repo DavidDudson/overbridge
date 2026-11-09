@@ -9,7 +9,8 @@ import { currentTab, sidebar } from "./sidebar";
 import { start } from "./start";
 import { topPanel, topRefresh } from "./top-run";
 import { silenceLegacyWarnings } from "./paths";
-import { OverbridgeError } from "./util";
+import { externalCommand, externalEnv, externalHelp } from "./external";
+import { exec, OverbridgeError } from "./util";
 
 const HELP = `overbridge (alias: ws) — multi-repo workspaces with bound Claude sessions in zellij
 
@@ -54,6 +55,10 @@ Zellij
 
 Hooks
   overbridge guard                              Claude PreToolUse hook (reads JSON on stdin)
+
+Extending
+  overbridge <name> [args]                      runs overbridge-<name> from PATH when <name> is not built in;
+                                        it gets OVERBRIDGE_ROOT, OVERBRIDGE_SELF and OVERBRIDGE_NAME
 `;
 
 function opts<T extends Record<string, { type: "string" | "boolean"; short?: string; multiple?: boolean }>>(
@@ -194,10 +199,13 @@ async function main(argv: string[]): Promise<number> {
     case "help":
     case "-h":
     case "--help":
-      console.log(HELP);
+      console.log(HELP + externalHelp());
       break;
-    default:
-      throw new OverbridgeError(`unknown command '${sub}'\n\n${HELP}`);
+    default: {
+      const bin = externalCommand(sub);
+      if (bin) return exec([bin, ...rest], { env: externalEnv() });
+      throw new OverbridgeError(`unknown command '${sub}'\n\n${HELP}${externalHelp()}`);
+    }
   }
   return 0;
 }
