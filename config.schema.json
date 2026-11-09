@@ -23,6 +23,31 @@
       "description": "Directories of skill extension files (<dir>/<skill>/<phase>.md), read before the repo's .overbridge/ext. Absolute, ~/-relative or relative to the root.",
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
+    },
+    "guard": {
+      "description": "Additions to the workspace guard. Only allowed in the root config.yml.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "read-paths": {
+          "description": "Paths under the root that any workspace may read (never write). Absolute or ~/-relative.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "deny": {
+          "description": "More Bash commands to block, checked after the built-in rules.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pattern", "reason"],
+            "properties": {
+              "pattern": { "type": "string", "minLength": 1, "description": "A regular expression matched against the command." },
+              "reason": { "type": "string", "minLength": 1, "description": "Shown to Claude when the command is blocked." }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

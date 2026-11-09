@@ -314,6 +314,29 @@ anyway.
 Hooks are only read from the root `config.yml`. A repo's own `overbridge.yml` can't declare them, because then
 checking out someone's branch would run whatever that branch says.
 
+### Guard additions
+
+A top-level `guard` block in the root `config.yml` adjusts the workspace guard for every workspace. A repo's
+`overbridge.yml` can't have one, so a checked-out branch can never loosen the guard.
+
+```yaml
+guard:
+  read-paths:              # under the root, but readable from any workspace
+    - ~/workspaces/.seeds
+  deny:                    # more Bash commands to block, checked after the built-in rules
+    - pattern: '\bnpm\s+publish\b'
+      reason: publishing is for the user, not a workspace Claude
+```
+
+- **`read-paths`**: paths, absolute or starting with `~/`, that a workspace's Claude may read even though they are
+  under the root. Write tools still can't touch them. A Bash command may name them, because the guard can't tell a
+  read from a write in a shell command.
+- **`deny`**: a regular expression matched against each Bash command, and the reason Claude is shown when it
+  matches.
+
+If the root `config.yml` can't be read, the guard blocks every tool call until it is fixed, as it does for any
+internal error.
+
 ### Extension keys
 
 A top-level key that starts with `x-`, such as `x-acme`, passes validation in either file. overbridge keeps it as
