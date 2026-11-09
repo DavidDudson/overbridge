@@ -9,7 +9,7 @@ import type { Provider } from "./pm/provider";
 import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, readState } from "./state";
 import { boxBottom, boxRow, boxTop, type Color, COLORS, colorize, fit, inverse, textWidth } from "./term";
-import { REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses } from "./reviewers";
+import { parseUnresolved, REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses, threadsCommand } from "./reviewers";
 import { stackOf, localStacks } from "./stack";
 import { run } from "./util";
 
@@ -287,6 +287,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     if (claim.pr !== undefined) {
       const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,title,isDraft,state,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments"], dir));
       if (view?.url) {
+        const threads = threadsCommand(view.url);
+        if (threads) view.unresolved = parseUnresolved(exec(threads, dir));
         const layers = stackOf(safeStacks(repo), claim.branch)?.layers ?? [];
         const stack = layers.length > 1 ? layers.flatMap((l) => (l.pr === undefined ? [] : [l.pr])) : [];
         links.push({
@@ -471,6 +473,19 @@ function withKeys(list: Button[]): Button[] {
  * workspace can be wiped. Right: apps, the editor, then the claude / terminal / diff pane toggles.
  * Apps ruled out by `when:` are left out.
  */
+/** A Ready/Draft or Merge press the panel shows at once, before the refetch confirms it. */
+export type PrChange = { kind: "ready"; pr: PrInfo; ready: boolean } | { kind: "merge"; pr: PrInfo };
+
+/** `snap` as it should look right after `change`: the PR (or every PR of its stack) flipped to draft or ready, or merged. */
+export function applyOptimistic(snap: TopSnapshot, change: PrChange): TopSnapshot {
+  const numbers = new Set(change.pr.stack.length ? change.pr.stack : [change.pr.number]);
+  const links = snap.links.map((l) => {
+    if (!l.pr || l.pr.repo !== change.pr.repo || !numbers.has(l.pr.number)) return l;
+    return change.kind === "ready" ? { ...l, pr: { ...l.pr, draft: !change.ready } } : { ...l, status: "merged" as const };
+  });
+  return { ...snap, links };
+}
+
 /** Keys for extra PR buttons after `p`; none clash with the panel's own keys. */
 const PR_KEYS = ["p", "u", "y", "w", "z"];
 

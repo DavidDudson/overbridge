@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
-import { type ActDeps, activate, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type TopApp, type TopLink, type TopSnapshot } from "../src/top";
+import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type TopApp, type TopLink, type TopSnapshot } from "../src/top";
 import { textWidth } from "../src/term";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -414,5 +414,32 @@ describe("button keys", () => {
     const keys = buttons(snap({ links })).map((b) => b.key).slice(0, 3);
     expect(keys).toEqual(["p", "u", "y"]);
     for (const k of ["q", "r", "o", "l", "h", "L"]) expect(buttons(snap({ links, ide: "zed", cleanup: true })).map((b) => b.key)).not.toContain(k);
+  });
+});
+
+describe("optimistic PR changes", () => {
+  const pr = (number: number, over: Partial<PrInfo> = {}): PrInfo => ({ repo: "api", number, title: "t", draft: false, dir: "/w/w1/api", stack: [], ...over });
+  const link = (p: PrInfo, status: TopLink["status"] = "mergeable"): TopLink => ({ label: `PR #${p.number}`, url: `u${p.number}`, status, pr: p });
+
+  test("Ready and Draft flip the draft flag at once, leaving other PRs alone", () => {
+    const s = snap({ links: [link(pr(1, { draft: true }), "blocked"), link(pr(2))] });
+    const ready = applyOptimistic(s, { kind: "ready", pr: pr(1, { draft: true }), ready: true });
+    expect(ready.links.map((l) => l.pr!.draft)).toEqual([false, false]);
+    const draft = applyOptimistic(s, { kind: "ready", pr: pr(2), ready: false });
+    expect(draft.links.map((l) => l.pr!.draft)).toEqual([true, true]);
+    expect(s.links.map((l) => l.pr!.draft)).toEqual([true, false]);
+  });
+
+  test("Merge marks the PR merged, so its actions disappear", () => {
+    const s = snap({ links: [link(pr(1)), link(pr(2))] });
+    const merged = applyOptimistic(s, { kind: "merge", pr: pr(1) });
+    expect(merged.links.map((l) => l.status)).toEqual(["merged", "mergeable"]);
+    expect(buttons(merged).filter((b) => b.prRow === 0)).toHaveLength(1);
+  });
+
+  test("a stack changes together, and only in its own repo", () => {
+    const s = snap({ links: [link(pr(1, { stack: [1, 2] })), link(pr(2, { stack: [1, 2] })), link(pr(2, { repo: "web" }))] });
+    const merged = applyOptimistic(s, { kind: "merge", pr: pr(1, { stack: [1, 2] }) });
+    expect(merged.links.map((l) => l.status)).toEqual(["merged", "merged", "mergeable"]);
   });
 });

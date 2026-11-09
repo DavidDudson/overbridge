@@ -4,7 +4,7 @@
  * different from a review that has not landed yet.
  */
 
-export const REVIEWER_STATES = ["reviewing", "reviewed", "changes", "limited", "skipped", "failed", "none"] as const;
+export const REVIEWER_STATES = ["reviewing", "reviewed", "changes", "comments", "limited", "skipped", "failed", "none"] as const;
 export type ReviewerState = (typeof REVIEWER_STATES)[number];
 
 export interface ReviewerStatus {
@@ -22,6 +22,8 @@ export interface ReviewerView {
   latestReviews?: { author?: { login?: string }; state?: string; submittedAt?: string; url?: string }[];
   comments?: { author?: { login?: string }; body?: string; createdAt?: string; url?: string }[];
   statusCheckRollup?: { name?: string; context?: string; status?: string; conclusion?: string; state?: string; detailsUrl?: string; targetUrl?: string }[];
+  /** Unresolved review threads each reviewer opened, from `threadsCommand`. */
+  unresolved?: Partial<Record<"Copilot" | "CodeRabbit", number>>;
 }
 
 const COPILOT = /copilot/i;
@@ -78,13 +80,19 @@ function codeRabbit(view: ReviewerView, pr: string): ReviewerStatus {
 /** Both reviewers' statuses for a PR at `pr` (its URL). CodeRabbit is left out when the repo never uses it. */
 export function reviewerStatuses(view: ReviewerView, pr: string): ReviewerStatus[] {
   const rabbit = codeRabbit(view, pr);
-  return [copilot(view, pr), ...(rabbit.state === "none" ? [] : [rabbit])];
+  // unresolved threads beat every other state: they are what needs doing next
+  const flag = (r: ReviewerStatus): ReviewerStatus => {
+    const n = view.unresolved?.[r.name] ?? 0;
+    return n > 0 ? { ...r, state: "comments", detail: String(n) } : r;
+  };
+  return [flag(copilot(view, pr)), ...(rabbit.state === "none" ? [] : [flag(rabbit)])];
 }
 
-export const REVIEWER_LOOK: Record<ReviewerState, { icon: string; color: "green" | "yellow" | "red" | "grey" | "cyan" }> = {
+export const REVIEWER_LOOK: Record<ReviewerState, { icon: string; color: "green" | "yellow" | "red" | "blue" | "grey" | "cyan" }> = {
   reviewing: { icon: "🟡", color: "yellow" },
   reviewed: { icon: "🟢", color: "green" },
   changes: { icon: "🔴", color: "red" },
+  comments: { icon: "💬", color: "blue" },
   limited: { icon: "🚫", color: "yellow" },
   skipped: { icon: "⚪", color: "grey" },
   failed: { icon: "🔴", color: "red" },
@@ -93,3 +101,30 @@ export const REVIEWER_LOOK: Record<ReviewerState, { icon: string; color: "green"
 
 /** The button text: `🟢 Copilot`, `🚫 CodeRabbit 56m`. */
 export const reviewerLabel = (r: ReviewerStatus) => `${REVIEWER_LOOK[r.state].icon} ${r.name}${r.detail ? ` ${r.detail}` : ""}`;
+
+/** The first comment's author on each review thread, and whether the thread is resolved: what the unresolved count reads. */
+const THREADS_QUERY = "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{author{login}}}}}}}}";
+
+/** The `gh api graphql` command listing a PR's review threads, or undefined when `url` is not a GitHub PR URL. */
+export function threadsCommand(url: string): string[] | undefined {
+  const m = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(url);
+  if (!m) return undefined;
+  return ["gh", "api", "graphql", "-f", `query=${THREADS_QUERY}`, "-F", `owner=${m[1]}`, "-F", `repo=${m[2]}`, "-F", `number=${m[3]}`];
+}
+
+/** Unresolved review threads per reviewer, from `threadsCommand`'s output. A thread belongs to whoever opened it. */
+export function parseUnresolved(out: string | undefined): NonNullable<ReviewerView["unresolved"]> {
+  const counts: NonNullable<ReviewerView["unresolved"]> = {};
+  try {
+    const threads = JSON.parse(out ?? "")?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
+    for (const t of threads as { isResolved?: boolean; comments?: { nodes?: { author?: { login?: string } }[] } }[]) {
+      if (t.isResolved) continue;
+      const login = t.comments?.nodes?.[0]?.author?.login ?? "";
+      const name = COPILOT.test(login) ? "Copilot" : CODERABBIT.test(login) ? "CodeRabbit" : undefined;
+      if (name) counts[name] = (counts[name] ?? 0) + 1;
+    }
+  } catch {
+    // no output or not JSON: no counts
+  }
+  return counts;
+}
