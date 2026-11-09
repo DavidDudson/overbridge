@@ -63,6 +63,13 @@ export async function topPanel(wsOpt?: string) {
 
   const deps: ActDeps = {
     open: openBrowser,
+    run: (command, dir, env) => {
+      try {
+        Bun.spawn({ cmd: ["sh", "-c", command], cwd: dir, env: { ...process.env, ...env }, stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
+      } catch (e) {
+        note = (e as Error).message;
+      }
+    },
     spawn: (cmd) => {
       try {
         const head = cmd[0]!;

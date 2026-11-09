@@ -6,9 +6,9 @@ import * as git from "./git";
 import { metaDir, wsDir, worktreePath } from "./paths";
 import { providerFor, refreshTitle } from "./pm";
 import type { Provider } from "./pm/provider";
-import { type AppSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
+import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, readState } from "./state";
-import { boxBottom, boxRow, boxTop, type Color, colorize, fit, inverse, textWidth } from "./term";
+import { boxBottom, boxRow, boxTop, type Color, COLORS, colorize, fit, inverse, textWidth } from "./term";
 import { REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses } from "./reviewers";
 import { stackOf, localStacks } from "./stack";
 import { run } from "./util";
@@ -100,8 +100,59 @@ export interface TopCache {
   links: TopLink[];
   /** Every claimed repo's PR is open (and there is at least one claim). Half of what makes a workspace cleanable. */
   prsOpen?: boolean;
+  /** What each configured button's `status` printed, keyed `<repo>/<id>`. A missing entry hides the button. */
+  buttons?: Record<string, ButtonState>;
   message?: string;
   at: number;
+}
+
+/** A configured button's state from its last `status` run. */
+export interface ButtonState {
+  text?: string;
+  color?: Color;
+}
+
+/** A configured button as the panel shows it. */
+export interface CustomButton {
+  repo: string;
+  spec: ButtonSpec;
+  dir: string;
+  /** Env the button's commands get: the workspace, repo, branch and PR. */
+  env: Record<string, string>;
+  /** From the cache; undefined until a `status` command has run once. */
+  state?: ButtonState;
+}
+
+/**
+ * Read a `status` command's output: a JSON object `{ "text", "color" }`, or else its first line as the text.
+ * An unknown colour is dropped.
+ */
+export function parseButtonStatus(out: string): ButtonState {
+  const trimmed = out.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const v = JSON.parse(trimmed) as { text?: unknown; color?: unknown };
+      return {
+        ...(typeof v.text === "string" && v.text ? { text: v.text } : {}),
+        ...(typeof v.color === "string" && v.color in COLORS ? { color: v.color as Color } : {}),
+      };
+    } catch {
+      // not JSON after all: fall through to plain text
+    }
+  }
+  const line = trimmed.split("\n")[0]!.trim();
+  return line ? { text: line } : {};
+}
+
+/** The env a configured button's commands run with. */
+export function buttonEnv(ws: string, repo: string, claim: { branch?: string; pr?: number }): Record<string, string> {
+  return { OVERBRIDGE_NAME: ws, OVERBRIDGE_REPO: repo, OVERBRIDGE_BRANCH: claim.branch ?? "", OVERBRIDGE_PR: claim.pr === undefined ? "" : String(claim.pr) };
+}
+
+/** Fill `{ws}`, `{repo}`, `{branch}` and `{pr}` in a button's URL, each URL-encoded. */
+export function buttonUrl(template: string, env: Record<string, string>): string {
+  const vars: Record<string, string> = { ws: env.OVERBRIDGE_NAME ?? "", repo: env.OVERBRIDGE_REPO ?? "", branch: env.OVERBRIDGE_BRANCH ?? "", pr: env.OVERBRIDGE_PR ?? "" };
+  return template.replace(/\{(ws|repo|branch|pr)\}/g, (_, k: string) => encodeURIComponent(vars[k]!));
 }
 
 export interface TopApp {
@@ -139,6 +190,8 @@ export interface TopSnapshot {
   /** `$OVERBRIDGE_IDE`, else `$EDITOR`; used for the editor button when no `ide` is configured. */
   editor?: string;
   apps: TopApp[];
+  /** Buttons from the root config. */
+  custom?: CustomButton[];
   /** The workspace can be wiped: PRs open, nothing uncommitted, nothing unpushed. */
   cleanup?: boolean;
   message?: string;
@@ -199,6 +252,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   let headline: string | undefined;
   let itemTitle: string | undefined;
   let itemLink: TopLink | undefined;
+  const buttonStates: Record<string, ButtonState> = {};
 
   for (const [repo, claim] of claims) {
     const dir = worktreePath(ws, repo);
@@ -224,6 +278,12 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
         problems.push(`${repo}: ${(e as Error).message}`);
       }
     }
+    for (const spec of config.buttons) {
+      if (!spec.status) continue;
+      const env = Object.entries(buttonEnv(ws, repo, claim)).map(([k, v]) => `${k}=${v}`);
+      const out = exec(["env", ...env, "sh", "-c", spec.status], dir);
+      if (out !== undefined) buttonStates[`${repo}/${spec.id}`] = parseButtonStatus(out);
+    }
     if (claim.pr !== undefined) {
       const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,title,isDraft,state,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments"], dir));
       if (view?.url) {
@@ -248,6 +308,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     links: itemLink || links.length ? [...(itemLink ? [itemLink] : []), ...links] : old.links,
     // released repos hold no branch, so only claimed branches need an open PR
     prsOpen: claimed > 0 && openPrs === claimed,
+    ...(Object.keys(buttonStates).length ? { buttons: buttonStates } : {}),
     ...(problems.length ? { message: problems.join("; ") } : {}),
     at: Date.now(),
   };
@@ -279,8 +340,10 @@ export function pressCleanup(armedAt: number | undefined, now: number): { confir
 /** Everything the panel draws, from the cache and local app records. */
 export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.env): Promise<TopSnapshot> {
   const cache = readTopCache(ws);
-  const claims = Object.keys(getWorkspace(readState(), ws).repos);
+  const claimed = getWorkspace(readState(), ws).repos;
+  const claims = Object.keys(claimed);
   const apps: TopApp[] = [];
+  const custom: CustomButton[] = [];
   let ide: Ide | undefined;
   const problems: string[] = cache.message ? [cache.message] : [];
   for (const repo of claims) {
@@ -288,6 +351,12 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
     try {
       const config = loadRepoConfig(repoDir, repo);
       ide ??= config.ide;
+      for (const spec of config.buttons) {
+        const state = cache.buttons?.[`${repo}/${spec.id}`];
+        // a button with a status command waits for it to print something
+        if (spec.status && !state) continue;
+        custom.push({ repo, spec, dir: repoDir, env: buttonEnv(ws, repo, claimed[repo] ?? {}), ...(state ? { state } : {}) });
+      }
       for (const spec of config.apps) {
         const record = readRecord(ws, repo, spec.id);
         apps.push({
@@ -313,6 +382,7 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
     ...(ide ? { ide } : {}),
     ...(editor ? { editor } : {}),
     apps,
+    ...(custom.length ? { custom } : {}),
     ...(cleanable(ws) ? { cleanup: true } : {}),
     ...(problems.length ? { message: problems.join("; ") } : {}),
   };
@@ -327,7 +397,8 @@ export type Action =
   | { kind: "pane"; pane: PaneKind }
   | { kind: "ready"; pr: PrInfo }
   | { kind: "merge"; pr: PrInfo }
-  | { kind: "cleanup" };
+  | { kind: "cleanup" }
+  | { kind: "custom"; button: CustomButton };
 
 export interface Button {
   label: string;
@@ -384,7 +455,7 @@ function withKeys(list: Button[]): Button[] {
   return list.map((b) => {
     const a = b.action;
     let key: string | undefined;
-    if (a.kind === "link") return b;
+    if (a.kind === "link" || a.kind === "custom") return b;
     else if (a.kind === "ready") key = b.prRow === 0 ? "g" : undefined;
     else if (a.kind === "merge") key = b.prRow === 0 ? "m" : undefined;
     else if (a.kind === "app") key = app < 9 ? String(++app) : undefined;
@@ -432,6 +503,12 @@ export function buttons(snap: TopSnapshot): Button[] {
     }
   }
   if (snap.cleanup) out.push({ label: "🧹 Cleanup", action: { kind: "cleanup" }, side: "left" });
+  const repos = new Set((snap.custom ?? []).map((c) => c.repo));
+  for (const c of snap.custom ?? []) {
+    const name = repos.size > 1 ? `${c.repo} ${c.spec.label}` : c.spec.label;
+    const text = c.state?.text ? `${name}: ${c.state.text}` : name;
+    out.push({ label: text, action: { kind: "custom", button: c }, side: c.spec.side, ...(c.state?.color ? { color: c.state.color } : {}) });
+  }
   for (const app of snap.apps) {
     if (!app.available) continue;
     const port = app.status === AppStatus.Stopped || app.port === undefined ? "" : ` :${app.port}`;
@@ -587,6 +664,8 @@ export interface ActDeps {
   ready: (pr: PrInfo, ready: boolean) => string | undefined;
   /** Merge the PR (or its stack); asks for a second press first. */
   merge: (pr: PrInfo) => string | undefined;
+  /** Run a configured button's shell command, detached, in `dir` with `env` added. */
+  run: (command: string, dir: string, env: Record<string, string>) => void;
 }
 
 /** Do what a button says; returns a message for the message row, or undefined. */
@@ -607,6 +686,12 @@ export function activate(button: Button, deps: ActDeps): string | undefined {
       return deps.ready(a.pr, a.pr.draft);
     case "merge":
       return deps.merge(a.pr);
+    case "custom": {
+      const { spec, dir, env } = a.button;
+      if (spec.url) deps.open(buttonUrl(spec.url, env));
+      else if (spec.run) deps.run(spec.run, dir, env);
+      return undefined;
+    }
     case "app": {
       const live = a.app.status === AppStatus.Running || a.app.status === AppStatus.Starting;
       try {

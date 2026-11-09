@@ -137,7 +137,7 @@ describe("PR rows", () => {
 
   test("activating the actions calls the deps with the PR", () => {
     const calls: string[] = [];
-    const deps: ActDeps = { open: () => {}, spawn: () => {}, start: () => {}, stop: () => {}, pane: noPane, cleanup: () => undefined, ready: (p, r) => void calls.push(`ready ${p.number} ${r}`), merge: (p) => void calls.push(`merge ${p.number}`) };
+    const deps: ActDeps = { open: () => {}, spawn: () => {}, start: () => {}, stop: () => {}, pane: noPane, cleanup: () => undefined, ready: (p, r) => void calls.push(`ready ${p.number} ${r}`), merge: (p) => void calls.push(`merge ${p.number}`), run: () => {} };
     activate({ label: "r", action: { kind: "ready", pr: info({ draft: true }) } }, deps);
     activate({ label: "d", action: { kind: "ready", pr: info() } }, deps);
     activate({ label: "m", action: { kind: "merge", pr: info() } }, deps);
@@ -156,6 +156,7 @@ describe("activate", () => {
     cleanup: () => void calls.push("cleanup"),
     ready: (p, r) => void calls.push(`ready ${p.number} ${r}`),
     merge: (p) => void calls.push(`merge ${p.number}`),
+    run: (cmd, dir, env) => void calls.push(`run ${cmd} in ${dir} pr=${env.OVERBRIDGE_PR}`),
   };
   beforeEach(() => void (calls.length = 0));
 
@@ -263,7 +264,7 @@ describe("cleanup", () => {
   });
 
   test("activating Cleanup calls the cleanup dep and shows its message", () => {
-    const deps: ActDeps = { open: () => {}, spawn: () => {}, start: () => {}, stop: () => {}, pane: noPane, cleanup: () => "armed", ready: () => undefined, merge: () => undefined };
+    const deps: ActDeps = { open: () => {}, spawn: () => {}, start: () => {}, stop: () => {}, pane: noPane, cleanup: () => "armed", ready: () => undefined, merge: () => undefined, run: () => {} };
     expect(activate({ label: "Cleanup", action: { kind: "cleanup" } }, deps)).toBe("armed");
   });
 
