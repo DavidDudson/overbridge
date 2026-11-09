@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { reviewerLabel, reviewerStatuses, shortDuration } from "../src/reviewers";
+import { parseUnresolved, REVIEWER_LOOK, reviewerLabel, reviewerStatuses, shortDuration, threadsCommand } from "../src/reviewers";
 
 const PR = "https://host/o/r/pull/3";
 const limitBody = "<!-- rate limited by coderabbit.ai -->\n> ## Review limit reached\n> **Next included review available in 56 minutes.**\n";
@@ -53,4 +53,36 @@ test("durations are shortened", () => {
   expect(shortDuration("56 minutes")).toBe("56m");
   expect(shortDuration("1 hour and 5 minutes")).toBe("1h 5m");
   expect(shortDuration("2 days")).toBe("2d");
+});
+
+describe("unresolved threads", () => {
+  const threads = (...logins: [string, boolean][]) =>
+    JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: logins.map(([login, isResolved]) => ({ isResolved, comments: { nodes: [{ author: { login } }] } })) } } } } });
+
+  test("counts open threads per reviewer and ignores resolved ones and other authors", () => {
+    const out = threads(["coderabbitai", false], ["coderabbitai", false], ["coderabbitai", true], ["copilot-pull-request-reviewer", false], ["someone", false]);
+    expect(parseUnresolved(out)).toEqual({ CodeRabbit: 2, Copilot: 1 });
+  });
+
+  test("no output or bad JSON counts nothing", () => {
+    expect(parseUnresolved(undefined)).toEqual({});
+    expect(parseUnresolved("not json")).toEqual({});
+  });
+
+  test("a reviewer with open threads shows a blue speech bubble and the count, over any other state", () => {
+    const rabbit = by("CodeRabbit", { latestReviews: [{ author: { login: "coderabbitai" }, state: "COMMENTED" }], unresolved: { CodeRabbit: 2 } });
+    expect(rabbit).toMatchObject({ state: "comments", detail: "2" });
+    expect(reviewerLabel(rabbit!)).toBe("💬 CodeRabbit 2");
+    expect(REVIEWER_LOOK.comments.color).toBe("blue");
+    expect(by("Copilot", { unresolved: { Copilot: 1 } })).toMatchObject({ state: "comments", detail: "1" });
+  });
+
+  test("resolved reviewers keep their state", () => {
+    expect(by("Copilot", { latestReviews: [{ author: { login: "copilot-pull-request-reviewer" }, state: "COMMENTED" }], unresolved: {} })).toMatchObject({ state: "reviewed" });
+  });
+
+  test("the query comes from the PR url; a non-GitHub url has none", () => {
+    expect(threadsCommand("https://github.com/o/r/pull/3")?.slice(-6)).toEqual(["-F", "owner=o", "-F", "repo=r", "-F", "number=3"]);
+    expect(threadsCommand("https://example.com/x")).toBeUndefined();
+  });
 });

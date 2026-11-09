@@ -4,7 +4,7 @@ import { requireWs } from "./commands";
 import { root, selfCommand } from "./paths";
 import { togglePane } from "./panes";
 import { mergePr, setReady } from "./pr-actions";
-import { ALT_COMMANDS, type ActDeps, activate, type Button, CLEANUP_ARM_MS, cleanable, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
+import { ALT_COMMANDS, type ActDeps, activate, applyOptimistic, type PrChange, type Button, CLEANUP_ARM_MS, cleanable, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
 import { ENTER_SCREEN, LEAVE_SCREEN } from "./term";
 import { log, run } from "./util";
 
@@ -90,11 +90,15 @@ export async function topPanel(wsOpt?: string) {
     },
     stop: (app: TopApp) => void stopApp(ws, app.repo, app.spec, app.repoDir),
     pane: (pane) => togglePane(ws, pane),
-    ready: (pr, ready) => setReady(pr, ready),
+    ready: (pr, ready) => {
+      showNow({ kind: "ready", pr, ready });
+      return setReady(pr, ready);
+    },
     merge: (pr) => {
       const press = pressCleanup(mergeArmed.get(pr.number), Date.now());
       if (press.armedAt === undefined) mergeArmed.delete(pr.number);
       else mergeArmed.set(pr.number, press.armedAt);
+      if (press.confirmed) showNow({ kind: "merge", pr });
       return press.confirmed ? mergePr(pr) : `press Merge again within ${CLEANUP_ARM_MS / 1000}s to merge ${pr.stack.length > 1 ? "the stack" : `PR #${pr.number}`}`;
     },
     cleanup: () => {
@@ -105,6 +109,14 @@ export async function topPanel(wsOpt?: string) {
   };
   let armedAt: number | undefined;
   const mergeArmed = new Map<number, number>();
+  /** Set when a press ran a PR action, so `act` refetches at once instead of waiting for the timer. */
+  let ranPrAction = false;
+  /** Paint the expected result before the blocking `gh` call; the refetch that follows corrects it if the call failed. */
+  const showNow = (change: PrChange) => {
+    ranPrAction = true;
+    snap = applyOptimistic(snap, change);
+    draw();
+  };
   const snapUrl = (app: TopApp) => {
     const port = app.port ?? "";
     return app.spec.ready?.kind === "http" ? app.spec.ready.url.replaceAll("{port}", String(port)) : "";
@@ -121,13 +133,14 @@ export async function topPanel(wsOpt?: string) {
     draw();
   };
 
-  const refresh = () => {
-    note = "refreshing…";
+  /** Rebuild the cache and redraw; `keep` is a message (an action's result) to leave on the message row afterwards. */
+  const refresh = (keep?: string) => {
+    note = keep ?? "refreshing…";
     draw();
     const self = selfCommand();
     const child = Bun.spawn({ cmd: [...self, "top", "refresh", "--ws", ws], stdin: "ignore", stdout: "ignore", stderr: "ignore" });
     void child.exited.then(async () => {
-      note = undefined;
+      note = keep;
       await reload();
     });
   };
@@ -135,7 +148,9 @@ export async function topPanel(wsOpt?: string) {
   const current = (): Button | undefined => frame.placed[cursor]?.button;
   const act = async (button: Button | undefined) => {
     if (!button) return;
+    ranPrAction = false;
     note = activate(button, deps) ?? note;
+    if (ranPrAction) return refresh(note);
     await Bun.sleep(150);
     await reload();
   };
