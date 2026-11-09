@@ -115,13 +115,14 @@ describe("PR rows", () => {
     expect(buttons(withPr("mergeable", info({ stack: [6, 7] }))).map((x) => x.label)).toContain("🟣 Merge stack");
   });
 
-  test("each PR gets its own row, actions right-aligned, the launchers below", () => {
+  test("each PR gets its own row, actions right-aligned, the launchers in their own section below", () => {
     const s = snap({ links: [{ label: "a #1", url: "u1", status: "mergeable", pr: info({ number: 1 }) }, { label: "b #2", url: "u2", status: "failing", pr: info({ repo: "web", number: 2 }) }], ide: "zed" });
     const f = layoutTop(s, 100);
     const rowOf = (label: string) => f.placed.find((p) => p.button.label.includes(label))!;
     expect(rowOf("api #1").row).toBe(1);
     expect(rowOf("web #2").row).toBe(2);
-    expect(rowOf("zed").row).toBe(3);
+    expect(f.rules).toEqual([{ row: 3, text: expect.stringContaining("actions") }]);
+    expect(rowOf("zed").row).toBe(4);
     const merge = rowOf("Merge");
     expect(merge.row).toBe(1);
     expect(merge.col + merge.width).toBe(98);

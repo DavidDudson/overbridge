@@ -529,10 +529,21 @@ export interface Placed {
   width: number;
 }
 
+/** A section divider: plain text on one row, no button. */
+export interface Rule {
+  row: number;
+  text: string;
+}
+
+/** Heads the launcher section (apps, editor, pane toggles) when PR rows sit above it. */
+const actionsRule = (width: number): string => "── actions ".padEnd(width, "─");
+
 export interface Frame {
   /** Plain text rows, border included (buttons too, for reading); the cursor and colours are drawn from `placed`. */
   rows: string[];
   placed: Placed[];
+  /** Divider rows between sections: 0-based row within the panel and the text drawn across it. */
+  rules: Rule[];
   /** The task name set into the top border. */
   title: string;
   /** The note set into the bottom border. */
@@ -603,7 +614,13 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
 
   const left = cells("left");
   const right = cells("right");
-  if (left.length && right.length && widthOf(left) + 2 + widthOf(right) <= inner) {
+  const rules: Rule[] = [];
+  if (base > 0 && right.length) {
+    // PR rows above: the launchers get their own section under a divider, so they never read as PR actions
+    const next = flow(left, "left");
+    rules.push({ row: next, text: actionsRule(inner) });
+    flow(right, "left", { row: next + 1, used: 0 });
+  } else if (left.length && right.length && widthOf(left) + 2 + widthOf(right) <= inner) {
     flow(left, "left");
     flow(right, "right", { row: base, used: 0 });
   } else {
@@ -612,6 +629,8 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
   const used = Math.max(0, ...placed.map((p) => p.row + 1));
   for (let y = 0; y < Math.max(used, height - 2, 1); y++) {
     let text = "";
+    const rule = rules.find((r) => r.row === y);
+    if (rule) text = fit(rule.text, inner).trimEnd();
     for (const p of placed.filter((q) => q.row === y).sort((a, b) => a.col - b.col)) {
       text += " ".repeat(Math.max(0, p.col - textWidth(text))) + clip(cell(p.button), p.width);
     }
@@ -622,7 +641,7 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
   const title = snap.title ?? snap.headline ?? snap.ws;
   const message = snap.message ?? "";
   const rows = [plain(boxTop(title, width)), ...content.map((r) => plain(boxRow(fit(r, inner)))), plain(boxBottom(width, message))];
-  return { rows, placed: shifted, title, message, width };
+  return { rows, placed: shifted, rules: rules.map((r) => ({ ...r, row: r.row + 1 })), title, message, width };
 }
 
 /** The button under a 0-based (col,row) cell, if any. */
@@ -642,6 +661,7 @@ export function paintTop(f: Frame, cursor: number): string {
   f.rows.forEach((_, y) => {
     out += `${ESC}[${y + 1};1H${y === 0 ? boxTop(f.title, f.width) : y === last ? boxBottom(f.width, f.message) : blank}`;
   });
+  for (const r of f.rules) out += `${ESC}[${r.row + 1};3H${ESC}[2m${fit(r.text, Math.max(1, f.width - 4))}${ESC}[0m`;
   f.placed.forEach((p, i) => {
     const text = clip(cell(p.button), p.width);
     const shown = i === cursor ? inverse(text) : p.button.color ? colorize(text, p.button.color) : text;
