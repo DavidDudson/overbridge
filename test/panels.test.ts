@@ -129,6 +129,17 @@ describe("top panel on screen", () => {
     for (const p of f.placed) expect(s.line(p.row)).toContain(cell(p.button));
   });
 
+  test("PR rows sit above a divider; the launchers draw under it", () => {
+    const pr = { repo: "api", number: 7, title: "feat: x", draft: false, dir: "/w/w1/api", stack: [] };
+    const f = layoutTop({ ...snap, links: [{ label: "PR #7", url: "u7", status: "mergeable", pr }] }, 140, 8);
+    const s = new Screen(140, 8).write(paintTop(f, 0));
+    expect(s.line(1)).toContain("api #7");
+    expect(s.line(2)).toMatch(/^│ ── actions ─+ *│$/);
+    expect(s.line(3)).toContain("web :3000");
+    expect(s.line(3)).toContain("diff");
+    expect(s.line(1)).not.toContain("diff");
+  });
+
   test("resizing is a redraw: wide to narrow to wide gives the same screen as drawing wide", () => {
     const wide = draw(80, 0).s.lines();
     const s = new Screen(80, 8);
