@@ -244,6 +244,39 @@ the root `config.yml` is how to set up a repo that has no `overbridge.yml`.
 `repos.<name>` applies inside a workspace, where overbridge knows which repo a directory belongs to. Outside a
 workspace, only `defaults` applies.
 
+### Hooks
+
+`hooks` in the root `config.yml` runs shell commands at points in a worktree's life. Each hook takes one command
+or a list. They can sit under `defaults` or `repos.<name>`.
+
+```yaml
+defaults:
+  hooks:
+    post-add: cp ~/.config/env/"$OVERBRIDGE_REPO".env .env   # copy gitignored local files in
+repos:
+  app:
+    hooks:
+      post-add: [pnpm install]
+      post-pr: my-tool record-pr "$OVERBRIDGE_PR"
+```
+
+- **`post-add`**: after a repo's worktree is added to a workspace (`new`, `add`, `start`, or `checkout` of a new repo).
+- **`post-checkout`**: after `overbridge checkout` claims a branch or PR and switches to it.
+- **`post-pr`**: after `overbridge pr` records an open PR for a claimed branch.
+- **`pre-remove`**: before `overbridge rm` removes a workspace, once for each repo in it.
+
+Each command runs with `sh -c` in the worktree. Its stdout goes to stderr, so it can't mix with the output of
+commands such as `overbridge new`. It gets `OVERBRIDGE_HOOK`, `OVERBRIDGE_NAME` (the workspace), `OVERBRIDGE_REPO`,
+`OVERBRIDGE_BRANCH`, `OVERBRIDGE_PR`, `OVERBRIDGE_ROOT`, and `OVERBRIDGE_SELF`. A hook runs after the state lock is
+released, so it may call overbridge itself.
+
+The commands in a hook run in order and stop at the first failure. A failing `post-*` hook prints a warning and the
+command still succeeds. A failing `pre-remove` hook stops `overbridge rm`, and `--force` removes the workspace
+anyway.
+
+Hooks are only read from the root `config.yml`. A repo's own `overbridge.yml` can't declare them, because then
+checking out someone's branch would run whatever that branch says.
+
 ### Extension keys
 
 A top-level key that starts with `x-`, such as `x-acme`, passes validation in either file. overbridge keeps it as

@@ -8,12 +8,35 @@
     "version": { "const": 1 },
     "defaults": {
       "description": "Applied under every repo's overbridge.yml.",
-      "type": "object"
+      "type": "object",
+      "properties": { "hooks": { "$ref": "#/$defs/hooks" } }
     },
     "repos": {
       "description": "Per repo, by its name in repos.toml: applied over that repo's overbridge.yml.",
       "type": "object",
-      "additionalProperties": { "type": ["object", "null"] }
+      "additionalProperties": {
+        "type": ["object", "null"],
+        "properties": { "hooks": { "$ref": "#/$defs/hooks" } }
+      }
+    }
+  },
+  "$defs": {
+    "command": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      ]
+    },
+    "hooks": {
+      "description": "Shell commands run in the worktree. Only allowed in the root config.yml.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "post-add": { "$ref": "#/$defs/command", "description": "After a repo's worktree is added to a workspace." },
+        "post-checkout": { "$ref": "#/$defs/command", "description": "After overbridge checkout claims a branch or PR." },
+        "post-pr": { "$ref": "#/$defs/command", "description": "After overbridge pr records an open PR." },
+        "pre-remove": { "$ref": "#/$defs/command", "description": "Before overbridge rm; a failure stops it unless --force." }
+      }
     }
   }
 }

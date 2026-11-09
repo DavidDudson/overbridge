@@ -5,6 +5,7 @@ import * as git from "./git";
 import { configPath, getConfigValue, loadConfigFile, loadRootLayers, rootConfigPath } from "./project-config";
 import { chooseLayout, userLayoutPath } from "./layout";
 import { barePath, currentWorkspace, envVar, metaDir, NAME_RE, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
+import { runHooks } from "./hooks";
 import { scaffold } from "./scaffold";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
 import { type Claim, claimOwner, getWorkspace, readState, withState } from "./state";
@@ -84,6 +85,7 @@ export function addRepo(repo: string, wsOpt?: string) {
   withState((s) => {
     getWorkspace(s, ws).repos[repo] = {};
   });
+  runHooks("post-add", { ws, repo });
 }
 
 export function removeWorkspace(ws: string, force: boolean) {
@@ -91,6 +93,10 @@ export function removeWorkspace(ws: string, force: boolean) {
   if (!force) {
     const dirty = Object.keys(w.repos).filter((r) => git.isDirty(worktreePath(ws, r)));
     if (dirty.length) fail(`${ws} has uncommitted changes in: ${dirty.join(", ")} (use --force to discard)`);
+  }
+  for (const [repo, claim] of Object.entries(w.repos)) {
+    const ok = runHooks("pre-remove", { ws, repo, ...(claim.branch ? { branch: claim.branch } : {}), ...(claim.pr ? { pr: claim.pr } : {}) });
+    if (!ok && !force) fail(`a pre-remove hook for ${ws}/${repo} failed; nothing was removed (use --force to remove anyway)`);
   }
   for (const r of Object.keys(w.repos)) git.removeWorktree(getRepo(r), worktreePath(ws, r), force);
   rmSync(wsDir(ws), { recursive: true, force: true });
@@ -158,6 +164,8 @@ export function checkout(args: string[], wsOpt?: string) {
   });
   const stack = stackOf(localStacks(repo), branch);
   log(`${ws}/${repo} → ${branch}${pr ? ` (PR #${pr})` : ""}${stack ? `\nstack: ${chain(stack)}` : ""}`);
+  const claim = getWorkspace(readState(), ws).repos[repo];
+  runHooks("post-checkout", { ws, repo, branch, ...(claim?.pr ? { pr: claim.pr } : {}) });
 }
 
 export function release(repo: string | undefined, wsOpt?: string) {
@@ -177,6 +185,8 @@ export function release(repo: string | undefined, wsOpt?: string) {
 
 export function recordPr(repo: string | undefined, wsOpt?: string) {
   const ws = requireWs(wsOpt);
+  // hooks run after the lock is released, so a hook may call overbridge itself
+  const found: { repo: string; branch: string; pr: number }[] = [];
   withState((s) => {
     const w = getWorkspace(s, ws);
     for (const r of repo ? [repo] : Object.keys(w.repos)) {
@@ -193,8 +203,10 @@ export function recordPr(repo: string | undefined, wsOpt?: string) {
       if (!c.branch) continue;
       c.pr = git.prForBranch(worktreePath(ws, r), c.branch);
       log(`${ws}/${r} ${c.branch}: ${c.pr ? `PR #${c.pr}` : "no PR"}`);
+      if (c.pr) found.push({ repo: r, branch: c.branch, pr: c.pr });
     }
   });
+  for (const f of found) runHooks("post-pr", { ws, ...f });
 }
 
 export function status(all: boolean, json: boolean) {
