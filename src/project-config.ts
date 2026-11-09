@@ -83,6 +83,8 @@ export interface ProjectConfig {
   ide?: Ide;
   /** Lifecycle hooks, from the root `config.yml` only. Present only when there are any. */
   hooks?: Hooks;
+  /** Top panel buttons, from the root `config.yml` only. */
+  buttons: ButtonSpec[];
   /** Top-level `x-<name>` keys, as written. Present only when there are any. */
   extensions?: Record<string, unknown>;
 }
@@ -92,9 +94,10 @@ export const defaultConfig = (): ProjectConfig => ({
   apps: [],
   commands: {},
   review: { exclude: [], localDir: DEFAULT_PERSONA_DIR },
+  buttons: [],
 });
 
-const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "hooks"];
+const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "hooks", "buttons"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
 const PM_KEYS = ["name", "project", "url", "tech-debt"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
@@ -249,11 +252,28 @@ function validateApp(entry: Record<string, unknown>, path: string, p: Problems):
   };
 }
 
+const ROOT_ONLY = "only allowed in the root config.yml, so a checked-out branch can't run commands";
+
+/** A button the top panel shows, from the root `config.yml` only (its `status` runs on every refresh). */
+export interface ButtonSpec {
+  id: string;
+  label: string;
+  /** Shell command run in the worktree on each refresh: its output is the button's text, no output hides it. */
+  status?: string;
+  /** Shell command run in the worktree, detached, when the button is pressed. */
+  run?: string;
+  /** URL opened when the button is pressed: `{ws}`, `{repo}`, `{branch}` and `{pr}` are filled in. */
+  url?: string;
+  side: "left" | "right";
+}
+const BUTTON_KEYS = ["id", "label", "status", "run", "url", "side"];
+
 /**
  * Validate parsed YAML. Throws one error naming `file` and every offending key. With `partial`, `raw` is
- * one layer of a merged config, so a missing required key is not an error.
+ * one layer of a merged config, so a missing required key is not an error. With `root`, the root-only keys
+ * (`hooks`, `buttons`) are allowed.
  */
-export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = false, hooks: hooksAllowed = false } = {}): ProjectConfig {
+export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = false, root = false } = {}): ProjectConfig {
   if (raw === null || raw === undefined) return defaultConfig();
   const p = new Problems(partial);
   const config = defaultConfig();
@@ -301,7 +321,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
 
   const hooks = raw.hooks;
   if (hooks !== undefined && hooks !== null) {
-    if (!hooksAllowed) p.add("hooks", `only allowed in the root ${ROOT_CONFIG_FILE}, so a checked-out branch can't run commands`);
+    if (!root) p.add("hooks", ROOT_ONLY);
     else if (!isObject(hooks)) p.add("hooks", "expected a mapping of hook name to a command or a list of commands");
     else {
       p.unknownKeys(hooks, HOOK_NAMES, "hooks");
@@ -314,6 +334,33 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
         if (list?.length) out[name] = list;
       }
       if (Object.keys(out).length) config.hooks = out;
+    }
+  }
+
+  const buttons = raw.buttons;
+  if (buttons !== undefined && buttons !== null) {
+    if (!root) p.add("buttons", ROOT_ONLY);
+    else if (!Array.isArray(buttons)) p.add("buttons", "expected a list");
+    else {
+      const seen = new Set<string>();
+      buttons.forEach((entry, i) => {
+        const at = `buttons[${i}]`;
+        if (!isObject(entry)) return p.add(at, "expected a mapping");
+        p.unknownKeys(entry, BUTTON_KEYS, at);
+        const id = p.string(entry, "id", at, true);
+        if (id !== undefined && !APP_ID_RE.test(id)) p.add(`${at}.id`, `'${id}' must start with a letter or digit and use only letters, digits, '.', '_' and '-'`);
+        if (id && seen.has(id)) p.add(`${at}.id`, `duplicate button id '${id}'`);
+        if (id) seen.add(id);
+        const label = p.string(entry, "label", at, true);
+        const status = p.string(entry, "status", at, false);
+        const runCmd = p.string(entry, "run", at, false);
+        const url = p.string(entry, "url", at, false);
+        if (runCmd && url) p.add(at, "set run or url, not both");
+        if (!runCmd && !url && !status && !partial) p.add(at, "set run, url or status");
+        const side = p.oneOf(p.string(entry, "side", at, false), ["left", "right"] as const, `${at}.side`) ?? "right";
+        if (id && label)
+          config.buttons.push({ id, label, side, ...(status ? { status } : {}), ...(runCmd ? { run: runCmd } : {}), ...(url ? { url } : {}) });
+      });
     }
   }
 
@@ -406,8 +453,8 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
   }
   if (p.list.length) fail(`${file}:\n${p.list.map((line) => `  ${line}`).join("\n")}`);
 
-  if (layers.defaults) validateConfig(layers.defaults, `${file} (defaults)`, { partial: true, hooks: true });
-  for (const [name, layer] of Object.entries(layers.repos)) validateConfig(layer, `${file} (repos.${name})`, { partial: true, hooks: true });
+  if (layers.defaults) validateConfig(layers.defaults, `${file} (defaults)`, { partial: true, root: true });
+  for (const [name, layer] of Object.entries(layers.repos)) validateConfig(layer, `${file} (repos.${name})`, { partial: true, root: true });
   return layers;
 }
 
@@ -438,8 +485,8 @@ export function resolveConfig(repoRaw: unknown, repo: string | undefined, file: 
     repoRaw !== undefined && repoRaw !== null && file,
     over && `${layers.file} (repos.${repo})`,
   ].filter(Boolean);
-  // the repo file was checked for hooks above, so any left come from the root config
-  return validateConfig(overlay(overlay(layers.defaults, repoRaw), over), sources.join(" + ") || file, { hooks: true });
+  // the repo file was checked for root-only keys above, so any left come from the root config
+  return validateConfig(overlay(overlay(layers.defaults, repoRaw), over), sources.join(" + ") || file, { root: true });
 }
 
 /** Load a config file for `repo` with the root layers applied. A missing file means the root layers alone. */
