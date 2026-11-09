@@ -230,3 +230,36 @@ describe("config commands", () => {
     expect(() => configCheck(rootConfigPath())).toThrow("does not exist");
   });
 });
+
+describe("buttons in the root config", () => {
+  test("are checked for shape, ids and actions", () => {
+    writeRoot(
+      [
+        "defaults:",
+        "  buttons:",
+        "    - { id: a, label: A, run: x, url: y }",
+        "    - { id: a, label: B, run: x }",
+        "    - { id: 'bad id', label: C, run: x, side: up }",
+        "    - 3",
+      ].join("\n"),
+    );
+    const message = thrown(() => loadRootLayers());
+    expect(message).toContain("buttons[0]: set run or url, not both");
+    expect(message).toContain("buttons[1].id: duplicate button id 'a'");
+    expect(message).toContain("buttons[2].id: 'bad id' must start with a letter or digit");
+    expect(message).toContain('buttons[2].side: expected one of left, right (got "up")');
+    expect(message).toContain("buttons[3]: expected a mapping");
+    writeRoot("repos:\n  app:\n    buttons: x\n");
+    expect(thrown(() => loadRootLayers())).toContain("config.yml (repos.app):\n  buttons: expected a list");
+  });
+
+  test("a merged button needs something to do", () => {
+    writeRoot("defaults:\n  buttons:\n    - { id: a, label: A }\n");
+    expect(thrown(() => loadRepoConfig(worktree("ws1", "app")))).toContain("buttons[0]: set run, url or status");
+  });
+
+  test("reach the repo's resolved config", () => {
+    writeRoot("repos:\n  app:\n    buttons:\n      - { id: docs, label: Docs, run: make docs, side: left }\n");
+    expect(loadRepoConfig(worktree("ws1", "app")).buttons).toEqual([{ id: "docs", label: "Docs", run: "make docs", side: "left" }]);
+  });
+});
