@@ -166,6 +166,13 @@ Each merge to `main` can release. [semantic-release](https://semantic-release.gi
 commits since the last `v*` tag: `fix:` and `perf:` release a patch, `feat:` a minor, and a `!` after the type a
 major. PRs are squash-merged, so the PR title is the commit it reads.
 
+## Platforms
+
+Linux (x86_64, aarch64) and macOS (Apple silicon; the flake builds `aarch64-darwin`). Process lookups use `/proc`
+where it exists and `ps` elsewhere (`src/proc.ts`); the browser opener is `open` on macOS and `xdg-open` elsewhere.
+CI runs the checks on both. On macOS the default filesystem ignores case, which the guard's path checks do not:
+treat it as a guardrail there too, not a sandbox.
+
 ## Environment
 
 | var          | default        | purpose                                    |
