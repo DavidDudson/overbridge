@@ -7,22 +7,26 @@ import { newTabKdl } from "./layout";
 import { barePath, metaDir, NAME_RE, selfCommand } from "./paths";
 import { providerFor } from "./pm";
 import type { Provider } from "./pm/provider";
-import { CONFIG_FILE, defaultConfig, type ProjectConfig, parseConfig } from "./project-config";
+import { CONFIG_FILE, type ProjectConfig, parseYaml, ROOT_CONFIG_FILE, resolveConfig } from "./project-config";
 import { sidebarWidth } from "./config";
 import { scaffold } from "./scaffold";
 import { switchTab } from "./sidebar";
 import { readState } from "./state";
 import { fail, log, run } from "./util";
 
-/** The repo's `overbridge.yml` as committed on its default branch, so no worktree has to exist yet. */
+/**
+ * The repo's `overbridge.yml` as committed on its default branch, so no worktree has to exist yet, with
+ * the root config's layers applied.
+ */
 function committedConfig(spec: RepoSpec): ProjectConfig {
+  const file = `${spec.name}:${CONFIG_FILE}`;
   const r = run(["git", "-C", barePath(spec.name), "show", `origin/${git.defaultBranch(spec)}:${CONFIG_FILE}`]);
-  return r.ok ? parseConfig(r.stdout, `${spec.name}:${CONFIG_FILE}`) : defaultConfig();
+  return resolveConfig(r.ok ? parseYaml(r.stdout, file) : undefined, spec.name, file);
 }
 
 function providerForRepo(spec: RepoSpec): Provider {
   const pm = committedConfig(spec).projectManagement;
-  if (!pm) fail(`${spec.name}: no project-management in ${CONFIG_FILE} on ${git.defaultBranch(spec)}`);
+  if (!pm) fail(`${spec.name}: no project-management in ${CONFIG_FILE} on ${git.defaultBranch(spec)} or in the root ${ROOT_CONFIG_FILE}`);
   return providerFor(pm, barePath(spec.name));
 }
 

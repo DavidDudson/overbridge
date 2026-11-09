@@ -45,7 +45,9 @@ overbridge claude <name>                          # run one bound Claude outside
 ## Config
 
 Per-repo rules go in the repo's `overbridge.yml` (see the README for every key and
-`overbridge.example.yml` for a commented copy); validate with `overbridge config check`. Global
+`overbridge.example.yml` for a commented copy); validate with `overbridge config check`. Settings
+that should not be committed to a repo go in `<root>/config.yml`: `defaults` sits under every repo's
+file and `repos.<name>` over one repo's file. `overbridge config show` prints the merged result. Global
 settings live in `repos.toml`: `[sidebar] width = 28` sets the tab sidebar width (12 to 80).
 
 ## Notes

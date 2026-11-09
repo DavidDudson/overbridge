@@ -3,6 +3,11 @@
   "title": "overbridge.yml",
   "type": "object",
   "additionalProperties": false,
+  "patternProperties": {
+    "^x-[A-Za-z0-9]": {
+      "description": "Extension settings, kept as written and never read by overbridge. Read one with `overbridge config get x-<name>.<key>`."
+    }
+  },
   "properties": {
     "version": { "const": 1 },
     "project-management": {

@@ -204,7 +204,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     const dir = worktreePath(ws, repo);
     let config;
     try {
-      config = loadRepoConfig(dir);
+      config = loadRepoConfig(dir, repo);
     } catch (e) {
       problems.push(`${repo}: ${(e as Error).message}`);
       continue;
@@ -286,7 +286,7 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
   for (const repo of claims) {
     const repoDir = worktreePath(ws, repo);
     try {
-      const config = loadRepoConfig(repoDir);
+      const config = loadRepoConfig(repoDir, repo);
       ide ??= config.ide;
       for (const spec of config.apps) {
         const record = readRecord(ws, repo, spec.id);
