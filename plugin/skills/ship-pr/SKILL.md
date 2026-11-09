@@ -1,6 +1,6 @@
 ---
 name: ship-pr
-description: Commit, push and open (or update) a GitHub PR from an overbridge workspace, then record the PR against the workspace, wait for a green build, request a Copilot review and resolve its feedback. Fills the PR body from the shared template (visible change summary and gaps, a benchmark table on performance PRs, screenshots; everything else collapsed). Handles a single PR on the default branch, a stacked PR on top of another branch or PR (always a real gh stack), and splitting one oversized branch into a stack. Use when the user says "ship it", "open a PR", "raise a PR", "push this up", "update the PR", "stack this on X", "on top of #123", "restack this onto X", "split this into a stack", "break this PR up", or "stacked PR". Pass `--with-review` (or say "review and open a PR") to run mob-review first.
+description: Commit, push and open (or update) a GitHub PR from an overbridge workspace, then record the PR against the workspace, wait for a green build, request Copilot and CodeRabbit reviews (CodeRabbit also on drafts) and resolve their feedback. Fills the PR body from the shared template (visible change summary and gaps, a benchmark table on performance PRs, screenshots; everything else collapsed). Handles a single PR on the default branch, a stacked PR on top of another branch or PR (always a real gh stack), and splitting one oversized branch into a stack. Use when the user says "ship it", "open a PR", "raise a PR", "push this up", "update the PR", "stack this on X", "on top of #123", "restack this onto X", "split this into a stack", "break this PR up", or "stacked PR". Pass `--with-review` (or say "review and open a PR") to run mob-review first.
 ---
 
 # Ship a PR from a workspace
@@ -157,9 +157,14 @@ The body summarises in `**Label:** value` lines with no `##` headings and never 
    gh api -X POST "repos/$owner/$repo/pulls/$pr/requested_reviewers" -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
    ```
    A 404 or "Reviews may only be requested from collaborators" means Copilot review is not enabled for the repo: note it and carry on. An account out of Copilot premium requests gets a 201 and no review: if the PR timeline shows no `review_requested` event for `Copilot` after the request, say the quota may be spent and skip the wait in step 11.
-5. Attach screenshots now if there are any (step 7), then read the body back (`gh pr view "$pr" --json body`) and confirm what landed matches what you sent. A write can silently drop a section.
-6. If the repo has a counterpart PR in another repo (a frontend change and its e2e tests, an API and its client), name each in the other's description at the very top, with the full `owner/repo#number` form, and say which one carries the change. Keep both honest as things move.
-7. Report the PR as a link and confirm: draft or ready, base branch, Copilot review requested, and what the screenshots ended up as (N images, or the reason there are none).
+5. **Request a CodeRabbit review, when the repo uses CodeRabbit.** CodeRabbit skips draft PRs on its own, so a draft gets no review unless asked. The repo uses it when it has a `.coderabbit.yaml` or `.coderabbit.yml`, or a `coderabbitai` comment or check shows up on the PR within about a minute of opening it. Unless that config sets `drafts: true` under `reviews.auto_review` (then it reviews drafts itself), ask for the review with a comment:
+   ```sh
+   gh pr comment "$pr" --body "@coderabbitai review"
+   ```
+   Do it again after every later push to a draft PR: its pushes are not reviewed automatically either. If CodeRabbit answers that it is rate limited (a comment containing `rate limited by coderabbit.ai`, which says when it is back), note it and skip its wait in step 11; that is quota, not a failure.
+6. Attach screenshots now if there are any (step 7), then read the body back (`gh pr view "$pr" --json body`) and confirm what landed matches what you sent. A write can silently drop a section.
+7. If the repo has a counterpart PR in another repo (a frontend change and its e2e tests, an API and its client), name each in the other's description at the very top, with the full `owner/repo#number` form, and say which one carries the change. Keep both honest as things move.
+8. Report the PR as a link and confirm: draft or ready, base branch, Copilot and CodeRabbit reviews requested (or why not), and what the screenshots ended up as (N images, or the reason there are none).
 
 ## 10. Wait for a green build
 
@@ -183,16 +188,18 @@ The PR isn't done until CI passes. The push already happened, so CI is running.
 4. Re-watch after every fix or rerun, and after every later push to the PR (review fixes, a merge of main, a rebase). Loop until every non-gate check is green, a failure is confirmed real and unfixable, or the rerun budget is spent.
 5. **Never declare the build green without confirming on GitHub that the checks passed.** Never rerun an approval gate hoping it turns green.
 
-## 11. Wait for Copilot, then resolve feedback
+## 11. Wait for Copilot and CodeRabbit, then resolve feedback
 
-1. Poll until the bot's review lands, every ~20 to 30s for a few minutes:
+1. Poll until each reviewer's review lands, every ~20 to 30s. Copilot usually takes a few minutes, CodeRabbit up to about ten:
    ```sh
    gh api "repos/$owner/$repo/pulls/$pr/reviews" \
-     --jq '.[] | select(.user.login=="Copilot" or .user.login=="copilot-pull-request-reviewer[bot]") | .state'
+     --jq '.[] | select(.user.login | test("copilot|coderabbit"; "i")) | {who: .user.login, state, at: .submitted_at}'
+   gh pr checks "$pr" --json name,bucket --jq '.[] | select(.name | test("coderabbit"; "i"))'
    ```
-   Skip this step when step 9 found Copilot review is not enabled or the quota looks spent, or when no review appears after a reasonable wait: say so and move on.
-2. Invoke the `resolve-feedback` skill on the PR. On a stack it must keep the chain intact: `gh stack sync`, or a manual rebase onto `origin/$BASE_BRANCH`, never the default branch.
-3. When it finishes, confirm the build is still green (step 10's rules) before reporting done.
+   A reviewer is done when it has a review newer than the last push, or (CodeRabbit) its `CodeRabbit` check has finished. Skip a reviewer when step 9 found it is not enabled, unavailable or out of quota, or when nothing appears after a reasonable wait: say so and move on.
+2. Invoke the `resolve-feedback` skill on the PR. It treats Copilot and CodeRabbit the same way. On a stack it must keep the chain intact: `gh stack sync`, or a manual rebase onto `origin/$BASE_BRANCH`, never the default branch.
+3. **Go round again while the PR is a draft.** Fixes are pushed, and a draft's pushes are not reviewed automatically, so when the repo uses CodeRabbit post `@coderabbitai review` again (step 9.5) and wait for the review that follows. Repeat steps 1 and 2 until no bot thread is left unresolved and no review is still in flight, at most three rounds; then report what is left.
+4. When it finishes, confirm the build is still green (step 10's rules) before reporting done.
 
 ## 12. Link the item
 
@@ -283,7 +290,7 @@ If either check prints `STOP`, don't push. Show the user what it found. A lower 
 - **Merge conflicts or behind-base**: `gh stack sync` (fetches, rebases the whole stack onto its bases, updates PR targets; never orphans upper branches). Never plain-`git rebase` one mid-stack branch; it orphans the ones above. Push with `gh stack push`.
 - **When the base's PR merges**, GitHub retargets this one to the default branch. Check how it merged: a squash-merged base means its commits are not ancestors of the default branch, so `gh stack sync` (or `git rebase --onto origin/<default> <old-base-head>`) drops that layer cleanly, where a plain rebase replays it as duplicates. Tell the user the stack collapses on merge.
 - **Rebase the whole stack onto the latest default branch** with `gh stack rebase`. Merging into it is `merge-main`'s job for a single branch only: on a stack, do not use it.
-- Drive the layers **bottom PR first**: it is the one that can merge. Each layer still needs its own green build and its own Copilot resolution.
+- Drive the layers **bottom PR first**: it is the one that can merge. Each layer still needs its own green build and its own Copilot and CodeRabbit review and resolution.
 
 ## Splitting an oversized branch
 
@@ -329,12 +336,12 @@ Turn one big branch into a stack of smaller PRs, one slice per layer. This rewri
    git diff "<Ln-branch>" "$SRC" --stat     # expect empty
    ```
    Non-empty means a file was missed or misassigned. Fix the layer before submitting; never open PRs on an incomplete split.
-7. **Submit.** Run the lower-branch checks from *Stacked PRs* first when the stack sits on an existing branch, then `gh stack push` and `gh stack submit --auto`. Fill every layer's description from the template, scoped to that layer, so none is left as a bare commit subject. Request Copilot on **every** PR in the stack (step 9.4, once per PR). Run `overbridge pr <repo>`. Report the bottom→top list of PR links, which is the base of which, and that the bottom PR merges first.
+7. **Submit.** Run the lower-branch checks from *Stacked PRs* first when the stack sits on an existing branch, then `gh stack push` and `gh stack submit --auto`. Fill every layer's description from the template, scoped to that layer, so none is left as a bare commit subject. Request Copilot (step 9.4) and, where the repo uses it, CodeRabbit (step 9.5) on **every** PR in the stack, once per PR. Run `overbridge pr <repo>`. Report the bottom→top list of PR links, which is the base of which, and that the bottom PR merges first.
 8. Then drive each PR through steps 10 and 11, bottom first.
 
 ## Rules
 
-- **Draft PRs, and request a Copilot review** on every PR. Only open one ready when the user says so.
+- **Draft PRs, and request a Copilot review and, where the repo uses CodeRabbit, a CodeRabbit review** (by comment, since it skips drafts) on every PR. Only open one ready when the user says so.
 - **Attribution**: end commits and PR bodies with exactly the attribution lines the session's instructions specify, and add none if none are specified. Never invent one. Always commit with the user's git identity.
 - **Always use `TEMPLATE.md`** for the PR body, unless the repo's `CLAUDE.md` says otherwise. Tick the checkboxes that match the real changes.
 - **Never name a personal skill, agent or review tool in a PR body or title.** Describe outcomes, not the tooling that produced them.
@@ -342,7 +349,7 @@ Turn one big branch into a stack of smaller PRs, one slice per layer. This rewri
 - **Cut anything that would not change a reviewer's decision**: long verbatim changelogs, notes about which local check caught what, commentary on how the work went. Keep the diff's intent, the callsites, the risks and the evidence.
 - **Never commit a screenshot.** Never paste an empty or `null` attachment URL into a body. Never drive an SSO or MFA login yourself.
 - **Never declare the build green without confirming the checks passed on GitHub.** Fix branch-caused failures, rerun suspected flakes at most twice per job, surface unrelated ones. The final summary names every check that is not green.
-- **Always wait for Copilot's review and resolve it** with `resolve-feedback` before calling a PR done, unless Copilot review is unavailable (say so).
+- **Always wait for Copilot's and CodeRabbit's reviews and resolve them** with `resolve-feedback` before calling a PR done, unless a reviewer is unavailable (say which, and why).
 - **A base field is not a stack.** Before reporting a stacked PR done, `gh stack view` must show the chain.
 - **Never `gh stack push` over a stale lower branch**, and never plain-rebase one mid-stack branch.
 - **State the split plan, then build it**; keep the `-presplit-backup` branch until the user says otherwise, and require an identical tree at the top of the stack.
