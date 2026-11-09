@@ -325,6 +325,22 @@ describe("cleanable", () => {
     expect(cleanable("w1")).toBe(false);
   });
 
+  test("a claim whose PR merged does not block while another PR is open; a closed or PR-less claim still does", () => {
+    withState((s) => {
+      s.workspaces.w1!.repos.r2 = { branch: "feat/13-other", pr: 4 };
+    });
+    const open = (state3: string, state4: string) => refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => prJson(cmd[3] === "4" ? state4 : state3) }).prsOpen;
+    expect(open("OPEN", "MERGED")).toBe(true);
+    expect(open("MERGED", "OPEN")).toBe(true);
+    expect(open("OPEN", "OPEN")).toBe(true);
+    expect(open("MERGED", "MERGED")).toBe(false);
+    expect(open("OPEN", "CLOSED")).toBe(false);
+    withState((s) => {
+      s.workspaces.w1!.repos.r2 = { branch: "feat/13-other" };
+    });
+    expect(open("OPEN", "OPEN")).toBe(false);
+  });
+
   test("a just-cleared agent makes it a candidate even without an open PR, but dirty trees still block", () => {
     cachePr("MERGED");
     expect(cleanable("w1")).toBe(false);

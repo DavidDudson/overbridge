@@ -40,10 +40,10 @@ overbridge start app ENG-123            # a Jira item: workspace ENG-123
 attach. `overbridge start` adds a tab to the running session; an item that already has a workspace is
 focused instead of started again. Workspaces can also be made by hand: `overbridge new <name> -r app -r infra`.
 
-**Cleanup.** A workspace whose claimed branches all have an open PR, with no uncommitted changes and no
-unpushed commits, shows a **Cleanup** button in its top panel. Press it twice within five seconds: it
-re-checks, stops the workspace's apps, runs `overbridge rm` and closes the tab. Merged or closed PRs do
-not count; the button needs an open one.
+**Cleanup.** A workspace with at least one open PR, where every other claimed branch has a merged PR, with no
+uncommitted changes and no unpushed commits, shows a **Cleanup** button in its top panel. Press it twice within
+five seconds: it re-checks, stops the workspace's apps, runs `overbridge rm` and closes the tab. A merged claim
+does not block it; a closed (unmerged) PR or a branch with no PR does, and one PR must still be open.
 
 Inside a workspace (shell pane or its Claude):
 
