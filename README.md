@@ -379,6 +379,24 @@ activate, arrows or Tab to move, `o` open a running app, `L` show its log, `r` r
 `1`-`9` the apps, `e` the editor, `c` `t` `d` claude, terminal and diff, `x` Cleanup. It reads caches and local app records only; `overbridge top refresh` rebuilds
 the cache and the panel runs it every minute.
 
+## Extending
+
+overbridge can be extended without a fork. A team or a person can add commands, keep their own settings, and
+set up repos they can't commit to.
+
+- **Commands**: `overbridge <name>` runs the first `overbridge-<name>` executable on PATH when `<name>` is not a
+  built-in command, the way git runs `git-<name>`. It gets the arguments as given and its exit code is passed on.
+  `overbridge help` lists the ones it finds. The command gets these environment variables:
+  - **`OVERBRIDGE_ROOT`**: the workspaces root, with symlinks resolved.
+  - **`OVERBRIDGE_SELF`**: how to call overbridge back, such as `overbridge` or `/path/to/bun /path/to/cli.ts`.
+  - **`OVERBRIDGE_NAME`**: the workspace the caller is bound to, when there is one.
+- **Settings**: top-level `x-<name>` keys in `overbridge.yml` or the root `config.yml`. See
+  [Extension keys](#extension-keys).
+- **Repo setup outside the repo**: the [root `config.yml`](#root-configyml).
+
+A workspace's Claude may run any `overbridge` command (its `.claude/settings.json` allows `Bash(overbridge:*)`), so
+that includes every `overbridge-<name>` on PATH. Only put commands on PATH that you are happy for it to run.
+
 ## Licence
 
 [MIT](LICENSE)
