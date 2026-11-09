@@ -78,6 +78,8 @@ overbridge config get commands.test
 
 An unset key means the repo has no such command: say so rather than guessing. Run a single file or project before the whole suite, and ask before an expensive full run. Follow the repo's `CLAUDE.md` for how to scope a run.
 
+Run each through the repo's dev shell: `overbridge shell <repo> -- <command>` (it runs the command as it is when the repo declares no `shell`).
+
 ## 4. Commit
 
 `ext: commit`: run `overbridge ext ship-pr commit` first (the commit message convention).

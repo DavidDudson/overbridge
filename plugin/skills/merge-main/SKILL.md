@@ -84,6 +84,8 @@ overbridge config get commands.typecheck
 overbridge config get commands.test
 ```
 
+Run each through the repo's dev shell: `overbridge shell <repo> -- <command>` (it runs the command as it is when the repo declares no `shell`).
+
 An unset command means the repo has none. Complete the merge with `git commit` (the default merge
 message is fine, with no AI attribution), then push with a plain `git push`. If the push is rejected,
 fetch and merge again: do not force.

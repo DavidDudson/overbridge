@@ -191,3 +191,84 @@ describe("workflow", () => {
     expect(ws(["checkout", "app", "fix/383-defences"], join(root, "ib")).code).toBe(0);
   });
 });
+
+describe("dev shells", () => {
+  const count = () => (existsSync(join(tmp, "count")) ? readFileSync(join(tmp, "count"), "utf8").split("\n").filter(Boolean).length : 0);
+  const shell = (args: string[], cwd?: string) => ws(["shell", "app", ...args], cwd);
+  const launch = () => {
+    const bin = join(tmp, "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "claude"), '#!/bin/sh\necho "FOO=$FOO"\npwd\n', { mode: 0o755 });
+    return Bun.spawnSync({
+      cmd: [process.execPath, CLI, "claude", "dsa"],
+      cwd: tmp,
+      env: { ...env(), PATH: `${bin}:${process.env.PATH}` },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  };
+
+  test("overbridge shell runs in the dev shell, caches its env, and invalidates on the key files", () => {
+    expect(ws(["new", "dsa", "-r", "app"]).code).toBe(0);
+    const dsa = join(root, "dsa");
+    const app = join(dsa, "app");
+
+    // no shell key: the command runs as it is
+    expect(shell(["--", "sh", "-c", "echo ${FOO-unset}"], dsa).out.trim()).toBe("unset");
+
+    writeFileSync(join(app, "flake.lock"), "1");
+    writeFileSync(
+      join(app, "overbridge.yml"),
+      `shell:\n  enter: env FOO=prefix\n  env: 'echo x >> ${join(tmp, "count")}; FOO=bar env -0'\n  key: [flake.lock]\n`,
+    );
+    const first = shell(["--", "sh", "-c", "echo $FOO; pwd"], dsa);
+    expect(first.code).toBe(0);
+    expect(first.out.trim().split("\n")).toEqual(["bar", app]);
+    expect(count()).toBe(1);
+
+    expect(shell(["--", "sh", "-c", "echo $FOO"], dsa).out.trim()).toBe("bar");
+    expect(count()).toBe(1);
+
+    writeFileSync(join(app, "flake.lock"), "2");
+    shell(["--", "true"], dsa);
+    expect(count()).toBe(2);
+
+    expect(shell(["--", "sh", "-c", "exit 3"], dsa).code).toBe(3);
+    // a child's own flags are not parsed as overbridge's
+    expect(shell(["--", "sh", "-c", "echo $0 $1", "--flag", "x"], dsa).out.trim()).toBe("--flag x");
+    expect(ws(["shell", "app"], dsa).code).toBe(1);
+    expect(ws(["shell", "nope", "--", "true"], dsa).err).toContain("nope is not in dsa");
+  });
+
+  test("with one repo the agent starts inside its shell, cwd the workspace root", () => {
+    const dsa = join(root, "dsa");
+    const run = launch();
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout.toString().trim().split("\n")).toEqual(["FOO=bar", dsa]);
+    expect(readFileSync(join(root, ".overbridge", "agent", "dsa.shell"), "utf8")).toBe("app");
+    expect(readFileSync(join(dsa, "CLAUDE.md"), "utf8")).not.toContain("## Dev shells");
+  });
+
+  test("adding a second repo warns that the first shell leaks, and overbridge shell still works for it", () => {
+    expect(ws(["repo", "add", "lib", remote]).code).toBe(0);
+    const dsa = join(root, "dsa");
+    const add = ws(["add", "lib"], dsa);
+    expect(add.code).toBe(0);
+    expect(add.err).toContain("runs inside app's dev shell");
+    expect(add.err).toContain("overbridge shell lib");
+
+    const md = readFileSync(join(dsa, "CLAUDE.md"), "utf8");
+    expect(md).toContain("## Dev shells");
+    expect(md).toContain("Repos with a dev shell: app.");
+
+    writeFileSync(join(dsa, "lib", "overbridge.yml"), "shell: env FOO=lib\n");
+    expect(ws(["shell", "lib", "--", "sh", "-c", "echo $FOO"], dsa).out.trim()).toBe("lib");
+    expect(shell(["--", "sh", "-c", "echo $FOO"], dsa).out.trim()).toBe("bar");
+  });
+
+  test("with several repos the agent starts plain and the marker is cleared", () => {
+    const run = launch();
+    expect(run.stdout.toString().split("\n")[0]).toBe("FOO=");
+    expect(existsSync(join(root, ".overbridge", "agent", "dsa.shell"))).toBe(false);
+  });
+});

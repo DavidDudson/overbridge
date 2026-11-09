@@ -5,6 +5,11 @@ project-management:
   name: github
   project: DavidDudson/overbridge
 
+shell:
+  enter: nix develop --command
+  env: nix develop --command env -0
+  key: [flake.nix, flake.lock]
+
 commands:
   typecheck: just typecheck
   test: just test

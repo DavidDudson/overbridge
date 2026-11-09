@@ -60,7 +60,7 @@ Read everything from `origin/<default>`, never from the workspace's current bran
    ```
 
    Save the output to the scratchpad; it is the input for every later phase. A 403 or 404 usually means Dependabot alerts are off for the repo or the token lacks access: say so, don't guess.
-2. **The ecosystem's audit command** as a cross-check, when dependencies are installed: `pnpm audit` / `npm audit` / `yarn npm audit`, `cargo audit`, `pip-audit`, `osv-scanner`. Report anything it finds that Dependabot doesn't; don't block on it. If it needs registry access and times out, stop and ask the user to restore it; don't retry.
+2. **The ecosystem's audit command** as a cross-check, when dependencies are installed: run through `overbridge shell <repo> -- <cmd>` so it sees the repo's dev shell: `pnpm audit` / `npm audit` / `yarn npm audit`, `cargo audit`, `pip-audit`, `osv-scanner`. Report anything it finds that Dependabot doesn't; don't block on it. If it needs registry access and times out, stop and ask the user to restore it; don't retry.
 3. **Open Dependabot PRs**: `gh pr list -R <owner>/<repo> --author app/dependabot --state open --json number,title,url`. A package that already has one is either merged as is (when it is green and covers every manifest) or folded into an item here and the Dependabot PR closed with a link to ours. Say which.
 
 ## Phase 2: Group and resolve the fix route

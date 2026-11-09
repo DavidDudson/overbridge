@@ -53,6 +53,7 @@ overbridge checkout infra '#42'           # pick up a PR
 overbridge pr                              # record PRs for claimed branches
 overbridge status --all
 overbridge release app
+overbridge shell app -- just test         # run a command in the repo's dev shell
 ```
 
 Run `overbridge help` for every command.
@@ -207,6 +208,7 @@ commands:             # all optional; skills run these to check a change
   test: pnpm test
   build: pnpm build
   format: pnpm format
+shell: nix develop --command   # dev shell prefix, see below; or { enter, env, key }
 review:
   personas: [security, code-quality]   # optional; default is auto-select by diff signals
   exclude: [pr-size]                   # skipped after selection
@@ -219,6 +221,26 @@ ide: vscode           # vscode | zed | webstorm
 `overbridge config show [path]` prints the resolved config as JSON, and says on stderr which files went into it.
 `overbridge config get <key> [path]` prints one resolved value (`commands.test`, `review.local-dir`) and exits
 non-zero when it is unset.
+
+### Dev shells
+
+A repo's `shell` key says how to enter its dev shell. `overbridge shell <repo> [--ws name] -- <cmd>` runs `cmd`
+in it from anywhere in the workspace (in the current directory when that is inside the repo, else its root), and
+exits with the command's code. A repo with no `shell` runs the command as it is, so the wrapper is always safe.
+
+- **Prefix only** (`shell: nix develop --command`): each call runs `<prefix> <cmd>` from the repo, then moves to the wanted directory.
+- **With `env` and `key`**: overbridge runs `env` once, keeps the variables that differ from its own, and stores them under
+  `$XDG_CACHE_HOME/overbridge/shell/`, keyed on the worktree, the config and the contents of the `key` files. Later calls run
+  the command directly with that env, so they skip the shell's start-up until a key file changes.
+
+Where it applies:
+
+- **One repo in the workspace**: the agent starts inside the shell, with the workspace root as its directory.
+- **Several repos**: the agent starts plain, and the generated workspace `CLAUDE.md` tells it to use
+  `overbridge shell`. The skills run `commands.*` through it, and the top panel's terminal button opens your `$SHELL`
+  in the first repo's shell.
+- Adding a second repo to a workspace whose agent is already inside the first repo's shell prints a warning: the first
+  env leaks into the agent. The add goes ahead, and `overbridge shell` still gives the second repo its own.
 
 ### Keys and defaults
 
@@ -235,6 +257,7 @@ non-zero when it is unset.
 | `project-management.issue-type` | `Task` | Jira issue type for new items |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
+| `shell` | none | the repo's dev shell: a command prefix (`nix develop --command`, `direnv exec .`), or a mapping `enter` (the prefix), `env` (a command printing the env NUL-separated, as `env -0` does) and `key` (repo-relative files whose contents invalidate the cached env; needs `env`). See [Dev shells](#dev-shells) |
 | `review.personas` | auto | reviewer personas to run; unset selects by diff signals |
 | `review.exclude` | `[]` | personas to skip, applied after selection |
 | `review.local-dir` | `.overbridge/personas` | repo-local personas, relative to the repo root |

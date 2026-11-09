@@ -42,6 +42,7 @@ for the PR body's summary, and for the check in step 3 that the work has not out
   ```
   Run a single file or project before the whole suite; run the whole suite once at the end
   without asking.
+  Run each through the repo's dev shell: `overbridge shell <repo> -- <command>` (it runs the command as it is when the repo declares no `shell`).
 - If the work shows the plan was wrong, re-plan in place and carry on. Stop only when the item has
   outgrown its scope (it now touches work the scope check would have called a `SPLIT`): put that to the
   user and wait.

@@ -39,4 +39,13 @@ review:
   # exclude: [pr-size]                  # skipped after selection; default: none
   local-dir: .overbridge/personas       # repo-local personas; this is the default
 
-ide: vscode                    # vscode | zed | webstorm; default: $OVERBRIDGE_IDE, then $EDITOR (personal; usually leave unset)
+# The repo's dev shell: agents, skills and terminals run commands in it (`overbridge shell <repo> -- <cmd>`).
+# A plain string is a command prefix; the command to run is appended.
+shell: direnv exec .
+# With `env` the resolved env is cached and commands run directly with it, not through `enter`:
+# shell:
+#   enter: direnv exec .
+#   env: direnv exec . env -0      # prints NUL-separated KEY=VALUE pairs
+#   key: [.envrc, flake.lock]      # files whose contents invalidate the cache; needs env
+
+ide: vscode                  # vscode | zed | webstorm; default: $OVERBRIDGE_IDE, then $EDITOR (personal; usually leave unset)
