@@ -9,6 +9,8 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   `overbridge.example.yml` must track its keys). The root `config.yml` layers over it (`loadRootLayers`, `resolveConfig`:
   `defaults` < repo file < `repos.<name>`; `config.schema.json` describes it), and top-level `x-*` keys pass through
   for extensions. Load repo config through `loadRepoConfig`/`loadConfigFile` so the layers apply.
+  Lifecycle hooks (`src/hooks.ts`, `runHooks`) come only from the root `config.yml`; `validateConfig` rejects them
+  in a repo file. Call `runHooks` outside `withState` so a hook can run overbridge.
   Global config is `repos.toml` (`src/config.ts`, e.g. `[sidebar] width`).
   Keep code generic: no repo names, ports, URLs or branch conventions outside that config.
   This repo dogfoods its own `overbridge.yml` (checked by `test/config-errors.test.ts`).

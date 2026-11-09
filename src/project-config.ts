@@ -74,6 +74,14 @@ export const COMMAND_NAMES = ["lint", "typecheck", "test", "build", "format"] as
 export type CommandName = (typeof COMMAND_NAMES)[number];
 export type Commands = Partial<Record<CommandName, string>>;
 
+/**
+ * Shell commands overbridge runs at points in a worktree's life. Read only from the root `config.yml`: a hook
+ * in a repo's own file would run whatever a checked-out branch says.
+ */
+export const HOOK_NAMES = ["post-add", "post-checkout", "post-pr", "pre-remove"] as const;
+export type HookName = (typeof HOOK_NAMES)[number];
+export type Hooks = Partial<Record<HookName, string[]>>;
+
 export const DEFAULT_PERSONA_DIR = ".overbridge/personas";
 
 export interface ReviewConfig {
@@ -92,6 +100,8 @@ export interface ProjectConfig {
   commands: Commands;
   review: ReviewConfig;
   ide?: Ide;
+  /** Lifecycle hooks, from the root `config.yml` only. Present only when there are any. */
+  hooks?: Hooks;
   /** Top-level `x-<name>` keys, as written. Present only when there are any. */
   extensions?: Record<string, unknown>;
 }
@@ -103,7 +113,7 @@ export const defaultConfig = (): ProjectConfig => ({
   review: { exclude: [], localDir: DEFAULT_PERSONA_DIR },
 });
 
-const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide"];
+const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "hooks"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
 const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
@@ -262,7 +272,7 @@ function validateApp(entry: Record<string, unknown>, path: string, p: Problems):
  * Validate parsed YAML. Throws one error naming `file` and every offending key. With `partial`, `raw` is
  * one layer of a merged config, so a missing required key is not an error.
  */
-export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = false } = {}): ProjectConfig {
+export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = false, hooks: hooksAllowed = false } = {}): ProjectConfig {
   if (raw === null || raw === undefined) return defaultConfig();
   const p = new Problems(partial);
   const config = defaultConfig();
@@ -331,6 +341,24 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
         if (app) seen.add(app.id);
         if (app && p.list.length === before) config.apps.push(app);
       });
+    }
+  }
+
+  const hooks = raw.hooks;
+  if (hooks !== undefined && hooks !== null) {
+    if (!hooksAllowed) p.add("hooks", `only allowed in the root ${ROOT_CONFIG_FILE}, so a checked-out branch can't run commands`);
+    else if (!isObject(hooks)) p.add("hooks", "expected a mapping of hook name to a command or a list of commands");
+    else {
+      p.unknownKeys(hooks, HOOK_NAMES, "hooks");
+      const out: Hooks = {};
+      for (const name of HOOK_NAMES) {
+        const value = hooks[name];
+        if (value === undefined || value === null) continue;
+        const list = typeof value === "string" ? (value ? [value] : undefined) : p.stringList(hooks, name, "hooks");
+        if (list === undefined && typeof value === "string") p.add(`hooks.${name}`, "expected a non-empty string");
+        if (list?.length) out[name] = list;
+      }
+      if (Object.keys(out).length) config.hooks = out;
     }
   }
 
@@ -423,8 +451,8 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
   }
   if (p.list.length) fail(`${file}:\n${p.list.map((line) => `  ${line}`).join("\n")}`);
 
-  if (layers.defaults) validateConfig(layers.defaults, `${file} (defaults)`, { partial: true });
-  for (const [name, layer] of Object.entries(layers.repos)) validateConfig(layer, `${file} (repos.${name})`, { partial: true });
+  if (layers.defaults) validateConfig(layers.defaults, `${file} (defaults)`, { partial: true, hooks: true });
+  for (const [name, layer] of Object.entries(layers.repos)) validateConfig(layer, `${file} (repos.${name})`, { partial: true, hooks: true });
   return layers;
 }
 
@@ -455,7 +483,8 @@ export function resolveConfig(repoRaw: unknown, repo: string | undefined, file: 
     repoRaw !== undefined && repoRaw !== null && file,
     over && `${layers.file} (repos.${repo})`,
   ].filter(Boolean);
-  return validateConfig(overlay(overlay(layers.defaults, repoRaw), over), sources.join(" + ") || file);
+  // the repo file was checked for hooks above, so any left come from the root config
+  return validateConfig(overlay(overlay(layers.defaults, repoRaw), over), sources.join(" + ") || file, { hooks: true });
 }
 
 /** Load a config file for `repo` with the root layers applied. A missing file means the root layers alone. */
