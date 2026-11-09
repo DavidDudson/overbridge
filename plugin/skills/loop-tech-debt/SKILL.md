@@ -13,6 +13,12 @@ file tech-debt item (under the tech-debt container)  →  loop-item
 
 This skill frames and files the item. It does not reimplement start, plan or PR logic: `loop-item` does that.
 
+## Extensions
+
+Extension files can add to this skill without changing it. At each step marked `ext: <phase>`, run
+`overbridge ext loop-tech-debt <phase>` before you do the step, and follow what it prints as well as this skill. Where
+the two conflict, the extension wins. It prints nothing when there is no extension. Its phases: `create-item`.
+
 ## Guard: only inside a workspace
 
 ```sh
@@ -45,6 +51,8 @@ File it without asking. The one exception is an item the investigation could not
 If this workspace already holds a branch with local work or an open PR for this repo, say so before filing. `overbridge checkout` will move this workspace, and the item would be left filed with nowhere to work. Resolve that with the user first (finish or release the branch with `overbridge release <repo>`, or use another workspace).
 
 ## Phase 2: File the item
+
+`ext: create-item`: run `overbridge ext loop-tech-debt create-item` first (how to file the item).
 
 Run the humanizer pass over the body first, if the `humanizer` skill is installed.
 

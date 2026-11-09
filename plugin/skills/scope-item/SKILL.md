@@ -8,6 +8,12 @@ description: Check that a work item (GitHub issue or Jira ticket) is one clear g
 Decide whether one branch and one PR can finish this item. Read-only: nothing is created, edited or
 transitioned here.
 
+## Extensions
+
+Extension files can add to this skill without changing it. At each step marked `ext: <phase>`, run
+`overbridge ext scope-item <phase>` before you do the step, and follow what it prints as well as this skill. Where
+the two conflict, the extension wins. It prints nothing when there is no extension. Its phases: `verdict`.
+
 ## Arguments
 
 An item id (`123`, `#123`, `ENG-123`). Ask for it if missing.
@@ -39,6 +45,8 @@ Check each of these against the body, and quote the line that decides it:
   author, not you, must make.
 
 ## Verdict
+
+`ext: verdict`: run `overbridge ext scope-item verdict` first (what to record with the verdict, such as an estimate).
 
 Print exactly one of:
 

@@ -15,6 +15,12 @@ resolve versions → research changelog/breaking/deprecations → build template
 
 This skill **delegates the lifecycle** to `loop-tech-debt`, which files the item and chains `loop-item` (start-item, plan gate, implement, ship-pr). It does not reimplement item creation, branching or PR mechanics. Its own job is the library-specific work: version research, the template, the code migration and the deprecation judgment call.
 
+## Extensions
+
+Extension files can add to this skill without changing it. At each step marked `ext: <phase>`, run
+`overbridge ext update-library <phase>` before you do the step, and follow what it prints as well as this skill. Where
+the two conflict, the extension wins. It prints nothing when there is no extension. Its phases: `create-item`, `prose`.
+
 ## Guard
 
 ```sh
@@ -107,6 +113,8 @@ Required sections (all present, even if a section is "None"):
 
 ## Phase 4: File the item and start the lifecycle
 
+`ext: create-item`: run `overbridge ext update-library create-item` first (how to file the item).
+
 Given an existing item id: update its body with the filled template, then invoke **`loop-item`** with that id and skip the rest of this phase.
 
 Otherwise invoke **`loop-tech-debt`** with the filled template as the problem description and item body. It files the item under the repo's tech-debt container (`project-management.tech-debt`), then drives `loop-item`. Because the template is already the full body, pass it as the item description rather than the usual minimal problem plus acceptance criteria, and tell `loop-tech-debt` to skip its Phase 1 investigation.
@@ -157,6 +165,8 @@ One-line summary: library (or, for a batch, each library), from→to, the item a
 - Respect `loop-item`'s scope gate (its only stop), and the registry-access rule for installs.
 
 ## Humanizer pass
+
+`ext: prose`: run `overbridge ext update-library prose` first (passes over the text you publish).
 
 If the `humanizer` skill is installed, run it over the item body and the PR description before publishing, and publish the result rather than your draft. This applies to edits as well as new text. After the write, read the text back (`gh issue view`, `jira issue view`, `gh pr view`) and confirm what landed matches what you sent. A write can silently drop a section.
 

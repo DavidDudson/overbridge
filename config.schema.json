@@ -18,6 +18,11 @@
         "type": ["object", "null"],
         "properties": { "hooks": { "$ref": "#/$defs/hooks" } }
       }
+    },
+    "skill-extensions": {
+      "description": "Directories of skill extension files (<dir>/<skill>/<phase>.md), read before the repo's .overbridge/ext. Absolute, ~/-relative or relative to the root.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
     }
   },
   "$defs": {

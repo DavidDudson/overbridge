@@ -102,6 +102,39 @@ from `overbridge.yml` (see below). Install it next to the first:
 Repo-local personas go in `review.local-dir` (default `.overbridge/personas`) as `<name>/SKILL.md` or `<name>.md`,
 in the same format as a built-in. A local persona with a built-in's name replaces it.
 
+### Skill extensions
+
+A team can add to the skills without forking them. Each skill names its extension points, called phases. At each
+one it runs `overbridge ext <skill> <phase>` and follows what that prints as well as its own steps. Where the two
+conflict, the extension wins.
+
+An extension is a Markdown file of instructions, at `<dir>/<skill>/<phase>.md`. A file at `<dir>/all/<phase>.md`
+applies to every skill with that phase, such as `prose`. overbridge reads these directories, least specific first:
+
+1. Each directory in `skill-extensions` in the root `config.yml`, in order. A path can be absolute, start with
+   `~/`, or be relative to the root.
+2. The repo's own `.overbridge/ext/`.
+
+```yaml
+# <root>/config.yml
+skill-extensions:
+  - ~/team-skills/overbridge-ext
+```
+
+| skill | phases |
+| --- | --- |
+| `ship-pr` | `commit`, `screenshots`, `pr-body`, `post-pr`, `prose` |
+| `start-item` | `read-item`, `plan` |
+| `scope-item` | `verdict` |
+| `resolve-feedback` | `fix`, `prose` |
+| `loop-tech-debt` | `create-item` |
+| `update-library` | `create-item`, `prose` |
+| `audit-vulns` | `create-item`, `prose` |
+| `mob-review` | `panel` |
+
+`overbridge ext list` shows every extension file it finds. A skill that runs `overbridge ext` for a phase with no
+file gets no output and carries on as written.
+
 ## Install
 
 overbridge runs on [Bun](https://bun.sh) 1.3 or later and needs `git`, `gh`, and `zellij` on PATH.

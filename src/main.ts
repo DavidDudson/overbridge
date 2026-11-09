@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import * as cmd from "./commands";
 import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
+import { extCommand } from "./ext";
 import { item } from "./item";
 import { next } from "./next";
 import { diff } from "./panes";
@@ -30,6 +31,11 @@ Setup
 
 Work items (the repo's project-management provider)
   overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
+
+Skill extensions
+  overbridge ext <skill> <phase>                extra instructions for a skill phase, from skill-extensions
+                                        dirs and the repo's .overbridge/ext (prints nothing when none)
+  overbridge ext list                           every extension file found
 
 Workspaces
   overbridge start <repo> <id> [--prompt text]  workspace named for a work item (ENG-123, gh-app-12), on its
@@ -97,6 +103,9 @@ async function main(argv: string[]): Promise<number> {
     }
     case "item":
       item(rest);
+      break;
+    case "ext":
+      extCommand(rest);
       break;
     case "app": {
       const { values, positionals } = opts(rest, { ...ws, repo: { type: "string" }, "no-wait": { type: "boolean" } });

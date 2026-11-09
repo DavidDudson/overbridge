@@ -15,6 +15,12 @@ collect alerts → group by package → resolve fix route per package → classi
 
 This skill decides **what** to upgrade and **how to split it**. The upgrade itself, the item body and the PR belong to `update-library` (which runs `loop-tech-debt` / `loop-item`). Do not reimplement any of that.
 
+## Extensions
+
+Extension files can add to this skill without changing it. At each step marked `ext: <phase>`, run
+`overbridge ext audit-vulns <phase>` before you do the step, and follow what it prints as well as this skill. Where
+the two conflict, the extension wins. It prints nothing when there is no extension. Its phases: `create-item`, `prose`.
+
 ## Guard: only inside a workspace
 
 ```sh
@@ -107,6 +113,8 @@ Then **stop and ask** which items to go ahead with (AskUserQuestion, multi-selec
 
 ## Phase 5: File and run
 
+`ext: create-item`: run `overbridge ext audit-vulns create-item` first (how to file the items).
+
 For each approved item:
 
 1. File it with `overbridge item create --tech-debt --title "<title>" --body-file -`. The body is `update-library`'s `TEMPLATE.md` (batch form for the batch item) filled from this audit: packages, versions, routes, advisories fixed. Leave the changelog and breaking-change sections for `update-library` to complete. Run the humanizer pass first if the `humanizer` skill is installed, and read the body back after (`gh issue view` / `jira issue view`).
@@ -129,5 +137,7 @@ The rest can't run here: a workspace holds one branch per repo, and once item 1 
 - Link every alert, PR and item you name.
 
 ## Humanizer pass
+
+`ext: prose`: run `overbridge ext audit-vulns prose` first (passes over the text you publish).
 
 If the `humanizer` skill is installed, run it over every item body this skill writes and publish the result rather than your draft. After the write, read the body back and confirm what landed matches what you sent. The chat report is exempt.
