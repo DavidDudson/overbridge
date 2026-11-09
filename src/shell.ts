@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { shellCacheDir } from "./paths";
 import type { ShellSpec } from "./project-config";
-import { fail, run } from "./util";
+import { fail, log } from "./util";
 
 /** A command ready to spawn: where, with what env. */
 export interface ShellInvocation {
@@ -53,6 +53,9 @@ export interface ShellDeps {
   cacheDir: () => string;
   /** The env the capture is diffed against. */
   base: () => Record<string, string | undefined>;
+  /** Whether `command` is on PATH. */
+  has: (command: string) => boolean;
+  warn: (msg: string) => void;
 }
 
 const defaultDeps = (): ShellDeps => ({
@@ -64,6 +67,8 @@ const defaultDeps = (): ShellDeps => ({
   read: readIfExists,
   cacheDir: shellCacheDir,
   base: () => process.env,
+  has: (command) => Bun.which(command) !== null,
+  warn: log,
 });
 
 /**
@@ -90,6 +95,18 @@ export function resolveEnv(repo: string, dir: string, spec: ShellSpec, deps: She
   return env;
 }
 
+/** Shell keywords, builtins and `env`: always there, so a command starting with one is not checked. */
+const SHELL_WORDS = new Set(["if", "case", "for", "while", "until", "{", "(", "!", ".", "source", "exec", "command", "eval", "env", "test", "["]);
+
+/**
+ * The program a shell command starts, skipping leading `VAR=value` assignments; undefined when it starts with
+ * a shell keyword or builtin, or is empty.
+ */
+export function leadingProgram(command: string): string | undefined {
+  const word = command.trim().split(/\s+/).find((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
+  return word && !SHELL_WORDS.has(word) ? word : undefined;
+}
+
 /** Run `inner` through `enter`, in `cwd`: the prefix runs where the repo's config lives, then the command moves to `cwd`. */
 const through = (enter: string, dir: string, cwd: string, inner: string[]): ShellInvocation => ({
   cmd: ["sh", "-c", `${enter} sh -c 'cd "$1" && shift && exec "$@"' sh "$@"`, "overbridge-shell", cwd, ...inner],
@@ -99,7 +116,8 @@ const through = (enter: string, dir: string, cwd: string, inner: string[]): Shel
 
 /**
  * How to run `argv` in `cwd` inside the repo's dev shell. With a cached env the command runs directly with
- * it; otherwise it goes through the `enter` prefix. No `shell` means the command runs as it is.
+ * it; otherwise it goes through the `enter` prefix. No `shell` means the command runs as it is, and so does a
+ * shell whose program (nix, direnv, ...) is not on PATH, with a warning: the repo's tools may still be there.
  */
 export function shellInvocation(
   repo: string,
@@ -107,9 +125,14 @@ export function shellInvocation(
   spec: ShellSpec | undefined,
   argv: string[],
   cwd = dir,
-  deps?: ShellDeps,
+  deps: ShellDeps = defaultDeps(),
 ): ShellInvocation {
   if (!spec) return { cmd: argv, cwd, env: {} };
+  const program = leadingProgram(spec.env ?? spec.enter);
+  if (program && !deps.has(program)) {
+    deps.warn(`${program} not on PATH; running without ${repo}'s dev shell`);
+    return { cmd: argv, cwd, env: {} };
+  }
   if (spec.env) return { cmd: argv, cwd, env: resolveEnv(repo, dir, spec, deps) };
   return through(spec.enter, dir, cwd, argv);
 }

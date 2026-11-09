@@ -234,6 +234,8 @@ non-zero when it is unset.
 A repo's `shell` key says how to enter its dev shell. `overbridge shell <repo> [--ws name] -- <cmd>` runs `cmd`
 in it from anywhere in the workspace (in the current directory when that is inside the repo, else its root), and
 exits with the command's code. A repo with no `shell` runs the command as it is, so the wrapper is always safe.
+If the shell's program is not on PATH (`nix` on a machine without Nix, say), the command runs as it is, with a
+warning, so the repo's tools need to be on PATH another way.
 
 - **Prefix only** (`shell: nix develop --command`): each call runs `<prefix> <cmd>` from the repo, then moves to the wanted directory.
 - **With `env` and `key`**: overbridge runs `env` once, keeps the variables that differ from its own, and stores them under
