@@ -9,9 +9,11 @@ import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { currentWorkspace, isInside, root } from "./paths";
+import { type GuardConfig, loadRootLayers } from "./project-config";
 
 export type HookInput = { cwd?: string; tool_name?: string; tool_input?: Record<string, unknown> };
-export type GuardCtx = { root: string; ws: string; home: string };
+/** `extra` is the root config's `guard` block: more paths to read and more commands to block. */
+export type GuardCtx = { root: string; ws: string; home: string; extra?: GuardConfig };
 
 const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 const READ_TOOLS = new Set(["Read", "Glob", "Grep", "LS"]);
@@ -69,7 +71,10 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
 
   const expand = (p: string) =>
     real(resolve(cwd, p === "~" || p.startsWith("~/") ? join(ctx.home, p.slice(1)) : p));
-  const foreign = (abs: string) => isInside(abs, rootPath) && !isInside(abs, wsPath);
+  const readable = (ctx.extra?.readPaths ?? []).map(expand);
+  // Under the root but outside this workspace. `read-paths` only ever relaxes reads, never writes.
+  const foreign = (abs: string) =>
+    isInside(abs, rootPath) && !isInside(abs, wsPath) && !readable.some((dir) => isInside(abs, dir));
 
   if (WRITE_TOOLS.has(tool) || READ_TOOLS.has(tool)) {
     const paths = PATH_KEYS.map((k) => ti[k]).filter((v): v is string => typeof v === "string" && v !== "");
@@ -89,6 +94,7 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
   if (tool === "Bash") {
     const cmd = String(ti.command ?? "").replace(/\$\{?HOME\}?/g, ctx.home);
     for (const [re, reason] of BASH_RULES) if (re.test(cmd)) return reason;
+    for (const { pattern, reason } of ctx.extra?.deny ?? []) if (pattern.test(cmd)) return reason;
     const other = /--ws[=\s]+(\S+)/.exec(cmd);
     if (other && other[1] !== ctx.ws) return `workspace ${ctx.ws} cannot act on workspace ${other[1]}`;
     for (const m of cmd.matchAll(PATH_TOKEN)) {
@@ -103,7 +109,8 @@ export async function guardMain(): Promise<number> {
     const input: HookInput = JSON.parse(await Bun.stdin.text());
     const ws = currentWorkspace(input.cwd ?? process.cwd());
     if (!ws) return 0;
-    const reason = check(input, { root: root(), ws, home: homedir() });
+    // a config.yml that can't be read throws, and the catch below blocks: the guard fails closed
+    const reason = check(input, { root: root(), ws, home: homedir(), extra: loadRootLayers().guard });
     if (!reason) return 0;
     console.error(`overbridge guard: ${reason}`);
     return 2;

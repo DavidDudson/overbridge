@@ -24,7 +24,8 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   added to the running session with `openTab`. Cleanup (`cleanable`, `pressCleanup` in `src/top.ts`, `wipe` in `src/top-run.ts`)
   offers to remove a workspace whose PRs are open with nothing uncommitted or unpushed.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
-  Exit 2 = block. Fail closed on internal errors.
+  Exit 2 = block. Fail closed on internal errors. The root `config.yml`'s `guard` block (`GuardConfig`) adds
+  `read-paths` (reads only) and `deny` rules; it is never read from a repo file, so a branch can't loosen the guard.
 - `src/state.ts`: all claim mutations go through `withState()` (lockfile + atomic rename; throw = no write).
 - `test/e2e.test.ts` drives the real CLI against a temp `OVERBRIDGE_ROOT` and a local bare "remote".
 - Generated files (`<ws>/.claude/settings.json`, `<ws>/CLAUDE.md`, layout) come from

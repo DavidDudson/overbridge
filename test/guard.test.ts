@@ -107,3 +107,31 @@ describe("bash", () => {
 test("ignores unrelated tools", () => {
   expect(check(tool("WebFetch", { url: "https://x" }), ctx)).toBeUndefined();
 });
+
+describe("root config additions", () => {
+  const extra = {
+    readPaths: ["/w/.seeds", "~/shared"],
+    deny: [{ pattern: /\bgit\s+push\s+--force(?:\s|$)/, reason: "use --force-with-lease" }],
+  };
+  const withExtra = { ...ctx, extra };
+
+  test("read-paths lets a workspace read, but not write, those paths under the root", () => {
+    expect(check(tool("Read", { file_path: "/w/.seeds/app.env" }), withExtra)).toBeUndefined();
+    expect(check(bash("cat /w/.seeds/app.env"), withExtra)).toBeUndefined();
+    expect(check(tool("Write", { file_path: "/w/.seeds/app.env" }), withExtra)).toContain("outside workspace ws1");
+    expect(check(tool("Read", { file_path: "/w/ws2/app/x.ts" }), withExtra)).toContain("outside workspace ws1");
+    expect(check(tool("Read", { file_path: "/w/.seeds/app.env" }), ctx)).toContain("outside workspace ws1");
+  });
+
+  test("read-paths expands ~", () => {
+    const homeInRoot = { ...ctx, home: "/w", extra };
+    expect(check(tool("Read", { file_path: "/w/shared/notes" }), homeInRoot)).toBeUndefined();
+  });
+
+  test("deny blocks extra commands with their reason, after the built-in rules", () => {
+    expect(check(bash("git push --force origin x"), withExtra)).toBe("use --force-with-lease");
+    expect(check(bash("git push --force-with-lease origin x"), withExtra)).toBeUndefined();
+    expect(check(bash("git switch main"), withExtra)).toContain("overbridge checkout");
+    expect(check(bash("git push --force origin x"), ctx)).toBeUndefined();
+  });
+});

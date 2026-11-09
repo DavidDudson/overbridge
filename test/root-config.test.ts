@@ -63,9 +63,9 @@ describe("overlay", () => {
 
 describe("loadRootLayers", () => {
   test("a missing or empty file has no layers", () => {
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {}, skillExtensions: [] });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] } });
     writeRoot("");
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {}, skillExtensions: [] });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] } });
   });
 
   test("reads defaults and per-repo layers", () => {
@@ -75,6 +75,7 @@ describe("loadRootLayers", () => {
       defaults: { ide: "zed" },
       repos: { app: { commands: { test: "bun test" } } },
       skillExtensions: [],
+      guard: { readPaths: [], deny: [] },
     });
   });
 
@@ -238,5 +239,59 @@ describe("skill-extensions", () => {
     expect(loadRootLayers().skillExtensions).toEqual(["~/ext", "/abs"]);
     writeRoot("skill-extensions: ~/ext\n");
     expect(thrown(() => loadRootLayers())).toContain("skill-extensions: expected a list of strings");
+  });
+});
+
+describe("guard block", () => {
+  test("reads read-paths and compiles deny patterns", () => {
+    writeRoot("guard:\n  read-paths: [~/seeds]\n  deny:\n    - pattern: '\\bnpm publish\\b'\n      reason: no publishing\n");
+    const { guard } = loadRootLayers();
+    expect(guard.readPaths).toEqual(["~/seeds"]);
+    expect(guard.deny.map((d) => [d.pattern.source, d.reason])).toEqual([["\\bnpm publish\\b", "no publishing"]]);
+  });
+
+  test("reports bad keys, rules and patterns", () => {
+    writeRoot("guard:\n  read-path: [x]\n  deny:\n    - pattern: '('\n      reason: r\n    - reason: r\n    - 3\n");
+    const message = thrown(() => loadRootLayers());
+    expect(message).toContain("guard.read-path: unknown key, did you mean 'read-paths'?");
+    expect(message).toContain("guard.deny[0].pattern: not a valid regular expression");
+    expect(message).toContain("guard.deny[1].pattern: required");
+    expect(message).toContain("guard.deny[2]: expected a mapping with pattern and reason");
+    writeRoot("guard: [x]\n");
+    expect(thrown(() => loadRootLayers())).toContain("guard: expected a mapping");
+    writeRoot("guard:\n  deny: x\n");
+    expect(thrown(() => loadRootLayers())).toContain("guard.deny: expected a list");
+  });
+
+  test("a repo's overbridge.yml can't loosen the guard", () => {
+    expect(() => parseConfig("guard:\n  read-paths: [/]\n")).toThrow("guard: unknown key");
+  });
+});
+
+describe("guard hook", () => {
+  const CLI = join(import.meta.dir, "..", "src", "cli.ts");
+  const guard = (input: object) => {
+    const p = Bun.spawnSync({
+      cmd: [process.execPath, CLI, "guard"],
+      stdin: new TextEncoder().encode(JSON.stringify(input)),
+      env: { ...process.env, OVERBRIDGE_ROOT: tmp, OVERBRIDGE_NAME: "" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    return { code: p.exitCode, err: p.stderr.toString() };
+  };
+  const call = (command: string) => ({ cwd: worktree("ws1", "app"), tool_name: "Bash", tool_input: { command } });
+
+  test("applies the root config's deny rules", () => {
+    writeRoot("guard:\n  deny:\n    - pattern: '\\bnpm publish\\b'\n      reason: no publishing from a workspace\n");
+    expect(guard(call("npm publish"))).toEqual({ code: 2, err: "overbridge guard: no publishing from a workspace\n" });
+    expect(guard(call("npm test")).code).toBe(0);
+  });
+
+  test("a root config that can't be read blocks everything", () => {
+    writeRoot("guard: [x]\n");
+    const r = guard(call("npm test"));
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("internal error, blocking to be safe");
   });
 });

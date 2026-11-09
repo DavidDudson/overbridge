@@ -412,7 +412,19 @@ export const configPath = (repoDir: string) => join(repoDir, CONFIG_FILE);
 /** The root config, `<root>/config.yml`: settings that live outside the repos. */
 export const ROOT_CONFIG_FILE = "config.yml";
 export const rootConfigPath = () => join(root(), ROOT_CONFIG_FILE);
-const ROOT_KEYS = ["version", "defaults", "repos", "skill-extensions"];
+const ROOT_KEYS = ["version", "defaults", "repos", "skill-extensions", "guard"];
+const GUARD_KEYS = ["read-paths", "deny"];
+
+/**
+ * Additions to the workspace guard, from the root `config.yml` only. They can only tighten it, apart
+ * from `readPaths`, which lets a workspace read (never write) the given paths under the root.
+ */
+export interface GuardConfig {
+  /** Paths, absolute or `~/`-relative, that a workspace may read even though they are under the root. */
+  readPaths: string[];
+  /** Extra Bash commands to block, with the reason shown to Claude. */
+  deny: { pattern: RegExp; reason: string }[];
+}
 
 /**
  * The root config's layers. `defaults` goes under every repo's `overbridge.yml`; `repos.<name>` goes
@@ -424,11 +436,12 @@ export interface RootLayers {
   repos: Record<string, Record<string, unknown>>;
   /** Directories of skill extension files (`<dir>/<skill>/<phase>.md`), as written: absolute, `~/` or root-relative. */
   skillExtensions: string[];
+  guard: GuardConfig;
 }
 
 /** Read and check `<root>/config.yml`. A missing or empty file has no layers. */
 export function loadRootLayers(file = rootConfigPath()): RootLayers {
-  const layers: RootLayers = { file, repos: {}, skillExtensions: [] };
+  const layers: RootLayers = { file, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] } };
   if (!existsSync(file)) return layers;
   const raw = parseYaml(readFileSync(file, "utf8"), file);
   if (raw === null || raw === undefined) return layers;
@@ -452,6 +465,31 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
       }
   }
   layers.skillExtensions = p.stringList(raw, "skill-extensions", "") ?? [];
+  if (raw.guard !== undefined && raw.guard !== null) {
+    if (!isObject(raw.guard)) p.add("guard", "expected a mapping with read-paths and deny");
+    else {
+      p.unknownKeys(raw.guard, GUARD_KEYS, "guard");
+      layers.guard.readPaths = p.stringList(raw.guard, "read-paths", "guard") ?? [];
+      const deny = raw.guard.deny;
+      if (deny !== undefined && deny !== null) {
+        if (!Array.isArray(deny)) p.add("guard.deny", "expected a list of { pattern, reason }");
+        else
+          deny.forEach((rule, i) => {
+            const at = `guard.deny[${i}]`;
+            if (!isObject(rule)) return p.add(at, "expected a mapping with pattern and reason");
+            p.unknownKeys(rule, ["pattern", "reason"], at);
+            const source = p.string(rule, "pattern", at, true);
+            const reason = p.string(rule, "reason", at, true);
+            if (!source || !reason) return;
+            try {
+              layers.guard.deny.push({ pattern: new RegExp(source), reason });
+            } catch (e) {
+              p.add(`${at}.pattern`, `not a valid regular expression: ${(e as Error).message}`);
+            }
+          });
+      }
+    }
+  }
   if (p.list.length) fail(`${file}:\n${p.list.map((line) => `  ${line}`).join("\n")}`);
 
   if (layers.defaults) validateConfig(layers.defaults, `${file} (defaults)`, { partial: true, hooks: true });
