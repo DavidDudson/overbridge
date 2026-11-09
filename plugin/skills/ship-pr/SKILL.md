@@ -9,6 +9,12 @@ Commit the work, push the branch, open a PR with the shared body template, get t
 
 `overbridge` owns branch changes. Never `git switch`, `git checkout <branch>` or `gh pr checkout`: the guard blocks them and they bypass the claim. To discard file changes use `git restore <path>`.
 
+## Extensions
+
+Extension files can add to this skill without changing it. At each step marked `ext: <phase>`, run
+`overbridge ext ship-pr <phase>` before you do the step, and follow what it prints as well as this skill. Where
+the two conflict, the extension wins. It prints nothing when there is no extension. Its phases: `commit`, `screenshots`, `pr-body`, `post-pr`, `prose`.
+
 ## Run to completion
 
 Invoking this skill ("ship it", "open a PR", "stack this") is the approval to commit, push, open the PR as a draft and drive it to a green build, with no question in between. Do steps 1 to 12 in one run. Never stop to ask "want me to push / submit / write the descriptions?" and never end the turn on a list of what is not done yet: do it, or say in the final summary why a step was skipped.
@@ -74,6 +80,8 @@ An unset key means the repo has no such command: say so rather than guessing. Ru
 
 ## 4. Commit
 
+`ext: commit`: run `overbridge ext ship-pr commit` first (the commit message convention).
+
 If there are uncommitted changes:
 
 - Stage explicit file names, not `git add -A`. Never stage secrets (`.env`, credentials, tokens), build output or screenshots.
@@ -101,6 +109,8 @@ If a PR already exists for the branch, pushing updated it; skip creation.
 
 ## 7. Visual evidence (best-effort)
 
+`ext: screenshots`: run `overbridge ext ship-pr screenshots` first (how to run the UI and capture it).
+
 A change with a visual surface owes a screenshot. Never block the PR on it.
 
 - **Skip, and say why**, when the diff touches no markup, style, story, icon or asset: pure test, type, config, docs and CI changes have nothing to show.
@@ -113,6 +123,8 @@ A change with a visual surface owes a screenshot. Never block the PR on it.
 - Stop the server, close the browser session (only tabs you opened), delete the PNGs after upload, and **never `git add` a screenshot**. A stray `.png` in `git status` is removed before any later commit.
 
 ## 8. Fill the PR body
+
+`ext: pr-body`: run `overbridge ext ship-pr pr-body` first (the PR body and title).
 
 Use **`TEMPLATE.md` in this skill's directory** in every repo, in place of the repo's own `PULL_REQUEST_TEMPLATE.md`, unless the repo's `CLAUDE.md` says otherwise. Read it and follow its filling rules:
 
@@ -181,6 +193,8 @@ The PR isn't done until CI passes. The push already happened, so CI is running.
 3. When it finishes, confirm the build is still green (step 10's rules) before reporting done.
 
 ## 12. Link the item
+
+`ext: post-pr`: run `overbridge ext ship-pr post-pr` first (what to do with the item once the PR is open).
 
 Closing the loop on the item is part of shipping. `overbridge item` has no transition command, so:
 
@@ -334,6 +348,8 @@ Turn one big branch into a stack of smaller PRs, one slice per layer. This rewri
 - Never end the turn with a to-do list ("not done yet: submit the stack, write the descriptions, take screenshots"). Do those steps; a skipped one goes in the summary with its reason.
 
 ## Humanizer pass
+
+`ext: prose`: run `overbridge ext ship-pr prose` first (passes over the text you publish).
 
 If the `humanizer` skill is installed, run it over the PR title and description of every PR you write, and publish the result rather than your draft. This applies to edits as well as new text. After the write, read the text back from the API and confirm what landed matches what you sent.
 

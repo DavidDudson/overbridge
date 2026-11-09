@@ -63,9 +63,9 @@ describe("overlay", () => {
 
 describe("loadRootLayers", () => {
   test("a missing or empty file has no layers", () => {
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {} });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {}, skillExtensions: [] });
     writeRoot("");
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {} });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {}, skillExtensions: [] });
   });
 
   test("reads defaults and per-repo layers", () => {
@@ -74,6 +74,7 @@ describe("loadRootLayers", () => {
       file: rootConfigPath(),
       defaults: { ide: "zed" },
       repos: { app: { commands: { test: "bun test" } } },
+      skillExtensions: [],
     });
   });
 
@@ -228,5 +229,14 @@ describe("config commands", () => {
   test("config check fails when neither file exists", () => {
     expect(() => configCheck(worktree("ws1", "app"))).toThrow("does not exist");
     expect(() => configCheck(rootConfigPath())).toThrow("does not exist");
+  });
+});
+
+describe("skill-extensions", () => {
+  test("is a list of directories", () => {
+    writeRoot("skill-extensions: [~/ext, /abs]\n");
+    expect(loadRootLayers().skillExtensions).toEqual(["~/ext", "/abs"]);
+    writeRoot("skill-extensions: ~/ext\n");
+    expect(thrown(() => loadRootLayers())).toContain("skill-extensions: expected a list of strings");
   });
 });

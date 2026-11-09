@@ -180,7 +180,7 @@ class Problems {
   }
   /** A list of non-empty strings, or undefined when the key is absent. */
   stringList(obj: Record<string, unknown>, key: string, path: string): string[] | undefined {
-    const at = `${path}.${key}`;
+    const at = path ? `${path}.${key}` : key;
     const v = obj[key];
     if (v === undefined || v === null) return;
     if (!Array.isArray(v)) {
@@ -412,7 +412,7 @@ export const configPath = (repoDir: string) => join(repoDir, CONFIG_FILE);
 /** The root config, `<root>/config.yml`: settings that live outside the repos. */
 export const ROOT_CONFIG_FILE = "config.yml";
 export const rootConfigPath = () => join(root(), ROOT_CONFIG_FILE);
-const ROOT_KEYS = ["version", "defaults", "repos"];
+const ROOT_KEYS = ["version", "defaults", "repos", "skill-extensions"];
 
 /**
  * The root config's layers. `defaults` goes under every repo's `overbridge.yml`; `repos.<name>` goes
@@ -422,11 +422,13 @@ export interface RootLayers {
   file: string;
   defaults?: Record<string, unknown>;
   repos: Record<string, Record<string, unknown>>;
+  /** Directories of skill extension files (`<dir>/<skill>/<phase>.md`), as written: absolute, `~/` or root-relative. */
+  skillExtensions: string[];
 }
 
 /** Read and check `<root>/config.yml`. A missing or empty file has no layers. */
 export function loadRootLayers(file = rootConfigPath()): RootLayers {
-  const layers: RootLayers = { file, repos: {} };
+  const layers: RootLayers = { file, repos: {}, skillExtensions: [] };
   if (!existsSync(file)) return layers;
   const raw = parseYaml(readFileSync(file, "utf8"), file);
   if (raw === null || raw === undefined) return layers;
@@ -449,6 +451,7 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
         else if (layer !== null) p.add(`repos.${name}`, "expected a mapping in overbridge.yml's format");
       }
   }
+  layers.skillExtensions = p.stringList(raw, "skill-extensions", "") ?? [];
   if (p.list.length) fail(`${file}:\n${p.list.map((line) => `  ${line}`).join("\n")}`);
 
   if (layers.defaults) validateConfig(layers.defaults, `${file} (defaults)`, { partial: true, hooks: true });

@@ -11,6 +11,12 @@ orient → read the item → scope-item → [scope gate] → claim branch → pl
 
 Scope comes before the branch: if the item splits, the branch belongs to the first slice.
 
+## Extensions
+
+Extension files can add to this skill without changing it. At each step marked `ext: <phase>`, run
+`overbridge ext start-item <phase>` before you do the step, and follow what it prints as well as this skill. Where
+the two conflict, the extension wins. It prints nothing when there is no extension. Its phases: `read-item`, `plan`.
+
 ## Arguments
 
 An item id (`123`, `#123`, `ENG-123`). Ask for it if missing.
@@ -28,6 +34,8 @@ If the item belongs to a repo this workspace does not hold yet, `overbridge chec
 adds it in step 4. If `project-management` is unset, stop: tell the user to add it to `overbridge.yml`.
 
 ## 2. Read the item
+
+`ext: read-item`: run `overbridge ext start-item read-item` first (what to read and record about the item).
 
 ```sh
 overbridge item view <id>
@@ -78,6 +86,8 @@ If it refuses, stop and tell the user which one does. Never use `git switch` or 
 If the branch already exists with commits, say so and ask whether to continue on it.
 
 ## 5. Plan mode
+
+`ext: plan`: run `overbridge ext start-item plan` first (what the plan must cover).
 
 Enter plan mode. The plan has these sections:
 

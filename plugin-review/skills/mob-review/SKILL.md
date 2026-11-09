@@ -7,6 +7,12 @@ description: Run the full staff-engineer review panel over a PR or branch. Spawn
 
 Spawn every in-scope `persona-*` reviewer in parallel over one diff, then aggregate their findings into a single ranked report. Each persona is a narrow, non-overlapping specialist; this skill is the orchestrator.
 
+## Extensions
+
+Extension files can add to this skill without changing it. At each step marked `ext: <phase>`, run
+`overbridge ext mob-review <phase>` before you do the step, and follow what it prints as well as this skill. Where
+the two conflict, the extension wins. It prints nothing when there is no extension. Its phases: `panel`.
+
 ## The panel
 
 Built-in personas ship in this plugin as sibling skills (`persona-<name>`). Repo-local personas live in the repo (see Step 2). A persona runs only when selected (Step 2) **and** its guard matches the diff.
@@ -107,6 +113,8 @@ wc -l < "$SCRATCH/copilot.jsonl"
 Review bodies count too: Copilot lists its low-confidence comments there with a file and line instead of posting them inline. Don't print the file here; Step 4 reads it.
 
 ## Step 2: Select the panel
+
+`ext: panel`: run `overbridge ext mob-review panel` first (extra reviewers or personas to run).
 
 Resolve the candidate list from the repo's `overbridge.yml`, then apply guards.
 

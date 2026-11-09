@@ -5,6 +5,12 @@ description: Action PR review feedback. Fetches review comments from GitHub, app
 
 # Resolve review feedback
 
+## Extensions
+
+Extension files can add to this skill without changing it. At each step marked `ext: <phase>`, run
+`overbridge ext resolve-feedback <phase>` before you do the step, and follow what it prints as well as this skill. Where
+the two conflict, the extension wins. It prints nothing when there is no extension. Its phases: `fix`, `prose`.
+
 ## Hard rules on replies and resolution (read first)
 
 - Never reply to a human reviewer's comment. Fix the code and leave the thread alone: the human reads
@@ -74,6 +80,8 @@ the surrounding code before applying it.
 
 ## 3. Apply the fixes
 
+`ext: fix`: run `overbridge ext resolve-feedback fix` first (how to apply and reply to feedback).
+
 Group related fixes. Then check them with the repo's own commands:
 
 ```sh
@@ -137,6 +145,8 @@ Weigh humans over bots, use only feedback from this PR, and apply nothing withou
 Skip this step when nothing maps cleanly.
 
 ## Prose
+
+`ext: prose`: run `overbridge ext resolve-feedback prose` first (passes over the replies you post).
 
 Run the `humanizer` skill over any PR description you rewrite. Bot replies, commit messages and code
 comments are exempt. After writing, read the text back from the API and confirm what landed matches
