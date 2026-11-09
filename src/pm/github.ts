@@ -1,6 +1,6 @@
 import type { ProjectManagement } from "../project-config";
 import { fail, run, type RunResult } from "../util";
-import { type Provider, type ProviderFactory, slug, type WorkItem } from "./provider";
+import { namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
 
 export type Runner = (cmd: string[], opts?: { cwd?: string }) => RunResult;
 
@@ -31,7 +31,13 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
 
   const projectFilter = () => (NUMBER_RE.test(config.project) ? ` project:${repo().split("/")[0]}/${config.project}` : "");
 
-  return {
+  // idFromBranch finds the number at the start or after `/` or `#`, followed by `-` or the end
+  if (config.branch && !/(?:^|[/#])\{(?:id|number)\}(?:-|$)/.test(config.branch)) {
+    fail(`project-management.branch '${config.branch}': for github, {number} must start the name or follow '/' or '#', and be followed by '-' or the end`);
+  }
+  const names = namer(config, { branch: "{number}-{slug}", workspace: "gh-{repo}-{number}" }, (id) => id.replace(/^#/, ""), (id) => provider.itemTypes(id));
+
+  const provider: Provider = {
     name: "github",
 
     idFromBranch(branch) {
@@ -57,9 +63,12 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
       return rows.map((i): WorkItem => ({ id: String(i.number), title: i.title, url: i.url }));
     },
 
-    branchName: (item) => `${item.id.replace(/^#/, "")}-${slug(item.title)}`,
+    itemTypes(id) {
+      const r = gh(["issue", "view", id.replace(/^#/, ""), "-R", repo(), "--json", "labels", "-q", ".labels[].name"]);
+      return r.ok ? r.stdout.split("\n").filter(Boolean) : [];
+    },
 
-    workspaceName: (id, repoName) => `gh-${repoName}-${id.replace(/^#/, "")}`,
+    ...names,
 
     createItem(item) {
       const args = ["issue", "create", "-R", repo(), "--title", item.title, "--body", item.body];
@@ -86,6 +95,7 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
       if (!r.ok) fail(`github: updating #${id.replace(/^#/, "")} failed: ${r.stderr || r.stdout}`);
     },
   };
+  return provider;
 }
 
 export const githubFactory: ProviderFactory = (config, cwd) => githubProvider(config, cwd);

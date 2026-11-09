@@ -31,9 +31,17 @@ export interface Provider {
   title(id: string): string | undefined;
   /** Open items assigned to me. */
   assigned(): WorkItem[];
-  /** A branch name that follows the provider's convention for `item`. */
+  /**
+   * The item's types, most specific first: a Jira issue type, or a GitHub issue's labels. They pick the
+   * `{type}` of a branch name. Hits the network.
+   */
+  itemTypes(id: string): string[];
+  /**
+   * A branch name for `item`, from `project-management.branch` or the provider's default. Needs the network
+   * only when the template uses `{type}`.
+   */
   branchName(item: { id: string; title: string }): string;
-  /** Workspace name for an item in `repo`: valid as a directory name and a zellij tab name. */
+  /** Workspace name for an item in `repo`, from `project-management.workspace` or the provider's default. */
   workspaceName(id: string, repo: string): string;
   /** File a new item and return it. */
   createItem(item: NewItem): WorkItem;
@@ -64,4 +72,47 @@ export function slug(text: string, max = 40): string {
     .replace(/^-+/, "")
     .slice(0, max)
     .replace(/-+$/, "");
+}
+
+/** Fill `{name}` placeholders in a name template. Placeholders are checked when the config is read. */
+export function renderTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{([a-z]+)\}/g, (whole, name: string) => vars[name] ?? whole);
+}
+
+/**
+ * The `{type}` for a branch: the `branch-types` entry for the first of `types` that has one (an exact
+ * match, then ignoring case), else `branch-types.default`, else `feat`.
+ */
+export function branchType(types: string[], map: Record<string, string> = {}): string {
+  const lower = new Map(Object.entries(map).map(([k, v]) => [k.toLowerCase(), v]));
+  for (const type of types) {
+    const found = map[type] ?? lower.get(type.toLowerCase());
+    if (found) return found;
+  }
+  return map.default ?? "feat";
+}
+
+/**
+ * Branch and workspace names from the config's templates, falling back to the provider's defaults.
+ * `normalize` turns a user-typed id into the provider's form (`42` → `ENG-42`); `number` is its digits.
+ */
+export function namer(
+  config: ProjectManagement,
+  defaults: { branch: string; workspace: string },
+  normalize: (id: string) => string,
+  itemTypes: (id: string) => string[],
+) {
+  const number = (id: string) => /(\d+)\s*$/.exec(id)?.[1] ?? id;
+  return {
+    branchName(item: { id: string; title: string }) {
+      const template = config.branch ?? defaults.branch;
+      const id = normalize(item.id);
+      const type = template.includes("{type}") ? branchType(itemTypes(id), config.branchTypes) : "";
+      return renderTemplate(template, { id, number: number(id), slug: slug(item.title), type });
+    },
+    workspaceName(id: string, repo: string) {
+      const normalized = normalize(id);
+      return renderTemplate(config.workspace ?? defaults.workspace, { id: normalized, number: number(normalized), repo });
+    },
+  };
 }

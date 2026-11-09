@@ -24,6 +24,7 @@ export function fakeProvider(
       return byId.get(id)?.title;
     },
     assigned: () => items,
+    itemTypes: () => [],
     branchName: (item) => `feat/${item.id}-${slug(item.title)}`,
     workspaceName: (id, repo) => (name === "jira" ? id : `gh-${repo}-${id}`),
     createItem(item) {

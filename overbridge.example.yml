@@ -8,6 +8,10 @@ project-management:
   project: owner/repo          # GitHub: owner/repo or a Projects v2 number. Jira: the project key, e.g. ENG
   # url: https://example.atlassian.net   # Jira only: base URL, used for ticket links
   # tech-debt: label:tech-debt           # an item id (parent), or label:<name>; default: no parent
+  # branch: "{type}/{id}-{slug}"         # {id} {number} {slug} {type}; default: github {number}-{slug}, jira feat/{id}-{slug}
+  # workspace: "{id}"                    # {id} {number} {repo}; default: github gh-{repo}-{number}, jira {id}
+  # branch-types: { Bug: fix, default: feat }   # item type or label -> {type}; default: feat
+  # issue-type: Task                     # Jira only: issue type for new items; default: Task
 
 # Apps `overbridge app` and the top panel can start and stop. Default: none.
 apps:
