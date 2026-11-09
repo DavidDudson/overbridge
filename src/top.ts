@@ -249,6 +249,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   const problems: string[] = [];
   const claimed = claims.filter(([, c]) => c.branch).length;
   let openPrs = 0;
+  let mergedPrs = 0;
   let headline: string | undefined;
   let itemTitle: string | undefined;
   let itemLink: TopLink | undefined;
@@ -300,6 +301,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       }
       else problems.push(`${repo}: no URL for PR #${claim.pr}`);
       if (view?.state === "OPEN") openPrs++;
+      else if (view?.state === "MERGED") mergedPrs++;
     }
   }
 
@@ -309,7 +311,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     ...(itemTitle ?? old.title ? { title: itemTitle ?? old.title } : {}),
     links: itemLink || links.length ? [...(itemLink ? [itemLink] : []), ...links] : old.links,
     // released repos hold no branch, so only claimed branches need an open PR
-    prsOpen: claimed > 0 && openPrs === claimed,
+    // an open PR somewhere, and every other claim already merged: a merged branch is finished, not a reason to keep the workspace
+    prsOpen: claimed > 0 && openPrs > 0 && openPrs + mergedPrs === claimed,
     ...(Object.keys(buttonStates).length ? { buttons: buttonStates } : {}),
     ...(problems.length ? { message: problems.join("; ") } : {}),
     at: Date.now(),
@@ -319,7 +322,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 }
 
 /**
- * Whether `ws` can be wiped: its agent is empty (just started or cleared), or every claimed branch has an open PR (from the cache), and no repo
+ * Whether `ws` can be wiped: its agent is empty (just started or cleared), or at least one claimed branch has an open PR and every other one has merged (from the cache), and no repo
  * holds uncommitted changes or unpushed commits (read from git now, so it is never stale).
  */
 export function cleanable(ws: string): boolean {
