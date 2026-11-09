@@ -196,6 +196,10 @@ non-zero when it is unset.
 | `project-management.project` | none | GitHub: `owner/repo` or a Projects v2 number (issues then come from the repo checked out in the workspace). Jira: the project key |
 | `project-management.url` | none | Jira site, e.g. `https://example.atlassian.net`; needed for ticket links |
 | `project-management.tech-debt` | none | where tech-debt items go: an item id (parent) or `label:<name>`; unset files them with no parent |
+| `project-management.branch` | GitHub `{number}-{slug}`, Jira `feat/{id}-{slug}` | branch name template. Placeholders: `{id}` (`ENG-12`, `12`), `{number}` (`12`), `{slug}` (the title, at most 40 characters), and `{type}` (see `branch-types`). It must use `{id}` or `{number}`. For GitHub, the number must start the name or follow `/` or `#`, and be followed by `-` or the end |
+| `project-management.workspace` | GitHub `gh-{repo}-{number}`, Jira `{id}` | workspace name template. Placeholders: `{id}`, `{number}`, and `{repo}`. It must use `{id}` or `{number}` |
+| `project-management.branch-types` | none | the `{type}` for each item type: a Jira issue type, or a GitHub label. The first of the item's types with an entry wins, ignoring case, then `default`, then `feat`. Looking up the type needs the network, so it happens only when `branch` uses `{type}` |
+| `project-management.issue-type` | `Task` | Jira issue type for new items |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
 | `review.personas` | auto | reviewer personas to run; unset selects by diff signals |

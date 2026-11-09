@@ -23,6 +23,25 @@ export interface ProjectManagement {
    * Unset means tech-debt items are filed with no parent.
    */
   techDebt?: string;
+  /** Branch name template; see `BRANCH_PLACEHOLDERS`. Unset means the provider's default. */
+  branch?: string;
+  /** Workspace name template; see `WORKSPACE_PLACEHOLDERS`. Unset means the provider's default. */
+  workspace?: string;
+  /** Item type (a Jira issue type or a GitHub label) to the `{type}` a branch name uses; `default` covers the rest. */
+  branchTypes?: Record<string, string>;
+  /** Issue type for new items (Jira). Unset means `Task`. */
+  issueType?: string;
+}
+
+export const BRANCH_PLACEHOLDERS = ["id", "number", "slug", "type"] as const;
+export const WORKSPACE_PLACEHOLDERS = ["id", "number", "repo"] as const;
+
+/** Problems with a name template: unknown placeholders, and a missing `{id}`/`{number}` when one is required. */
+export function templateProblems(template: string, allowed: readonly string[], needsId: boolean): string[] {
+  const used = [...template.matchAll(/\{([^}]*)\}/g)].map((m) => m[1]!);
+  const problems = used.filter((p) => !allowed.includes(p)).map((p) => `unknown placeholder {${p}} (allowed: ${allowed.map((a) => `{${a}}`).join(", ")})`);
+  if (needsId && !used.some((p) => p === "id" || p === "number")) problems.push("needs {id} or {number}, so a branch names its item");
+  return problems;
 }
 
 export const APP_WHEN = ["always", "feature-branch"] as const;
@@ -86,7 +105,7 @@ export const defaultConfig = (): ProjectConfig => ({
 
 const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
-const PM_KEYS = ["name", "project", "url", "tech-debt"];
+const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -266,8 +285,34 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       const project = p.string(pm, "project", "project-management", true);
       const url = p.string(pm, "url", "project-management", false);
       const techDebt = p.string(pm, "tech-debt", "project-management", false);
+      const branch = p.string(pm, "branch", "project-management", false);
+      if (branch) for (const problem of templateProblems(branch, BRANCH_PLACEHOLDERS, true)) p.add("project-management.branch", problem);
+      const workspace = p.string(pm, "workspace", "project-management", false);
+      if (workspace) for (const problem of templateProblems(workspace, WORKSPACE_PLACEHOLDERS, true)) p.add("project-management.workspace", problem);
+      const issueType = p.string(pm, "issue-type", "project-management", false);
+      let branchTypes: Record<string, string> | undefined;
+      const types = pm["branch-types"];
+      if (types !== undefined && types !== null) {
+        if (!isObject(types)) p.add("project-management.branch-types", "expected a mapping of item type to branch type");
+        else {
+          branchTypes = {};
+          for (const type of Object.keys(types)) {
+            const value = p.string(types, type, "project-management.branch-types", true);
+            if (value) branchTypes[type] = value;
+          }
+        }
+      }
       if (name && project) {
-        config.projectManagement = { name, project, ...(url ? { url } : {}), ...(techDebt ? { techDebt } : {}) };
+        config.projectManagement = {
+          name,
+          project,
+          ...(url ? { url } : {}),
+          ...(techDebt ? { techDebt } : {}),
+          ...(branch ? { branch } : {}),
+          ...(workspace ? { workspace } : {}),
+          ...(branchTypes ? { branchTypes } : {}),
+          ...(issueType ? { issueType } : {}),
+        };
       }
     }
   }

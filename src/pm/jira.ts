@@ -1,7 +1,7 @@
 import type { ProjectManagement } from "../project-config";
 import { fail, run } from "../util";
 import type { Runner } from "./github";
-import { type Provider, type ProviderFactory, slug, type WorkItem } from "./provider";
+import { namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
 
 const KEY_RE = /^[A-Z][A-Z0-9_]*$/;
 
@@ -25,7 +25,21 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
     return rows.map((row) => ({ key: row.key, summary: row.fields?.summary ?? "" }));
   };
 
-  return {
+  /** The ticket as `jira issue view --raw` prints it, or undefined when it can't be read. */
+  type Raw = { fields?: { summary?: string; issuetype?: { name?: string } } };
+  const view = (id: string): Raw | undefined => {
+    const r = jira(["issue", "view", normalize(id), "--raw"]);
+    if (!r.ok) return undefined;
+    try {
+      return JSON.parse(r.stdout) as Raw;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const names = namer(config, { branch: "feat/{id}-{slug}", workspace: "{id}" }, normalize, (id) => provider.itemTypes(id));
+
+  const provider: Provider = {
     name: "jira",
 
     idFromBranch(branch) {
@@ -39,14 +53,11 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
       return `${base}/browse/${normalize(id)}`;
     },
 
-    title(id) {
-      const r = jira(["issue", "view", normalize(id), "--raw"]);
-      if (!r.ok) return undefined;
-      try {
-        return (JSON.parse(r.stdout) as { fields?: { summary?: string } }).fields?.summary || undefined;
-      } catch {
-        return undefined;
-      }
+    title: (id) => view(id)?.fields?.summary || undefined,
+
+    itemTypes(id) {
+      const type = view(id)?.fields?.issuetype?.name;
+      return type ? [type] : [];
     },
 
     assigned() {
@@ -56,12 +67,10 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
       return items(r.stdout).map((i): WorkItem => ({ id: i.key, title: i.summary, url: base ? `${base}/browse/${i.key}` : "" }));
     },
 
-    branchName: (item) => `feat/${normalize(item.id)}-${slug(item.title)}`,
-
-    workspaceName: (id) => normalize(id),
+    ...names,
 
     createItem(item) {
-      const args = ["issue", "create", "-p", key, "-t", "Task", "-s", item.title, "-b", item.body, "--no-input"];
+      const args = ["issue", "create", "-p", key, "-t", config.issueType ?? "Task", "-s", item.title, "-b", item.body, "--no-input"];
       for (const label of item.labels ?? []) args.push("-l", label);
       if (item.parent) args.push("-P", normalize(item.parent));
       const r = jira(args);
@@ -77,6 +86,7 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
       if (!r.ok) fail(`jira: updating ${normalize(id)} failed: ${r.stderr || r.stdout}`);
     },
   };
+  return provider;
 }
 
 export const jiraFactory: ProviderFactory = (config, cwd) => jiraProvider(config, cwd);
