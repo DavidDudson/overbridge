@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { metaDir } from "./paths";
+import { pidAlive } from "./proc";
 
 /**
  * What a workspace's agent is doing. `empty` is a session just started or cleared: no conversation to lose. `bg` is never recorded: it is `done` read while background
@@ -43,15 +44,7 @@ export const STALE_MS: Record<AgentState, number> = {
 export const agentStatePath = (meta: string, ws: string) => join(meta, "agent", `${ws}.json`);
 export const agentStateFile = (ws: string) => agentStatePath(metaDir(), ws);
 
-/** Whether `pid` is a live, non-zombie process. */
-export function pidAlive(pid: number): boolean {
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-    return stat[stat.lastIndexOf(")") + 2] !== "Z";
-  } catch {
-    return false;
-  }
-}
+export { pidAlive };
 
 /**
  * The state of `ws`, or undefined when there is none, it is stale, or the file is unreadable.

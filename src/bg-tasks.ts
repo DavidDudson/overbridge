@@ -1,30 +1,14 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { listProcs, type Proc, readProc } from "./proc";
 
 /**
- * Background shells of a Claude session, found from /proc. Imported by the agent hook, so
- * it uses node builtins only. Linux only: elsewhere it finds nothing.
+ * Background shells of a Claude session, found from the process table (`/proc` on Linux, `ps` on macOS).
+ * Imported by the agent hook, so it uses node builtins only.
  */
 
 const SHELLS = new Set(["bash", "sh", "zsh", "dash", "fish", "nu"]);
 
-interface Proc {
-  pid: number;
-  ppid: number;
-  comm: string;
-}
-
-function readProc(pid: number): Proc | undefined {
-  try {
-    // "<pid> (<comm>) <state> <ppid> ..."; comm may contain spaces and parens
-    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-    const open = stat.indexOf("(");
-    const close = stat.lastIndexOf(")");
-    const rest = stat.slice(close + 2).split(" ");
-    return { pid, ppid: Number(rest[1]), comm: stat.slice(open + 1, close) };
-  } catch {
-    return undefined;
-  }
-}
+/** macOS prints login shells as `-zsh`. */
+const shellName = (comm: string) => comm.replace(/^-/, "");
 
 /** The process in `from`'s ancestry named `claude`, else its parent. */
 function sessionRoot(from: number): number | undefined {
@@ -49,10 +33,8 @@ export function backgroundShells(from = process.pid): number[] {
     if (rootPid === undefined) return [];
     const ancestors = new Set<number>();
     for (let p = from; p > 1 && !ancestors.has(p); p = readProc(p)?.ppid ?? 0) ancestors.add(p);
-    return readdirSync("/proc")
-      .filter((d) => /^\d+$/.test(d))
-      .map((d) => readProc(Number(d)))
-      .filter((p): p is Proc => !!p && p.ppid === rootPid && SHELLS.has(p.comm) && !ancestors.has(p.pid))
+    return listProcs()
+      .filter((p: Proc) => p.ppid === rootPid && SHELLS.has(shellName(p.comm)) && !ancestors.has(p.pid))
       .map((p) => p.pid);
   } catch {
     return [];
