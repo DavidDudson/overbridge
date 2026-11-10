@@ -5,7 +5,7 @@ import { beginRemoval, Landing } from "./remove";
 import { gitClean } from "./top";
 import { errorMessage } from "./util";
 
-/** How long one sidebar trusts a git check of an ended workspace before running it again. */
+/** How long one sidebar trusts a git check of an ended workspace, or waits after a throw, before trying again. */
 export const GIT_RECHECK_MS = 10_000;
 
 export interface ReapDeps {
@@ -32,6 +32,9 @@ export interface ReapResult {
   faults: ReadonlyMap<string, string>;
 }
 
+/** What the last look at an ended workspace found, trusted for `GIT_RECHECK_MS`. */
+type Memo = { atMs: number; clean: boolean } | { atMs: number; fault: string };
+
 const defaultDeps = (): ReapDeps => ({
   endedForGood: (ws) => sessionEndedForGood(ws),
   gitClean,
@@ -44,45 +47,45 @@ const defaultDeps = (): ReapDeps => ({
  * time: a throw (gone from state since the list was built, a locked state file) is reported for that workspace alone.
  */
 export function createReaper(deps: ReapDeps = defaultDeps()): (candidates: readonly ReapCandidate[]) => ReapResult {
-  const checks = new Map<string, { atMs: number; clean: boolean }>();
-  const held = new Map<string, { atMs: number; message: string }>();
+  const memos = new Map<string, Memo>();
+  const fresh = (m: Memo) => deps.now() - m.atMs < GIT_RECHECK_MS;
   const isClean = (ws: string): boolean => {
-    const cached = checks.get(ws);
-    if (cached && deps.now() - cached.atMs < GIT_RECHECK_MS) {
-      return cached.clean;
+    const memo = memos.get(ws);
+    if (memo && "clean" in memo && fresh(memo)) {
+      return memo.clean;
     }
     const clean = deps.gitClean(ws);
-    checks.set(ws, { atMs: deps.now(), clean });
+    memos.set(ws, { atMs: deps.now(), clean });
     return clean;
   };
   return (candidates) => {
     const unsaved = new Set<string>();
     const faults = new Map<string, string>();
-    const ended = new Set<string>();
+    const seen = new Set<string>();
     for (const c of candidates) {
       if (isOrchestrationTab(c.tab) || c.error !== undefined || c.fault !== undefined) continue;
-      const fault = held.get(c.tab);
-      if (fault && deps.now() - fault.atMs < GIT_RECHECK_MS) {
-        faults.set(c.tab, fault.message);
+      const memo = memos.get(c.tab);
+      if (memo && "fault" in memo && fresh(memo)) {
+        seen.add(c.tab);
+        faults.set(c.tab, memo.fault);
         continue;
       }
       try {
         if (!deps.endedForGood(c.tab)) continue;
-        ended.add(c.tab);
+        seen.add(c.tab);
         if (!isClean(c.tab)) {
           unsaved.add(c.tab);
           continue;
         }
         deps.remove(c.tab);
-        held.delete(c.tab);
       } catch (e) {
-        const message = errorMessage(e);
-        held.set(c.tab, { atMs: deps.now(), message });
-        faults.set(c.tab, message);
+        const fault = errorMessage(e);
+        seen.add(c.tab);
+        memos.set(c.tab, { atMs: deps.now(), fault });
+        faults.set(c.tab, fault);
       }
     }
-    [...checks.keys()].filter((ws) => !ended.has(ws)).forEach((ws) => checks.delete(ws));
-    [...held.keys()].filter((ws) => !faults.has(ws)).forEach((ws) => held.delete(ws));
+    [...memos.keys()].filter((ws) => !seen.has(ws)).forEach((ws) => memos.delete(ws));
     return { unsaved, faults };
   };
 }

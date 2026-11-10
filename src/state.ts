@@ -68,6 +68,10 @@ export function workspaceFault(w: unknown): string | undefined {
     if (!isRecord(w.removing)) return `state record has removing as ${describeValue(w.removing)}`;
     if (typeof w.removing.since !== "string" || Number.isNaN(Date.parse(w.removing.since))) return "state record's removing has no valid since";
   }
+  if (w.removeError !== undefined && typeof w.removeError !== "string") return `state record has removeError as ${describeValue(w.removeError)}`;
+  if (w.removalBlocked !== undefined && !Object.values<unknown>(RemovalBlock).includes(w.removalBlocked)) {
+    return `state record has removalBlocked as ${JSON.stringify(w.removalBlocked)}`;
+  }
   return undefined;
 }
 

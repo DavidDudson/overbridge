@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentStateFile, UNKNOWN_GLYPH } from "../src/agent-state";
 import { CleanupCause, CleanupOutcome, cleanupRecords, cleanupRows } from "../src/cleanup-log";
 import { metaDir } from "../src/paths";
-import { EMPTY_MODEL, type Entry, entries, entryLines, gather, inFlightCleanups, type Model, renderSidebar, Section, type SidebarReaders } from "../src/sidebar";
+import { EMPTY_MODEL, type Entry, entries, entryLines, type Footer, FooterKind, footerToDraw, gather, inFlightCleanups, LEGEND_FOOTER, type Model, renderSidebar, Section, type SidebarReaders } from "../src/sidebar";
 import { type State, tryReadState, withState, workspaceFault } from "../src/state";
 import { readTopCache, readTopCacheChecked, topCacheFault } from "../src/top";
 
@@ -42,7 +42,9 @@ describe("top cache shape", () => {
       ["42", "got a number"],
       ['{"title": 7}', "title is a number"],
       ['{"headline": ["x"], "links": []}', "headline is an array"],
-      ['{"links": {}}', "links is a object"],
+      ['{"links": {}}', "links is an object"],
+      ['{"links": []}', "at is missing"],
+      ['{"links": [], "at": "5"}', "at is a string"],
       ['{"links": [], "merged": "yes"}', "merged is a string"],
       ["{not json", "JSON"],
     ] as const) {
@@ -73,6 +75,17 @@ describe("workspace records", () => {
     expect(workspaceFault({ created: "now", repos: {}, removing: null })).toContain("removing as null");
     expect(workspaceFault({ created: "now", repos: {}, removing: {} })).toContain("no valid since");
     expect(workspaceFault({ created: "now", repos: {}, removing: { since: "yesterday" } })).toContain("no valid since");
+    expect(workspaceFault({ created: "now", repos: {}, removeError: "hook failed", removalBlocked: "merged-unsaved" })).toBeUndefined();
+    expect(workspaceFault({ created: "now", repos: {}, removeError: { msg: "x" } })).toContain("removeError as an object");
+    expect(workspaceFault({ created: "now", repos: {}, removalBlocked: "nope" })).toContain('removalBlocked as "nope"');
+  });
+
+  test("withState never overwrites a state file it cannot parse", () => {
+    mkdirSync(metaDir(), { recursive: true });
+    const file = join(metaDir(), "state.json");
+    writeFileSync(file, "{not json");
+    expect(() => withState((s) => { s.workspaces.w1 = workspace(); })).toThrow();
+    expect(readFileSync(file, "utf8")).toBe("{not json");
   });
 
   test("tryReadState keeps the fallback and names the file when state will not parse", () => {
@@ -217,6 +230,23 @@ describe("one poll of the sidebar", () => {
     }
   });
 
+  test("a bad state file is reported as itself, and the sweep waits for it", () => {
+    const sweeps: string[] = [];
+    const readers = okReaders();
+    readers.sweep = () => {
+      sweeps.push("ran");
+      throw new Error("JSON Parse error");
+    };
+    readers.readState = (fallback) => ({ state: fallback, fault: "state.json: JSON Parse error" });
+    expect(gather(readers, 26, EMPTY_MODEL).fault).toBe("state.json: JSON Parse error");
+    readers.readState = throwing("state");
+    expect(gather(readers, 26, EMPTY_MODEL).fault).toBe("state: state broke");
+    expect(sweeps).toEqual([]);
+    readers.readState = () => ({ state: good });
+    expect(gather(readers, 26, EMPTY_MODEL).fault).toBe("merge sweep: JSON Parse error");
+    expect(sweeps).toEqual(["ran"]);
+  });
+
   test("the reaper's faults land on their cards; its unsaved ones keep their mark", () => {
     const readers = okReaders();
     readers.reap = () => ({ unsaved: new Set(["w2"]), faults: new Map([["w1", "no workspace 'w1'"]]) });
@@ -224,6 +254,20 @@ describe("one poll of the sidebar", () => {
     expect(model.list[0]).toMatchObject({ tab: "w1", fault: "no workspace 'w1'" });
     expect(model.list[1]).toMatchObject({ tab: "w2", unsaved: true });
     expect(model.fault).toBeUndefined();
+  });
+
+  test("the footer shows the user's prompt first, then the last key's fault, then the poll's, then the legend", () => {
+    const prompt: Footer = { kind: FooterKind.Prompt, prompt: { text: "12" } };
+    for (const [footer, input, poll, want] of [
+      [LEGEND_FOOTER, undefined, undefined, LEGEND_FOOTER],
+      [LEGEND_FOOTER, undefined, "state.json: bad", { kind: FooterKind.Error, message: "state.json: bad" }],
+      [LEGEND_FOOTER, "key: boom", "state.json: bad", { kind: FooterKind.Error, message: "key: boom" }],
+      [LEGEND_FOOTER, "key: boom", undefined, { kind: FooterKind.Error, message: "key: boom" }],
+      [prompt, "key: boom", "state.json: bad", prompt],
+      [{ kind: FooterKind.Busy, id: "12" }, undefined, "state.json: bad", { kind: FooterKind.Busy, id: "12" }],
+    ] as const) {
+      expect(footerToDraw(footer, input, poll)).toEqual(want);
+    }
   });
 
   test("a fault footer renders inside the frame", () => {

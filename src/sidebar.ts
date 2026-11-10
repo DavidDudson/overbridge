@@ -72,34 +72,25 @@ const entryFor = (tab: string, section: Section, label: string): Entry => {
   return { tab, section, glyph: glyphFor(state), state, label };
 };
 
-/** `record[key]`, or undefined when reading it throws (a getter; never from JSON, but the list must not depend on that). */
-function readProperty(record: Record<string, unknown>, key: string): unknown {
-  try {
-    return record[key];
-  } catch {
-    return undefined;
-  }
-}
-
-/** A card for an entry that could not be read: the tab name and why, no agent state. */
-const faultEntry = (tab: string, section: Section, fault: string): Entry => ({ tab, section, glyph: UNKNOWN_GLYPH, label: tab, fault });
+/** A card for an entry that could not be read: its label and why, no agent state. */
+const faultEntry = (tab: string, section: Section, fault: string, label = tab): Entry => ({ tab, section, glyph: UNKNOWN_GLYPH, label, fault });
 
 /** `build()`'s entry, or a fault card when it throws, so one bad tab never costs the whole list. */
-function guardedEntry(tab: string, section: Section, build: () => Entry): Entry {
+function guardedEntry(tab: string, section: Section, build: () => Entry, label = tab): Entry {
   try {
     return build();
   } catch (e) {
-    return faultEntry(tab, section, errorMessage(e));
+    return faultEntry(tab, section, errorMessage(e), label);
   }
 }
 
 /** The card for workspace `ws` whose state record is `w`: a fault card when the record or its top cache is malformed. */
 function workspaceEntry(ws: string, w: unknown): Entry {
   const recordFault = workspaceFault(w);
-  if (recordFault !== undefined || !isWorkspaceState(w)) {
-    return faultEntry(ws, Section.Workspaces, recordFault ?? "state record is malformed");
+  if (recordFault !== undefined) {
+    return faultEntry(ws, Section.Workspaces, recordFault);
   }
-  const { removeError: error, removalBlocked: blocked } = w;
+  const { removeError: error, removalBlocked: blocked } = w as WorkspaceState;
   const { cache, fault } = readTopCacheChecked(ws);
   const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
   return { ...entry, ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}) };
@@ -109,10 +100,13 @@ function workspaceEntry(ws: string, w: unknown): Entry {
 const removingRecord = (w: unknown, now = Date.now()): (WorkspaceState & { removing: Removing }) | undefined =>
   isWorkspaceState(w) && w.removing && isRemoving(w, now) ? (w as WorkspaceState & { removing: Removing }) : undefined;
 
-/** Whether `w` hides its workspace as being removed; a record that throws when read never hides anything. */
-const hiddenByRemoval = (w: unknown): boolean => {
+/**
+ * Whether `workspaces[ws]` hides its workspace as being removed. Reading the record and checking its worker's pid
+ * both happen inside the guard: a record that throws is a card to show, never one to hide.
+ */
+const hiddenByRemoval = (workspaces: Record<string, unknown>, ws: string): boolean => {
   try {
-    return removingRecord(w) !== undefined;
+    return removingRecord(workspaces[ws]) !== undefined;
   } catch {
     return false;
   }
@@ -125,10 +119,10 @@ const hiddenByRemoval = (w: unknown): boolean => {
  */
 export function entries(order: string[] = tabOrder(), state: State = readState()): Entry[] {
   const workspaces: Record<string, unknown> = state.workspaces;
-  const names = Object.keys(workspaces).filter((ws) => !hiddenByRemoval(readProperty(workspaces, ws))).sort(naturalSort);
+  const names = Object.keys(workspaces).filter((ws) => !hiddenByRemoval(workspaces, ws)).sort(naturalSort);
   const rank = (ws: string) => { const i = order.indexOf(ws); return i < 0 ? order.length : i; };
   return [
-    ...ORCHESTRATION_TABS.map((t) => guardedEntry(t.tab, Section.Orchestration, () => entryFor(t.tab, Section.Orchestration, t.label))),
+    ...ORCHESTRATION_TABS.map((t) => guardedEntry(t.tab, Section.Orchestration, () => entryFor(t.tab, Section.Orchestration, t.label), t.label)),
     ...names.toSorted((a, b) => rank(a) - rank(b)).map((ws) => guardedEntry(ws, Section.Workspaces, () => workspaceEntry(ws, workspaces[ws]))),
   ];
 }
@@ -298,7 +292,11 @@ export const EMPTY_MODEL: Model = { list: [], status: [], limits: undefined, sta
 
 const NO_REAP: ReapResult = { unsaved: new Set(), faults: new Map() };
 
-/** One poll. Each reader runs on its own: the first failure becomes `fault`, and its part keeps `last`'s value or an empty one. */
+/**
+ * One poll. Each reader runs on its own: the first failure becomes `fault`, and its part keeps `last`'s value or an
+ * empty one. State is read first, so a bad state file is reported as itself, not as whatever reader hit it next; the
+ * merge sweep, which would only hit it again, waits for the file to be readable.
+ */
 export function gather(readers: SidebarReaders, inner: number, last: Model): Model {
   const faults: string[] = [];
   const attempt = <T>(what: string, fn: () => T, fallback: T): T => {
@@ -309,14 +307,17 @@ export function gather(readers: SidebarReaders, inner: number, last: Model): Mod
       return fallback;
     }
   };
-  const order = attempt("zellij tabs", readers.tabOrder, []);
-  attempt("orchestration tabs", () => readers.keepOrchestration(order), undefined);
-  attempt("merge sweep", readers.sweep, undefined);
   const read = attempt("state", () => readers.readState(last.state), { state: last.state });
   if (read.fault) {
     faults.push(read.fault);
   }
-  const state = read.fault ? last.state : read.state;
+  const stateUnreadable = faults.length > 0;
+  const state = stateUnreadable ? last.state : read.state;
+  const order = attempt("zellij tabs", readers.tabOrder, []);
+  attempt("orchestration tabs", () => readers.keepOrchestration(order), undefined);
+  if (!stateUnreadable) {
+    attempt("merge sweep", readers.sweep, undefined);
+  }
   const listed = attempt("workspace list", () => readers.entries(order, state), last.list);
   const reaped = attempt("auto-remove", () => readers.reap(listed), NO_REAP);
   const list = listed.map((e) => {
@@ -374,6 +375,12 @@ export type Footer =
   | { kind: typeof FooterKind.Error; message: string };
 
 export const LEGEND_FOOTER: Footer = { kind: FooterKind.Legend };
+
+/** The footer to draw: the user's prompt or message first, else the last key press's fault, else this poll's, else the legend. */
+export function footerToDraw(footer: Footer, inputFault: string | undefined, pollFault: string | undefined): Footer {
+  const fault = inputFault ?? pollFault;
+  return footer.kind === FooterKind.Legend && fault ? { kind: FooterKind.Error, message: fault } : footer;
+}
 export const EMPTY_PROMPT: Footer = { kind: FooterKind.Prompt, prompt: { text: "" } };
 
 export const promptLabel = (p: Prompt) => (p.id === undefined ? "new ws: " : `repo for ${p.id}: `);
@@ -683,11 +690,6 @@ export async function sidebar(wsOpt?: string) {
     draw();
   };
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
-  /** The footer to draw: the user's prompt or message first, else the last key press's fault, else this poll's, else the legend. */
-  const footerToDraw = (): Footer => {
-    const fault = inputFault ?? last.fault;
-    return footer.kind === FooterKind.Legend && fault ? { kind: FooterKind.Error, message: fault } : footer;
-  };
   /** Gather, then paint; neither may end the pane, so a failure is named in the footer and the next poll tries again. */
   const draw = () => {
     const { height, width } = size();
@@ -707,7 +709,7 @@ export async function sidebar(wsOpt?: string) {
       const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount);
       const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;
       offset = clampScroll(scrolled, workspaceHeights, rows);
-      process.stdout.write(frame(renderSidebar(list, current, offset, height, width, last.limits, Date.now(), version, status, footerToDraw(), pending), height, width));
+      process.stdout.write(frame(renderSidebar(list, current, offset, height, width, last.limits, Date.now(), version, status, footerToDraw(footer, inputFault, last.fault), pending), height, width));
     } catch (e) {
       process.stdout.write(frame([colorize(fit(`sidebar: ${errorMessage(e)}`, width), FAULT_COLOR)], height, width));
     }
@@ -767,8 +769,9 @@ export async function sidebar(wsOpt?: string) {
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.on("data", (buf) => {
+      // one draw per chunk, so a fault from any key in it stays on screen
+      inputFault = undefined;
       for (const input of decodeInput(buf.toString())) {
-        inputFault = undefined;
         let taken = false;
         guarded("key", () => {
           taken = footerTakes(input);

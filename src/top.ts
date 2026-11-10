@@ -207,19 +207,23 @@ const cacheFile = (ws: string) => join(metaDir(), "top", `${ws}.json`);
 
 const EMPTY_CACHE: TopCache = { links: [], at: 0 };
 
-/** Why a parsed cache file is not a `TopCache`, or undefined when every field the panes read has the right type. */
+/**
+ * Why a parsed cache file is not a `TopCache`, or undefined when every field the panes read has the right type:
+ * the optional fields when present, and `links` and `at` always (the sweep's age check needs a real `at`).
+ */
 export function topCacheFault(raw: unknown): string | undefined {
   if (!isRecord(raw)) return `expected a mapping, got ${describeValue(raw)}`;
-  const wrong = (field: string, ok: boolean) => (raw[field] === undefined || ok ? undefined : `${field} is ${describeValue(raw[field])}`);
+  const wrong = (field: string, ok: boolean) => (ok ? undefined : `${field} is ${describeValue(raw[field])}`);
+  const optional = (field: string, ok: boolean) => (raw[field] === undefined ? undefined : wrong(field, ok));
   return (
-    wrong("headline", typeof raw.headline === "string") ??
-    wrong("title", typeof raw.title === "string") ??
-    wrong("message", typeof raw.message === "string") ??
-    wrong("prsOpen", typeof raw.prsOpen === "boolean") ??
-    wrong("at", typeof raw.at === "number") ??
-    (Array.isArray(raw.links) ? undefined : `links is ${describeValue(raw.links)}`) ??
-    wrong("merged", isRecord(raw.merged)) ??
-    wrong("buttons", isRecord(raw.buttons))
+    optional("headline", typeof raw.headline === "string") ??
+    optional("title", typeof raw.title === "string") ??
+    optional("message", typeof raw.message === "string") ??
+    optional("prsOpen", typeof raw.prsOpen === "boolean") ??
+    optional("merged", isRecord(raw.merged)) ??
+    optional("buttons", isRecord(raw.buttons)) ??
+    wrong("links", Array.isArray(raw.links)) ??
+    wrong("at", typeof raw.at === "number" && Number.isFinite(raw.at))
   );
 }
 

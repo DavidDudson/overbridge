@@ -128,3 +128,14 @@ describe("one workspace's failure", () => {
     expect(f.removed).toEqual(["a"]);
   });
 });
+
+describe("a card the sidebar could not read", () => {
+  test("is never checked or removed, and reports nothing", () => {
+    const f = fake({ ended: ["b"] });
+    const { unsaved, faults } = createReaper(f.deps)([{ tab: "b", fault: "top cache: got null" }]);
+    expect(f.gitChecks).toEqual([]);
+    expect(f.removed).toEqual([]);
+    expect(faults.size).toBe(0);
+    expect(unsaved.size).toBe(0);
+  });
+});
