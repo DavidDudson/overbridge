@@ -117,7 +117,8 @@ The new workspace opens in its own tab and its Claude does the work. Tell the us
 opened. If \`overbridge start\` refuses, say why and stop.
 
 You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge item view\`, read-only
-\`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`release\`, \`up\`, \`repo add\`).`;
+\`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`release\`, \`up\`, \`repo add\`). You may also message
+workspace Claudes with \`ListAgents\` and \`SendMessage\`, for example to tell every tab to resume its work.`;
 
 /**
  * Tells the agent to run repo commands through `overbridge shell` when the workspace holds several repos and

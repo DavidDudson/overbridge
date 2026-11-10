@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { userLayoutPath } from "./layout";
 import { join } from "node:path";
 import { type AgentState, glyphFor, readAgentState } from "./agent-state";
+import { createReaper } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
 import { type CleanupInFlight, cleanupRows } from "./cleanup-log";
@@ -11,7 +12,8 @@ import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
 import { ensureOrchestrationTabs } from "./orchestration-keep";
 import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-history";
-import { isRemoving, readState, type State, watchState } from "./state";
+import { isRemoving, RemovalBlock, readState, type State, watchState } from "./state";
+import { claimSweep, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache } from "./top";
 import { sidebarLabel } from "./top";
@@ -54,6 +56,10 @@ export interface Entry {
   label: string;
   /** Why the last background removal failed; replaces the status line. */
   error?: string;
+  /** Why the merged-PR sweep kept this workspace; replaces the agent status line. */
+  blocked?: RemovalBlock;
+  /** The session ended, but uncommitted or unpushed work keeps the workspace. */
+  unsaved?: boolean;
 }
 
 export { sidebarLabel, stripConventional } from "./top";
@@ -77,8 +83,8 @@ export function entries(order: string[] = tabOrder()): Entry[] {
     ...ORCHESTRATION_TABS.map((t) => entryFor(t.tab, Section.Orchestration, t.label)),
     ...names.toSorted((a, b) => rank(a) - rank(b)).map((ws) => {
       const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, readTopCache(ws)));
-      const error = workspaces[ws]!.removeError;
-      return error ? { ...entry, error } : entry;
+      const { removeError: error, removalBlocked: blocked } = workspaces[ws]!;
+      return { ...entry, ...(error ? { error } : {}), ...(blocked ? { blocked } : {}) };
     }),
   ];
 }
@@ -129,6 +135,11 @@ const STATE_TEXT: Record<AgentState, { text: string; color: Color }> = {
   end: { text: "ended", color: "red" },
 };
 
+const BLOCK_TEXT: Record<RemovalBlock, { text: string; color: Color }> = {
+  [RemovalBlock.MergedUnsaved]: { text: "merged · unsaved work", color: "yellow" },
+};
+const UNSAVED_TEXT: { text: string; color: Color } = { text: "ended · unsaved work", color: "red" };
+
 /** `text` broken at spaces into lines of at most `width` columns; an over-long word is split. */
 export function wrapText(text: string, width: number): string[] {
   const lines: string[] = [];
@@ -174,7 +185,7 @@ export const entryHeights = (list: Entry[], width: number) => list.map((e, i) =>
 /** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line. */
 export function entryLines(e: Entry, index: number, selected: boolean, inner: number): string[] {
   const titles = titleRows(e, index, inner).map((l) => fit(l, inner));
-  const status = e.error ? { text: `cleanup failed: ${e.error}`, color: "red" as const } : e.state ? STATE_TEXT[e.state] : undefined;
+  const status = e.error ? { text: `cleanup failed: ${e.error}`, color: "red" as const } : e.blocked ? BLOCK_TEXT[e.blocked] : e.unsaved ? UNSAVED_TEXT : e.state ? STATE_TEXT[e.state] : undefined;
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
   const sub = fit(`${indent}${status?.text ?? ""}`, inner);
   if (selected) return [...titles, sub].map(inverse);
@@ -513,6 +524,7 @@ export async function sidebar(wsOpt?: string) {
   // Read once at start, so a pane left running across an upgrade shows the version it runs.
   const version = overbridgeVersion();
   const userLayout = existsSync(userLayoutPath());
+  const reap = createReaper();
   let offset = 0;
   let footer: Footer = LEGEND_FOOTER;
   let statusRowCount = 0;
@@ -539,7 +551,12 @@ export async function sidebar(wsOpt?: string) {
     if (!userLayout) {
       ensureOrchestrationTabs(order);
     }
-    const list = entries(order);
+    if (claimSweep()) {
+      startSweep();
+    }
+    const listed = entries(order);
+    const unsaved = reap(listed);
+    const list = listed.map((e) => (unsaved.has(e.tab) ? { ...e, unsaved: true } : e));
     const current = Math.max(0, list.findIndex((e) => e.tab === self));
     const { height, width } = size();
     const heights = entryHeights(list, width);

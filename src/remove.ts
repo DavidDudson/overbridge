@@ -6,10 +6,10 @@ import { removeWorkspace } from "./commands";
 import { landingTab } from "./next";
 import { isOrchestrationTab, orchestrationRemoveMessage } from "./orchestration";
 import { metaDir, root, selfCommand } from "./paths";
-import { entries, switchTab, tabOrder } from "./sidebar";
+import { currentTab, entries, switchTab, tabOrder } from "./sidebar";
 import { openTab } from "./tab";
 import { getWorkspace, isRemoving, readState, withState } from "./state";
-import { cleanable, gitClean, readTopCache, refreshTop, sidebarLabel, snapshotTop } from "./top";
+import { cleanable, noUnsavedWork, readTopCache, refreshTop, sidebarLabel, snapshotTop } from "./top";
 import { fail, type RunResult, run } from "./util";
 
 /** The internal `rm` flag that runs `finishRemoval` in the detached worker. */
@@ -53,6 +53,13 @@ function spawnFinishWorker(ws: string): number {
   }
 }
 
+/**
+ * When `beginRemoval` moves the user to another tab. `Always` suits Cleanup, pressed from the workspace's own tab.
+ * `IfFocused` suits a removal the user didn't start, which must not pull them off the tab they are on.
+ */
+export const Landing = { Always: "always", IfFocused: "if-focused" } as const;
+export type Landing = (typeof Landing)[keyof typeof Landing];
+
 /** Tab name → stable tab id, from `zellij action list-tabs` (`TAB_ID POSITION NAME` rows under a header). */
 export function parseTabIds(listTabs: string): Map<string, string> {
   return new Map(
@@ -71,23 +78,32 @@ export function parseTabIds(listTabs: string): Map<string, string> {
  * and close `ws`'s tab. `previous` is the tab the user came from, when known. Returns a refusal message,
  * or undefined once the removal is under way.
  */
-export function beginRemoval(ws: string, opts: { previous?: string; deps?: RemovalDeps } = {}): string | undefined {
+export function beginRemoval(ws: string, opts: { previous?: string; landing?: Landing; deps?: RemovalDeps } = {}): string | undefined {
   if (isOrchestrationTab(ws)) {
     return orchestrationRemoveMessage(ws);
   }
   const deps = opts.deps ?? defaultDeps();
-  const w = getWorkspace(readState(), ws);
-  if (isRemoving(w)) {
-    return `${ws} is already being removed`;
+  const alreadyRemoving = `${ws} is already being removed`;
+  if (isRemoving(getWorkspace(readState(), ws))) {
+    return alreadyRemoving;
   }
-  if (!gitClean(ws)) {
+  if (!noUnsavedWork(ws)) {
     return `${ws} has uncommitted changes or unpushed commits; not removing`;
   }
   const list = deps.inZellij ? entries() : [];
-  withState((s) => {
-    const { removeError: _, ...rest } = getWorkspace(s, ws);
+  // several sidebars can start the same automatic removal at once, so the check and the mark share one lock
+  const claimed = withState((s) => {
+    const current = getWorkspace(s, ws);
+    if (isRemoving(current)) {
+      return false;
+    }
+    const { removeError: _, ...rest } = current;
     s.workspaces[ws] = { ...rest, removing: { since: new Date().toISOString() } };
+    return true;
   });
+  if (!claimed) {
+    return alreadyRemoving;
+  }
   const pid = deps.spawnWorker(ws);
   withState((s) => {
     const current = s.workspaces[ws];
@@ -96,7 +112,8 @@ export function beginRemoval(ws: string, opts: { previous?: string; deps?: Remov
     }
   });
   if (deps.inZellij) {
-    leaveTab(ws, landingTab(list, ws, opts.previous), deps.exec);
+    const switchAway = opts.landing !== Landing.IfFocused || currentTab(deps.exec) === ws;
+    leaveTab(ws, switchAway ? landingTab(list, ws, opts.previous) : undefined, deps.exec);
   }
   return undefined;
 }
@@ -132,7 +149,7 @@ export async function finishRemoval(ws: string): Promise<void> {
     }
     refreshTop(ws);
     if (!cleanable(ws)) {
-      fail(`${ws} is no longer clean (no open PR, or uncommitted or unpushed work); not removed`);
+      fail(`${ws} is no longer clean (no open or merged PRs, or uncommitted or unpushed work); not removed`);
     }
     const { apps } = await snapshotTop(ws);
     apps

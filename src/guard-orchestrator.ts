@@ -11,7 +11,10 @@ export const START_HINT =
 
 const blocked = (what: string) => `the orchestrator only coordinates, so ${what} is not allowed here. ${START_HINT}`;
 
-/** Tools that cannot change anything, or whose own tool calls come back through this hook (Agent, Skill). */
+/**
+ * Tools that cannot change anything, whose own tool calls come back through this hook (Agent, Skill), or that
+ * only talk to other Claude sessions (ListAgents, SendMessage), which run their own guards.
+ */
 const ALLOWED_TOOLS = new Set([
   "Read",
   "Glob",
@@ -29,6 +32,8 @@ const ALLOWED_TOOLS = new Set([
   "EnterPlanMode",
   "ExitPlanMode",
   "BashOutput",
+  "ListAgents",
+  "SendMessage",
   "ListMcpResourcesTool",
   "ReadMcpResourceTool",
 ]);

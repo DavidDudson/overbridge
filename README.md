@@ -53,7 +53,23 @@ five seconds. If a repo has uncommitted changes or unpushed commits by then, Cle
 Otherwise the tab closes at once, the workspace leaves every sidebar, and you land on the next tab that needs
 attention, or else the tab next to it. A background process then re-checks the PRs, stops the workspace's apps, and
 runs `overbridge rm`. If any of that fails, the workspace comes back with the error on its sidebar card, and its tab
-reopens. A merged claim does not block it; a closed (unmerged) PR or a branch with no PR does, and one PR must still be open.
+reopens. A merged claim does not block it; a closed (unmerged) PR or a branch with no PR does.
+
+**Ending a session.** When you exit a workspace's Claude on purpose (`/exit` or Ctrl-D), overbridge removes the
+workspace the way Cleanup does. Its tab closes, it leaves every sidebar, and a background process finishes the removal.
+It doesn't need an open PR. If a repo has uncommitted changes or unpushed commits, the workspace stays in the list,
+marked `ended · unsaved work`, and goes once that work is pushed or thrown away. `/clear` and `/resume` don't count as
+ending a session. Nor does a session that ends because zellij quit or the machine restarted, so those workspaces resume
+on the next `overbridge up`. If you're on another tab when it goes, you stay there.
+
+**Removal once every PR merges.** When every claimed branch has a merged PR, overbridge removes the workspace through
+the same background flow, without a key press. Any open sidebar can run the check (`overbridge top sweep`), and only
+one of them runs it each minute, so it works whether or not the workspace's tab is open. The workspace stays if a repo
+has uncommitted changes or its HEAD is not the merged PR's head commit, and its sidebar card reads "merged · unsaved
+work". The check compares HEAD with the PR's head rather than the default branch, because a squash merge leaves the
+branch's commits off the default branch. A workspace also stays while its agent is working, and goes once the agent is
+idle or has ended. A claim with no PR, or a PR closed without merging, keeps the workspace. Orchestration tabs are never
+removed this way.
 
 Inside a workspace (shell pane or its Claude):
 
@@ -581,7 +597,7 @@ waiting for input first, then finished, then finished with background tasks runn
 
 Each workspace's `.claude/settings.json` registers `overbridge hook` for `SessionStart`,
 `UserPromptSubmit`, `PostToolUse`, `Notification`, `PreCompact`, `Stop` and `SessionEnd`, next to the guard.
-It records `empty` (a session just started or cleared; Claude's later idle notification does not turn it into `waiting`, and the workspace becomes a Cleanup candidate if nothing is uncommitted or unpushed), `idle`, `busy`, `waiting`, `done` or `end` in `<meta>/agent/<ws>.json`. On `Stop` it also records the pids of shells still running under the session (background tasks); `done` reads as `bg` while any is alive. Plan-mode plans are written to `<ws>/plans/` (`plansDirectory` in the generated settings), not `~/.claude/plans`.
+It records `empty` (a session just started or cleared; Claude's later idle notification does not turn it into `waiting`, and the workspace becomes a Cleanup candidate if nothing is uncommitted or unpushed), `idle`, `busy`, `waiting`, `done` or `end` (with Claude's SessionEnd `reason`; `/clear` and `/resume` record nothing) in `<meta>/agent/<ws>.json`. On `Stop` it also records the pids of shells still running under the session (background tasks); `done` reads as `bg` while any is alive. Plan-mode plans are written to `<ws>/plans/` (`plansDirectory` in the generated settings), not `~/.claude/plans`.
 The root tab's Claude records its state the same way, under its tab name (`<meta>/agent/@root.json`).
 The hook
 never blocks or fails the agent and loads none of the rest of the CLI. A `busy` state with no

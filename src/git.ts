@@ -69,6 +69,15 @@ export function head(wt: string): string {
   return currentBranch(wt) || `detached@${run(["git", "-C", wt, "rev-parse", "--short", "HEAD"]).stdout}`;
 }
 
+/** The full commit id HEAD points at; undefined when the worktree is missing or git fails. */
+export function headSha(wt: string): string | undefined {
+  if (!existsSync(wt)) {
+    return undefined;
+  }
+  const r = run(["git", "-C", wt, "rev-parse", "HEAD"]);
+  return r.ok && r.stdout ? r.stdout : undefined;
+}
+
 export function isDirty(wt: string): boolean {
   return existsSync(wt) && run(["git", "-C", wt, "status", "--porcelain"]).stdout !== "";
 }

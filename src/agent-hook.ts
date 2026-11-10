@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type AgentState, agentStatePath, readAgentState } from "./agent-state";
+import { type AgentState, agentStatePath, CONTINUING_END_REASONS, readAgentState } from "./agent-state";
 import { backgroundShells } from "./bg-tasks";
 import { envVar, ORCHESTRATION_ENV, root, selfCommand, silenceLegacyWarnings } from "./paths";
 
@@ -24,9 +24,13 @@ export const EVENT_STATE: Record<string, AgentState> = {
 /**
  * The state a hook event records, given the session's current state. A session just started or cleared is
  * `empty`, and Claude's later idle notification must not turn that into `waiting`: nobody is being waited on.
+ * A session ended by `/clear` or `/resume` records nothing, because the next SessionStart follows at once.
  */
-export function nextState(event: string, source: string | undefined, current: AgentState | undefined): AgentState | undefined {
+export function nextState(event: string, source: string | undefined, current: AgentState | undefined, endReason?: string): AgentState | undefined {
   if (event === "SessionStart") return source === "resume" || source === "compact" ? "idle" : "empty";
+  if (event === "SessionEnd" && endReason !== undefined && CONTINUING_END_REASONS.includes(endReason)) {
+    return undefined;
+  }
   if (event === "Notification" && current === "empty") return undefined;
   return EVENT_STATE[event];
 }
@@ -80,7 +84,7 @@ const ageMs = (path: string, now: number): number => {
 };
 
 /** Record `state` for `ws` unless it is the same state written moments ago. */
-export function recordState(metaDir: string, ws: string, state: AgentState, now = Date.now(), bg: number[] = []) {
+export function recordState(metaDir: string, ws: string, state: AgentState, now = Date.now(), bg: number[] = [], endReason?: string) {
   const file = agentStatePath(metaDir, ws);
   try {
     const old = JSON.parse(readFileSync(file, "utf8")) as { state?: string; at?: number };
@@ -90,7 +94,7 @@ export function recordState(metaDir: string, ws: string, state: AgentState, now 
   }
   mkdirSync(join(metaDir, "agent"), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ state, at: now, ...(bg.length ? { bg } : {}) }));
+  writeFileSync(tmp, JSON.stringify({ state, at: now, ...(bg.length ? { bg } : {}), ...(endReason === undefined ? {} : { reason: endReason }) }));
   renameSync(tmp, file);
 }
 
@@ -122,7 +126,7 @@ export async function hookMain(): Promise<number> {
     // an orchestration tab has no top panel, so it records state but never refreshes a top cache
     const ws = workspace || process.env[ORCHESTRATION_ENV];
     if (!ws) return 0;
-    const input = JSON.parse(await Bun.stdin.text()) as { hook_event_name?: string; source?: string; trigger?: string; stop_hook_active?: boolean };
+    const input = JSON.parse(await Bun.stdin.text()) as { hook_event_name?: string; source?: string; reason?: string; trigger?: string; stop_hook_active?: boolean };
     const meta = join(root(), ".overbridge");
     const event = input.hook_event_name ?? "";
     if (event === "PreCompact" && input.trigger === "auto") markCompact(meta, ws);
@@ -133,8 +137,8 @@ export async function hookMain(): Promise<number> {
       console.log(JSON.stringify({ decision: "block", reason: COMPACT_RESTART_REASON }));
       return 0;
     }
-    const state = nextState(event, input.source, event === "Notification" ? readAgentState(ws) : undefined);
-    if (state) recordState(meta, ws, state, Date.now(), state === "done" ? backgroundShells() : []);
+    const state = nextState(event, input.source, event === "Notification" ? readAgentState(ws) : undefined, input.reason);
+    if (state) recordState(meta, ws, state, Date.now(), state === "done" ? backgroundShells() : [], state === "end" ? input.reason : undefined);
     if (workspace && claimRefresh(meta, workspace)) startRefresh(workspace);
   } catch {
     // a status hook must never get in the way of the agent
