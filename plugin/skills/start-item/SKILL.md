@@ -68,8 +68,8 @@ Each item gets its own workspace, named for it (`ENG-123`, `gh-app-12`). Look at
   overbridge start <repo> <id>
   ```
 
-  It creates the item's workspace, claims the item's branch there and opens a new tab whose Claude
-  runs `/start-item <id>`. If the item already has a workspace it focuses that tab instead. Tell the
+  It creates the item's workspace, claims the item's branch there and opens a new tab in the background
+  whose Claude runs `/start-item <id>`. If the item already has a workspace it focuses that tab instead. Tell the
   user which workspace and tab it opened, then **stop**: the plan happens in the new tab, not here.
   If `overbridge start` refuses (the branch or issue is claimed elsewhere), stop and say which workspace holds it.
 

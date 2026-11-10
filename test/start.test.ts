@@ -3,8 +3,9 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkout, createWorkspace, repoAdd } from "../src/commands";
-import { start } from "../src/start";
+import { openTab, start } from "../src/start";
 import { readState } from "../src/state";
+import type { RunResult } from "../src/util";
 import { fakeProvider } from "./helpers/fake-provider";
 
 let tmp: string;
@@ -67,5 +68,58 @@ describe("start", () => {
 
   test("an unknown item is an error", () => {
     expect(() => start("app", "99", undefined, { provider: provider() })).toThrow("99: not found");
+  });
+});
+
+/** A fake zellij: `current-tab-info` names `current` (or fails when undefined), `new-tab` succeeds when `opens`. */
+const fakeZellij = (current: string | undefined, opens = true) => {
+  const calls: string[][] = [];
+  const exec = (cmd: string[]): RunResult => {
+    calls.push(cmd);
+    const action = cmd[2];
+    if (action === "current-tab-info") {
+      return { ok: current !== undefined, code: current === undefined ? 1 : 0, stdout: current === undefined ? "" : `name: ${current}\nposition: 0`, stderr: "" };
+    }
+    if (action === "new-tab") {
+      return { ok: opens, code: opens ? 0 : 1, stdout: opens ? "3" : "", stderr: opens ? "" : "no session" };
+    }
+    return { ok: true, code: 0, stdout: "", stderr: "" };
+  };
+  return { calls, exec, actions: () => calls.map((c) => c[2]) };
+};
+
+describe("start inside zellij", () => {
+  beforeAll(() => {
+    process.env.ZELLIJ = "0";
+  });
+  afterAll(() => {
+    process.env.ZELLIJ = "";
+  });
+
+  test("a new workspace's tab opens in the background", () => {
+    const z = fakeZellij("mine");
+    start("app", "20", undefined, { provider: fakeProvider([{ id: "20", title: "Background", url: "" }]), exec: z.exec });
+    expect(z.actions()).toEqual(["current-tab-info", "new-tab", "go-to-tab-name"]);
+    expect(z.calls[1]).toContain("gh-app-20");
+    expect(z.calls[2]).toEqual(["zellij", "action", "go-to-tab-name", "mine"]);
+  });
+
+  test("an item that already has a workspace switches to its tab", () => {
+    const z = fakeZellij("mine");
+    start("app", "20", undefined, { provider: fakeProvider([{ id: "20", title: "Background", url: "" }]), exec: z.exec });
+    expect(z.calls[0]).toEqual(["zellij", "action", "go-to-tab-name", "gh-app-20"]);
+    expect(z.actions()).not.toContain("new-tab");
+  });
+
+  test("no current tab means nothing to go back to", () => {
+    const z = fakeZellij(undefined);
+    openTab("ws-a", undefined, z.exec);
+    expect(z.actions()).toEqual(["current-tab-info", "new-tab"]);
+  });
+
+  test("a tab that fails to open does not move focus", () => {
+    const z = fakeZellij("mine", false);
+    openTab("ws-b", undefined, z.exec);
+    expect(z.actions()).toEqual(["current-tab-info", "new-tab"]);
   });
 });
