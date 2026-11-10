@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { ghReposCache, metaDir, ORCHESTRATION_ENV, root, selfCommand, worktreePath, wsDir } from "./paths";
+import { pluginSettings } from "./plugins";
 import { loadRepoConfig } from "./project-config";
 import { getWorkspace, readState } from "./state";
 import { shellQuote } from "./util";
@@ -36,6 +37,7 @@ export function scaffold(ws: string) {
   mkdirSync(join(dir, ".claude"), { recursive: true });
   const settings = {
     env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
+    ...pluginSettings(),
     // plan-mode plans live in the workspace folder, not ~/.claude/plans
     plansDirectory: PLANS_DIR,
     permissions: { allow: ALLOWED_COMMANDS },
@@ -73,8 +75,27 @@ export function scaffoldOrchestration(tab: string): string {
   const settings = {
     env: { [ORCHESTRATION_ENV]: tab, OVERBRIDGE_ROOT: root(), OVERBRIDGE_NAME: "" },
     hooks: { PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }], ...agentStateHooks() },
+    ...pluginSettings(),
   };
   writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
+  return file;
+}
+
+/** The plugin settings a workspace Claude loads with `--settings`, kept in the meta dir like the orchestration ones. */
+export const pluginSettingsPath = () => join(metaDir(), "plugins.settings.json");
+
+/**
+ * (Re)write the plugin settings and return their path. A workspace Claude gets them through `--settings` as well
+ * as its settings.json, because Claude ignores a project's marketplaces in a folder it does not trust, and a
+ * folder trusted by `claude-trust.ts` can lose that trust.
+ */
+export function scaffoldPlugins(): string {
+  const file = pluginSettingsPath();
+  mkdirSync(dirname(file), { recursive: true });
+  // every tab's Claude launches at once when the session starts, so none may read a half-written file
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(pluginSettings(), null, 2) + "\n");
+  renameSync(tmp, file);
   return file;
 }
 

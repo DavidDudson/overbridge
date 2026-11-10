@@ -98,22 +98,19 @@ green build, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev lo
 `scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`) and `read-handoff` (continue from a handoff file after `/clear`). They read the
 repo's `overbridge.yml` (`project-management`, `commands`) and work with work items through `overbridge item`.
 `loop-tech-debt` files items with `overbridge item create --tech-debt`, so set `project-management.tech-debt`.
-`audit-vulns` reads Dependabot alerts, so it needs a GitHub repo. Install:
+`audit-vulns` reads Dependabot alerts, so it needs a GitHub repo.
 
-```
-/plugin marketplace add ~/repos/overbridge
-/plugin install overbridge@overbridge
-```
+You don't install it. Every workspace and orchestration Claude starts with both plugins enabled from the
+installed overbridge (`extraKnownMarketplaces` and `enabledPlugins`, written to `.claude/settings.json` and passed
+with `--settings`), so the skills always match the running version. `overbridge start` stops with a fix when the
+install has no plugins, and warns when Claude has another `overbridge` marketplace registered, such as one added
+by hand. Remove that one with `claude plugin marketplace remove overbridge`.
 
 `plugin-review/` is a second plugin, `overbridge-review`, with the review panel: `mob-review`, `review-pr`,
 `update-personas` and the `persona-*` reviewers (security, code-quality, naming, comments, error-handling,
 architecture, test-design, integration-test, performance, resilience, pr-size, api-design, database,
 github-actions, shell, typing, a11y, async-state, ac-check, production-protector, skills). It reads `review.*`
-from `overbridge.yml` (see below). Install it next to the first:
-
-```
-/plugin install overbridge-review@overbridge
-```
+from `overbridge.yml` (see below). It is enabled in the same way as the first.
 
 `mob-review` uses only the built-in `code-review` skill. `review-pr` claims the PR with `overbridge checkout`.
 `loop-item` calls `mob-review` when this plugin is installed. Nothing in it needs `pickup`; `merge-main` and

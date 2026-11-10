@@ -1,8 +1,12 @@
 import { existsSync, realpathSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/** The installed overbridge package: the folder holding `src/`, `plugin/` and `.claude-plugin/`. */
+export const packageRoot = () => fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 
 let quietLegacy = false;
 const warned = new Set<string>();

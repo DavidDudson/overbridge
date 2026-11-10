@@ -6,7 +6,7 @@ import { landingTab } from "./next";
 import { isOrchestrationTab, orchestrationRemoveMessage } from "./orchestration";
 import { metaDir, root, selfCommand } from "./paths";
 import { currentTab, entries, switchTab, tabOrder } from "./sidebar";
-import { openTab } from "./start";
+import { openTab } from "./tab";
 import { getWorkspace, isRemoving, readState, withState } from "./state";
 import { cleanable, gitClean, refreshTop, snapshotTop } from "./top";
 import { fail, type RunResult, run } from "./util";
