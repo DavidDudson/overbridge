@@ -512,6 +512,12 @@ The width (default 60) comes from the global config:
 width = 60    # 12 to 200
 ```
 
+`s` opens a one-line prompt at the foot of the sidebar. Type `<repo> <id>`, such as `overbridge 79` or
+`web-monorepo ENG-123`. If the tab's workspace holds one repo, the id alone is enough; otherwise the prompt asks for
+the repo next. Enter runs `overbridge start`, which opens the item's workspace in a new tab, or switches to its tab if
+it already has one. Esc cancels. While the prompt is open, every key goes into it. If the start fails (unknown repo,
+item not found, or a refused claim), the footer shows the error until you press another key.
+
 At the foot sit Claude's usage limits (Hourly = 5-hour window, Weekly), coloured green, yellow or red by
 projected usage at reset, and a key legend. Claude's statusline script writes them to
 `<meta>/limits.json` as `{"at": <ms>, "fiveHour": {"pct", "resetsAt"}, "weekly": {...}}` (`resetsAt` in epoch
