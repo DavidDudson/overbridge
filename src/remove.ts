@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { AppStatus, stopApp } from "./apps";
 import { removeWorkspace } from "./commands";
 import { landingTab } from "./next";
+import { isOrchestrationTab, orchestrationRemoveMessage } from "./orchestration";
 import { metaDir, root, selfCommand } from "./paths";
 import { entries, switchTab, tabOrder } from "./sidebar";
 import { openTab } from "./start";
@@ -70,6 +71,9 @@ export function parseTabIds(listTabs: string): Map<string, string> {
  * or undefined once the removal is under way.
  */
 export function beginRemoval(ws: string, opts: { previous?: string; deps?: RemovalDeps } = {}): string | undefined {
+  if (isOrchestrationTab(ws)) {
+    return orchestrationRemoveMessage(ws);
+  }
   const deps = opts.deps ?? defaultDeps();
   const w = getWorkspace(readState(), ws);
   if (isRemoving(w)) {

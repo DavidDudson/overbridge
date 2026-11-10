@@ -152,6 +152,13 @@ describe("beginRemoval", () => {
     expect(calls[0]).toEqual(["zellij", "action", "go-to-tab-name", "b2"]);
   });
 
+  test("refuses an orchestration tab without touching zellij", () => {
+    const { deps, calls, spawned } = fakeDeps("");
+    expect(beginRemoval("@root", { deps })).toContain("orchestration tab");
+    expect(spawned).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
   test("refuses at once, without hiding anything, when a repo has uncommitted changes", () => {
     ob(["new", "d1", "-r", "app"]);
     writeFileSync(join(root, "d1", "app", "dirty.txt"), "x");
