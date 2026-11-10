@@ -2,12 +2,6 @@
 
 exports[`generated layout two workspaces, one resuming 1`] = `
 "layout {
-  default_tab_template {
-    children
-    pane size=1 borderless=true {
-      plugin location="zellij:status-bar"
-    }
-  }
   tab name="@root" focus=true {
     pane split_direction="vertical" {
       pane name="sidebar" command="overbridge" cwd="/ws-root" size=60 borderless=true focus=true {
@@ -64,12 +58,6 @@ exports[`generated layout two workspaces, one resuming 1`] = `
 
 exports[`generated layout a wide sidebar and a self command with arguments 1`] = `
 "layout {
-  default_tab_template {
-    children
-    pane size=1 borderless=true {
-      plugin location="zellij:status-bar"
-    }
-  }
   tab name="@root" focus=true {
     pane split_direction="vertical" {
       pane name="sidebar" command="/usr/bin/bun" cwd="/ws-root" size=40 borderless=true focus=true {

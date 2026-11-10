@@ -73,6 +73,11 @@ describe("workflow", () => {
     expect(settings.env.OVERBRIDGE_NAME).toBe("ws1");
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain("guard");
     expect(settings.plansDirectory).toBe("plans");
+    // the copy a Claude started in a repo folder loads with --settings: same hooks, plans kept in the workspace
+    const copy = JSON.parse(readFileSync(join(root, ".overbridge", "workspaces", "ws1.settings.json"), "utf8"));
+    expect(copy.hooks).toEqual(settings.hooks);
+    expect(copy.env).toEqual(settings.env);
+    expect(copy.plansDirectory).toBe(join(root, "ws1", "plans"));
     expect(settings.permissions.allow).toContain("Bash(gh pr ready:*)");
     expect(settings.permissions.allow).toContain("Bash(gh stack push:*)");
     expect(settings.permissions.allow).not.toContain("Bash(gh pr merge:*)");
@@ -255,11 +260,11 @@ describe("dev shells", () => {
     expect(ws(["shell", "nope", "--", "true"], dsa).err).toContain("nope is not in dsa");
   });
 
-  test("with one repo the agent starts inside its shell, cwd the workspace root", () => {
+  test("with one repo the agent starts inside its shell, cwd the repo folder", () => {
     const dsa = join(root, "dsa");
     const run = launch();
     expect(run.exitCode).toBe(0);
-    expect(run.stdout.toString().trim().split("\n")).toEqual(["FOO=bar", dsa]);
+    expect(run.stdout.toString().trim().split("\n")).toEqual(["FOO=bar", join(dsa, "app")]);
     expect(readFileSync(join(root, ".overbridge", "agent", "dsa.shell"), "utf8")).toBe("app");
     expect(readFileSync(join(dsa, "CLAUDE.md"), "utf8")).not.toContain("## Dev shells");
   });
