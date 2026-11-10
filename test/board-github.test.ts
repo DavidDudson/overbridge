@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { githubRows, rowsFromGraphql, slugFromUrl } from "../src/pm/board";
+import { githubRows, rowsFromGraphql, slugFromUrl } from "../src/pm/board-github";
 
 const reply = JSON.stringify({
   data: {

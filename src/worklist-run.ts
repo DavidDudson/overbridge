@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadRepos } from "./config";
 import { metaDir } from "./paths";
-import { githubRows, slugFromUrl } from "./pm/board";
+import { githubRows, slugFromUrl } from "./pm/board-github";
 import { rank, type Ranked, type WorkRow } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
 import { committedConfig } from "./start";

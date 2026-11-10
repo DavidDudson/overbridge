@@ -4,6 +4,7 @@ import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
 import { extCommand } from "./ext";
 import { item } from "./item";
+import { go, GO_USAGE } from "./go";
 import { next } from "./next";
 import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
@@ -18,7 +19,7 @@ import { externalCommand, externalEnv, externalHelp } from "./external";
 import { exec, OverbridgeError } from "./util";
 
 const START_USAGE =
-  "usage: overbridge start <repo> <id> [--prompt text] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] | overbridge start <repo> --task <slug> --prompt <text>";
+  "usage: overbridge start <repo> <id> [--prompt text] [--here] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] | overbridge start <repo> --task <slug> --prompt <text>";
 
 const HELP = `overbridge (alias: ws) — multi-repo workspaces with bound Claude sessions in zellij
 
@@ -31,6 +32,8 @@ Setup
   overbridge app [id [action]]                  list or start|stop|restart|status|log repo apps
   overbridge next                               go to the next tab needing you: waiting for input, then finished,
                                         then finished with background tasks (zellij binds it to a key)
+  overbridge go <n>|<name>|next|prev            switch tab by sidebar number, name, or neighbour (wrapping);
+                                        works outside zellij too, so a window-manager key can call it
   overbridge diff [--ws name]                   changes since the default branch, whitespace ignored, via delta
   overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
@@ -48,7 +51,10 @@ Skill extensions
 Workspaces
   overbridge start <repo> <id> [--prompt text]  workspace named for a work item (ENG-123, gh-app-12), on its
                                         branch, in a new tab running /start-item; focuses an existing one's
-                                        tab, or opens it when it has none
+                                        tab, or opens it when it has none. Inside a workspace on a task/
+                                        branch with no PR, re-binds that workspace to the item instead
+                                        (the item's branch is claimed in place, carrying the task's work)
+  overbridge start <repo> <id> --here           re-bind the current workspace to the item from any clean claim
   overbridge start <repo> --task <slug> --prompt <text>
                                         work with no item yet (a ticket to file, a spike): workspace <slug>
                                         on branch task/<slug>, in a new tab whose Claude starts with <text>
@@ -144,6 +150,12 @@ async function main(argv: string[]): Promise<number> {
     case "next":
       console.log(next(currentTab()));
       break;
+    case "go": {
+      const { positionals } = opts(rest, {});
+      if (positionals.length !== 1) throw new OverbridgeError(GO_USAGE);
+      console.log(go(positionals[0]!));
+      break;
+    }
     case "diff": {
       const { values } = opts(rest, ws);
       diff(cmd.requireWs(values.ws));
@@ -230,22 +242,23 @@ async function main(argv: string[]): Promise<number> {
         task: { type: "string" },
         stack: { type: "boolean" },
         name: { type: "string" },
+        here: { type: "boolean" },
       });
       if (values.stack) {
-        if (values.task !== undefined || positionals.length < 3) throw new OverbridgeError(START_USAGE);
+        if (values.task !== undefined || values.here || positionals.length < 3) throw new OverbridgeError(START_USAGE);
         startStack(positionals[0]!, positionals.slice(1), { name: values.name, prompt: values.prompt });
         break;
       }
       if (values.name !== undefined) throw new OverbridgeError("--name only goes with --stack");
       if (values.task !== undefined) {
-        if (positionals.length !== 1 || values.prompt === undefined) {
+        if (positionals.length !== 1 || values.prompt === undefined || values.here) {
           throw new OverbridgeError("usage: overbridge start <repo> --task <slug> --prompt <text>");
         }
         startTask(positionals[0]!, values.task, values.prompt);
         break;
       }
       if (positionals.length !== 2) throw new OverbridgeError(START_USAGE);
-      start(positionals[0]!, positionals[1]!, values.prompt);
+      start(positionals[0]!, positionals[1]!, values.prompt, { here: values.here });
       break;
     }
     case "layout":

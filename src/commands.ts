@@ -6,7 +6,7 @@ import { configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLay
 import { agentDirOf, chooseLayout, userLayoutPath } from "./layout";
 import { isOrchestrationTab, orchestrationRemoveMessage, type OrchestrationTab } from "./orchestration";
 import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
-import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
+import { barePath, currentWorkspace, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, sessionName, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
 import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, workspaceSettingsPath } from "./scaffold";
 import { openTab, TabFocus, type ZellijExec } from "./tab";
@@ -16,8 +16,6 @@ import { shellInvocation } from "./shell";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
 import { type Claim, claimOwner, getWorkspace, readState, withState } from "./state";
 import { exec, fail, log, must, naturalSort, run, shellQuote } from "./util";
-
-const SESSION = () => envVar("SESSION") ?? "workspaces";
 
 /** What a workspace really holds in `repo`: its claim, its worktree head, and the stacks of either. */
 export const holdings = (repo: string, stacks: Stack[]) => (ws: string, c: Claim) =>
@@ -147,7 +145,12 @@ export function removeWorkspace(ws: string, force: boolean) {
   log(`removed ${ws}`);
 }
 
-export function checkout(args: string[], wsOpt?: string) {
+/**
+ * `overbridge checkout <repo> <branch|#pr>`: claim `ref` for the workspace and switch its worktree to it.
+ * A branch that exists neither locally nor on origin is created from `opts.base` (default: the remote default
+ * branch); `start` passes `HEAD` to carry a task branch's work onto the item's branch.
+ */
+export function checkout(args: string[], wsOpt?: string, opts: { base?: string } = {}) {
   const ws = requireWs(wsOpt);
   let [repo, ref] = args;
   const owned = Object.keys(getWorkspace(readState(), ws).repos);
@@ -165,7 +168,7 @@ export function checkout(args: string[], wsOpt?: string) {
   let branch = ref;
   let pr: number | undefined;
   let prUrl: string | undefined;
-  let base = `origin/${git.defaultBranch(spec)}`;
+  let base = opts.base ?? `origin/${git.defaultBranch(spec)}`;
   let remote: Stack | undefined;
   const selector = git.parsePrRef(ref);
   if (selector) {
@@ -313,7 +316,7 @@ export function up(fresh: boolean) {
     writeFileSync(file, choice.kdl);
   }
 
-  const session = SESSION();
+  const session = sessionName();
   const sessions = run(["zellij", "list-sessions", "--short", "--no-formatting"]).stdout.split("\n");
   let exists = sessions.includes(session);
   if (exists && fresh) {
