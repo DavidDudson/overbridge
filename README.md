@@ -552,7 +552,7 @@ The legend shows the range the digits reach, such as `1-14`.
 Left/Right or `h`/`l` go back and forward through the tabs visited from the sidebar, like a browser.
 Every tab's sidebar shares one history per zellij session (`<meta>/sidebar-history/<session>.json`),
 tabs closed since are skipped, and a failed switch leaves it as it was. Switches made outside the sidebar
-(zellij keys, the tab bar, `overbridge next`) are not recorded.
+(zellij keys, the tab bar, `overbridge next`, `overbridge go`) are not recorded.
 The new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. Long titles wrap under their text (up to three rows).
 
@@ -601,6 +601,11 @@ seconds); unknown or over six hours old shows `–`.
 
 `overbridge next` (the `n` key in the sidebar, and a zellij binding) goes to the next tab that needs you:
 waiting for input first, then finished, then finished with background tasks running, cycling from the current tab.
+
+`overbridge go <n>|<name>|next|prev` switches tab by its sidebar number (`go 1` is the root tab, like `⌥1`), by name,
+or to the neighbouring tab (wrapping), and lands on that tab's Claude pane. It works from outside the session too,
+so a window-manager key (say Hyprland `SUPER+ALT+<n>`) can be bound to it: without `$ZELLIJ` it targets the session by
+name, `$OVERBRIDGE_SESSION` or `workspaces`.
 #### Agent state
 
 Each workspace's `.claude/settings.json` registers `overbridge hook` for `SessionStart`,

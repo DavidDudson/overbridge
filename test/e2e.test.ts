@@ -150,6 +150,14 @@ describe("workflow", () => {
     expect(sh(["git", "worktree", "list"], join(root, ".bare", "app.git"))).not.toContain("/ws1/");
   });
 
+  test("go takes exactly one target, and help lists it", () => {
+    const r = ws(["go"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("usage: overbridge go <n>|<name>|next|prev");
+    expect(ws(["go", "1", "2"]).err).toContain("usage: overbridge go");
+    expect(ws(["help"]).out).toContain("overbridge go <n>|<name>|next|prev");
+  });
+
   test("new needs a name: workspaces are named for their work, not numbered", () => {
     const r = ws(["new", "-r", "app"]);
     expect(r.code).toBe(1);

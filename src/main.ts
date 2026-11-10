@@ -4,6 +4,7 @@ import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
 import { extCommand } from "./ext";
 import { item } from "./item";
+import { go, GO_USAGE } from "./go";
 import { next } from "./next";
 import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
@@ -30,6 +31,8 @@ Setup
   overbridge app [id [action]]                  list or start|stop|restart|status|log repo apps
   overbridge next                               go to the next tab needing you: waiting for input, then finished,
                                         then finished with background tasks (zellij binds it to a key)
+  overbridge go <n>|<name>|next|prev            switch tab by sidebar number, name, or neighbour (wrapping);
+                                        works outside zellij too, so a window-manager key can call it
   overbridge diff [--ws name]                   changes since the default branch, whitespace ignored, via delta
   overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
@@ -143,6 +146,12 @@ async function main(argv: string[]): Promise<number> {
     case "next":
       console.log(next(currentTab()));
       break;
+    case "go": {
+      const { positionals } = opts(rest, {});
+      if (positionals.length !== 1) throw new OverbridgeError(GO_USAGE);
+      console.log(go(positionals[0]!));
+      break;
+    }
     case "diff": {
       const { values } = opts(rest, ws);
       diff(cmd.requireWs(values.ws));
