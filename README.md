@@ -71,6 +71,14 @@ branch's commits off the default branch. A workspace also stays while its agent 
 idle or has ended. A claim with no PR, or a PR closed without merging, keeps the workspace. Orchestration tabs are never
 removed this way.
 
+**Icebox.** `overbridge icebox <name>` pauses a workspace you will not touch for a while, such as one holding a
+draft PR. It refuses while any repo has uncommitted or unpushed work. Otherwise it stops the workspace's apps and
+queued checks, writes a handoff to `<ws>/.overbridge/handoffs/` (reason `icebox`), closes its tab and marks it
+iceboxed. Claims and worktrees stay, so nothing else can take its branch or PR. The sidebar lists it as a dim
+`❄ <name> iceboxed` row, `status` marks it `iceboxed`, and `up`/`layout` leave it out. `overbridge thaw <name>`
+reopens the tab, the agent continuing its conversation and reading the handoff. If every PR of an iceboxed
+workspace merges, the merged-PR check removes it like any other.
+
 **Seeing what was removed.** Every removal shows at the bottom of the sidebar, so none happens unseen. A yellow
 `🧹 4s removing <title>` row shows one in progress. A finished one stays for an hour and names what removed it:
 `🧹 3m merged <title>` for the merged-PR check, `exited` for an ended session, and `cleaned` for the Cleanup button.

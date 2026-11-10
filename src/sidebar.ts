@@ -12,7 +12,7 @@ import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
 import { ensureOrchestrationTabs } from "./orchestration-keep";
 import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-history";
-import { isRemoving, RemovalBlock, readState, type State, watchState } from "./state";
+import { isIceboxed, isRemoving, RemovalBlock, readState, type State, watchState } from "./state";
 import { claimSweep, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache } from "./top";
@@ -77,7 +77,7 @@ const entryFor = (tab: string, section: Section, label: string): Entry => {
  */
 export function entries(order: string[] = tabOrder()): Entry[] {
   const workspaces = readState().workspaces;
-  const names = Object.keys(workspaces).filter((ws) => !isRemoving(workspaces[ws]!)).sort(naturalSort);
+  const names = Object.keys(workspaces).filter((ws) => !isRemoving(workspaces[ws]!) && !isIceboxed(workspaces[ws])).sort(naturalSort);
   const rank = (ws: string) => { const i = order.indexOf(ws); return i < 0 ? order.length : i; };
   return [
     ...ORCHESTRATION_TABS.map((t) => entryFor(t.tab, Section.Orchestration, t.label)),
@@ -204,6 +204,14 @@ export function queueRows(queue: { running?: Ticket; waiting: Ticket[] }, inner:
     : [];
   const waiting = queue.waiting.length ? [dim(fit(`⧗ ${queue.waiting.length} waiting: ${queue.waiting.map((t) => t.ws).join(" ")}`, inner))] : [];
   return [...running, ...waiting];
+}
+
+/** Iceboxed workspaces, one dim row each under the divider; they have no tab, so no card and no digit. */
+export function icedRows(state: State, inner: number): string[] {
+  return Object.keys(state.workspaces)
+    .filter((ws) => isIceboxed(state.workspaces[ws]))
+    .sort(naturalSort)
+    .map((ws) => dim(fit(`❄ ${ws} iceboxed`, inner)));
 }
 
 /** Workspaces being removed in the background right now, labelled as their cards were. */
@@ -564,7 +572,7 @@ export async function sidebar(wsOpt?: string) {
     const workspaceHeights = heights.slice(pinned);
     const inner = Math.max(0, width - 4);
     const state = readState();
-    const status = [...cleanupRows(inFlightCleanups(state), state.cleanups ?? [], inner), ...queueRows(readQueue(), inner)];
+    const status = [...icedRows(state, inner), ...cleanupRows(inFlightCleanups(state), state.cleanups ?? [], inner), ...queueRows(readQueue(), inner)];
     statusRowCount = status.length;
     const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount);
     const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;

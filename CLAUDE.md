@@ -48,6 +48,11 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   The sidebar starts the sweep; `claimSweep` (`src/sweep-trigger.ts`) lets one sidebar run it per `MERGE_SWEEP_MS`.
   Every removal is visible: `beginRemoval` stores its `CleanupCause` in `removing`, `finishRemoval` appends the outcome to
   `State.cleanups` (`src/cleanup-log.ts`), and the sidebar lists in-flight and recent ones under its divider (`cleanupRows`).
+- `src/icebox.ts` is `overbridge icebox`/`thaw`: a paused workspace keeps its claims and worktrees, has `iceboxed` in state and no
+  tab. `icebox` refuses on `unsavedRepos`, stops apps (`stopApps`) and checks (`stopChecksFor`), writes a handoff (`src/handoff.ts`)
+  and closes the tab last (`leaveTab`); `thaw` reopens it with `--continue` and `/read-handoff`. `entries()` leaves iceboxed
+  workspaces out (they have no tab, so no digit; the sidebar lists them under `icedRows`), and `workspaceNames()` skips them for
+  `up`/`layout`. Any new code that lists workspaces for tabs must skip `isIceboxed`.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors. The root `config.yml`'s `guard` block (`GuardConfig`) adds
   `read-paths` (reads only) and `deny` rules; it is never read from a repo file, so a branch can't loosen the guard.

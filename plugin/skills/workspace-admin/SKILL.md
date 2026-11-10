@@ -36,6 +36,8 @@ overbridge new <name> -r <repo> [-r <repo>...]    # by hand; name it for its wor
 overbridge tab <name> [--prompt text]             # reopen a workspace's closed tab (focuses it when open)
 overbridge add <repo> --ws <name>                 # add another repo to an existing workspace
 overbridge rm <name> [--force]                    # refuses with uncommitted changes unless --force
+overbridge icebox <name>                          # pause: stop apps and checks, write a handoff, close the tab; claims stay; refuses with unsaved work
+overbridge thaw <name>                            # reopen an iceboxed workspace; its agent resumes and reads the handoff
 overbridge status --all
 
 overbridge spinup                                 # rebuild the zellij session over existing workspaces

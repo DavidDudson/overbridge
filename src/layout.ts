@@ -20,7 +20,7 @@ export interface TabOptions {
   /** Resume the agent's last conversation (`claude --continue`). */
   resume?: boolean;
   sidebarWidth?: number;
-  /** First message for the agent, e.g. `/start-item 51`. Ignored when `resume` is set. */
+  /** First message for the agent, e.g. `/start-item 51`. Sent after the resumed conversation when `resume` is set. */
   prompt?: string;
   focus?: boolean;
 }
@@ -33,7 +33,7 @@ export function tabKdl(ws: string, self: string[], opts: TabOptions = {}): strin
   const [cmd, ...baseArgs] = self;
   const width = opts.sidebarWidth ?? SIDEBAR_WIDTH;
   const args = (...rest: string[]) => [...baseArgs, ...rest].map(q).join(" ");
-  const extra = opts.resume ? ["--continue"] : opts.prompt ? ["--", opts.prompt] : [];
+  const extra = [...(opts.resume ? ["--continue"] : []), ...(opts.prompt ? ["--", opts.prompt] : [])];
   const agent = args("claude", ws, ...extra);
   return `  tab name=${q(ws)}${opts.focus ? " focus=true" : ""} {
     pane split_direction="vertical" {

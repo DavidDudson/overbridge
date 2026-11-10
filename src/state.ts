@@ -12,6 +12,8 @@ export type Removing = { since: string; cause?: CleanupCause; pid?: number };
 /** Why a workspace that would be removed by itself is kept; shown on its sidebar card. */
 export const RemovalBlock = { MergedUnsaved: "merged-unsaved" } as const;
 export type RemovalBlock = (typeof RemovalBlock)[keyof typeof RemovalBlock];
+/** A paused workspace: no tab, no processes, claims and worktrees kept. */
+export type Iceboxed = { since: string; handoff?: string };
 export type WorkspaceState = {
   created: string;
   repos: Record<string, Claim>;
@@ -21,6 +23,8 @@ export type WorkspaceState = {
   removeError?: string;
   /** Set by the merged-PR sweep when the workspace would be removed but holds unsaved work. */
   removalBlocked?: RemovalBlock;
+  /** Set by `overbridge icebox`; cleared by `thaw`. The workspace has no tab while it is set. */
+  iceboxed?: Iceboxed;
 };
 export type State = {
   version: 1;
@@ -123,6 +127,9 @@ export function isRemoving(w: WorkspaceState, now = Date.now(), alive: (pid: num
   }
   return now - Date.parse(w.removing.since) < REMOVING_GRACE_MS;
 }
+
+/** Whether `w` is paused by `overbridge icebox`. */
+export const isIceboxed = (w: WorkspaceState | undefined): boolean => w?.iceboxed !== undefined;
 
 export function getWorkspace(s: State, ws: string): WorkspaceState {
   return s.workspaces[ws] ?? fail(`no workspace '${ws}'`);
