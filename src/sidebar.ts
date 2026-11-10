@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { userLayoutPath } from "./layout";
 import { join } from "node:path";
 import { type AgentState, glyphFor, readAgentState } from "./agent-state";
 import { requireWs } from "./commands";
@@ -7,6 +8,7 @@ import { metaDir, selfCommand } from "./paths";
 import { type Limits, limitRows, readLimits } from "./limits";
 import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
+import { ensureOrchestrationTabs } from "./orchestration-keep";
 import { readState } from "./state";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache } from "./top";
@@ -418,12 +420,18 @@ export async function sidebar(wsOpt?: string) {
 
   // Read once at start, so a pane left running across an upgrade shows the version it runs.
   const version = overbridgeVersion();
+  const userLayout = existsSync(userLayoutPath());
   let offset = 0;
   let footer: Footer = LEGEND_FOOTER;
   let queueRowCount = 0;
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
   const draw = () => {
-    const list = entries();
+    const order = tabOrder();
+    // a user layout decides its own tabs, so only the generated one gets its orchestration tabs back
+    if (!userLayout) {
+      ensureOrchestrationTabs(order);
+    }
+    const list = entries(order);
     const current = Math.max(0, list.findIndex((e) => e.tab === self));
     const { height, width } = size();
     const heights = entryHeights(list, width);
