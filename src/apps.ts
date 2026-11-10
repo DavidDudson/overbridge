@@ -5,7 +5,7 @@ import * as git from "./git";
 import { wsDir } from "./paths";
 import type { AppSpec } from "./project-config";
 import { readState } from "./state";
-import { fail, run } from "./util";
+import { fail, run, spawnCwd } from "./util";
 
 /**
  * Launch and teardown for the apps a repo declares in overbridge.yml. Each app
@@ -247,7 +247,7 @@ export async function waitReady(spec: AppSpec, record: AppRecord, timeoutMs: num
 export function openBrowser(url: string) {
   const opener = process.platform === "darwin" ? "open" : "xdg-open";
   try {
-    Bun.spawn({ cmd: [opener, url], stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
+    Bun.spawn({ cmd: [opener, url], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
   } catch {
     // no opener installed
   }

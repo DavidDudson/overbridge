@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { type AgentState, agentStatePath, readAgentState } from "./agent-state";
 import { backgroundShells } from "./bg-tasks";
@@ -110,7 +111,7 @@ export function claimRefresh(metaDir: string, ws: string, now = Date.now()): boo
 
 function startRefresh(ws: string) {
   const [cmd, ...args] = selfCommand();
-  Bun.spawn({ cmd: [cmd!, ...args, "top", "refresh", "--ws", ws], stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
+  Bun.spawn({ cmd: [cmd!, ...args, "top", "refresh", "--ws", ws], cwd: homedir(), stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
 }
 
 /** Entry point for `overbridge hook`: the hook payload is JSON on stdin. Always exits 0. */

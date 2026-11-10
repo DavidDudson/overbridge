@@ -6,7 +6,7 @@ import { togglePane } from "./panes";
 import { mergePr, setReady } from "./pr-actions";
 import { ALT_COMMANDS, type ActDeps, activate, applyOptimistic, type PrChange, type Button, CLEANUP_ARM_MS, cleanable, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
 import { ENTER_SCREEN, LEAVE_SCREEN } from "./term";
-import { log, run } from "./util";
+import { log, run, spawnCwd } from "./util";
 
 const POLL_MS = 2_000;
 const REFRESH_MS = 60_000;
@@ -75,7 +75,7 @@ export async function topPanel(wsOpt?: string) {
         const head = cmd[0]!;
         const alt = ALT_COMMANDS[head];
         const resolved = !Bun.which(head) && alt && Bun.which(alt) ? [alt, ...cmd.slice(1)] : cmd;
-        Bun.spawn({ cmd: resolved, stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
+        Bun.spawn({ cmd: resolved, cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
       } catch {
         note = `${cmd[0]} is not installed`;
       }
@@ -138,7 +138,7 @@ export async function topPanel(wsOpt?: string) {
     note = keep ?? "refreshing…";
     draw();
     const self = selfCommand();
-    const child = Bun.spawn({ cmd: [...self, "top", "refresh", "--ws", ws], stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    const child = Bun.spawn({ cmd: [...self, "top", "refresh", "--ws", ws], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
     void child.exited.then(async () => {
       note = keep;
       await reload();

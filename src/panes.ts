@@ -4,7 +4,7 @@ import { selfCommand, worktreePath, wsDir } from "./paths";
 import { loadRepoConfig } from "./project-config";
 import { getWorkspace, readState } from "./state";
 import type { PaneKind } from "./top";
-import { run } from "./util";
+import { run, spawnCwd } from "./util";
 
 /**
  * The claude / terminal / diff buttons. Claude is always open at the left of the tab; terminal and
@@ -125,7 +125,7 @@ export function diff(ws: string) {
       }
     })();
     const base = (def && run(["git", "-C", dir, "merge-base", "HEAD", `origin/${def}`]).stdout) || "HEAD";
-    const raw = Bun.spawnSync({ cmd: ["git", "-C", dir, "diff", "-w", "--color=always", base], stdout: "pipe", stderr: "pipe" });
+    const raw = Bun.spawnSync({ cmd: ["git", "-C", dir, "diff", "-w", "--color=always", base], cwd: spawnCwd(), stdout: "pipe", stderr: "pipe" });
     if (!raw.stdout.length) continue;
     const text = Bun.which("delta")
       ? Bun.spawnSync({ cmd: deltaCommand(columns), cwd: dir, stdin: raw.stdout, stdout: "pipe", stderr: "pipe" }).stdout.toString()
@@ -137,5 +137,5 @@ export function diff(ws: string) {
     Bun.sleepSync(2_000);
     return;
   }
-  Bun.spawnSync({ cmd: ["less", "-R"], stdin: Buffer.from(out), stdout: "inherit", stderr: "inherit" });
+  Bun.spawnSync({ cmd: ["less", "-R"], cwd: spawnCwd(), stdin: Buffer.from(out), stdout: "inherit", stderr: "inherit" });
 }
