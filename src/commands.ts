@@ -20,7 +20,7 @@ import { exec, fail, log, must, naturalSort, run, shellQuote } from "./util";
 const SESSION = () => envVar("SESSION") ?? "workspaces";
 
 /** What a workspace really holds in `repo`: its claim, its worktree head, and the stacks of either. */
-const holdings = (repo: string, stacks: Stack[]) => (ws: string, c: Claim) =>
+export const holdings = (repo: string, stacks: Stack[]) => (ws: string, c: Claim) =>
   cover(stacks, [c.branch, git.currentBranch(worktreePath(ws, repo))], [c.pr]);
 
 export function requireWs(explicit?: string): string {
