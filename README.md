@@ -115,7 +115,11 @@ Run `overbridge help` for every command.
 
 `plugin/` ships skills: `workspace`, `ship-pr` (commit, PR, stacked PRs and splitting a branch into a stack,
 green build, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
-`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`) and `read-handoff` (continue from a handoff file after `/clear`). They read the
+`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`), `read-handoff` (continue from a handoff file after `/clear`) and `whip` (from the
+orchestration tab: find every workspace with work still outstanding, such as a draft PR, a conflict with main,
+review feedback, a red build, uncommitted or unpushed work or an item not yet shipped, and message its Claude a
+plain "continue" naming what is left; done workspaces are skipped; it ends with a sent/skipped table and takes
+`--dry-run`). They read the
 repo's `overbridge.yml` (`project-management`, `commands`) and work with work items through `overbridge item`.
 `loop-tech-debt` files items with `overbridge item create --tech-debt`, so set `project-management.tech-debt`.
 `audit-vulns` reads Dependabot alerts, so it needs a GitHub repo.
@@ -568,7 +572,8 @@ a brief through `--append-system-prompt`. The guard lets it read anything, run r
 commands, check status, and start or remove workspaces. It blocks file edits, branch changes, commits,
 pushes, and changes to PRs and issues, and its message tells Claude to start a workspace instead. When you
 ask it for a task, it runs `overbridge start` with your request as `--prompt`, and the new workspace's
-Claude does the work. The Workspaces frame is below it. Keys,
+Claude does the work. `/whip` there messages every workspace whose work is still outstanding to continue (see
+[Claude Code plugin](#claude-code-plugin)). The Workspaces frame is below it. Keys,
 clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
 and sidebar files never share a name with a workspace's.
