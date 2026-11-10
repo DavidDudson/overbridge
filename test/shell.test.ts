@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cacheKey, envDiff, parseEnv0, resolveEnv, shellInvocation, type ShellDeps } from "../src/shell";
+import { cacheKey, envDiff, leadingProgram, parseEnv0, resolveEnv, shellInvocation, type ShellDeps } from "../src/shell";
 import type { ShellSpec } from "../src/project-config";
 
 const spec = (extra: Partial<ShellSpec> = {}): ShellSpec => ({ enter: "wrap", key: [], ...extra });
@@ -16,9 +16,9 @@ afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })))
  * Deps with an in-memory store for the repo's key files, a real temp dir as the cache, and a counter of
  * captures. A path under the cache dir reads from disk; any other from the store.
  */
-function fake(files: Record<string, string> = {}, captured = "FOO=bar\0PATH=/x\0") {
+function fake(files: Record<string, string> = {}, captured = "FOO=bar\0PATH=/x\0", onPath = (_: string) => true) {
   const store = { ...files };
-  const state = { captures: 0 };
+  const state = { captures: 0, warnings: [] as string[] };
   const cache = mkdtempSync(join(tmpdir(), "shell-cache-"));
   dirs.push(cache);
   const deps: ShellDeps = {
@@ -29,6 +29,8 @@ function fake(files: Record<string, string> = {}, captured = "FOO=bar\0PATH=/x\0
     read: (file) => (file.startsWith(cache) ? readIfExists(file) : store[file]),
     cacheDir: () => cache,
     base: () => ({ PATH: "/usr/bin", HOME: "/h" }),
+    has: onPath,
+    warn: (msg) => state.warnings.push(msg),
   };
   return { deps, store, state };
 }
@@ -69,7 +71,7 @@ describe("shellInvocation", () => {
   });
 
   test("a prefix runs where the config lives, then moves to the wanted cwd", () => {
-    const inv = shellInvocation("app", "/r", spec({ enter: "nix develop --command" }), ["just", "test"], "/ws");
+    const inv = shellInvocation("app", "/r", spec({ enter: "nix develop --command" }), ["just", "test"], "/ws", fake().deps);
     expect(inv.cwd).toBe("/r");
     expect(inv.env).toEqual({});
     expect(inv.cmd.slice(0, 2)).toEqual(["sh", "-c"]);
@@ -90,6 +92,46 @@ describe("shellInvocation", () => {
     const f = fake();
     const inv = shellInvocation("app", "/r", spec({ env: "e" }), ["just", "test"], "/ws", f.deps);
     expect(inv).toEqual({ cmd: ["just", "test"], cwd: "/ws", env: { FOO: "bar", PATH: "/x" } });
+  });
+
+  test("a prefix whose program is not on PATH runs the command as it is, with a warning", () => {
+    const f = fake({}, undefined, (c) => c !== "nix");
+    const inv = shellInvocation("app", "/r", spec({ enter: "nix develop --command" }), ["just", "test"], "/ws", f.deps);
+    expect(inv).toEqual({ cmd: ["just", "test"], cwd: "/ws", env: {} });
+    expect(f.state.warnings).toEqual(["nix not on PATH; running without app's dev shell"]);
+  });
+
+  test("an env command whose program is not on PATH is not captured", () => {
+    const f = fake({}, undefined, (c) => c !== "nix");
+    const inv = shellInvocation("app", "/r", spec({ enter: "nix develop --command", env: "nix develop --command env -0" }), ["just"], "/ws", f.deps);
+    expect(inv).toEqual({ cmd: ["just"], cwd: "/ws", env: {} });
+    expect(f.state.captures).toBe(0);
+  });
+
+  test("checks the env command's program when there is one, not enter's", () => {
+    const f = fake({}, undefined, (c) => c !== "nix");
+    const inv = shellInvocation("app", "/r", spec({ enter: "nix develop --command", env: "direnv exec . env -0" }), ["just"], "/ws", f.deps);
+    expect(inv.env).toEqual({ FOO: "bar", PATH: "/x" });
+    expect(f.state.warnings).toEqual([]);
+  });
+});
+
+describe("leadingProgram", () => {
+  test("is the first word", () => {
+    expect(leadingProgram("  nix develop --command")).toBe("nix");
+    expect(leadingProgram("/opt/bin/devbox run --")).toBe("/opt/bin/devbox");
+  });
+
+  test("skips leading assignments", () => {
+    expect(leadingProgram("NIX_CONFIG=x FOO=1 nix develop")).toBe("nix");
+  });
+
+  test("is undefined for shell keywords, builtins and env, which are always there", () => {
+    for (const c of ["if command -v nix; then nix develop; fi", ". ./activate &&", "env FOO=1", "exec direnv exec ."]) expect(leadingProgram(c)).toBeUndefined();
+  });
+
+  test("is undefined for an empty command", () => {
+    expect(leadingProgram("   ")).toBeUndefined();
   });
 });
 
