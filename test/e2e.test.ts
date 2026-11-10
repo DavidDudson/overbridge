@@ -285,10 +285,16 @@ describe("check queue", () => {
   const check = (args: string[]) => ws(["check", ...args], cq());
   const spawnCheck = (args: string[]) =>
     Bun.spawn({ cmd: [process.execPath, CLI, "check", ...args], cwd: cq(), env: env(), stdout: "pipe", stderr: "pipe" });
+  /** Tickets only: a holder rewrites its ticket through a `.tmp` file, so the directory briefly holds both. */
+  const tickets = () => readdirSync(queue()).filter((name) => name.endsWith(".json"));
   const waitFor = async (done: () => boolean) => {
     const deadline = Date.now() + 10_000;
-    while (!done() && Date.now() < deadline) await Bun.sleep(25);
-    expect(done()).toBe(true);
+    let seen = done();
+    while (!seen && Date.now() < deadline) {
+      await Bun.sleep(25);
+      seen = done();
+    }
+    expect(seen).toBe(true);
   };
 
   test("runs in the repo's dev shell, passes the exit code through and leaves no ticket", () => {
@@ -297,7 +303,7 @@ describe("check queue", () => {
     const r = check(["--", "sh", "-c", 'echo "$FOO $OVERBRIDGE_CHECK_HELD"; exit 3']);
     expect(r.code).toBe(3);
     expect(r.out.trim()).toBe("queued 1");
-    expect(readdirSync(queue())).toEqual([]);
+    expect(tickets()).toEqual([]);
     expect(check(["app", "--", "true"]).code).toBe(0);
     expect(check(["nope", "--", "true"]).err).toContain("nope is not in cq");
     expect(check(["app"]).code).toBe(1);
@@ -340,7 +346,7 @@ describe("check queue", () => {
   test("a waiter gives up with 75 after wait-seconds", async () => {
     config("  wait-seconds: 1\n");
     const holder = spawnCheck(["--", "sleep", "3"]);
-    await waitFor(() => readdirSync(queue()).length === 1);
+    await waitFor(() => tickets().length === 1);
     const r = check(["--", "true"]);
     expect(r.code).toBe(75);
     expect(r.err).toContain("still busy after 1s");
@@ -359,6 +365,6 @@ describe("check queue", () => {
     expect(r.out.trim()).toBe("after");
     expect(r.err).toContain("holder from ghost died");
     expect(await orphan.exited).not.toBe(0);
-    expect(readdirSync(queue())).toEqual([]);
+    expect(tickets()).toEqual([]);
   }, CHECK_TEST_MS);
 });
