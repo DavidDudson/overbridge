@@ -531,6 +531,13 @@ clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to t
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
 and sidebar files never share a name with a workspace's.
 
+An orchestration tab always stays open. `overbridge rm @root` refuses it, and Cleanup never offers it.
+When its Claude session ends, a fresh one starts in the same pane; a session that keeps exiting within
+a few seconds waits a little longer each time (up to 30s). When the tab is closed, the next sidebar poll
+opens it again at the front and returns focus to the tab you were on. A lock in
+`<meta>/orchestration/@root.reopen.lock` makes sure only one sidebar reopens it. A user layout
+(`layouts/overbridge.kdl`) decides its own tabs, so nothing is reopened when one exists.
+
 Under the list, while the [check queue](#check-queue) is busy, a `▶` row shows the running command, its
 workspace, and how long it has run, and a `⧗` row lists the workspaces waiting.
 

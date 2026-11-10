@@ -30,6 +30,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - `src/orchestration.ts` lists the orchestration tabs (`@root`: Claude in the root). Their names start with `@` so they never
   match `NAME_RE`. The sidebar pins them in its Orchestration frame; their Claude gets the agent-state hooks and no guard
   through `claude --settings` (`scaffoldOrchestration`), and `OVERBRIDGE_TAB` names it for the hook.
+  They never go away: every removal path checks `isOrchestrationTab` (`removeWorkspace`, `cleanable`, `wipe`; add it to any
+  new one), `claudeOrchestration` restarts Claude when it exits (`restartAfter`), and the sidebar poll reopens a closed tab
+  (`ensureOrchestrationTabs` in `src/orchestration-keep.ts`, one owner per tab through a reopen lock).
 - `src/start.ts` is `overbridge start <repo> <id>`: one workspace per work item, named by `Provider.workspaceName`,
   added to the running session with `openTab`. Cleanup (`cleanable`, `pressCleanup` in `src/top.ts`, `wipe` in `src/top-run.ts`)
   offers to remove a workspace whose PRs are open with nothing uncommitted or unpushed.

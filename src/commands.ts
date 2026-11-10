@@ -4,7 +4,8 @@ import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./c
 import * as git from "./git";
 import { configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, rootConfigPath } from "./project-config";
 import { chooseLayout, userLayoutPath } from "./layout";
-import { type OrchestrationTab } from "./orchestration";
+import { isOrchestrationTab, orchestrationRemoveMessage, type OrchestrationTab } from "./orchestration";
+import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
 import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
 import { scaffold, scaffoldOrchestration } from "./scaffold";
@@ -108,6 +109,9 @@ function warnShellLeak(ws: string, added: string) {
 }
 
 export function removeWorkspace(ws: string, force: boolean) {
+  if (isOrchestrationTab(ws)) {
+    fail(orchestrationRemoveMessage(ws));
+  }
   const w = getWorkspace(readState(), ws);
   if (!force) {
     const dirty = Object.keys(w.repos).filter((r) => git.isDirty(worktreePath(ws, r)));
@@ -338,13 +342,31 @@ export function claude(ws: string, extra: string[]) {
 }
 
 /**
- * Launch an orchestration tab's Claude in its folder, with the agent-state hooks and no workspace guard.
+ * Run an orchestration tab's Claude in its folder, with the agent-state hooks and no workspace guard, and
+ * start a fresh session each time one ends, so the tab always has one. `extra` applies to the first
+ * session only. Closing the tab or the session (a hang-up or terminate signal) stops the loop.
  * `OVERBRIDGE_NAME` is blanked so a value inherited from the launching shell cannot bind it to a workspace.
  */
-export function claudeOrchestration(t: OrchestrationTab, extra: string[]) {
-  const settings = scaffoldOrchestration(t.tab);
-  const env = { OVERBRIDGE_NAME: "", [ORCHESTRATION_ENV]: t.tab, OVERBRIDGE_ROOT: root() };
-  process.exit(exec(["claude", "--settings", settings, ...extra], { cwd: t.dir(), env }));
+export function claudeOrchestration(t: OrchestrationTab, extra: string[]): never {
+  const env = { ...process.env, OVERBRIDGE_NAME: "", [ORCHESTRATION_ENV]: t.tab, OVERBRIDGE_ROOT: root() };
+  // Ctrl-C belongs to Claude; without a handler it would also kill this loop
+  process.on("SIGINT", () => {});
+  const session = (args: string[], streak: number): never => {
+    const startedMs = Date.now();
+    const p = Bun.spawnSync({ cmd: ["claude", "--settings", scaffoldOrchestration(t.tab), ...args], cwd: t.dir(), env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+    if (p.signalCode && STOP_SIGNALS.has(String(p.signalCode))) {
+      process.exit(1);
+    }
+    const next = restartAfter(Date.now() - startedMs, streak);
+    if (next.delayMs) {
+      log(`${t.tab}: claude exited quickly ${next.streak} times in a row; starting a fresh session in ${next.delayMs / 1_000}s`);
+      Bun.sleepSync(next.delayMs);
+    } else {
+      log(`${t.tab}: claude exited; starting a fresh session`);
+    }
+    return session([], next.streak);
+  };
+  return session(extra, 0);
 }
 
 /** `overbridge shell <repo> -- <cmd>`: run `cmd` in the repo's dev shell, or as it is when the repo has none. */
