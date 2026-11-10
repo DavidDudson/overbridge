@@ -43,8 +43,8 @@ overbridge start app ENG-123            # a Jira item: workspace ENG-123
 ```
 
 `overbridge spinup` always rebuilds the session, killing running panes. Use `overbridge up` to just
-attach. `overbridge start` adds a tab to the running session; an item that already has a workspace is
-focused instead of started again. Workspaces can also be made by hand: `overbridge new <name> -r app -r infra`.
+attach. `overbridge start` adds a tab to the running session in the background, so you stay on your tab; an
+item that already has a workspace is focused instead of started again. Workspaces can also be made by hand: `overbridge new <name> -r app -r infra`.
 
 **Cleanup.** A workspace with at least one open PR, where every other claimed branch has a merged PR, with no
 uncommitted changes and no unpushed commits, shows a **Cleanup** button in its top panel. Press it twice within
@@ -561,7 +561,7 @@ width = 60    # 12 to 200
 
 `s` opens a one-line prompt at the foot of the sidebar. Type `<repo> <id>`, such as `overbridge 79` or
 `web-monorepo ENG-123`. If the tab's workspace holds one repo, the id alone is enough; otherwise the prompt asks for
-the repo next. Enter runs `overbridge start`, which opens the item's workspace in a new tab, or switches to its tab if
+the repo next. Enter runs `overbridge start`, which opens the item's workspace in a new background tab, or switches to its tab if
 it already has one. Esc cancels. While the prompt is open, every key goes into it. If the start fails (unknown repo,
 item not found, or a refused claim), the footer shows the error until you press another key.
 
