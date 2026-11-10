@@ -19,6 +19,9 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   its own, no raw `git switch`/`checkout <branch>`/`gh pr checkout`/`gh stack checkout`/
   `gh stack trunk`/`git worktree`,
   no workspace admin commands.
+- **Trusted folders.** overbridge marks each workspace folder it creates as trusted in Claude's `~/.claude.json`
+  (`$CLAUDE_CONFIG_DIR/.claude.json` when set), so a session started there skips the "trust this folder" prompt.
+  `overbridge rm` removes the entry again. Folders made by hand under the overbridge root still prompt.
 - **Zellij tabs.** `overbridge up` opens a session whose first tab is the orchestration tab. It runs
   Claude in the overbridge root without the workspace guard, for work that spans workspaces, such as
   filing issues or starting workspaces. After it comes one tab per workspace: a sidebar down the left,

@@ -9,6 +9,7 @@ import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, ORCHEST
 import { runHooks } from "./hooks";
 import { scaffold, scaffoldOrchestration } from "./scaffold";
 import { runCheck } from "./check-queue";
+import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
 import { type Claim, claimOwner, getWorkspace, readState, withState } from "./state";
@@ -70,6 +71,7 @@ export function createWorkspace(name: string, repos: string[]) {
   if (state.workspaces[name] || existsSync(wsDir(name))) fail(`workspace '${name}' already exists`);
   for (const r of repos) getRepo(r);
   mkdirSync(wsDir(name), { recursive: true });
+  trustFolder(wsDir(name));
   withState((s) => {
     s.workspaces[name] = { created: new Date().toISOString(), repos: {} };
   });
@@ -118,6 +120,7 @@ export function removeWorkspace(ws: string, force: boolean) {
     if (!ok && !force) fail(`a pre-remove hook for ${ws}/${repo} failed; nothing was removed (use --force to remove anyway)`);
   }
   for (const r of Object.keys(w.repos)) git.removeWorktree(getRepo(r), worktreePath(ws, r), force);
+  untrustFolder(wsDir(ws));
   rmSync(wsDir(ws), { recursive: true, force: true });
   // per-workspace files outside the workspace dir: top cache, agent state, sidebar pane, tab layout
   for (const f of [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("sidebars", ws), join("tabs", `${ws}.kdl`)])
@@ -328,6 +331,7 @@ export function spinup() {
 export function claude(ws: string, extra: string[]) {
   const repos = Object.keys(getWorkspace(readState(), ws).repos);
   scaffold(ws);
+  trustFolder(wsDir(ws));
   const [only] = repos;
   const spec = repos.length === 1 && only ? loadRepoConfig(worktreePath(ws, only), only).shell : undefined;
   const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, ["claude", ...extra], wsDir(ws));
