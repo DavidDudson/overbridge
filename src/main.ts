@@ -8,11 +8,14 @@ import { next } from "./next";
 import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
-import { start } from "./start";
+import { FINISH_FLAG, finishRemoval } from "./remove";
+import { start, startTask } from "./start";
 import { topPanel, topRefresh } from "./top-run";
 import { silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
 import { exec, OverbridgeError } from "./util";
+
+const START_USAGE = "usage: overbridge start <repo> <id> [--prompt text] | overbridge start <repo> --task <slug> --prompt <text>";
 
 const HELP = `overbridge (alias: ws) — multi-repo workspaces with bound Claude sessions in zellij
 
@@ -41,6 +44,9 @@ Skill extensions
 Workspaces
   overbridge start <repo> <id> [--prompt text]  workspace named for a work item (ENG-123, gh-app-12), on its
                                         branch, in a new tab running /start-item; focuses an existing one
+  overbridge start <repo> --task <slug> --prompt <text>
+                                        work with no item yet (a ticket to file, a spike): workspace <slug>
+                                        on branch task/<slug>, in a new tab whose Claude starts with <text>
   overbridge new <name> [-r repo]...            create a workspace
   overbridge add <repo> [--ws name]             add a repo worktree to a workspace
   overbridge shell <repo> [--ws name] -- <cmd>  run a command in the repo's dev shell (its shell key in
@@ -63,7 +69,7 @@ Branches & PRs (workspace inferred from $OVERBRIDGE_NAME or cwd)
 Zellij
   overbridge spinup                             rebuild the session (creates an empty 'scratch' workspace if none)
   overbridge up [--fresh]                       attach/launch session: the orchestration tabs (@root: Claude in
-                                        the root, no guard), then one tab per workspace
+                                        the root, guarded to coordinate only), then one tab per workspace
   overbridge layout                             print the generated zellij layout
   overbridge claude <name|@tab> [-- args]       run Claude bound to a workspace, or an orchestration tab's Claude
 
@@ -155,9 +161,13 @@ async function main(argv: string[]): Promise<number> {
       break;
     }
     case "rm": {
-      const { values, positionals } = opts(rest, { force: { type: "boolean", short: "f" } });
+      const { values, positionals } = opts(rest, { force: { type: "boolean", short: "f" }, [FINISH_FLAG]: { type: "boolean" } });
       if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge rm <name> [--force]");
-      cmd.removeWorkspace(positionals[0]!, !!values.force);
+      if (values[FINISH_FLAG]) {
+        await finishRemoval(positionals[0]!);
+      } else {
+        cmd.removeWorkspace(positionals[0]!, !!values.force);
+      }
       break;
     }
     case "status":
@@ -195,8 +205,15 @@ async function main(argv: string[]): Promise<number> {
       cmd.spinup();
       break;
     case "start": {
-      const { values, positionals } = opts(rest, { prompt: { type: "string" } });
-      if (positionals.length !== 2) throw new OverbridgeError("usage: overbridge start <repo> <id> [--prompt text]");
+      const { values, positionals } = opts(rest, { prompt: { type: "string" }, task: { type: "string" } });
+      if (values.task !== undefined) {
+        if (positionals.length !== 1 || values.prompt === undefined) {
+          throw new OverbridgeError("usage: overbridge start <repo> --task <slug> --prompt <text>");
+        }
+        startTask(positionals[0]!, values.task, values.prompt);
+        break;
+      }
+      if (positionals.length !== 2) throw new OverbridgeError(START_USAGE);
       start(positionals[0]!, positionals[1]!, values.prompt);
       break;
     }

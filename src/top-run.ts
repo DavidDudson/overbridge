@@ -1,12 +1,13 @@
 import { readFileSync } from "node:fs";
 import { AppStatus, logPath, openBrowser, startApp, stopApp, waitReady } from "./apps";
 import { requireWs } from "./commands";
-import { root, selfCommand } from "./paths";
+import { selfCommand } from "./paths";
+import { beginRemoval } from "./remove";
 import { togglePane } from "./panes";
 import { mergePr, setReady } from "./pr-actions";
-import { ALT_COMMANDS, type ActDeps, activate, applyOptimistic, type PrChange, type Button, CLEANUP_ARM_MS, cleanable, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
+import { ALT_COMMANDS, type ActDeps, activate, applyOptimistic, type PrChange, type Button, CLEANUP_ARM_MS, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
 import { ENTER_SCREEN, LEAVE_SCREEN } from "./term";
-import { log, run, spawnCwd } from "./util";
+import { log, spawnCwd } from "./util";
 
 const POLL_MS = 2_000;
 const REFRESH_MS = 60_000;
@@ -18,26 +19,6 @@ const ESC = "\x1b";
 export function topRefresh(wsOpt?: string) {
   const cache = refreshTop(requireWs(wsOpt));
   if (cache.message) log(cache.message);
-}
-
-/**
- * Wipe `ws` once its Cleanup is confirmed. Re-reads everything first (PR state from the network,
- * git state from disk) and refuses on any doubt, then stops its apps, runs a non-force `rm`
- * (which itself refuses uncommitted changes) and closes this tab. Returns the message to show.
- */
-function wipe(ws: string, apps: TopApp[]): string | undefined {
-  refreshTop(ws);
-  if (!cleanable(ws)) return `${ws} is no longer clean (empty agent or open PR, nothing uncommitted or unpushed); not wiping`;
-  try {
-    for (const app of apps) if (app.status === AppStatus.Running || app.status === AppStatus.Starting) stopApp(ws, app.repo, app.spec, app.repoDir);
-  } catch (e) {
-    return `not wiping ${ws}: ${(e as Error).message}`;
-  }
-  const rm = Bun.spawnSync({ cmd: [...selfCommand(), "rm", ws], cwd: root(), stdout: "ignore", stderr: "pipe" });
-  if (rm.exitCode !== 0) return rm.stderr.toString().trim() || `rm ${ws} failed`;
-  // closes the focused tab, which is this one: the press came from here
-  if (process.env.ZELLIJ) run(["zellij", "action", "close-tab"], { cwd: root() });
-  return `wiped ${ws}`;
 }
 
 const lastLine = (path: string): string => {
@@ -104,7 +85,7 @@ export async function topPanel(wsOpt?: string) {
     cleanup: () => {
       const press = pressCleanup(armedAt, Date.now());
       armedAt = press.armedAt;
-      return press.confirmed ? wipe(ws, snap.apps) : `press Cleanup again within ${CLEANUP_ARM_MS / 1000}s to wipe ${ws}`;
+      return press.confirmed ? (beginRemoval(ws) ?? `removing ${ws}…`) : `press Cleanup again within ${CLEANUP_ARM_MS / 1000}s to wipe ${ws}`;
     },
   };
   let armedAt: number | undefined;

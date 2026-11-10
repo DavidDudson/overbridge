@@ -66,13 +66,17 @@ function agentStateHooks() {
 export const orchestrationSettingsPath = (tab: string) => join(metaDir(), "orchestration", `${tab}.settings.json`);
 
 /**
- * (Re)write the settings an orchestration tab's Claude loads with `--settings`: the agent-state hooks and no
- * guard, so it can run the admin commands a workspace Claude may not. Idempotent.
+ * (Re)write the settings an orchestration tab's Claude loads with `--settings`: the agent-state hooks and the
+ * guard, which sees `OVERBRIDGE_TAB` and applies the orchestrator's allow list. Idempotent.
  */
 export function scaffoldOrchestration(tab: string): string {
   const file = orchestrationSettingsPath(tab);
   mkdirSync(dirname(file), { recursive: true });
-  const settings = { env: { [ORCHESTRATION_ENV]: tab, OVERBRIDGE_ROOT: root() }, hooks: agentStateHooks(), ...pluginSettings() };
+  const settings = {
+    env: { [ORCHESTRATION_ENV]: tab, OVERBRIDGE_ROOT: root(), OVERBRIDGE_NAME: "" },
+    hooks: { PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }], ...agentStateHooks() },
+    ...pluginSettings(),
+  };
   writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
   return file;
 }
@@ -82,7 +86,8 @@ export const pluginSettingsPath = () => join(metaDir(), "plugins.settings.json")
 
 /**
  * (Re)write the plugin settings and return their path. A workspace Claude gets them through `--settings` as well
- * as its settings.json, because Claude ignores a project's marketplaces until the folder is trusted.
+ * as its settings.json, because Claude ignores a project's marketplaces in a folder it does not trust, and a
+ * folder trusted by `claude-trust.ts` can lose that trust.
  */
 export function scaffoldPlugins(): string {
   const file = pluginSettingsPath();
@@ -93,6 +98,26 @@ export function scaffoldPlugins(): string {
   renameSync(tmp, file);
   return file;
 }
+
+/** The orchestrator's brief, appended to its system prompt: it coordinates and starts workspaces for all work. */
+export const orchestratorPrompt = () => `You are the overbridge orchestrator, running in the overbridge root (${root()}).
+You coordinate: you read, check status and start workspaces. You never do the work yourself. A guard blocks
+editing files, changing branches, committing, pushing, and creating or changing PRs and issues here.
+
+When the user asks for any task (fixing something, filing a ticket, planning a spike, picking up or reviewing
+a PR), start a workspace for it first, passing their request on, then stop:
+
+- For a work item: \`overbridge start <repo> <id> --prompt "<the request, in the user's words>"\`
+- For a PR: find its item with \`overbridge item from-branch <its head branch>\`, then
+  \`overbridge start <repo> <that id> --prompt "/pickup #<pr> <anything else they asked>"\`. A PR with no item
+  uses \`--task pr-<number>\` instead of an id.
+- With no item yet: \`overbridge start <repo> --task <short-slug> --prompt "<the request, in the user's words>"\`
+
+The new workspace opens in its own tab and its Claude does the work. Tell the user which workspace and tab
+opened. If \`overbridge start\` refuses, say why and stop.
+
+You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge item view\`, read-only
+\`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`release\`, \`up\`, \`repo add\`).`;
 
 /**
  * Tells the agent to run repo commands through `overbridge shell` when the workspace holds several repos and

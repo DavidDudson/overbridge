@@ -19,6 +19,9 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   its own, no raw `git switch`/`checkout <branch>`/`gh pr checkout`/`gh stack checkout`/
   `gh stack trunk`/`git worktree`,
   no workspace admin commands.
+- **Trusted folders.** overbridge marks each workspace folder it creates as trusted in Claude's `~/.claude.json`
+  (`$CLAUDE_CONFIG_DIR/.claude.json` when set), so a session started there skips the "trust this folder" prompt.
+  `overbridge rm` removes the entry again. Folders made by hand under the overbridge root still prompt.
 - **Zellij tabs.** `overbridge up` opens a session whose first tab is the orchestration tab. It runs
   Claude in the overbridge root without the workspace guard, for work that spans workspaces, such as
   filing issues or starting workspaces. After it comes one tab per workspace: a sidebar down the left,
@@ -37,16 +40,20 @@ overbridge repo add infra git@github.com:you/infra.git
 overbridge spinup                       # fresh zellij session over the existing workspaces ('scratch' if none)
 overbridge start app 12                 # workspace gh-app-12 on the issue's branch, in a new tab running /start-item
 overbridge start app ENG-123            # a Jira item: workspace ENG-123
+overbridge start app --task file-x --prompt 'file a ticket for X'   # no item yet: workspace file-x on branch task/file-x
 ```
 
 `overbridge spinup` always rebuilds the session, killing running panes. Use `overbridge up` to just
-attach. `overbridge start` adds a tab to the running session; an item that already has a workspace is
-focused instead of started again. Workspaces can also be made by hand: `overbridge new <name> -r app -r infra`.
+attach. `overbridge start` adds a tab to the running session in the background, so you stay on your tab; an
+item that already has a workspace is focused instead of started again. Workspaces can also be made by hand: `overbridge new <name> -r app -r infra`.
 
 **Cleanup.** A workspace with at least one open PR, where every other claimed branch has a merged PR, with no
 uncommitted changes and no unpushed commits, shows a **Cleanup** button in its top panel. Press it twice within
-five seconds: it re-checks, stops the workspace's apps, runs `overbridge rm` and closes the tab. A merged claim
-does not block it; a closed (unmerged) PR or a branch with no PR does, and one PR must still be open.
+five seconds. If a repo has uncommitted changes or unpushed commits by then, Cleanup refuses and nothing changes.
+Otherwise the tab closes at once, the workspace leaves every sidebar, and you land on the next tab that needs
+attention, or else the tab next to it. A background process then re-checks the PRs, stops the workspace's apps, and
+runs `overbridge rm`. If any of that fails, the workspace comes back with the error on its sidebar card, and its tab
+reopens. A merged claim does not block it; a closed (unmerged) PR or a branch with no PR does, and one PR must still be open.
 
 Inside a workspace (shell pane or its Claude):
 
@@ -514,19 +521,37 @@ Use `--repo <name>` when two repos declare the same id and `--no-wait` to skip t
 
 `overbridge sidebar` is the pane down the left of every tab. It lists each workspace with
 its agent state emoji (🆕 empty: just started or cleared, 💤 idle, 🔄 busy, ✅ done, ⏳ done but background tasks still running, ❓ waiting for you, ❌ ended, `·` unknown)
-and its item title when cached (no id, no conventional-commit prefix; the workspace name until then), with the key that jumps to it (`⌥1` to `⌥9`, in tab order). Each tab runs its own copy and marks its own tab.
-Up/Down or `j`/`k` step to the neighbouring tab, a digit (1-9) jumps, a click picks a row;
-the new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
+and its item title when cached (no id, no conventional-commit prefix; the workspace name until then), with its number in tab order (`⌥1` to `⌥9`, then `10` and up). Each tab runs its own copy and marks its own tab.
+Up/Down or `j`/`k` step to the neighbouring tab, a click picks a row, and a tab's number jumps to it.
+A digit that could start a two-digit number waits 0.6 s for a second one, so with 14 tabs `1` then `2`
+goes to tab 12 and `1` alone goes to tab 1. If you leave the tab some other way while a digit waits, the digit is dropped.
+The legend shows the range the digits reach, such as `1-14`.
+Left/Right or `h`/`l` go back and forward through the tabs visited from the sidebar, like a browser.
+Every tab's sidebar shares one history per zellij session (`<meta>/sidebar-history/<session>.json`),
+tabs closed since are skipped, and a failed switch leaves it as it was. Switches made outside the sidebar
+(zellij keys, the tab bar, `overbridge next`) are not recorded.
+The new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. Long titles wrap under their text (up to three rows).
 
-The sidebar has two frames. The Orchestration frame is on top, lists the orchestration tabs and does
+The sidebar has two frames. The Orchestration frame is on top, lists the orchestration tabs, and does
 not scroll. It has one tab, `@root`, which runs Claude in the overbridge root (`$OVERBRIDGE_ROOT`,
-`~/workspaces` by default). That Claude loads the agent-state hooks through
-`claude --settings <meta>/orchestration/@root.settings.json` and has no guard, so it can run admin
-commands such as `overbridge start` and `overbridge new`. The Workspaces frame is below it. Keys,
+`~/workspaces` by default). That Claude coordinates and doesn't do the work itself. It loads the
+agent-state hooks and a guard through `claude --settings <meta>/orchestration/@root.settings.json`, and gets
+a brief through `--append-system-prompt`. The guard lets it read anything, run read-only `git` and `gh`
+commands, check status, and start or remove workspaces. It blocks file edits, branch changes, commits,
+pushes, and changes to PRs and issues, and its message tells Claude to start a workspace instead. When you
+ask it for a task, it runs `overbridge start` with your request as `--prompt`, and the new workspace's
+Claude does the work. The Workspaces frame is below it. Keys,
 clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
 and sidebar files never share a name with a workspace's.
+
+An orchestration tab always stays open. `overbridge rm @root` refuses it, and Cleanup never offers it.
+When its Claude session ends, a fresh one starts in the same pane; a session that keeps exiting within
+a few seconds waits a little longer each time (up to 30s). When the tab is closed, the next sidebar poll
+opens it again at the front and returns focus to the tab you were on. A lock in
+`<meta>/orchestration/@root.reopen.lock` makes sure only one sidebar reopens it. A user layout
+(`layouts/overbridge.kdl`) decides its own tabs, so nothing is reopened when one exists.
 
 Under the list, while the [check queue](#check-queue) is busy, a `▶` row shows the running command, its
 workspace, and how long it has run, and a `⧗` row lists the workspaces waiting.
@@ -541,7 +566,7 @@ width = 60    # 12 to 200
 
 `s` opens a one-line prompt at the foot of the sidebar. Type `<repo> <id>`, such as `overbridge 79` or
 `web-monorepo ENG-123`. If the tab's workspace holds one repo, the id alone is enough; otherwise the prompt asks for
-the repo next. Enter runs `overbridge start`, which opens the item's workspace in a new tab, or switches to its tab if
+the repo next. Enter runs `overbridge start`, which opens the item's workspace in a new background tab, or switches to its tab if
 it already has one. Esc cancels. While the prompt is open, every key goes into it. If the start fails (unknown repo,
 item not found, or a refused claim), the footer shows the error until you press another key.
 

@@ -351,6 +351,12 @@ describe("cleanable", () => {
     expect(cleanable("w1")).toBe(false);
   });
 
+  test("an orchestration tab is never a candidate, even with a just-cleared agent", () => {
+    mkdirSync(join(tmp, ".overbridge", "agent"), { recursive: true });
+    writeFileSync(join(tmp, ".overbridge", "agent", "@root.json"), JSON.stringify({ state: "empty", at: Date.now() }));
+    expect(cleanable("@root")).toBe(false);
+  });
+
   test("uncommitted changes block it", () => {
     cachePr("OPEN");
     writeFileSync(join(wt, "scratch.txt"), "x");

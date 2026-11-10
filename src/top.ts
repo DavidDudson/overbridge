@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import { AppStatus, appAvailable, appStatus, appUrl, readRecord } from "./apps";
 import { readAgentState } from "./agent-state";
 import * as git from "./git";
+import { isOrchestrationTab } from "./orchestration";
 import { metaDir, wsDir, worktreePath } from "./paths";
 import { providerFor, refreshTitle } from "./pm";
 import type { Provider } from "./pm/provider";
@@ -326,7 +327,15 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
  * holds uncommitted changes or unpushed commits (read from git now, so it is never stale).
  */
 export function cleanable(ws: string): boolean {
+  if (isOrchestrationTab(ws)) {
+    return false;
+  }
   if (!readTopCache(ws).prsOpen && readAgentState(ws) !== "empty") return false;
+  return gitClean(ws);
+}
+
+/** No repo in `ws` holds uncommitted changes or unpushed commits. Local and fast, so it can run before the tab closes. */
+export function gitClean(ws: string): boolean {
   return Object.keys(getWorkspace(readState(), ws).repos).every((repo) => {
     const wt = worktreePath(ws, repo);
     return !git.isDirty(wt) && !git.hasUnpushed(wt);

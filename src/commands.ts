@@ -4,11 +4,13 @@ import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./c
 import * as git from "./git";
 import { configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, rootConfigPath } from "./project-config";
 import { chooseLayout, userLayoutPath } from "./layout";
-import { type OrchestrationTab } from "./orchestration";
+import { isOrchestrationTab, orchestrationRemoveMessage, type OrchestrationTab } from "./orchestration";
+import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
 import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
-import { scaffold, scaffoldOrchestration, scaffoldPlugins } from "./scaffold";
+import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins } from "./scaffold";
 import { runCheck } from "./check-queue";
+import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
 import { type Claim, claimOwner, getWorkspace, readState, withState } from "./state";
@@ -70,6 +72,7 @@ export function createWorkspace(name: string, repos: string[]) {
   if (state.workspaces[name] || existsSync(wsDir(name))) fail(`workspace '${name}' already exists`);
   for (const r of repos) getRepo(r);
   mkdirSync(wsDir(name), { recursive: true });
+  trustFolder(wsDir(name));
   withState((s) => {
     s.workspaces[name] = { created: new Date().toISOString(), repos: {} };
   });
@@ -108,6 +111,9 @@ function warnShellLeak(ws: string, added: string) {
 }
 
 export function removeWorkspace(ws: string, force: boolean) {
+  if (isOrchestrationTab(ws)) {
+    fail(orchestrationRemoveMessage(ws));
+  }
   const w = getWorkspace(readState(), ws);
   if (!force) {
     const dirty = Object.keys(w.repos).filter((r) => git.isDirty(worktreePath(ws, r)));
@@ -117,7 +123,17 @@ export function removeWorkspace(ws: string, force: boolean) {
     const ok = runHooks("pre-remove", { ws, repo, ...(claim.branch ? { branch: claim.branch } : {}), ...(claim.pr ? { pr: claim.pr } : {}) });
     if (!ok && !force) fail(`a pre-remove hook for ${ws}/${repo} failed; nothing was removed (use --force to remove anyway)`);
   }
-  for (const r of Object.keys(w.repos)) git.removeWorktree(getRepo(r), worktreePath(ws, r), force);
+  const removed: string[] = [];
+  for (const r of Object.keys(w.repos)) {
+    try {
+      git.removeWorktree(getRepo(r), worktreePath(ws, r), force);
+    } catch (e) {
+      const cause = `removing the ${r} worktree failed: ${(e as Error).message}`;
+      fail(removed.length ? `${ws} is partly removed (the ${removed.join(", ")} worktrees are gone); ${cause}` : `${ws}: ${cause}; nothing was removed`);
+    }
+    removed.push(r);
+  }
+  untrustFolder(wsDir(ws));
   rmSync(wsDir(ws), { recursive: true, force: true });
   // per-workspace files outside the workspace dir: top cache, agent state, sidebar pane, tab layout
   for (const f of [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("sidebars", ws), join("tabs", `${ws}.kdl`)])
@@ -328,6 +344,7 @@ export function spinup() {
 export function claude(ws: string, extra: string[]) {
   const repos = Object.keys(getWorkspace(readState(), ws).repos);
   scaffold(ws);
+  trustFolder(wsDir(ws));
   const [only] = repos;
   const spec = repos.length === 1 && only ? loadRepoConfig(worktreePath(ws, only), only).shell : undefined;
   const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, ["claude", "--settings", scaffoldPlugins(), ...extra], wsDir(ws));
@@ -338,13 +355,43 @@ export function claude(ws: string, extra: string[]) {
 }
 
 /**
- * Launch an orchestration tab's Claude in its folder, with the agent-state hooks and no workspace guard.
+ * The orchestrator's `claude` argv: its settings (hooks and guard) and its brief appended to the system prompt.
+ */
+export const orchestrationArgs = (settings: string, extra: readonly string[]) => [
+  "claude",
+  "--settings",
+  settings,
+  "--append-system-prompt",
+  orchestratorPrompt(),
+  ...extra,
+];
+
+/**
+ * Run an orchestration tab's Claude in its folder, with the agent-state hooks, the orchestrator guard and its
+ * brief, and start a fresh session each time one ends, so the tab always has one. `extra` applies to the first
+ * session only. Closing the tab or the session (a hang-up or terminate signal) stops the loop.
  * `OVERBRIDGE_NAME` is blanked so a value inherited from the launching shell cannot bind it to a workspace.
  */
-export function claudeOrchestration(t: OrchestrationTab, extra: string[]) {
-  const settings = scaffoldOrchestration(t.tab);
-  const env = { OVERBRIDGE_NAME: "", [ORCHESTRATION_ENV]: t.tab, OVERBRIDGE_ROOT: root() };
-  process.exit(exec(["claude", "--settings", settings, ...extra], { cwd: t.dir(), env }));
+export function claudeOrchestration(t: OrchestrationTab, extra: string[]): never {
+  const env = { ...process.env, OVERBRIDGE_NAME: "", [ORCHESTRATION_ENV]: t.tab, OVERBRIDGE_ROOT: root() };
+  // Ctrl-C belongs to Claude; without a handler it would also kill this loop
+  process.on("SIGINT", () => {});
+  const session = (args: string[], streak: number): never => {
+    const startedMs = Date.now();
+    const p = Bun.spawnSync({ cmd: orchestrationArgs(scaffoldOrchestration(t.tab), args), cwd: t.dir(), env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+    if (p.signalCode && STOP_SIGNALS.has(String(p.signalCode))) {
+      process.exit(1);
+    }
+    const next = restartAfter(Date.now() - startedMs, streak);
+    if (next.delayMs) {
+      log(`${t.tab}: claude exited quickly ${next.streak} times in a row; starting a fresh session in ${next.delayMs / 1_000}s`);
+      Bun.sleepSync(next.delayMs);
+    } else {
+      log(`${t.tab}: claude exited; starting a fresh session`);
+    }
+    return session([], next.streak);
+  };
+  return session(extra, 0);
 }
 
 /** `overbridge shell <repo> -- <cmd>`: run `cmd` in the repo's dev shell, or as it is when the repo has none. */

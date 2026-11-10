@@ -1,14 +1,25 @@
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { metaDir } from "./paths";
+import { pidAlive } from "./proc";
 import { type Cover, overlaps } from "./stack";
 import { fail } from "./util";
 
 export type Claim = { branch?: string; pr?: number };
-export type WorkspaceState = { created: string; repos: Record<string, Claim> };
+/** A background removal in flight: when it started and, once spawned, the worker's pid. */
+export type Removing = { since: string; pid?: number };
+export type WorkspaceState = {
+  created: string;
+  repos: Record<string, Claim>;
+  /** Set while the background removal worker runs; the sidebar hides the workspace meanwhile. */
+  removing?: Removing;
+  /** Why the last background removal failed; shown on the workspace's sidebar card. */
+  removeError?: string;
+};
 export type State = { version: 1; workspaces: Record<string, WorkspaceState> };
 
-const statePath = () => join(metaDir(), "state.json");
+const STATE_FILE = "state.json";
+const statePath = () => join(metaDir(), STATE_FILE);
 const lockPath = () => join(metaDir(), "state.lock");
 
 const LOCK_WAIT_MS = 15_000;
@@ -61,6 +72,43 @@ export function withState<T>(fn: (s: State) => T): T {
     closeSync(fd);
     rmSync(lockPath(), { force: true });
   }
+}
+
+/**
+ * Call `onChange` soon after state is written, so every pane sees a change together instead of on its next poll.
+ * `writeState` renames a temp file into place, so this watches the directory, not the file. Returns a stop function.
+ */
+export function watchState(onChange: () => void, debounceMs = 50): () => void {
+  mkdirSync(metaDir(), { recursive: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const watcher = watch(metaDir(), (_event, filename) => {
+    if (filename !== STATE_FILE) {
+      return;
+    }
+    clearTimeout(timer);
+    timer = setTimeout(onChange, debounceMs);
+  });
+  return () => {
+    clearTimeout(timer);
+    watcher.close();
+  };
+}
+
+/** How long a removal mark hides the workspace before its worker has written its pid. */
+export const REMOVING_GRACE_MS = 30_000;
+
+/**
+ * Whether `w` is being removed in the background right now. A mark whose worker died (no live pid once the
+ * grace period is over) no longer counts, so a killed worker never hides a workspace for good.
+ */
+export function isRemoving(w: WorkspaceState, now = Date.now(), alive: (pid: number) => boolean = pidAlive): boolean {
+  if (!w.removing) {
+    return false;
+  }
+  if (w.removing.pid !== undefined) {
+    return alive(w.removing.pid);
+  }
+  return now - Date.parse(w.removing.since) < REMOVING_GRACE_MS;
 }
 
 export function getWorkspace(s: State, ws: string): WorkspaceState {

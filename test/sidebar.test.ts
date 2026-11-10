@@ -6,7 +6,8 @@ import { agentStateFile, glyphFor, readAgentState, UNKNOWN_GLYPH } from "../src/
 import { sidebarWidth } from "../src/config";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { bodyRowsFor, clampScroll, EMPTY_PROMPT, type Entry, entryAt, entryLines, type Finished, type Footer, FooterKind, footerRow, LEGEND, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stripConventional, switchTab, targetFor, wrapText } from "../src/sidebar";
+import { bodyRowsFor, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryLines, type Finished, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
+import { readHistory, Travel, writeHistory } from "../src/sidebar-history";
 import { type Input, textWidth } from "../src/term";
 
 const entry = (tab: string, glyph = "○", label = tab, section: Section = Section.Workspaces): Entry => ({ tab, section, glyph, label });
@@ -35,9 +36,10 @@ describe("entry cards", () => {
     expect(entryLines(entry("b"), 1, true, 12)[0]).toBe("\x1b[7m⌥2 ○ b      \x1b[0m");
   });
 
-  test("only the first nine entries get a key", () => {
+  test("the first nine entries show their Alt key, the rest their two-digit number", () => {
     expect(entryLines(entry("x"), 8, false, 10)[0]!.startsWith("⌥9 ")).toBe(true);
-    expect(entryLines(entry("x"), 9, false, 10)[0]!.startsWith("   ")).toBe(true);
+    expect(entryLines(entry("x"), 9, false, 10)[0]!.startsWith("10 ")).toBe(true);
+    expect(entryLines(entry("x"), 11, false, 10)[0]!.startsWith("12 ")).toBe(true);
   });
 
   test("a frame fits the height and width exactly, with a card per entry and the limits inside", () => {
@@ -106,7 +108,8 @@ describe("orchestration frame", () => {
     const h = Array(withRoot.length).fill(2);
     expect(targetFor(key("up"), 1, 0, h, 10, 1)).toBe(0);
     expect(targetFor(key("down"), 0, 0, h, 10, 1)).toBe(1);
-    expect(targetFor(key("1"), 4, 0, h, 10, 1)).toBe(0);
+    expect(stepFor(key("1"), 4, 0, h, 10, 1)).toEqual({ pending: "1" });
+    expect(commitDigit("1", withRoot, withRoot[4]!.tab, withRoot[4]!.tab)).toBe(0);
   });
 
   test("pinnedCount counts the orchestration entries", () => {
@@ -171,13 +174,6 @@ describe("targetFor", () => {
     expect(targetFor(key("down"), 11, 0, h, 20)).toBeUndefined();
   });
 
-  test("a digit jumps, out of range or the current tab does nothing", () => {
-    expect(targetFor(key("5"), 0, 0, h, 20)).toBe(4);
-    expect(targetFor(key("9"), 0, 0, Array(4).fill(2), 20)).toBeUndefined();
-    expect(targetFor(key("1"), 0, 0, h, 20)).toBeUndefined();
-    expect(targetFor(key("0"), 0, 0, h, 20)).toBeUndefined();
-  });
-
   test("a click picks the row under it, through the scroll offset", () => {
     expect(targetFor({ kind: "click", col: 3, row: 3 }, 0, 4, h, 20)).toBe(5);
     expect(targetFor({ kind: "click", col: 3, row: 40 }, 0, 0, h, 20)).toBeUndefined();
@@ -185,6 +181,68 @@ describe("targetFor", () => {
 
   test("other keys do nothing", () => {
     expect(targetFor(key("x"), 0, 0, h, 20)).toBeUndefined();
+  });
+});
+
+describe("stepFor", () => {
+  const h14 = Array(14).fill(2);
+  const h4 = Array(4).fill(2);
+
+  test("a digit no two-digit tab starts with jumps at once; out of range or the current tab does nothing", () => {
+    expect(stepFor(key("5"), 0, 0, h14, 20)).toEqual({ target: 4, pending: "" });
+    expect(stepFor(key("9"), 0, 0, h4, 20).target).toBeUndefined();
+    expect(stepFor(key("1"), 0, 0, h4, 20)).toEqual({ target: undefined, pending: "" });
+    expect(stepFor(key("0"), 0, 0, h14, 20)).toEqual({ pending: "" });
+  });
+
+  test("a digit that could start a two-digit tab is held", () => {
+    expect(stepFor(key("1"), 3, 0, Array(10).fill(2), 20)).toEqual({ pending: "1" });
+    expect(stepFor(key("1"), 3, 0, Array(9).fill(2), 20)).toEqual({ target: 0, pending: "" });
+  });
+
+  test("a second digit picks the two-digit tab, or the held digit's own tab past the end", () => {
+    expect(stepFor(key("2"), 0, 0, h14, 20, 0, "1")).toEqual({ target: 11, pending: "" });
+    expect(stepFor(key("0"), 0, 0, h14, 20, 0, "1")).toEqual({ target: 9, pending: "" });
+    expect(stepFor(key("7"), 3, 0, h14, 20, 0, "1")).toEqual({ target: 0, pending: "" });
+  });
+
+  test("any other input drops the held digit", () => {
+    expect(stepFor(key("down"), 0, 0, h14, 20, 0, "1")).toEqual({ target: 1, pending: "" });
+    expect(stepFor(key("x"), 0, 0, h14, 20, 0, "1").pending).toBe("");
+  });
+
+  test("←/h and →/l travel the history", () => {
+    expect(stepFor(key("left"), 0, 0, h14, 20, 0, "1")).toEqual({ travel: Travel.Back, pending: "" });
+    expect(stepFor(key("h"), 0, 0, h14, 20).travel).toBe(Travel.Back);
+    expect(stepFor(key("right"), 0, 0, h14, 20).travel).toBe(Travel.Forward);
+    expect(stepFor(key("l"), 0, 0, h14, 20).travel).toBe(Travel.Forward);
+  });
+});
+
+describe("commitDigit", () => {
+  test("goes to the held digit's tab while this tab has focus", () => {
+    expect(commitDigit("1", list, "w3", "w3")).toBe(0);
+  });
+
+  test("drops the digit when another tab has focus, or nothing is held", () => {
+    expect(commitDigit("1", list, "w3", "w5")).toBeUndefined();
+    expect(commitDigit("1", list, "w3", undefined)).toBeUndefined();
+    expect(commitDigit("", list, "w3", "w3")).toBeUndefined();
+  });
+});
+
+describe("legend", () => {
+  test("shows the range the digits reach", () => {
+    expect(legend(14)).toStartWith("1-14 go");
+    expect(legend(1)).toStartWith("1 go");
+    expect(legend(0)).toStartWith("←→");
+  });
+
+  test("shows the held digit while it waits", () => {
+    expect(legend(14, "1")).toBe("1…");
+    const rows = renderSidebar(list, 0, 0, 20, 40, undefined, 0, "", [], LEGEND_FOOTER, "1");
+    expect(rows.join("\n")).toContain("1…");
+    expect(renderSidebar(list, 0, 0, 20, 40, undefined, 0).join("\n")).toContain("1-12 go");
   });
 });
 
@@ -211,17 +269,53 @@ describe("agent state", () => {
 describe("switchTab", () => {
   test("goes to the tab, then focuses its sidebar when known", () => {
     const calls: string[][] = [];
-    switchTab("w2", (c) => calls.push(c));
+    const record = (c: string[]) => { calls.push(c); return { ok: true }; };
+    expect(switchTab("w2", record)).toBe(true);
     expect(calls).toEqual([["zellij", "action", "go-to-tab-name", "w2"]]);
 
     mkdirSync(join(metaDir(), "sidebars"), { recursive: true });
     writeFileSync(join(metaDir(), "sidebars", "w2"), "7\n");
     calls.length = 0;
-    switchTab("w2", (c) => calls.push(c));
+    switchTab("w2", record);
     expect(calls).toEqual([
       ["zellij", "action", "go-to-tab-name", "w2"],
       ["zellij", "action", "focus-pane-id", "terminal_7"],
     ]);
+  });
+
+  test("fails only when the tab switch fails, not when its sidebar already has focus", () => {
+    mkdirSync(join(metaDir(), "sidebars"), { recursive: true });
+    writeFileSync(join(metaDir(), "sidebars", "w2"), "7\n");
+    expect(switchTab("w2", (c) => ({ ok: c[2] !== "focus-pane-id" }))).toBe(true);
+    expect(switchTab("w2", () => ({ ok: false }))).toBe(false);
+  });
+});
+
+describe("switching with history", () => {
+  const ok = () => ({ ok: true });
+  const fail = () => ({ ok: false });
+
+  test("a visit records the tab left, and ← then → walk back and forward", () => {
+    expect(visitTab("w1", "w2", ok)).toBe(true);
+    expect(visitTab("w2", "w3", ok)).toBe(true);
+    expect(readHistory()).toEqual({ back: ["w1", "w2"], forward: [] });
+    expect(travelTab("w3", Travel.Back, list, ok)).toBe(true);
+    expect(readHistory()).toEqual({ back: ["w1"], forward: ["w3"] });
+    expect(travelTab("w2", Travel.Forward, list, ok)).toBe(true);
+    expect(readHistory()).toEqual({ back: ["w1", "w2"], forward: [] });
+  });
+
+  test("a failed switch leaves the history as it was", () => {
+    writeHistory({ back: ["w1"], forward: [] });
+    expect(visitTab("w2", "w3", fail)).toBe(false);
+    expect(travelTab("w2", Travel.Back, list, fail)).toBe(false);
+    expect(readHistory()).toEqual({ back: ["w1"], forward: [] });
+  });
+
+  test("travel with nowhere to go does not switch", () => {
+    const calls: string[][] = [];
+    expect(travelTab("w1", Travel.Back, list, (c) => { calls.push(c); return { ok: true }; })).toBe(false);
+    expect(calls).toEqual([]);
   });
 });
 
@@ -265,7 +359,7 @@ describe("new workspace prompt", () => {
     }, start);
 
   test("the legend names the s key and shows in the footer by default", () => {
-    expect(LEGEND).toContain("s new ws");
+    expect(legend(12)).toContain("s new ws");
     const rows = renderSidebar(list, 0, 0, 20, 60, undefined, 0);
     expect(strip(rows.at(-2)!)).toContain("s new ws");
   });

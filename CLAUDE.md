@@ -28,14 +28,24 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   (`groupCpuSeconds` in `src/proc.ts`). Its pure parts are unit-tested; `test/e2e.test.ts` drives the real queue.
 - `src/layout.ts` builds the zellij layout (the orchestration tabs, `orchestrationTabKdl`, then one tab per workspace, `tabKdl`); a user `layouts/overbridge.kdl` replaces it.
 - `src/orchestration.ts` lists the orchestration tabs (`@root`: Claude in the root). Their names start with `@` so they never
-  match `NAME_RE`. The sidebar pins them in its Orchestration frame; their Claude gets the agent-state hooks and no guard
-  through `claude --settings` (`scaffoldOrchestration`), and `OVERBRIDGE_TAB` names it for the hook.
-- `src/start.ts` is `overbridge start <repo> <id>`: one workspace per work item, named by `Provider.workspaceName`,
-  added to the running session with `openTab`. Cleanup (`cleanable`, `pressCleanup` in `src/top.ts`, `wipe` in `src/top-run.ts`)
-  offers to remove a workspace whose PRs are open with nothing uncommitted or unpushed.
+  match `NAME_RE`. The sidebar pins them in its Orchestration frame; their Claude gets the agent-state hooks, the orchestrator guard
+  (`src/guard-orchestrator.ts`: an allow list, fail closed) and a brief (`orchestratorPrompt`) through `claude --settings`
+  (`scaffoldOrchestration`); `OVERBRIDGE_TAB` with no `OVERBRIDGE_NAME` selects that guard.
+  They never go away: every removal path checks `isOrchestrationTab` (`removeWorkspace`, `cleanable`, `beginRemoval`; add it to any
+  new one), `claudeOrchestration` restarts Claude when it exits (`restartAfter`), and the sidebar poll reopens a closed tab
+  (`ensureOrchestrationTabs` in `src/orchestration-keep.ts`, one owner per tab through a reopen lock).
+- `src/start.ts` is `overbridge start <repo> <id>` (or `--task <slug>` for work with no item, on `task/<slug>`): one workspace per work item, named by `Provider.workspaceName`,
+  added to the running session with `openTab`. Cleanup (`cleanable`, `pressCleanup` in `src/top.ts`; `beginRemoval`, `finishRemoval` in `src/remove.ts`)
+  offers to remove a workspace whose PRs are open with nothing uncommitted or unpushed. `beginRemoval` marks it `removing` in state
+  (the sidebar hides it), switches to `landingTab` (`src/next.ts`), closes its tab by id, and starts a detached `rm --background-finish` worker.
+  A failed worker sets `removeError` (shown on the sidebar card) and reopens the tab.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors. The root `config.yml`'s `guard` block (`GuardConfig`) adds
   `read-paths` (reads only) and `deny` rules; it is never read from a repo file, so a branch can't loosen the guard.
+- `src/claude-trust.ts` records Claude folder trust in `~/.claude.json` (`$CLAUDE_CONFIG_DIR` when set) for workspace
+  folders only: `createWorkspace` and `claude()` trust, `removeWorkspace` untrusts. Claude rewrites that file while
+  it runs, so change only the one key and write it with an atomic rename. `bunfig.toml` preloads
+  `test/helpers/isolate-claude-config.ts` so tests never touch the real file.
 - `src/state.ts`: all claim mutations go through `withState()` (lockfile + atomic rename; throw = no write).
 - `test/e2e.test.ts` drives the real CLI against a temp `OVERBRIDGE_ROOT` and a local bare "remote".
 - Generated files (`<ws>/.claude/settings.json`, `<ws>/CLAUDE.md`, layout) come from
@@ -49,5 +59,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - Plugin skills in `plugin/skills/`; keep them in sync with CLI commands/flags. Skills mark extension points with
   `ext: <phase>` lines (`src/ext.ts`, `overbridge ext`); a new or renamed phase goes in the skill's Extensions
   section and the README's phase table.
+- Neither `plugin.json` has a `version`, on purpose. Claude Code then versions each plugin by its git commit, so
+  `claude plugin update` picks up every push to `main`. A fixed version makes it skip new commits until someone bumps it.
 - Review panel is a second plugin, `plugin-review/` (`overbridge-review`): `mob-review`, `review-pr`, `update-personas`,
   `persona-*`. A new persona needs a row in `mob-review`'s panel table; keep its README list in sync.

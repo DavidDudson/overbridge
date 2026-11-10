@@ -120,6 +120,14 @@ describe("workflow", () => {
     expect(ws(["rm", "empty"]).code).toBe(0);
   });
 
+  test("rm refuses an orchestration tab, with or without --force", () => {
+    for (const args of [["rm", "@root"], ["rm", "--force", "@root"]]) {
+      const r = ws(args);
+      expect(r.code).not.toBe(0);
+      expect(r.err).toContain("@root is an orchestration tab");
+    }
+  });
+
   test("layout opens the root orchestration tab, then one tab per workspace, each with sidebar and top panel", () => {
     for (const n of ["ws3", "ws4", "ws5"]) ws(["new", n]);
     const kdl = ws(["layout"]).out;
