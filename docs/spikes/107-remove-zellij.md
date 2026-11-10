@@ -14,6 +14,11 @@ Issue: [#107](https://github.com/DavidDudson/overbridge/issues/107). Investigati
    proof of concept, below), it has no plugin runtime or per-tab wasm instance, and with `prefix None` it has no
    modes and no bindings unless we add them. Ghostty-native tabs and Hyprland windows do not fit (reasons below).
 
+A controlled benchmark at overbridge's real shape (28 tabs, 83 panes, same stand-in load; table below) puts
+zellij-as-today at 79 % server CPU idle and 4.3 s to open a tab, zellij without the status bar at 6 % and 0.45 s,
+and tmux at 0 % and 18 ms, with 6 MB against 82–310 MB of RSS. Step 1 is worth taking today; step 2 is worth
+the migration.
+
 The keybind goal is reachable with either multiplexer, because the fix is not the multiplexer: the few
 tab-switching keys move either to the multiplexer's root table (Alt chords, no modes) or out of the terminal
 entirely, to Hyprland `SUPER` chords that run `overbridge go <n>|next|prev`. `SUPER` never reaches a TUI, so that is
@@ -112,6 +117,52 @@ tmux has neither a plugin runtime nor a wasm host; hidden windows cost it only V
 overbridge's own cost (three per tab) and belong to the performance epic, not to this spike; they are the same under
 any multiplexer.
 
+### Controlled benchmark: A zellij as today, B zellij without status-bar, C tmux
+
+Same load for all three, in throwaway servers (`zellij --session bench107-a/-b`, `tmux -L bench107`), never the
+live session. 28 tabs (`@root` + 27 workspaces) with overbridge's exact pane layout: the zellij KDL came from
+`layoutKdl` in `src/layout.ts` (B is the same KDL with `default_tab_template` and its `zellij:status-bar` removed);
+C rebuilt it with `new-window` / `split-window -b -h -l 60` / `split-window -b -v -l 5`. One client attached to each
+server through a 220x60 pty (`script`). zellij ran the user's `config.kdl` from nix-home; tmux ran
+`prefix None`, `status off`, `mouse on`, `extended-keys always`, `allow-set-title off`. Each of the 83 panes ran
+the same `sh` stand-in: **idle** (sleep), **steady** (3 lines/s per pane, ~250 lines/s in all), **redraw** (a
+20-row cursor-home frame 5x/s per pane, the closest cheap imitation of a TUI spinner). Server CPU is `top`
+averaged over 30 s per phase (the cputime delta over the same 30 s agreed in every case); RSS and threads are the
+server's at the end of each phase; latencies are the CLI round trip (`go-to-tab-name` / `select-window`, and
+`new-tab --layout` / `new-window` + two splits), averaged over 10 and 3 calls. Harness: scratchpad `bench107/`.
+
+| | A: zellij 0.45.1 + status-bar | B: zellij 0.45.1, no status-bar | C: tmux 3.8 |
+| --- | --- | --- | --- |
+| Server CPU, idle | 78.7 % | 6.0 % | 0.0 % |
+| Server CPU, steady output | 84.5 % | 8.4 % | 1.7 % |
+| Server CPU, redraw | 101.9 % | 25.4 % | 7.6 % |
+| Server RSS idle → redraw | 310 → 516 MB | 82 → 313 MB | 6 → 45 MB |
+| Server threads | 113–126 | 101–116 | 1 |
+| Switch tab (avg) | 67 ms | 12 ms | 3 ms |
+| New tab with 3 panes (avg) | 4334 ms | 454 ms | 18 ms |
+
+The attached client used 0.0–0.1 % CPU in every case (it relays bytes; the server does the work).
+
+Reading:
+
+- The status-bar plugin is most of zellij's cost: removing it cuts idle CPU 13x and tab opening 10x, which
+  confirms step 1 of the recommendation as a near-free win.
+- tmux is still an order of magnitude lighter than B at every point (idle 0 % vs 6 %, redraw 7.6 % vs 25.4 %, 6 MB vs
+  82 MB, one thread vs ~100), and 25x faster to open a tab. Under a redraw-heavy load zellij's remaining cost is its
+  screen model and plugin host, not the status bar.
+- A's 79 % idle matches the live session's 95–185 % (28 real Claude TUIs produce more output than the stand-ins).
+
+Caveats:
+
+- Stand-ins are `sh` loops, not Claude Code or the bun sidebar/top panes. They produce simpler escape sequences
+  and less output than Claude, so absolute numbers are lower than real use; the ranking is what the benchmark shows.
+- One run per variant on a busy machine (the live 28-tab session was running alongside), 30 s per phase.
+- Latencies are CLI round trips, not time-to-pixels.
+- In C the `@root` window's sidebar split failed, because tmux reads a target starting with `@` as a window id
+  (`-t workspaces:@root`); it needs the exact-name form `-t 'workspaces:=@root'`. So C ran 82 panes, one idle pane
+  short of A and B, which does not change the picture. The adapter must use `=`-prefixed targets for every
+  orchestration tab.
+
 ## Alternatives
 
 ### tmux 3.8 (recommended replacement)
@@ -136,6 +187,8 @@ Trade-offs:
   the first thing the PoC checks under Ghostty. zellij 0.45 supports the kitty protocol natively.
 - Apps may rename panes with OSC titles (Claude Code does); `set -g allow-set-title off` keeps the titles
   `panes.ts` finds panes by.
+- A target that starts with `@` is a window id to tmux, so orchestration tabs (`@root`) must always be addressed
+  by exact name: `-t 'workspaces:=@root'`. The adapter should `=`-prefix every name it passes.
 - No floating panes; `overbridge next` runs with `run-shell -b` instead.
 - No layout file. `overbridge layout` prints the tmux command script instead of KDL; the user override file goes.
 - Scrollback/copy: tmux copy-mode with `mouse on`; `copy_command wl-copy` becomes `copy-command 'wl-copy'`.
