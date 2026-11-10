@@ -43,6 +43,8 @@ overbridge spinup                       # fresh zellij session over the existing
 overbridge start app 12                 # workspace gh-app-12 on the issue's branch, in a new tab running /start-item
 overbridge start app ENG-123            # a Jira item: workspace ENG-123
 overbridge start app --task file-x --prompt 'file a ticket for X'   # no item yet: workspace file-x on branch task/file-x
+overbridge start app --stack 12 13 14   # items in dependency order, bottom first: workspace gh-app-12-stack (or --name <slug>)
+                                        # holding a gh stack with one layer per item, claim and HEAD on layer 1
 overbridge start app 12                 # inside file-x once it filed #12: re-binds file-x to the item, no new workspace
 overbridge start app 12 --here          # re-bind the current workspace from any claim, if nothing is uncommitted or unpushed
 ```
@@ -75,11 +77,10 @@ branch's commits off the default branch. A workspace also stays while its agent 
 idle or has ended. A claim with no PR, or a PR closed without merging, keeps the workspace. Orchestration tabs are never
 removed this way.
 
-**Seeing what was removed.** Every removal shows at the bottom of the sidebar, so none happens unseen. A yellow
-`🧹 4s removing <title>` row shows one in progress. A finished one stays for an hour and names what removed it:
-`🧹 3m merged <title>` for the merged-PR check, `exited` for an ended session, and `cleaned` for the Cleanup button.
-A failed removal shows as a red `✗ 1m failed <title>`. The sidebar shows at most three of these rows, newest first,
-and `state.json` keeps the last 20 under `cleanups`.
+**Seeing what was removed.** The bottom of the sidebar shows `🧹 next check 42s`, a countdown to the next merged-PR check.
+Below it, a yellow `🧹 removing <title>` row shows a removal in progress and a grey `🧹 removed <title>` row one that finished;
+a failed one shows red as `✗ failed <title>`. Finished rows stay until the next check, then drop off. The sidebar shows at most
+three removal rows, and `state.json` keeps the last 20 under `cleanups`.
 
 Inside a workspace (shell pane or its Claude):
 

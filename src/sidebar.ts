@@ -564,7 +564,7 @@ export async function sidebar(wsOpt?: string) {
     const workspaceHeights = heights.slice(pinned);
     const inner = Math.max(0, width - 4);
     const state = readState();
-    const status = [...cleanupRows(inFlightCleanups(state), state.cleanups ?? [], inner), ...queueRows(readQueue(), inner)];
+    const status = [...cleanupRows(inFlightCleanups(state), state.cleanups ?? [], inner, Date.now(), state.mergeSweepAt), ...queueRows(readQueue(), inner)];
     statusRowCount = status.length;
     const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount);
     const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;

@@ -1,4 +1,4 @@
-import { checkout, createWorkspace, removeWorkspace } from "./commands";
+import { checkout, createWorkspace, holdings, removeWorkspace } from "./commands";
 import { getRepo, type RepoSpec } from "./config";
 import * as git from "./git";
 import { barePath, currentWorkspace, NAME_RE, worktreePath } from "./paths";
@@ -9,8 +9,9 @@ import { CONFIG_FILE, type ProjectConfig, parseYaml, ROOT_CONFIG_FILE, resolveCo
 import { scaffold } from "./scaffold";
 import { switchTab } from "./sidebar";
 import { openTab, TabFocus, tabOrder, type ZellijExec } from "./tab";
-import { type Claim, isRemoving, readState, type State } from "./state";
-import { fail, log, run } from "./util";
+import { cover, hasGhStack, localStacks } from "./stack";
+import { type Claim, claimOwner, isRemoving, readState, type State } from "./state";
+import { fail, log, must, run } from "./util";
 
 /**
  * The repo's `overbridge.yml` as committed on its default branch, so no worktree has to exist yet, with
@@ -138,6 +139,83 @@ export function startTask(repo: string, slug: string, prompt: string, deps: { ex
   openWorkspace(slug, repo, `${TASK_BRANCH_PREFIX}${slug}`, { prompt }, deps.exec);
 }
 
+/** Suffix of the workspace name `startStack` derives from its bottom item. */
+export const STACK_SUFFIX = "-stack";
+
+/** `ref` exists in `repo`'s bare clone. */
+const hasRef = (repo: string, ref: string) => run(["git", "-C", barePath(repo), "show-ref", "--verify", "--quiet", ref]).ok;
+
+/**
+ * `overbridge start <repo> --stack <id1> <id2> ... [--name <slug>]`: ids in dependency order, bottom first. One
+ * workspace (named `--name`, else the bottom item's workspace name plus `-stack`) holds `repo` with a `gh stack`
+ * of one layer per item, each on its item's branch. The claim sits on the bottom branch and HEAD stays there;
+ * `claimOwner` sees the other layers through gh-stack's catalog, so no other workspace can take any of them.
+ * The tab's agent runs `/start-item` for the bottom item and is told the layers above it are queued.
+ */
+export function startStack(
+  repo: string,
+  ids: string[],
+  opts: { name?: string; prompt?: string } = {},
+  deps: { provider?: Provider; exec?: ZellijExec; plugins?: () => PluginProblems; ghStack?: () => boolean } = {},
+) {
+  if (ids.length < 2) fail("a stack needs at least two items; use `overbridge start <repo> <id>` for one");
+  const dup = ids.find((id, i) => ids.indexOf(id) !== i);
+  if (dup) fail(`${dup} is listed twice in --stack`);
+  if (!(deps.ghStack ?? hasGhStack)()) fail("gh-stack is not installed: run `gh extension install github/gh-stack`");
+  requirePlugins(deps.plugins);
+  const spec = getRepo(repo);
+  git.fetch(spec);
+  const provider = deps.provider ?? providerForRepo(spec);
+  // resolve every item before anything exists, so a typo in the last id leaves nothing behind
+  const items = ids.map((id) => {
+    const title = provider.title(id) ?? fail(`${id}: not found in ${provider.name}`);
+    return { id, branch: provider.branchName({ id, title }) };
+  });
+  const branches = items.map((i) => i.branch);
+  const same = branches.find((b, i) => branches.indexOf(b) !== i);
+  if (same) fail(`two items map to branch ${same}`);
+
+  const name = opts.name ?? `${provider.workspaceName(ids[0]!, repo)}${STACK_SUFFIX}`;
+  if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}'`);
+  if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, {}, deps.exec);
+
+  // layers must be new: a branch already on origin belongs to checking out its existing PR or stack
+  const remote = branches.find((b) => hasRef(repo, `refs/remotes/origin/${b}`));
+  if (remote) fail(`${remote} already exists on origin; pull an existing stack with \`overbridge checkout ${repo} '#<pr>'\``);
+  const stacks = localStacks(repo);
+  const owner = claimOwner(readState(), repo, cover(stacks, branches), holdings(repo, stacks), name);
+  if (owner) fail(`${repo} ${branches.join(" <- ")} (or a stack or issue it touches) is claimed by workspace ${owner}`);
+
+  const made = branches.filter((b) => !hasRef(repo, `refs/heads/${b}`));
+  const layers = items.map((i, n) => `${n + 1}. ${i.id} (${i.branch})`).join("; ");
+  const brief = `This workspace holds a gh stack of ${items.length} layers, bottom first: ${layers}. You start on layer 1; move up with 'gh stack up' and run 'overbridge pr ${repo}' after each move.`;
+  openWorkspace(
+    name,
+    repo,
+    branches[0]!,
+    { prompt: opts.prompt, defaultPrompt: `/start-item ${ids[0]}. ${brief}` },
+    deps.exec,
+    (wt) => {
+      try {
+        // the bottom branch exists already (the claim made it off origin's default); init adopts it and builds the rest
+        must(["gh", "stack", "init", ...branches], { cwd: wt });
+        // init leaves HEAD on the top layer; work and the claim begin at the bottom
+        must(["git", "-C", wt, "switch", branches[0]!]);
+      } catch (e) {
+        undoStack(repo, wt, made);
+        throw e;
+      }
+    },
+  );
+}
+
+/** Drop a half-built local stack and the branches `startStack` created for it; nothing was pushed. */
+function undoStack(repo: string, wt: string, made: string[]) {
+  run(["git", "-C", wt, "switch", "--quiet", "--detach"]);
+  run(["gh", "stack", "unstack", "--local"], { cwd: wt });
+  for (const b of made) run(["git", "-C", barePath(repo), "branch", "-D", b]);
+}
+
 /** Stop before any workspace exists when its Claude could not load the overbridge skills; print the warnings. */
 function requirePlugins(check: () => PluginProblems = pluginProblems) {
   const { errors, warnings } = check();
@@ -151,7 +229,7 @@ function requirePlugins(check: () => PluginProblems = pluginProblems) {
  * Create workspace `name` holding `repo` on `branch` and open its tab in the background, or show its tab when it
  * already exists, since you asked for it.
  */
-function openWorkspace(name: string, repo: string, branch: string, prompts: TabPrompt, exec: ZellijExec = run) {
+function openWorkspace(name: string, repo: string, branch: string, prompts: TabPrompt, exec: ZellijExec = run, setup?: (wt: string) => void) {
   if (readState().workspaces[name]) {
     log(`${name} already exists`);
     showTab(name, prompts, exec);
@@ -161,6 +239,7 @@ function openWorkspace(name: string, repo: string, branch: string, prompts: TabP
   createWorkspace(name, [repo]);
   try {
     checkout([repo, branch], name);
+    setup?.(worktreePath(name, repo));
   } catch (e) {
     // a refused claim must not leave an empty workspace behind
     removeWorkspace(name, true);

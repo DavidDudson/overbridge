@@ -99,6 +99,7 @@ describe("ensureOrchestrationTabs", () => {
     expect(kdl).toContain('tab name="@root" focus=true');
     expect(kdl).toContain('args "claude" "@root"');
     expect(kdl).not.toContain("--continue");
+    expect(kdl).not.toContain("status-bar");
     expect(kdl.match(/tab name=/g)).toHaveLength(1);
   });
 });
