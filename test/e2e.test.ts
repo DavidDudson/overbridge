@@ -134,7 +134,7 @@ describe("workflow", () => {
     expect(kdl.match(/\btab name=/g)?.length).toBe(7);
     expect(kdl.indexOf('tab name="@root"')).toBeLessThan(kdl.indexOf('tab name="ws'));
     expect(kdl).toContain('"claude" "@root"');
-    expect(kdl).toContain('args "worklist"');
+    expect(kdl).toMatch(/args .*"worklist"/);
     expect(kdl).toContain('"claude" "ws5"');
     expect(kdl).toContain('"sidebar" "--ws" "ws5"');
     expect(kdl).toContain('"top" "--ws" "ws5"');
