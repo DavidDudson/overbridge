@@ -11,13 +11,14 @@ import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
 import { FINISH_FLAG, finishRemoval } from "./remove";
 import { sweepMerged } from "./merge-sweep";
-import { showTab, start, startTask } from "./start";
+import { showTab, start, startStack, startTask } from "./start";
 import { topPanel, topRefresh } from "./top-run";
 import { silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
 import { exec, OverbridgeError } from "./util";
 
-const START_USAGE = "usage: overbridge start <repo> <id> [--prompt text] | overbridge start <repo> --task <slug> --prompt <text>";
+const START_USAGE =
+  "usage: overbridge start <repo> <id> [--prompt text] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] | overbridge start <repo> --task <slug> --prompt <text>";
 
 const HELP = `overbridge (alias: ws) — multi-repo workspaces with bound Claude sessions in zellij
 
@@ -53,6 +54,10 @@ Workspaces
   overbridge start <repo> --task <slug> --prompt <text>
                                         work with no item yet (a ticket to file, a spike): workspace <slug>
                                         on branch task/<slug>, in a new tab whose Claude starts with <text>
+  overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text]
+                                        items in dependency order, bottom first: one workspace (<slug>, else
+                                        the first item's name plus -stack) holding a gh stack with one layer
+                                        (branch + claim) per item, on layer 1, in a new tab running /start-item
   overbridge new <name> [-r repo]...            create a workspace and open its tab
   overbridge tab <name> [--prompt text]         open a workspace's tab when it has none, else focus it
   overbridge add <repo> [--ws name]             add a repo worktree to a workspace
@@ -225,7 +230,18 @@ async function main(argv: string[]): Promise<number> {
       break;
     }
     case "start": {
-      const { values, positionals } = opts(rest, { prompt: { type: "string" }, task: { type: "string" } });
+      const { values, positionals } = opts(rest, {
+        prompt: { type: "string" },
+        task: { type: "string" },
+        stack: { type: "boolean" },
+        name: { type: "string" },
+      });
+      if (values.stack) {
+        if (values.task !== undefined || positionals.length < 3) throw new OverbridgeError(START_USAGE);
+        startStack(positionals[0]!, positionals.slice(1), { name: values.name, prompt: values.prompt });
+        break;
+      }
+      if (values.name !== undefined) throw new OverbridgeError("--name only goes with --stack");
       if (values.task !== undefined) {
         if (positionals.length !== 1 || values.prompt === undefined) {
           throw new OverbridgeError("usage: overbridge start <repo> --task <slug> --prompt <text>");

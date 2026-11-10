@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkout, createWorkspace, newWorkspace, repoAdd } from "../src/commands";
 import { metaDir } from "../src/paths";
-import { showTab, start, startTask } from "../src/start";
+import { localStacks } from "../src/stack";
+import { showTab, start, startStack, startTask } from "../src/start";
 import { readState } from "../src/state";
 import { openTab, TabFocus } from "../src/tab";
 import type { RunResult } from "../src/util";
@@ -81,8 +82,87 @@ describe("start", () => {
   });
 });
 
+describe("start --stack", () => {
+  const items = [
+    { id: "31", title: "Base layer", url: "" },
+    { id: "32", title: "Middle layer", url: "" },
+    { id: "33", title: "Top layer", url: "" },
+  ];
+  const stackProvider = () => fakeProvider(items);
+  const BRANCHES = ["feat/31-base-layer", "feat/32-middle-layer", "feat/33-top-layer"];
+  const wtOf = (ws: string) => join(tmp, "workspaces", ws, "app");
+  const git = (cwd: string, ...args: string[]) => {
+    const p = Bun.spawnSync({ cmd: ["git", ...args], cwd, env: process.env, stdout: "pipe" });
+    return p.stdout.toString().trim();
+  };
+  const ghStack = () => Bun.spawnSync({ cmd: ["gh", "stack", "--version"], stdout: "pipe", stderr: "pipe" }).exitCode === 0;
+  const stackTest = ghStack() ? test : test.skip;
+
+  stackTest("one workspace, a layer per item bottom first, claim and HEAD on the bottom", () => {
+    startStack("app", ["31", "32", "33"], {}, { provider: stackProvider(), plugins: noProblems });
+    const w = readState().workspaces["gh-app-31-stack"]!;
+    expect(w.repos.app?.branch).toBe(BRANCHES[0]);
+    expect(git(wtOf("gh-app-31-stack"), "branch", "--show-current")).toBe(BRANCHES[0]!);
+    const stack = localStacks("app").find((s) => s.layers.some((l) => l.branch === BRANCHES[0]))!;
+    expect(stack.layers.map((l) => l.branch)).toEqual(BRANCHES);
+    // each layer sits on the one below it
+    const isAncestor = (a: string, b: string) =>
+      Bun.spawnSync({ cmd: ["git", "merge-base", "--is-ancestor", a, b], cwd: wtOf("gh-app-31-stack") }).exitCode === 0;
+    expect(isAncestor(BRANCHES[0]!, BRANCHES[1]!)).toBe(true);
+    expect(isAncestor(BRANCHES[1]!, BRANCHES[2]!)).toBe(true);
+  });
+
+  stackTest("the claim covers every layer: another workspace cannot take a middle or top one", () => {
+    createWorkspace("rival", ["app"]);
+    for (const b of BRANCHES.slice(1)) {
+      expect(() => checkout(["app", b], "rival")).toThrow("claimed by workspace gh-app-31-stack");
+    }
+  });
+
+  stackTest("an existing stack workspace is not started twice", () => {
+    startStack("app", ["31", "32", "33"], {}, { provider: stackProvider(), plugins: noProblems });
+    expect(Object.keys(readState().workspaces).filter((n) => n.endsWith("-stack"))).toEqual(["gh-app-31-stack"]);
+  });
+
+  stackTest("a layer claimed elsewhere refuses the whole start and leaves nothing behind", () => {
+    const p = fakeProvider([
+      { id: "41", title: "A", url: "" },
+      { id: "42", title: "B", url: "" },
+    ]);
+    checkout(["app", "feat/42-b"], "rival");
+    expect(() => startStack("app", ["41", "42"], {}, { provider: p, plugins: noProblems })).toThrow("claimed by workspace rival");
+    expect(readState().workspaces["gh-app-41-stack"]).toBeUndefined();
+    expect(git(join(tmp, "remote.git"), "branch", "--list", "feat/41-a")).toBe("");
+  });
+
+  stackTest("--name sets the workspace name", () => {
+    const p = fakeProvider([
+      { id: "51", title: "A", url: "" },
+      { id: "52", title: "B", url: "" },
+    ]);
+    startStack("app", ["51", "52"], { name: "perf-one" }, { provider: p, plugins: noProblems });
+    expect(readState().workspaces["perf-one"]?.repos.app?.branch).toBe("feat/51-a");
+  });
+
+  test("fewer than two items, a repeated id, a missing item or a bad name is an error and creates nothing", () => {
+    const run = (ids: string[], name?: string) => startStack("app", ids, { name }, { provider: stackProvider(), plugins: noProblems, ghStack: () => true });
+    expect(() => run(["31"])).toThrow("at least two items");
+    expect(() => run(["31", "31"])).toThrow("listed twice");
+    expect(() => run(["31", "99"])).toThrow("99: not found");
+    expect(() => run(["31", "32"], "../x")).toThrow("invalid workspace name");
+    expect(Object.keys(readState().workspaces)).not.toContain("../x");
+  });
+
+  test("missing gh-stack stops before anything is created", () => {
+    expect(() =>
+      startStack("app", ["61", "62"], {}, { provider: fakeProvider(), plugins: noProblems, ghStack: () => false }),
+    ).toThrow("gh-stack is not installed");
+    expect(readState().workspaces["gh-app-61-stack"]).toBeUndefined();
+  });
+});
+
 /**
- * A fake zellij: `current-tab-info` names `current` (or fails when undefined), `new-tab` succeeds when `opens`,
+ * A fake zellij:`current-tab-info` names `current` (or fails when undefined), `new-tab` succeeds when `opens`,
  * and `query-tab-names` lists `tabs`.
  */
 const fakeZellij = (current: string | undefined, opens = true, tabs: string[] = []) => {

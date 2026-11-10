@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sidebarWidth } from "./config";
-import { newTabKdl } from "./layout";
+import { agentDirOf, newTabKdl } from "./layout";
 import { metaDir, selfCommand, sessionName } from "./paths";
 import { log, run } from "./util";
 
@@ -53,7 +53,7 @@ export function openTab(ws: string, prompt?: string, focus: TabFocus = TabFocus.
   const dir = join(metaDir(), "tabs");
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${ws}.kdl`);
-  writeFileSync(file, newTabKdl(ws, selfCommand(), { sidebarWidth: sidebarWidth(), focus: true, ...(prompt ? { prompt } : {}) }));
+  writeFileSync(file, newTabKdl(ws, selfCommand(), { sidebarWidth: sidebarWidth(), focus: true, agentCwd: agentDirOf(ws), ...(prompt ? { prompt } : {}) }));
   const back = focus === TabFocus.Background ? currentTab(exec) : undefined;
   const r = exec(["zellij", "action", "new-tab", "--layout", file, "--name", ws]);
   if (!r.ok) {

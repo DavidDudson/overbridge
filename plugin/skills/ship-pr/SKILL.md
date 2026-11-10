@@ -222,7 +222,7 @@ If it is missing, tell the user to run `gh extension install github/gh-stack` (i
 
 Use the `gh-stack` skill for the exact non-interactive flags, the rebase and conflict flow, and merging. This section adds what overbridge needs on top.
 
-**A claim covers the whole stack.** `overbridge checkout <repo> '#<pr>'` pulls an existing stack and claims every layer. Never `gh stack checkout` or `gh stack trunk`: both are blocked. Run `overbridge pr <repo>` after submitting and after moving between layers. A branch or PR claimed by another workspace cannot be taken: if `overbridge checkout` refuses, stop and tell the user.
+**A claim covers the whole stack.** `overbridge checkout <repo> '#<pr>'` pulls an existing stack and claims every layer. Never `gh stack checkout` or `gh stack trunk`: both are blocked. Run `overbridge pr <repo>` after submitting and after moving between layers. A branch or PR claimed by another workspace cannot be taken: if `overbridge checkout` refuses, stop and tell the user. A workspace opened with `overbridge start <repo> --stack <id>...` already holds a local stack with one empty-diff layer per item (bottom first): fill each layer in order and `gh stack up` to the next, rather than `gh stack add`.
 
 "Base" below means the branch the PR targets, **not the default branch**. Resolve a PR number or URL to a branch first:
 
