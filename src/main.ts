@@ -12,6 +12,7 @@ import { FINISH_FLAG, finishRemoval } from "./remove";
 import { sweepMerged } from "./merge-sweep";
 import { showTab, start, startTask } from "./start";
 import { topPanel, topRefresh } from "./top-run";
+import { worklistPane } from "./worklist-run";
 import { silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
 import { exec, OverbridgeError } from "./util";
@@ -143,6 +144,9 @@ async function main(argv: string[]): Promise<number> {
       diff(cmd.requireWs(values.ws));
       break;
     }
+    case "worklist":
+      await worklistPane();
+      break;
     case "top": {
       const { values, positionals } = opts(rest, ws);
       if (positionals[0] === "refresh") topRefresh(values.ws);

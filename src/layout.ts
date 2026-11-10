@@ -63,8 +63,8 @@ export function orchestrationTabKdl(t: OrchestrationTab, self: string[], opts: O
       pane name=${q("sidebar")} command=${q(cmd!)} cwd=${q(dir)} size=${width} borderless=true focus=true {
         args ${args("sidebar", "--ws", t.tab)}
       }
-      pane name=${q(`${t.tab} · claude`)} command=${q(cmd!)} cwd=${q(dir)} {
-        args ${args("claude", t.tab, ...(opts.resume ? ["--continue"] : []))}
+      pane name=${q(t.pane ? `${t.tab} · ${t.pane}` : `${t.tab} · claude`)} command=${q(cmd!)} cwd=${q(dir)} {
+        args ${t.pane ? args(t.pane) : args("claude", t.tab, ...(opts.resume ? ["--continue"] : []))}
       }
     }
   }`;
@@ -139,7 +139,7 @@ const hasTranscript = (dir: string, home: string) => {
 export function resumable(workspaces: string[], home = homedir()): Set<string> {
   return new Set([
     ...workspaces.filter((ws) => hasTranscript(wsDir(ws), home)),
-    ...ORCHESTRATION_TABS.filter((t) => hasTranscript(t.dir(), home)).map((t) => t.tab),
+    ...ORCHESTRATION_TABS.filter((t) => !t.pane && hasTranscript(t.dir(), home)).map((t) => t.tab),
   ]);
 }
 
