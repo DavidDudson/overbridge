@@ -127,7 +127,8 @@ describe("check-queue", () => {
     expect(problems("check-queue: 5\n")).toEqual([
       "check-queue: expected a mapping with max-load-percent, timeout-seconds, stall-seconds, wait-seconds",
     ]);
-    expect(problems("check-queue:\n  max-load-percent: 150\n")).toEqual(["check-queue.max-load-percent: expected a whole number from 1 to 100 (got 150)"]);
+    expect(problems("check-queue:\n  max-load-percent: 1.5\n")).toEqual(["check-queue.max-load-percent: expected a whole number from 1 up (got 1.5)"]);
+    expect(parseConfig("check-queue:\n  max-load-percent: 400\n", "f.yml").checkQueue.maxLoadPercent).toBe(400);
     expect(problems("check-queue:\n  stall-seconds: 0\n")).toEqual(["check-queue.stall-seconds: expected a whole number from 1 up (got 0)"]);
     expect(problems("check-queue:\n  wait-seconds: '10'\n")).toEqual(['check-queue.wait-seconds: expected a whole number from 1 up (got "10")']);
     expect(problems("check-queue:\n  timeout-secs: 10\n")).toEqual(["check-queue.timeout-secs: unknown key, did you mean 'timeout-seconds'?"]);

@@ -276,10 +276,12 @@ describe("dev shells", () => {
 });
 
 describe("check queue", () => {
+  // the runner's own load must never hold a test at the gate, and each test spawns several CLIs
+  const CHECK_TEST_MS = 20_000;
   const cq = () => join(root, "cq");
   const queue = () => join(root, ".overbridge", "check-queue");
   const config = (extra = "") =>
-    writeFileSync(join(cq(), "app", "overbridge.yml"), `shell: env FOO=queued\ncheck-queue:\n  max-load-percent: 100\n${extra}`);
+    writeFileSync(join(cq(), "app", "overbridge.yml"), `shell: env FOO=queued\ncheck-queue:\n  max-load-percent: 100000\n${extra}`);
   const check = (args: string[]) => ws(["check", ...args], cq());
   const spawnCheck = (args: string[]) =>
     Bun.spawn({ cmd: [process.execPath, CLI, "check", ...args], cwd: cq(), env: env(), stdout: "pipe", stderr: "pipe" });
@@ -300,7 +302,7 @@ describe("check queue", () => {
     expect(check(["nope", "--", "true"]).err).toContain("nope is not in cq");
     expect(check(["app"]).code).toBe(1);
     expect(check(["--timeout-seconds", "x", "--", "true"]).err).toContain("--timeout-seconds expects a whole number");
-  });
+  }, CHECK_TEST_MS);
 
   test("two runs take turns instead of overlapping", async () => {
     const log = join(tmp, "turns.log");
@@ -312,19 +314,19 @@ describe("check queue", () => {
     expect(await second.exited).toBe(0);
     expect(await new Response(second.stderr).text()).toContain("waiting behind 1 in the queue");
     expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "end a", "start b", "end b"]);
-  });
+  }, CHECK_TEST_MS);
 
   test("a nested check inside a held run runs at once", () => {
     const r = check(["--", "sh", "-c", `${process.execPath} ${CLI} check -- echo nested`]);
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe("nested");
-  });
+  }, CHECK_TEST_MS);
 
   test("a run over its timeout is killed with 124", () => {
     const r = check(["--timeout-seconds", "1", "--", "sleep", "30"]);
     expect(r.code).toBe(124);
     expect(r.err).toContain("stopped after 1s");
-  });
+  }, CHECK_TEST_MS);
 
   test("a run that uses no CPU for stall-seconds is killed with 137", () => {
     config("  stall-seconds: 1\n");
@@ -333,17 +335,17 @@ describe("check queue", () => {
     expect(r.code).toBe(137);
     expect(r.err).toContain("used no CPU for 1s");
     expect(Date.now() - started).toBeLessThan(10_000);
-  });
+  }, CHECK_TEST_MS);
 
   test("a waiter gives up with 75 after wait-seconds", async () => {
     config("  wait-seconds: 1\n");
-    const holder = spawnCheck(["--", "sleep", "4"]);
+    const holder = spawnCheck(["--", "sleep", "3"]);
     await waitFor(() => readdirSync(queue()).length === 1);
     const r = check(["--", "true"]);
     expect(r.code).toBe(75);
     expect(r.err).toContain("still busy after 1s");
     expect(await holder.exited).toBe(0);
-  });
+  }, CHECK_TEST_MS);
 
   test("a dead holder's ticket is reaped and the command it left running is killed", async () => {
     config();
@@ -358,5 +360,5 @@ describe("check queue", () => {
     expect(r.err).toContain("holder from ghost died");
     expect(await orphan.exited).not.toBe(0);
     expect(readdirSync(queue())).toEqual([]);
-  });
+  }, CHECK_TEST_MS);
 });

@@ -108,10 +108,9 @@
       "additionalProperties": false,
       "properties": {
         "max-load-percent": {
-          "description": "Start only while the 1-minute load average is under this share of the cores. Default 70.",
+          "description": "Start only while the 1-minute load average is under this share of the cores. Over 100 allows more load than there are cores. Default 70.",
           "type": "integer",
-          "minimum": 1,
-          "maximum": 100
+          "minimum": 1
         },
         "timeout-seconds": { "description": "Kill the run after this long. Default 180.", "type": "integer", "minimum": 1 },
         "stall-seconds": {

@@ -96,7 +96,7 @@ export interface ShellSpec {
 
 /** How `overbridge check` queues a command: when it may start, and when it is killed. */
 export interface CheckQueue {
-  /** Start only while the 1-minute load average is under this share of the cores. */
+  /** Start only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. */
   maxLoadPercent: number;
   /** Kill the run after this long, busy or not. */
   timeoutSeconds: number;
@@ -503,7 +503,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       const set = (value: number | undefined, field: keyof CheckQueue) => {
         if (value !== undefined) config.checkQueue = { ...config.checkQueue, [field]: value };
       };
-      set(p.positiveInt(checkQueue, "max-load-percent", "check-queue", 100), "maxLoadPercent");
+      set(p.positiveInt(checkQueue, "max-load-percent", "check-queue"), "maxLoadPercent");
       set(p.positiveInt(checkQueue, "timeout-seconds", "check-queue"), "timeoutSeconds");
       set(p.positiveInt(checkQueue, "stall-seconds", "check-queue"), "stallSeconds");
       set(p.positiveInt(checkQueue, "wait-seconds", "check-queue"), "waitSeconds");

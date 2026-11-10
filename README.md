@@ -292,7 +292,7 @@ it has run, and who is waiting.
 | `project-management.issue-type` | `Task` | Jira issue type for new items |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
-| `check-queue.max-load-percent` | `70` | start a queued run only while the 1-minute load average is under this share of the cores. See [Check queue](#check-queue) |
+| `check-queue.max-load-percent` | `70` | start a queued run only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. See [Check queue](#check-queue) |
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
 | `check-queue.wait-seconds` | `900` | give up (exit 75) when a run gets no turn, or the load stays high, for this long |
