@@ -35,21 +35,29 @@ export const AUTO_MODE_ALLOW = [
 export function scaffold(ws: string) {
   const dir = wsDir(ws);
   mkdirSync(join(dir, ".claude"), { recursive: true });
-  const settings = {
-    env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
-    ...pluginSettings(),
-    // plan-mode plans live in the workspace folder, not ~/.claude/plans
-    plansDirectory: PLANS_DIR,
-    permissions: { allow: ALLOWED_COMMANDS },
-    autoMode: { allow: ["$defaults", ...AUTO_MODE_ALLOW] },
-    hooks: {
-      PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }],
-      ...agentStateHooks(),
-    },
-  };
-  writeFileSync(join(dir, ".claude", "settings.json"), JSON.stringify(settings, null, 2) + "\n");
+  writeFileSync(join(dir, ".claude", "settings.json"), JSON.stringify(workspaceSettings(ws, PLANS_DIR), null, 2) + "\n");
+  // a Claude started in a repo folder does not read the workspace's .claude, so it loads this copy with `--settings`;
+  // plans stay in the workspace folder, not that repo's worktree
+  mkdirSync(dirname(workspaceSettingsPath(ws)), { recursive: true });
+  writeFileSync(workspaceSettingsPath(ws), JSON.stringify(workspaceSettings(ws, join(dir, PLANS_DIR)), null, 2) + "\n");
   writeFileSync(join(dir, "CLAUDE.md"), claudeMd(ws, dir, devShellSection(ws)));
 }
+
+/** The copy of workspace `ws`'s settings kept in the meta dir, for a Claude whose cwd is a repo folder. */
+export const workspaceSettingsPath = (ws: string) => join(metaDir(), "workspaces", `${ws}.settings.json`);
+
+const workspaceSettings = (ws: string, plansDirectory: string) => ({
+  env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
+  ...pluginSettings(),
+  // plan-mode plans live in the workspace folder, not ~/.claude/plans
+  plansDirectory,
+  permissions: { allow: ALLOWED_COMMANDS },
+  autoMode: { allow: ["$defaults", ...AUTO_MODE_ALLOW] },
+  hooks: {
+    PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }],
+    ...agentStateHooks(),
+  },
+});
 
 const hook = (sub: string) => ({ type: "command", command: [...selfCommand(), sub].map(shellQuote).join(" ") });
 

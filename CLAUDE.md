@@ -59,6 +59,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - `test/e2e.test.ts` drives the real CLI against a temp `OVERBRIDGE_ROOT` and a local bare "remote".
 - Generated files (`<ws>/.claude/settings.json`, `<ws>/CLAUDE.md`, layout) come from
   `src/scaffold.ts` / `src/layout.ts`; they must stay idempotent.
+  The agent starts in `agentDir` (`src/layout.ts`: the first repo's worktree, so `overbridge.yml`, `item`, `config` and `ext`
+  resolve; the workspace root with no repo or only root transcripts) and loads `<meta>/workspaces/<ws>.settings.json`
+  through `--settings`, since Claude reads `.claude/settings.json` only from its own folder.
 - `src/stack.ts` reads gh-stack's catalog (`<bare>/gh-stack`); claims cover whole stacks via `cover()`.
 - Installed from nix-home's `ws` flake input (to be renamed `overbridge`), which is pinned. After a PR merges to `main`, bump it in
   nix-home (`nix flake update ws`, own commit + PR) or the installed `ws` stays on the old rev.

@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ORCHESTRATION_TABS } from "../src/orchestration";
-import { root, wsDir } from "../src/paths";
-import { chooseLayout, layoutKdl, newTabKdl, resumable, SIDEBAR_WIDTH, TOP_ROWS, transcriptDir, userLayoutPath, zellijConfigDir } from "../src/layout";
+import { root, worktreePath, wsDir } from "../src/paths";
+import { agentDir, chooseLayout, layoutKdl, newTabKdl, resumable, SIDEBAR_WIDTH, TOP_ROWS, transcriptDir, userLayoutPath, zellijConfigDir } from "../src/layout";
 
 const self = ["overbridge"];
 const tabs = (kdl: string) => kdl.match(/\btab name=/g)?.length ?? 0;
@@ -129,5 +129,46 @@ describe("newTabKdl", () => {
     const resumed = newTabKdl("ENG-1", self, { prompt: "/start-item ENG-1", resume: true });
     expect(resumed).toContain('"--continue"');
     expect(resumed).not.toContain("/start-item");
+  });
+});
+
+describe("agentDir", () => {
+  const home = () => join(tmp, "home");
+  const transcript = (dir: string) => {
+    mkdirSync(transcriptDir(dir, home()), { recursive: true });
+    writeFileSync(join(transcriptDir(dir, home()), "s.jsonl"), "{}\n");
+  };
+
+  test("the workspace root with no repo", () => {
+    expect(agentDir("a", [], home())).toBe(wsDir("a"));
+  });
+
+  test("the only repo's worktree", () => {
+    expect(agentDir("a", ["app"], home())).toBe(worktreePath("a", "app"));
+  });
+
+  test("the first repo when there are several", () => {
+    expect(agentDir("a", ["app", "lib"], home())).toBe(worktreePath("a", "app"));
+  });
+
+  test("a workspace whose only transcripts are in its root keeps the root, so --continue still resumes", () => {
+    transcript(wsDir("a"));
+    expect(agentDir("a", ["app"], home())).toBe(wsDir("a"));
+    transcript(worktreePath("a", "app"));
+    expect(agentDir("a", ["app"], home())).toBe(worktreePath("a", "app"));
+  });
+
+  test("the claude pane opens in the agent dir; sidebar and top stay in the root", () => {
+    const kdl = layoutKdl(["a"], self, { agentDirs: { a: worktreePath("a", "app") } });
+    const tab = kdl.split(/\n(?=  tab )/).find((t) => t.startsWith('  tab name="a"'))!;
+    expect(tab).toMatch(new RegExp(`name="a · claude"[^\\n]*cwd=${JSON.stringify(worktreePath("a", "app")).replace(/[/]/g, "\\/")}`));
+    expect(tab).toMatch(new RegExp(`name="sidebar"[^\\n]*cwd=${JSON.stringify(wsDir("a")).replace(/[/]/g, "\\/")}`));
+    expect(newTabKdl("a", self, { agentCwd: "/x/y" })).toContain('cwd="/x/y"');
+  });
+
+  test("resumable looks in the agent dir", () => {
+    transcript(worktreePath("a", "app"));
+    expect([...resumable(["a"], home(), { a: worktreePath("a", "app") })]).toEqual(["a"]);
+    expect([...resumable(["a"], home())]).toEqual([]);
   });
 });
