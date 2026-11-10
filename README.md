@@ -57,6 +57,7 @@ overbridge pr                              # record PRs for claimed branches
 overbridge status --all
 overbridge release app
 overbridge shell app -- just test         # run a command in the repo's dev shell
+overbridge check app -- just test         # the same, queued: one heavy command at a time across workspaces
 ```
 
 Run `overbridge help` for every command.
@@ -69,6 +70,7 @@ Run `overbridge help` for every command.
   .bare/<repo>.git          bare clones (refspec → refs/remotes/origin/*)
   .overbridge/state.json    claims, lock-protected (.overbridge/state.lock)
   .overbridge/layout.kdl    generated zellij layout (plus agent/, top/, apps state)
+  .overbridge/check-queue/  one ticket per queued or running `overbridge check`
   <ws>/                     named for its work item, e.g. gh-app-12
     CLAUDE.md               generated workspace rules
     .claude/settings.json   OVERBRIDGE_NAME env + guard hook
@@ -249,10 +251,31 @@ Where it applies:
 
 - **One repo in the workspace**: the agent starts inside the shell, with the workspace root as its directory.
 - **Several repos**: the agent starts plain, and the generated workspace `CLAUDE.md` tells it to use
-  `overbridge shell`. The skills run `commands.*` through it, and the top panel's terminal button opens your `$SHELL`
+  `overbridge shell` and `overbridge check`. The skills run `commands.format` and installs through `overbridge shell`,
+  and lint, typecheck, test, and build through `overbridge check`. The top panel's terminal button opens your `$SHELL`
   in the first repo's shell.
 - Adding a second repo to a workspace whose agent is already inside the first repo's shell prints a warning: the first
   env leaks into the agent. The add goes ahead, and `overbridge shell` still gives the second repo its own.
+
+### Check queue
+
+`overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>` runs a heavy command, such as lint, typecheck,
+test or build, so that only one runs at a time across every workspace. The skills send the repo's `commands.lint`,
+`typecheck`, `test`, and `build` through it. The repo defaults to the one the current directory is in, then to the
+workspace's only repo.
+
+1. **Queue.** Each call writes a ticket to `.overbridge/check-queue/`. The oldest ticket whose process is still alive
+   holds the turn, and the others wait in order. Waiters remove tickets whose process has died. If a dead holder left
+   its command running, they kill that command too.
+2. **Load.** Once it holds the turn, the run waits until the 1-minute load average is under `max-load-percent` of the cores.
+3. **Run.** The command runs in the repo's dev shell, as with `overbridge shell`, in a process group of its own. A
+   command started inside a held run, such as a git hook, runs straight away instead of queueing behind its parent.
+4. **Stop.** The command is killed (TERM, then KILL after 10 seconds) when it runs past `timeout-seconds` (exit 124),
+   or when its process group uses no CPU for `stall-seconds` (exit 137). If no turn comes within `wait-seconds`, the
+   call gives up with exit 75. Otherwise it exits with the command's own code.
+
+`--timeout-seconds` raises or lowers the time limit for one run. The tab sidebar shows the running command, how long
+it has run, and who is waiting.
 
 ### Keys and defaults
 
@@ -269,6 +292,10 @@ Where it applies:
 | `project-management.issue-type` | `Task` | Jira issue type for new items |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
+| `check-queue.max-load-percent` | `70` | start a queued run only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. See [Check queue](#check-queue) |
+| `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
+| `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
+| `check-queue.wait-seconds` | `900` | give up (exit 75) when a run gets no turn, or the load stays high, for this long |
 | `shell` | none | the repo's dev shell: a command prefix (`nix develop --command`, `direnv exec .`), or a mapping `enter` (the prefix), `env` (a command printing the env NUL-separated, as `env -0` does) and `key` (repo-relative files whose contents invalidate the cached env; needs `env`). See [Dev shells](#dev-shells) |
 | `review.personas` | auto | reviewer personas to run; unset selects by diff signals |
 | `review.exclude` | `[]` | personas to skip, applied after selection |
@@ -503,6 +530,9 @@ commands such as `overbridge start` and `overbridge new`. The Workspaces frame i
 clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
 and sidebar files never share a name with a workspace's.
+
+Under the list, while the [check queue](#check-queue) is busy, a `▶` row shows the running command, its
+workspace, and how long it has run, and a `⧗` row lists the workspaces waiting.
 
 The width (default 60) comes from the global config:
 

@@ -97,7 +97,8 @@ Enter plan mode. The plan has these sections:
 - **Approach**: ordered steps, riskiest first. Name the files and modules touched.
 - **Test approach**: for each criterion, the test that proves it and at what level (unit, integration,
   end to end), or why it is not worth a test. Use the repo's own commands from
-  `overbridge config get commands.test` and `commands.typecheck` (unset means the repo has none).
+  `overbridge config get commands.test` and `commands.typecheck` (unset means the repo has none), each run
+  through `overbridge check <repo> -- <command>`.
 - **Open questions**: anything you could not settle from the item.
 
 Do not start implementing. The plan ends at the user's approval, which covers the plan and its scope.

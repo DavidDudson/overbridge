@@ -101,6 +101,25 @@
           "dependentRequired": { "key": ["env"] }
         }
       ]
+    },
+    "check-queue": {
+      "description": "How `overbridge check` queues a command. Every key is optional.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max-load-percent": {
+          "description": "Start only while the 1-minute load average is under this share of the cores. Over 100 allows more load than there are cores. Default 70.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeout-seconds": { "description": "Kill the run after this long. Default 180.", "type": "integer", "minimum": 1 },
+        "stall-seconds": {
+          "description": "Kill the run once its processes have used no CPU for this long. Default 300.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "wait-seconds": { "description": "Give up waiting for a turn after this long. Default 900.", "type": "integer", "minimum": 1 }
+      }
     }
   }
 }
