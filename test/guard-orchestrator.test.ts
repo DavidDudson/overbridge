@@ -12,7 +12,7 @@ describe("orchestrator: file and other tools", () => {
     expect(reason).toContain(START_HINT);
   });
 
-  test.each(["Read", "Glob", "Grep", "LS", "WebFetch", "Agent", "Skill", "AskUserQuestion"])("allows %s", (name) => {
+  test.each(["Read", "Glob", "Grep", "LS", "WebFetch", "Agent", "Skill", "AskUserQuestion", "ListAgents", "SendMessage"])("allows %s", (name) => {
     expect(checkOrchestrator(tool(name, { file_path: "/w/ws2/app/secret" }))).toBeUndefined();
   });
 
