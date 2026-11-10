@@ -1,6 +1,5 @@
 {
   "name": "overbridge",
-  "version": "0.1.0",
   "description": "Skills for overbridge multi-repo workspaces bound to Claude sessions in zellij.",
   "author": { "name": "David Dudson" }
 }

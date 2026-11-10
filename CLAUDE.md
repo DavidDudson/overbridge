@@ -56,5 +56,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - Plugin skills in `plugin/skills/`; keep them in sync with CLI commands/flags. Skills mark extension points with
   `ext: <phase>` lines (`src/ext.ts`, `overbridge ext`); a new or renamed phase goes in the skill's Extensions
   section and the README's phase table.
+- Neither `plugin.json` has a `version`, on purpose. Claude Code then versions each plugin by its git commit, so
+  `claude plugin update` picks up every push to `main`. A fixed version makes it skip new commits until someone bumps it.
 - Review panel is a second plugin, `plugin-review/` (`overbridge-review`): `mob-review`, `review-pr`, `update-personas`,
   `persona-*`. A new persona needs a row in `mob-review`'s panel table; keep its README list in sync.
