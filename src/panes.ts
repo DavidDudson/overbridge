@@ -4,6 +4,7 @@ import { selfCommand, worktreePath, wsDir } from "./paths";
 import { loadRepoConfig } from "./project-config";
 import { getWorkspace, readState } from "./state";
 import type { PaneKind } from "./top";
+import type { ZellijExec } from "./tab";
 import { run, spawnCwd } from "./util";
 
 /**
@@ -97,6 +98,23 @@ export function togglePane(ws: string, kind: PaneKind, deps: PaneDeps = defaultD
   if (kind === "diff") args.push("--close-on-exit", "--", ...deps.self, "diff", "--ws", ws);
   else args.push(...terminalCommand(ws, deps));
   return deps.zellij(args) === undefined ? `could not open ${kind}` : undefined;
+}
+
+/**
+ * Focus the Claude pane of `tab`'s tab; false when the tab has none (then focus stays where zellij put it).
+ * Takes a `ZellijExec` so `overbridge go` can reach the session from outside it.
+ */
+export function focusClaude(tab: string, exec: ZellijExec): boolean {
+  const listed = exec(["zellij", "action", "list-panes", "--json"]);
+  let panes: ZellijPane[] = [];
+  try {
+    panes = listed.ok ? (JSON.parse(listed.stdout) as ZellijPane[]) : [];
+  } catch {
+    panes = [];
+  }
+  const claude = findPane(panes, tab, "claude");
+  if (!claude) return false;
+  return exec(["zellij", "action", "focus-pane-id", target(claude)]).ok;
 }
 
 /** Delta needs room for side-by-side; below this many columns it is turned off. */
