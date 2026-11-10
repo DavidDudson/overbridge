@@ -71,11 +71,10 @@ branch's commits off the default branch. A workspace also stays while its agent 
 idle or has ended. A claim with no PR, or a PR closed without merging, keeps the workspace. Orchestration tabs are never
 removed this way.
 
-**Seeing what was removed.** Every removal shows at the bottom of the sidebar, so none happens unseen. A yellow
-`🧹 4s removing <title>` row shows one in progress. A finished one stays for an hour and names what removed it:
-`🧹 3m merged <title>` for the merged-PR check, `exited` for an ended session, and `cleaned` for the Cleanup button.
-A failed removal shows as a red `✗ 1m failed <title>`. The sidebar shows at most three of these rows, newest first,
-and `state.json` keeps the last 20 under `cleanups`.
+**Seeing what was removed.** The bottom of the sidebar shows `🧹 next check 42s`, a countdown to the next merged-PR check.
+Below it, a yellow `🧹 removing <title>` row shows a removal in progress and a grey `🧹 removed <title>` row one that finished;
+a failed one shows red as `✗ failed <title>`. Finished rows stay until the next check, then drop off. The sidebar shows at most
+three removal rows, and `state.json` keeps the last 20 under `cleanups`.
 
 Inside a workspace (shell pane or its Claude):
 
