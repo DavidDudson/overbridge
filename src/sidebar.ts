@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userLayoutPath } from "./layout";
 import { join } from "node:path";
-import { type AgentState, glyphFor, readAgentState } from "./agent-state";
-import { createReaper } from "./auto-remove";
+import { type AgentState, glyphFor, readAgentState, UNKNOWN_GLYPH } from "./agent-state";
+import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
 import { type CleanupInFlight, cleanupRows } from "./cleanup-log";
@@ -12,13 +12,12 @@ import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
 import { ensureOrchestrationTabs } from "./orchestration-keep";
 import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-history";
-import { isRemoving, RemovalBlock, readState, type State, watchState } from "./state";
+import { isRemoving, RemovalBlock, readState, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
 import { claimSweep, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
-import { readTopCache } from "./top";
-import { sidebarLabel } from "./top";
+import { readTopCache, readTopCacheChecked, sidebarLabel } from "./top";
 import { currentTab, tabOrder } from "./tab";
-import { naturalSort, run, spawnCwd } from "./util";
+import { errorMessage, naturalSort, run, spawnCwd } from "./util";
 import { overbridgeVersion } from "./version";
 
 /** How long a held digit waits for a second one before it goes to its one-digit tab. */
@@ -60,6 +59,8 @@ export interface Entry {
   blocked?: RemovalBlock;
   /** The session ended, but uncommitted or unpushed work keeps the workspace. */
   unsaved?: boolean;
+  /** This entry could not be read: a bad cache or state record, or a reader that threw. Replaces the status line. */
+  fault?: string;
 }
 
 export { sidebarLabel, stripConventional } from "./top";
@@ -71,21 +72,60 @@ const entryFor = (tab: string, section: Section, label: string): Entry => {
   return { tab, section, glyph: glyphFor(state), state, label };
 };
 
+/** `record[key]`, or undefined when reading it throws (a getter; never from JSON, but the list must not depend on that). */
+function readProperty(record: Record<string, unknown>, key: string): unknown {
+  try {
+    return record[key];
+  } catch {
+    return undefined;
+  }
+}
+
+/** A card for an entry that could not be read: the tab name and why, no agent state. */
+const faultEntry = (tab: string, section: Section, fault: string): Entry => ({ tab, section, glyph: UNKNOWN_GLYPH, label: tab, fault });
+
+/** `build()`'s entry, or a fault card when it throws, so one bad tab never costs the whole list. */
+function guardedEntry(tab: string, section: Section, build: () => Entry): Entry {
+  try {
+    return build();
+  } catch (e) {
+    return faultEntry(tab, section, errorMessage(e));
+  }
+}
+
+/** The card for workspace `ws` whose state record is `w`: a fault card when the record or its top cache is malformed. */
+function workspaceEntry(ws: string, w: unknown): Entry {
+  const fault = workspaceFault(w);
+  if (fault) {
+    return faultEntry(ws, Section.Workspaces, fault);
+  }
+  const { removeError: error, removalBlocked: blocked } = w as WorkspaceState;
+  const { cache, error: cacheFault } = readTopCacheChecked(ws);
+  const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
+  return { ...entry, ...(cacheFault ? { fault: cacheFault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}) };
+}
+
+/** Whether `w` hides its workspace as being removed; a malformed record, or one that throws when read, never hides anything. */
+const hiddenByRemoval = (w: unknown): boolean => {
+  try {
+    return workspaceFault(w) === undefined && isRemoving(w as WorkspaceState);
+  } catch {
+    return false;
+  }
+};
+
 /**
  * The orchestration tabs, then every workspace in tab order, so the Alt+digit keys match the digits shown.
  * The generated layout opens the orchestration tabs first, so their digits come first in tab order too.
+ * Each card is built on its own: a workspace whose files are bad or whose readers throw gets a fault card.
  */
-export function entries(order: string[] = tabOrder()): Entry[] {
-  const workspaces = readState().workspaces;
-  const names = Object.keys(workspaces).filter((ws) => !isRemoving(workspaces[ws]!)).sort(naturalSort);
+export function entries(order: string[] = tabOrder(), state: State = readState()): Entry[] {
+  const workspaces: Record<string, unknown> = state.workspaces;
+  const names = Object.keys(workspaces).filter((ws) => !hiddenByRemoval(readProperty(workspaces, ws))).sort(naturalSort);
   const rank = (ws: string) => { const i = order.indexOf(ws); return i < 0 ? order.length : i; };
   return [
-    ...ORCHESTRATION_TABS.map((t) => entryFor(t.tab, Section.Orchestration, t.label)),
-    ...names.toSorted((a, b) => rank(a) - rank(b)).map((ws) => {
-      const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, readTopCache(ws)));
-      const { removeError: error, removalBlocked: blocked } = workspaces[ws]!;
-      return { ...entry, ...(error ? { error } : {}), ...(blocked ? { blocked } : {}) };
-    }),
+    ...ORCHESTRATION_TABS.map((t) => guardedEntry(t.tab, Section.Orchestration, () => entryFor(t.tab, Section.Orchestration, t.label))),
+    ...names.toSorted((a, b) => rank(a) - rank(b)).map((ws) => guardedEntry(ws, Section.Workspaces, () => workspaceEntry(ws, workspaces[ws]))),
   ];
 }
 
@@ -139,6 +179,7 @@ const BLOCK_TEXT: Record<RemovalBlock, { text: string; color: Color }> = {
   [RemovalBlock.MergedUnsaved]: { text: "merged · unsaved work", color: "yellow" },
 };
 const UNSAVED_TEXT: { text: string; color: Color } = { text: "ended · unsaved work", color: "red" };
+const FAULT_COLOR: Color = "red";
 
 /** `text` broken at spaces into lines of at most `width` columns; an over-long word is split. */
 export function wrapText(text: string, width: number): string[] {
@@ -185,7 +226,17 @@ export const entryHeights = (list: Entry[], width: number) => list.map((e, i) =>
 /** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line. */
 export function entryLines(e: Entry, index: number, selected: boolean, inner: number): string[] {
   const titles = titleRows(e, index, inner).map((l) => fit(l, inner));
-  const status = e.error ? { text: `cleanup failed: ${e.error}`, color: "red" as const } : e.blocked ? BLOCK_TEXT[e.blocked] : e.unsaved ? UNSAVED_TEXT : e.state ? STATE_TEXT[e.state] : undefined;
+  const status = e.fault
+    ? { text: `error: ${e.fault}`, color: FAULT_COLOR }
+    : e.error
+      ? { text: `cleanup failed: ${e.error}`, color: "red" as const }
+      : e.blocked
+        ? BLOCK_TEXT[e.blocked]
+        : e.unsaved
+          ? UNSAVED_TEXT
+          : e.state
+            ? STATE_TEXT[e.state]
+            : undefined;
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
   const sub = fit(`${indent}${status?.text ?? ""}`, inner);
   if (selected) return [...titles, sub].map(inverse);
@@ -206,11 +257,81 @@ export function queueRows(queue: { running?: Ticket; waiting: Ticket[] }, inner:
   return [...running, ...waiting];
 }
 
-/** Workspaces being removed in the background right now, labelled as their cards were. */
+/** Workspaces being removed in the background right now, labelled as their cards were; a malformed record is skipped. */
 export function inFlightCleanups(state: State = readState(), now = Date.now()): CleanupInFlight[] {
-  return Object.entries(state.workspaces).flatMap(([ws, w]) =>
-    w.removing && isRemoving(w, now) ? [{ label: sidebarLabel(ws, readTopCache(ws)), sinceMs: Date.parse(w.removing.since) }] : [],
-  );
+  return Object.entries(state.workspaces as Record<string, unknown>).flatMap(([ws, w]) => {
+    try {
+      if (workspaceFault(w) !== undefined) return [];
+      const record = w as WorkspaceState;
+      return record.removing && isRemoving(record, now) ? [{ label: sidebarLabel(ws, readTopCache(ws)), sinceMs: Date.parse(record.removing.since) }] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** What the sidebar reads on every poll. Injectable so a throwing reader can be tested without zellij, git or files. */
+export interface SidebarReaders {
+  tabOrder: () => string[];
+  /** Reopen a closed orchestration tab (a no-op under a user layout). */
+  keepOrchestration: (order: string[]) => void;
+  /** Start the merged-PR sweep when this sidebar's turn comes. */
+  sweep: () => void;
+  readState: (fallback: State) => { state: State; error?: string };
+  entries: (order: string[], state: State) => Entry[];
+  reap: (list: Entry[]) => ReapResult;
+  /** The rows under the divider: cleanups, then the check queue. */
+  status: (state: State, inner: number) => string[];
+  limits: () => Limits | undefined;
+}
+
+/** One poll's result. The last good one is kept, so a poll that fails keeps the list on screen. */
+export interface Model {
+  list: Entry[];
+  status: string[];
+  limits: Limits | undefined;
+  /** The last state that parsed. */
+  state: State;
+  /** The first thing that failed this poll, shown in the footer until a poll succeeds. */
+  fault?: string;
+}
+
+export const EMPTY_MODEL: Model = { list: [], status: [], limits: undefined, state: { version: 1, workspaces: {} } };
+
+const NO_REAP: ReapResult = { unsaved: new Set(), faults: new Map() };
+
+/**
+ * One poll of the sidebar. Every reader runs on its own: the first that throws is recorded as the model's `fault`
+ * and its part keeps `last`'s value (the list) or an empty one (status rows, limits), so the pane keeps drawing.
+ * A state file that will not parse keeps the last good state and names the file.
+ */
+export function gather(readers: SidebarReaders, inner: number, last: Model): Model {
+  const faults: string[] = [];
+  const attempt = <T>(what: string, fn: () => T, fallback: T): T => {
+    try {
+      return fn();
+    } catch (e) {
+      faults.push(`${what}: ${errorMessage(e)}`);
+      return fallback;
+    }
+  };
+  const order = attempt("zellij tabs", readers.tabOrder, []);
+  attempt("orchestration tabs", () => readers.keepOrchestration(order), undefined);
+  attempt("merge sweep", readers.sweep, undefined);
+  const read = attempt("state", () => readers.readState(last.state), { state: last.state });
+  if (read.error) {
+    faults.push(read.error);
+  }
+  const state = read.error ? last.state : read.state;
+  const listed = attempt("workspace list", () => readers.entries(order, state), last.list);
+  const reaped = attempt("auto-remove", () => readers.reap(listed), NO_REAP);
+  const list = listed.map((e) => {
+    const fault = reaped.faults.get(e.tab);
+    return fault ? { ...e, fault } : reaped.unsaved.has(e.tab) ? { ...e, unsaved: true } : e;
+  });
+  const status = attempt("status rows", () => readers.status(state, inner), []);
+  const limits = attempt("limits", readers.limits, undefined);
+  return { list, status, limits, state, ...(faults[0] ? { fault: faults[0] } : {}) };
 }
 
 /**
@@ -524,7 +645,18 @@ export async function sidebar(wsOpt?: string) {
   // Read once at start, so a pane left running across an upgrade shows the version it runs.
   const version = overbridgeVersion();
   const userLayout = existsSync(userLayoutPath());
-  const reap = createReaper();
+  const readers: SidebarReaders = {
+    tabOrder,
+    // a user layout decides its own tabs, so only the generated one gets its orchestration tabs back
+    keepOrchestration: (order) => { if (!userLayout) ensureOrchestrationTabs(order); },
+    sweep: () => { if (claimSweep()) startSweep(); },
+    readState: tryReadState,
+    entries,
+    reap: createReaper(),
+    status: (state, inner) => [...cleanupRows(inFlightCleanups(state), state.cleanups ?? [], inner, Date.now(), state.mergeSweepAt), ...queueRows(readQueue(), inner)],
+    limits: readLimits,
+  };
+  let last: Model = EMPTY_MODEL;
   let offset = 0;
   let footer: Footer = LEGEND_FOOTER;
   let statusRowCount = 0;
@@ -535,48 +667,61 @@ export async function sidebar(wsOpt?: string) {
     pending = digit;
     digitTimer = digit ? setTimeout(commit, DIGIT_MS) : undefined;
   };
-  const commit = () => {
-    const list = entries();
-    const target = commitDigit(pending, list, self, currentTab());
-    hold("");
-    if (target !== undefined) {
-      visitTab(self, list[target]!.tab);
+  /** Run `fn`; when it throws, the error goes to the footer instead of ending the pane. */
+  const guarded = (what: string, fn: () => void) => {
+    try {
+      fn();
+    } catch (e) {
+      last = { ...last, fault: `${what}: ${errorMessage(e)}` };
     }
+  };
+  const commit = () => {
+    guarded("go to tab", () => {
+      const list = last.list;
+      const target = commitDigit(pending, list, self, currentTab());
+      hold("");
+      if (target !== undefined) {
+        visitTab(self, list[target]!.tab);
+      }
+    });
     draw();
   };
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
+  /** The footer to draw: the user's prompt or message first, else this poll's fault, else the legend. */
+  const footerToDraw = (): Footer => (footer.kind === FooterKind.Legend && last.fault ? { kind: FooterKind.Error, message: last.fault } : footer);
+  /**
+   * Gather, then paint. Neither may end the pane: a failed gather keeps the last good model and names the failure
+   * in the footer; a failed paint (which should not happen) paints the failure alone. The next poll tries again.
+   */
   const draw = () => {
-    const order = tabOrder();
-    // a user layout decides its own tabs, so only the generated one gets its orchestration tabs back
-    if (!userLayout) {
-      ensureOrchestrationTabs(order);
-    }
-    if (claimSweep()) {
-      startSweep();
-    }
-    const listed = entries(order);
-    const unsaved = reap(listed);
-    const list = listed.map((e) => (unsaved.has(e.tab) ? { ...e, unsaved: true } : e));
-    const current = Math.max(0, list.findIndex((e) => e.tab === self));
     const { height, width } = size();
-    const heights = entryHeights(list, width);
-    const pinned = pinnedCount(list);
-    const workspaceHeights = heights.slice(pinned);
     const inner = Math.max(0, width - 4);
-    const state = readState();
-    const status = [...cleanupRows(inFlightCleanups(state), state.cleanups ?? [], inner, Date.now(), state.mergeSweepAt), ...queueRows(readQueue(), inner)];
-    statusRowCount = status.length;
-    const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount);
-    const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;
-    offset = clampScroll(scrolled, workspaceHeights, rows);
-    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits(), Date.now(), version, status, footer, pending), height, width));
+    try {
+      last = gather(readers, inner, last);
+    } catch (e) {
+      last = { ...last, fault: `sidebar: ${errorMessage(e)}` };
+    }
+    try {
+      const { list, status } = last;
+      const current = Math.max(0, list.findIndex((e) => e.tab === self));
+      const heights = entryHeights(list, width);
+      const pinned = pinnedCount(list);
+      const workspaceHeights = heights.slice(pinned);
+      statusRowCount = status.length;
+      const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount);
+      const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;
+      offset = clampScroll(scrolled, workspaceHeights, rows);
+      process.stdout.write(frame(renderSidebar(list, current, offset, height, width, last.limits, Date.now(), version, status, footerToDraw(), pending), height, width));
+    } catch (e) {
+      process.stdout.write(frame([colorize(fit(`sidebar: ${errorMessage(e)}`, width), FAULT_COLOR)], height, width));
+    }
   };
   const show = (next: Footer) => {
     footer = next;
     draw();
   };
   const submit = (prompt: Prompt) => {
-    const plan = parseStart(prompt, Object.keys(readState().workspaces[self]?.repos ?? {}));
+    const plan = parseStart(prompt, Object.keys(last.state.workspaces[self]?.repos ?? {}));
     switch (plan.kind) {
       case StartPlanKind.AskRepo:
         return show({ kind: FooterKind.Prompt, prompt: { text: "", id: plan.id } });
@@ -627,28 +772,31 @@ export async function sidebar(wsOpt?: string) {
     process.stdin.resume();
     process.stdin.on("data", (buf) => {
       for (const input of decodeInput(buf.toString())) {
-        if (footerTakes(input)) {
-          hold("");
-          continue;
-        }
         if (input.kind === "key" && (input.key === "q" || input.key === "ctrl-c")) return quit();
-        if (input.kind === "key" && input.key === "n") {
-          hold("");
-          next(self);
-          continue;
-        }
-        const list = entries();
-        const current = list.findIndex((e) => e.tab === self);
-        const { height, width } = size();
-        const heights = entryHeights(list, width);
-        const pinned = pinnedCount(list);
-        const step = stepFor(input, current, offset, heights, bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount), pinned, pending);
-        hold(step.pending);
-        if (step.travel !== undefined) {
-          travelTab(self, step.travel, list);
-        } else if (step.target !== undefined) {
-          visitTab(self, list[step.target]!.tab);
-        }
+        guarded("key", () => {
+          if (footerTakes(input)) {
+            hold("");
+            return;
+          }
+          if (input.kind === "key" && input.key === "n") {
+            hold("");
+            next(self);
+            return;
+          }
+          // the list on screen, so a click lands on the card the user saw
+          const list = last.list;
+          const current = list.findIndex((e) => e.tab === self);
+          const { height, width } = size();
+          const heights = entryHeights(list, width);
+          const pinned = pinnedCount(list);
+          const step = stepFor(input, current, offset, heights, bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount), pinned, pending);
+          hold(step.pending);
+          if (step.travel !== undefined) {
+            travelTab(self, step.travel, list);
+          } else if (step.target !== undefined) {
+            visitTab(self, list[step.target]!.tab);
+          }
+        });
       }
       draw();
     });

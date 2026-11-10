@@ -4,7 +4,7 @@ import type { CleanupCause, CleanupRecord } from "./cleanup-log";
 import { metaDir } from "./paths";
 import { pidAlive } from "./proc";
 import { type Cover, overlaps } from "./stack";
-import { fail } from "./util";
+import { describeValue, errorMessage, fail, isRecord } from "./util";
 
 export type Claim = { branch?: string; pr?: number };
 /** A background removal in flight: when it started, what started it and, once spawned, the worker's pid. */
@@ -45,6 +45,37 @@ export function readState(): State {
     if (e.code === "ENOENT") return { version: 1, workspaces: {} };
     throw e;
   }
+}
+
+/**
+ * `readState` for a pane that must keep running: the state, or `fallback` and why when the file is unreadable,
+ * not JSON, or has no `workspaces` mapping. Writers keep using `readState`, so a file `withState` cannot parse is
+ * never overwritten.
+ */
+export function tryReadState(fallback: State = { version: 1, workspaces: {} }): { state: State; error?: string } {
+  let state: unknown;
+  try {
+    state = readState();
+  } catch (e) {
+    return { state: fallback, error: `${STATE_FILE}: ${errorMessage(e)}` };
+  }
+  if (!isRecord(state)) return { state: fallback, error: `${STATE_FILE}: expected a mapping, got ${describeValue(state)}` };
+  if (!isRecord(state.workspaces)) return { state: fallback, error: `${STATE_FILE}: workspaces is ${describeValue(state.workspaces)}, not a mapping` };
+  return { state: state as State };
+}
+
+/**
+ * Why one workspace record in state cannot be trusted, or undefined when its shape is right. A record a hand edit
+ * or a half-written file left malformed shows as an error on its own sidebar card instead of throwing in every reader.
+ */
+export function workspaceFault(w: unknown): string | undefined {
+  if (!isRecord(w)) return `state record is ${describeValue(w)}, not a mapping`;
+  if (!isRecord(w.repos)) return `state record has ${w.repos === undefined ? "no repos" : `repos as ${describeValue(w.repos)}`}`;
+  if (w.removing !== undefined) {
+    if (!isRecord(w.removing)) return `state record has removing as ${describeValue(w.removing)}`;
+    if (typeof w.removing.since !== "string" || Number.isNaN(Date.parse(w.removing.since))) return "state record's removing has no valid since";
+  }
+  return undefined;
 }
 
 function writeState(s: State) {

@@ -44,6 +44,11 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   A session the user exits on purpose (`endedForGood`, reason `prompt_input_exit`) also makes a workspace cleanable.
   Each sidebar's poll runs `createReaper` (`src/auto-remove.ts`), which calls `beginRemoval` with `Landing.IfFocused`
   once git is clean, or marks the card `ended · unsaved work`.
+  Every sidebar card is its own failure domain: `entries` builds each card in a guard (`workspaceFault`, `readTopCacheChecked`),
+  the reaper reports a throw per workspace (`ReapResult.faults`), and the pane's poll is `gather` over injectable `SidebarReaders`,
+  keeping the last good `Model` and putting the first failure in the footer. The panes read state through `tryReadState`;
+  writers keep `readState`, so a file `withState` cannot parse is never overwritten. A reader that can be fed a bad file must
+  report, not throw.
   Once every claimed PR has merged (`TopCache.merged`, the PR head commits), `src/merge-sweep.ts` (`overbridge top sweep`) removes the workspace
   through `beginRemoval` with `Landing.IfFocused`, after `mergedClean` checks that each HEAD is its PR head. A squash merge
   leaves no remote branch holding those commits, so `hasUnpushed` cannot do that check. Unsaved work sets `removalBlocked`, which the sidebar card shows.

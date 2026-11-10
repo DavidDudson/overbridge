@@ -12,7 +12,7 @@ import { getWorkspace, readState } from "./state";
 import { boxBottom, boxRow, boxTop, type Color, COLORS, colorize, fit, inverse, textWidth } from "./term";
 import { parseUnresolved, REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses, threadsCommand } from "./reviewers";
 import { stackOf, localStacks } from "./stack";
-import { run } from "./util";
+import { describeValue, errorMessage, isRecord, run } from "./util";
 
 const safeStacks = (repo: string) => {
   try {
@@ -205,13 +205,42 @@ export const IDE_COMMANDS: Record<Ide, string> = { vscode: "code", zed: "zed", w
 
 const cacheFile = (ws: string) => join(metaDir(), "top", `${ws}.json`);
 
-export function readTopCache(ws: string): TopCache {
-  try {
-    return JSON.parse(readFileSync(cacheFile(ws), "utf8"));
-  } catch {
-    return { links: [], at: 0 };
-  }
+const EMPTY_CACHE: TopCache = { links: [], at: 0 };
+
+/** Why a parsed cache file is not a `TopCache`, or undefined when every field the panes read has the right type. */
+export function topCacheFault(raw: unknown): string | undefined {
+  if (!isRecord(raw)) return `expected a mapping, got ${describeValue(raw)}`;
+  const wrong = (field: string, ok: boolean) => (raw[field] === undefined || ok ? undefined : `${field} is ${describeValue(raw[field])}`);
+  return (
+    wrong("headline", typeof raw.headline === "string") ??
+    wrong("title", typeof raw.title === "string") ??
+    wrong("message", typeof raw.message === "string") ??
+    wrong("prsOpen", typeof raw.prsOpen === "boolean") ??
+    wrong("at", typeof raw.at === "number") ??
+    (Array.isArray(raw.links) ? undefined : `links is ${describeValue(raw.links)}`) ??
+    wrong("merged", isRecord(raw.merged)) ??
+    wrong("buttons", isRecord(raw.buttons))
+  );
 }
+
+/**
+ * The cache file, checked: a missing file is the empty cache; one that is unreadable, not JSON, or misshapen is
+ * the empty cache plus why, so the sidebar can show the error on that workspace's card alone.
+ */
+export function readTopCacheChecked(ws: string): { cache: TopCache; error?: string } {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(cacheFile(ws), "utf8"));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { cache: EMPTY_CACHE };
+    return { cache: EMPTY_CACHE, error: `top cache: ${errorMessage(e)}` };
+  }
+  const fault = topCacheFault(raw);
+  return fault ? { cache: EMPTY_CACHE, error: `top cache: ${fault}` } : { cache: raw as TopCache };
+}
+
+/** The cache file as a `TopCache`; the empty cache when it is missing, unreadable or misshapen. */
+export const readTopCache = (ws: string): TopCache => readTopCacheChecked(ws).cache;
 
 function writeTopCache(ws: string, cache: TopCache) {
   mkdirSync(join(metaDir(), "top"), { recursive: true });

@@ -1,6 +1,7 @@
 import { type State, withState } from "./state";
 import { MERGE_SWEEP_MS } from "./sweep-trigger";
 import { type Color, colorize, fit } from "./term";
+import { isRecord } from "./util";
 
 /** How a finished workspace removal ended. */
 export const CleanupOutcome = { Removed: "removed", Failed: "failed" } as const;
@@ -45,6 +46,9 @@ export function recordCleanup(record: CleanupRecord) {
 export const secondsToCheck = (sweepAt: number | undefined, now: number, intervalMs = MERGE_SWEEP_MS): number =>
   Math.max(0, Math.ceil((intervalMs - (now - (sweepAt ?? 0))) / 1000));
 
+/** Whether a record from state has the fields a row needs; a hand edit or a half-written file can leave one without. */
+export const isCleanupRecord = (r: unknown): r is CleanupRecord => isRecord(r) && typeof r.label === "string" && typeof r.atMs === "number" && Number.isFinite(r.atMs);
+
 const rowStyle = (r: CleanupRecord): { glyph: string; word: string; color: Color } =>
   r.outcome === CleanupOutcome.Failed ? { glyph: "✗", word: "failed", color: "red" } : { glyph: "🧹", word: "removed", color: "grey" };
 
@@ -52,10 +56,11 @@ const rowStyle = (r: CleanupRecord): { glyph: string; word: string; color: Color
  * The cleanup rows under the sidebar's divider, each `inner` columns wide: a countdown to the next check, then the removals in flight, then
  * those finished since the last check (`sweepAt`), which drop off when the next check runs. At most `CLEANUP_ROWS` removal rows.
  */
-export function cleanupRows(inFlight: readonly CleanupInFlight[], log: readonly CleanupRecord[], inner: number, now = Date.now(), sweepAt?: number): string[] {
+export function cleanupRows(inFlight: readonly CleanupInFlight[], log: readonly unknown[], inner: number, now = Date.now(), sweepAt?: number): string[] {
   const timer = colorize(fit(`🧹 next check ${secondsToCheck(sweepAt, now)}s`, inner), "grey");
   const running = inFlight.map((r) => colorize(fit(`🧹 removing ${r.label}`, inner), "yellow"));
   const finished = log
+    .filter(isCleanupRecord)
     .filter((r) => r.atMs >= (sweepAt ?? 0))
     .toSorted((a, b) => b.atMs - a.atMs)
     .map((r) => {
