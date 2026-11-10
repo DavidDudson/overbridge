@@ -84,7 +84,7 @@ overbridge config get commands.typecheck
 overbridge config get commands.test
 ```
 
-Run each through the repo's dev shell: `overbridge shell <repo> -- <command>` (it runs the command as it is when the repo declares no `shell`).
+Run each through the check queue: `overbridge check <repo> -- <command>`. It runs one at a time across workspaces, in the repo's dev shell. Exit 124 means it went over its time limit, 137 that it stopped using CPU, and 75 that no turn came: report it rather than retrying in a loop.
 
 An unset command means the repo has none. Complete the merge with `git commit` (the default merge
 message is fine, with no AI attribution), then push with a plain `git push`. If the push is rejected,

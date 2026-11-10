@@ -6,7 +6,7 @@ import { agentStateFile, glyphFor, readAgentState, UNKNOWN_GLYPH } from "../src/
 import { sidebarWidth } from "../src/config";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { clampScroll, type Entry, entryAt, entryLines, renderSidebar, scrollFor, Section, bodyRowsFor, pinnedCount, pinnedRowsFor, sidebarLabel, stripConventional, switchTab, targetFor, wrapText } from "../src/sidebar";
+import { clampScroll, type Entry, entryAt, entryLines, queueRows, renderSidebar, scrollFor, Section, bodyRowsFor, pinnedCount, pinnedRowsFor, sidebarLabel, stripConventional, switchTab, targetFor, wrapText } from "../src/sidebar";
 import { type Input, textWidth } from "../src/term";
 
 const entry = (tab: string, glyph = "○", label = tab, section: Section = Section.Workspaces): Entry => ({ tab, section, glyph, label });
@@ -252,5 +252,27 @@ describe("sidebarLabel", () => {
     expect(sidebarLabel("w1", {})).toBe("w1");
     expect(sidebarLabel("w1", { headline: "12" })).toBe("w1");
     expect(stripConventional("fix:")).toBe("fix:");
+  });
+});
+
+describe("check queue rows", () => {
+  const plain = (rows: string[]) => rows.map((r) => r.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
+  const t = (ws: string, extra = {}) => ({ pid: 1, ws, repo: "app", command: "just test", queuedAtMs: 0, ...extra });
+
+  test("nothing when the queue is empty", () => {
+    expect(queueRows({ waiting: [] }, 30, 0)).toEqual([]);
+  });
+
+  test("the running command with its time, then who waits", () => {
+    const rows = queueRows({ running: t("67", { runPid: 9, runningSinceMs: 0 }), waiting: [t("68"), t("70")] }, 40, 83_000);
+    expect(plain(rows)).toEqual(["▶ 67 1m23s just test", "⧗ 2 waiting: 68 70"]);
+  });
+
+  test("the rows take space from the list, so the frame keeps its height", () => {
+    const queue = queueRows({ running: t("67", { runPid: 9, runningSinceMs: 0 }), waiting: [t("68")] }, 26, 5_000);
+    const rows = renderSidebar(list, 0, 0, 20, 30, undefined, 0, "", queue);
+    expect(rows).toHaveLength(20);
+    expect(rows.join("\n")).toContain("▶ 67 5s just test");
+    expect(rows.findIndex((r) => r.includes("▶"))).toBeGreaterThan(rows.findIndex((r) => r.includes("├")));
   });
 });

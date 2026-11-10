@@ -94,10 +94,11 @@ function devShellSection(ws: string): string {
   return `
 ## Dev shells
 
-This workspace holds several repos, so you run in none of their dev shells. Run a repo's own tools and its
-\`commands.*\` (\`overbridge config get commands.test <repo-dir>\`) through
-\`overbridge shell <repo> -- <cmd>\`, e.g. \`overbridge shell ${withShell[0]} -- <cmd>\`. Repos with a dev shell: ${withShell.join(", ")}.
-A repo without one runs the command as it is, so using \`overbridge shell\` is always safe.
+This workspace holds several repos, so you run in none of their dev shells. Run a repo's own tools through
+\`overbridge shell <repo> -- <cmd>\`, such as \`overbridge shell ${withShell[0]} -- <cmd>\`. Run its lint, typecheck, test
+and build commands (\`overbridge config get commands.test <repo-dir>\`) through \`overbridge check <repo> -- <cmd>\`,
+which uses the same shell. Repos with a dev shell: ${withShell.join(", ")}.
+A repo without one runs the command as it is, so both are always safe to use.
 `;
 }
 
@@ -123,6 +124,9 @@ access to other workspaces and direct branch switching. Do not try to work aroun
 - Stacked PRs (\`gh stack\`): a claim covers every layer of its stack. \`gh stack init/add/up/down/top/bottom\`,
   \`push\`, \`submit\`, \`rebase\` and \`sync\` work as normal; pull an existing stack with \`overbridge checkout <repo> #<pr>\`
   (never \`gh stack checkout\` or \`gh stack trunk\`). Run \`overbridge pr <repo>\` after moving between layers or submitting.
+- Run lint, typecheck, test, and build commands through \`overbridge check <repo> -- <cmd>\`. Only one runs at a time
+  across all workspaces. It runs in the repo's dev shell once the machine's load allows. overbridge kills a run that
+  goes over its time limit (exit 124) or stops using CPU (exit 137). If no turn comes in time, it gives up with exit 75.
 ${devShells}
 ## GitHub repos
 

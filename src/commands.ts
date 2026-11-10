@@ -8,10 +8,11 @@ import { type OrchestrationTab } from "./orchestration";
 import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
 import { scaffold, scaffoldOrchestration } from "./scaffold";
+import { runCheck } from "./check-queue";
 import { shellInvocation } from "./shell";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
 import { type Claim, claimOwner, getWorkspace, readState, withState } from "./state";
-import { exec, fail, log, must, naturalSort, run } from "./util";
+import { exec, fail, log, must, naturalSort, run, shellQuote } from "./util";
 
 const SESSION = () => envVar("SESSION") ?? "workspaces";
 
@@ -347,14 +348,38 @@ export function claudeOrchestration(t: OrchestrationTab, extra: string[]) {
 }
 
 /** `overbridge shell <repo> -- <cmd>`: run `cmd` in the repo's dev shell, or as it is when the repo has none. */
-export function shell(repo: string, cmd: string[], wsOpt?: string) {
-  const ws = requireWs(wsOpt);
+/** `cmd` in `repo`'s dev shell, run from the cwd when it is inside the worktree, else from the worktree. */
+function inRepoShell(ws: string, repo: string, cmd: string[]) {
   if (!getWorkspace(readState(), ws).repos[repo]) fail(`${repo} is not in ${ws}`);
-  if (!cmd.length) fail("usage: overbridge shell <repo> [--ws name] -- <cmd>...");
   const dir = worktreePath(ws, repo);
   const here = process.cwd();
-  const inv = shellInvocation(repo, dir, loadRepoConfig(dir, repo).shell, cmd, isInside(here, dir) ? here : dir);
+  const config = loadRepoConfig(dir, repo);
+  return { config, inv: shellInvocation(repo, dir, config.shell, cmd, isInside(here, dir) ? here : dir) };
+}
+
+export function shell(repo: string, cmd: string[], wsOpt?: string) {
+  const ws = requireWs(wsOpt);
+  if (!cmd.length) fail("usage: overbridge shell <repo> [--ws name] -- <cmd>...");
+  const { inv } = inRepoShell(ws, repo, cmd);
   process.exit(exec(inv.cmd, { cwd: inv.cwd, env: inv.env }));
+}
+
+/**
+ * `overbridge check [repo] -- <cmd>`: run `cmd` in the repo's dev shell through the shared check queue. The repo
+ * defaults to the one the cwd is in, then to the workspace's only repo.
+ */
+export async function check(repoArg: string | undefined, cmd: string[], wsOpt?: string, timeoutSeconds?: number): Promise<number> {
+  const ws = requireWs(wsOpt);
+  const repos = Object.keys(getWorkspace(readState(), ws).repos);
+  const here = repoOf(process.cwd());
+  const repo =
+    repoArg ??
+    (here && repos.includes(here) ? here : undefined) ??
+    (repos.length === 1 ? repos[0] : undefined) ??
+    fail(`name the repo to check in: overbridge check <repo> -- <cmd> (${ws} holds ${repos.join(", ") || "no repos"})`);
+  const { config, inv } = inRepoShell(ws, repo, cmd);
+  const settings = timeoutSeconds === undefined ? config.checkQueue : { ...config.checkQueue, timeoutSeconds };
+  return runCheck(inv, { ws, repo, command: cmd.map(shellQuote).join(" ") }, settings);
 }
 
 export function whoami() {

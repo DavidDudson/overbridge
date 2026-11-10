@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AgentState, glyphFor, readAgentState } from "./agent-state";
 import { requireWs } from "./commands";
+import { readQueue, type Ticket } from "./check-queue";
 import { metaDir } from "./paths";
 import { type Limits, limitRows, readLimits } from "./limits";
 import { next } from "./next";
@@ -75,8 +76,12 @@ export const pinnedCount = (list: Entry[]) => list.filter((e) => e.section === S
 /** Rows the Orchestration frame takes: its two borders and its cards, or none when it is empty. */
 export const pinnedRowsFor = (heights: number[], pinned: number) => (pinned ? 2 + heights.slice(0, pinned).reduce((n, h) => n + h, 0) : 0);
 
-/** Rows between the Workspaces frame's top border and its divider, for a pane `height` rows tall. */
-export const bodyRowsFor = (height: number, pinnedRows = 0) => Math.max(1, height - pinnedRows - CHROME_TOP - CHROME_BOTTOM);
+/**
+ * Rows between the Workspaces frame's top border and its divider, for a pane `height` rows tall, after the
+ * Orchestration frame and the check queue rows under the divider.
+ */
+export const bodyRowsFor = (height: number, pinnedRows = 0, queueRowCount = 0) =>
+  Math.max(1, height - pinnedRows - CHROME_TOP - CHROME_BOTTOM - queueRowCount);
 
 /** The scroll offset closest to `offset` that shows entry `selected`, given each entry's row `heights`. */
 export function scrollFor(selected: number, offset: number, heights: number[], rows: number): number {
@@ -163,18 +168,32 @@ export function entryLines(e: Entry, index: number, selected: boolean, inner: nu
   return [...titles, status ? colorize(sub, status.color) : sub];
 }
 
+const elapsed = (sinceMs: number, now: number) => {
+  const secs = Math.max(0, Math.round((now - sinceMs) / 1000));
+  return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${String(secs % 60).padStart(2, "0")}s`;
+};
+
+/** The check queue under the divider: the running command and how many wait behind it; none when it is empty. */
+export function queueRows(queue: { running?: Ticket; waiting: Ticket[] }, inner: number, now = Date.now()): string[] {
+  const running = queue.running
+    ? [colorize(fit(`▶ ${queue.running.ws} ${elapsed(queue.running.runningSinceMs ?? now, now)} ${queue.running.command}`, inner), "blue")]
+    : [];
+  const waiting = queue.waiting.length ? [dim(fit(`⧗ ${queue.waiting.length} waiting: ${queue.waiting.map((t) => t.ws).join(" ")}`, inner))] : [];
+  return [...running, ...waiting];
+}
+
 /**
  * The whole sidebar as `height` rows of `width` columns. A rounded frame titled "Orchestration" holds a card per
  * orchestration tab; below it a frame titled "Workspaces" holds a card per workspace (title wraps), scrolled by
- * `offset` (an index into the workspaces), then a divider, the usage limits and the key legend, with `version`
- * set into the bottom border. `current` indexes the whole list.
+ * `offset` (an index into the workspaces), then a divider, the `queue` rows, the usage limits and the key legend,
+ * with `version` set into the bottom border. `current` indexes the whole list.
  */
-export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = ""): string[] {
+export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = "", queue: string[] = []): string[] {
   const inner = Math.max(0, width - 4);
   const pinned = pinnedCount(list);
   const cards = (from: number, to: number) => list.slice(from, to).flatMap((e, i) => entryLines(e, from + i, from + i === current, inner));
   const pinnedFrame = pinned ? [boxTop("Orchestration", width), ...cards(0, pinned).map(boxRow), boxBottom(width)] : [];
-  const bodyRows = Math.max(0, height - pinnedFrame.length - CHROME_TOP - CHROME_BOTTOM);
+  const bodyRows = Math.max(0, height - pinnedFrame.length - CHROME_TOP - CHROME_BOTTOM - queue.length);
   const visible = cards(pinned + offset, list.length).slice(0, bodyRows);
   const body = [...visible, ...Array<string>(bodyRows - visible.length).fill(" ".repeat(inner))];
   return [
@@ -182,6 +201,7 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
     boxTop("Workspaces", width),
     ...body.slice(0, bodyRows).map(boxRow),
     boxDivider(width),
+    ...queue.map(boxRow),
     ...limitRows(limits, inner, now).map(boxRow),
     boxRow(dim(fit(LEGEND, inner))),
     boxBottom(width, version, "grey"),
@@ -261,6 +281,7 @@ export async function sidebar(wsOpt?: string) {
   // Read once at start, so a pane left running across an upgrade shows the version it runs.
   const version = overbridgeVersion();
   let offset = 0;
+  let queueRowCount = 0;
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
   const draw = () => {
     const list = entries();
@@ -269,10 +290,12 @@ export async function sidebar(wsOpt?: string) {
     const heights = entryHeights(list, width);
     const pinned = pinnedCount(list);
     const workspaceHeights = heights.slice(pinned);
-    const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned));
+    const queue = queueRows(readQueue(), Math.max(0, width - 4));
+    queueRowCount = queue.length;
+    const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), queueRowCount);
     const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;
     offset = clampScroll(scrolled, workspaceHeights, rows);
-    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits(), Date.now(), version), height, width));
+    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits(), Date.now(), version, queue), height, width));
   };
 
   await new Promise<void>((resolve) => {
@@ -298,7 +321,7 @@ export async function sidebar(wsOpt?: string) {
         const { height, width } = size();
         const heights = entryHeights(list, width);
         const pinned = pinnedCount(list);
-        const target = targetFor(input, current, offset, heights, bodyRowsFor(height, pinnedRowsFor(heights, pinned)), pinned);
+        const target = targetFor(input, current, offset, heights, bodyRowsFor(height, pinnedRowsFor(heights, pinned), queueRowCount), pinned);
         if (target !== undefined) {
           switchTab(list[target]!.tab);
         }
