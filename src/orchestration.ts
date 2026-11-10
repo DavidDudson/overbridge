@@ -16,3 +16,10 @@ export interface OrchestrationTab {
 export const ORCHESTRATION_TABS: readonly OrchestrationTab[] = [{ tab: "@root", label: "overbridge root", dir: root }];
 
 export const orchestrationTab = (tab: string): OrchestrationTab | undefined => ORCHESTRATION_TABS.find((t) => t.tab === tab);
+
+/** Whether `name` is an orchestration tab, which no removal path may touch. */
+export const isOrchestrationTab = (name: string): boolean => orchestrationTab(name) !== undefined;
+
+/** Why `name` can't be removed, for every removal path to report the same way. */
+export const orchestrationRemoveMessage = (name: string) =>
+  `${name} is an orchestration tab, which always stays open; it can't be removed or cleaned up`;

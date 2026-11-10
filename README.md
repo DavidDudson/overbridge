@@ -19,6 +19,9 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   its own, no raw `git switch`/`checkout <branch>`/`gh pr checkout`/`gh stack checkout`/
   `gh stack trunk`/`git worktree`,
   no workspace admin commands.
+- **Trusted folders.** overbridge marks each workspace folder it creates as trusted in Claude's `~/.claude.json`
+  (`$CLAUDE_CONFIG_DIR/.claude.json` when set), so a session started there skips the "trust this folder" prompt.
+  `overbridge rm` removes the entry again. Folders made by hand under the overbridge root still prompt.
 - **Zellij tabs.** `overbridge up` opens a session whose first tab is the orchestration tab. It runs
   Claude in the overbridge root without the workspace guard, for work that spans workspaces, such as
   filing issues or starting workspaces. After it comes one tab per workspace: a sidebar down the left,
@@ -538,6 +541,13 @@ clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to t
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
 and sidebar files never share a name with a workspace's.
 
+An orchestration tab always stays open. `overbridge rm @root` refuses it, and Cleanup never offers it.
+When its Claude session ends, a fresh one starts in the same pane; a session that keeps exiting within
+a few seconds waits a little longer each time (up to 30s). When the tab is closed, the next sidebar poll
+opens it again at the front and returns focus to the tab you were on. A lock in
+`<meta>/orchestration/@root.reopen.lock` makes sure only one sidebar reopens it. A user layout
+(`layouts/overbridge.kdl`) decides its own tabs, so nothing is reopened when one exists.
+
 Under the list, while the [check queue](#check-queue) is busy, a `▶` row shows the running command, its
 workspace, and how long it has run, and a `⧗` row lists the workspaces waiting.
 
@@ -548,6 +558,12 @@ The width (default 60) comes from the global config:
 [sidebar]
 width = 60    # 12 to 200
 ```
+
+`s` opens a one-line prompt at the foot of the sidebar. Type `<repo> <id>`, such as `overbridge 79` or
+`web-monorepo ENG-123`. If the tab's workspace holds one repo, the id alone is enough; otherwise the prompt asks for
+the repo next. Enter runs `overbridge start`, which opens the item's workspace in a new tab, or switches to its tab if
+it already has one. Esc cancels. While the prompt is open, every key goes into it. If the start fails (unknown repo,
+item not found, or a refused claim), the footer shows the error until you press another key.
 
 At the foot sit Claude's usage limits (Hourly = 5-hour window, Weekly), coloured green, yellow or red by
 projected usage at reset, and a key legend. Claude's statusline script writes them to

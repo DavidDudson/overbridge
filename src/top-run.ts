@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { AppStatus, logPath, openBrowser, startApp, stopApp, waitReady } from "./apps";
 import { requireWs } from "./commands";
+import { isOrchestrationTab, orchestrationRemoveMessage } from "./orchestration";
 import { root, selfCommand } from "./paths";
 import { togglePane } from "./panes";
 import { mergePr, setReady } from "./pr-actions";
@@ -26,6 +27,9 @@ export function topRefresh(wsOpt?: string) {
  * (which itself refuses uncommitted changes) and closes this tab. Returns the message to show.
  */
 function wipe(ws: string, apps: TopApp[]): string | undefined {
+  if (isOrchestrationTab(ws)) {
+    return orchestrationRemoveMessage(ws);
+  }
   refreshTop(ws);
   if (!cleanable(ws)) return `${ws} is no longer clean (empty agent or open PR, nothing uncommitted or unpushed); not wiping`;
   try {

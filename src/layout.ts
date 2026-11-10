@@ -106,6 +106,15 @@ ${tabKdl(ws, self, opts)}
 `;
 }
 
+/** A layout holding just orchestration tab `t`, for reopening it with `zellij action new-tab --layout`. */
+export function newOrchestrationTabKdl(t: OrchestrationTab, self: string[], opts: Omit<TabOptions, "prompt" | "resume"> = {}): string {
+  return `layout {
+${TAB_TEMPLATE}
+${orchestrationTabKdl(t, self, { ...opts, focus: true })}
+}
+`;
+}
+
 /** Zellij's config dir: `$ZELLIJ_CONFIG_DIR`, else `$XDG_CONFIG_HOME/zellij`, else `~/.config/zellij`. */
 export function zellijConfigDir(env: Record<string, string | undefined> = process.env, home = homedir()): string {
   if (env.ZELLIJ_CONFIG_DIR) return env.ZELLIJ_CONFIG_DIR;
