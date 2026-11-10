@@ -42,7 +42,10 @@ for the PR body's summary, and for the check in step 3 that the work has not out
   ```
   Run a single file or project before the whole suite; run the whole suite once at the end
   without asking.
-  Run each through the repo's dev shell: `overbridge shell <repo> -- <command>` (it runs the command as it is when the repo declares no `shell`).
+  Run `test`, `typecheck` and `lint` through the check queue: `overbridge check <repo> -- <command>`. It runs one at a
+  time across workspaces, in the repo's dev shell. Run `format` through `overbridge shell <repo> -- <command>`.
+  Exit 124 means a check went over its time limit, 137 that it stopped using CPU, and 75 that no turn came: report
+  it rather than retrying in a loop.
 - If the work shows the plan was wrong, re-plan in place and carry on. Stop only when the item has
   outgrown its scope (it now touches work the scope check would have called a `SPLIT`): put that to the
   user and wait.

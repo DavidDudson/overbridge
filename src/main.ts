@@ -45,7 +45,11 @@ Workspaces
   overbridge add <repo> [--ws name]             add a repo worktree to a workspace
   overbridge shell <repo> [--ws name] -- <cmd>  run a command in the repo's dev shell (its shell key in
                                         overbridge.yml); as it is when the repo has none
-  overbridge rm <name> [--force]               remove a workspace and its worktrees (the top panel's
+  overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>
+                                        run a heavy command (lint, typecheck, test, build) in the repo's
+                                        dev shell, one at a time across workspaces, once the load allows;
+                                        killed on timeout or when it stops using CPU (check-queue in overbridge.yml)
+  overbridge rm <name> [--force]              remove a workspace and its worktrees (the top panel's
                                         Cleanup button does this once the PR is open and nothing is unpushed)
   overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty state
   overbridge whoami                             workspace for the current dir/session
@@ -217,6 +221,18 @@ async function main(argv: string[]): Promise<number> {
         throw new OverbridgeError("usage: overbridge shell <repo> [--ws name] -- <cmd>...");
       cmd.shell(positionals[0]!, rest.slice(cut + 1), values.ws);
       break;
+    }
+    case "check": {
+      // everything after `--` belongs to the child: never parse its flags
+      const cut = rest.indexOf("--");
+      const usage = "usage: overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>...";
+      const { values, positionals } = opts(cut < 0 ? rest : rest.slice(0, cut), { ...ws, "timeout-seconds": { type: "string" } });
+      if (positionals.length > 1 || cut < 0 || cut === rest.length - 1) throw new OverbridgeError(usage);
+      const timeout = values["timeout-seconds"];
+      const timeoutSeconds = timeout === undefined ? undefined : Number(timeout);
+      if (timeoutSeconds !== undefined && (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1))
+        throw new OverbridgeError(`--timeout-seconds expects a whole number of seconds above 0 (got '${timeout}')\n${usage}`);
+      return cmd.check(positionals[0], rest.slice(cut + 1), values.ws, timeoutSeconds);
     }
     case "guard":
       silenceLegacyWarnings();

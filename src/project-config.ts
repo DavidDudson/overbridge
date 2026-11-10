@@ -94,6 +94,20 @@ export interface ShellSpec {
   key: string[];
 }
 
+/** How `overbridge check` queues a command: when it may start, and when it is killed. */
+export interface CheckQueue {
+  /** Start only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. */
+  maxLoadPercent: number;
+  /** Kill the run after this long, busy or not. */
+  timeoutSeconds: number;
+  /** Kill the run once its process group has used no CPU for this long. */
+  stallSeconds: number;
+  /** Give up waiting for a turn after this long. */
+  waitSeconds: number;
+}
+
+export const defaultCheckQueue = (): CheckQueue => ({ maxLoadPercent: 70, timeoutSeconds: 180, stallSeconds: 300, waitSeconds: 900 });
+
 export const DEFAULT_PERSONA_DIR = ".overbridge/personas";
 
 export interface ReviewConfig {
@@ -114,6 +128,7 @@ export interface ProjectConfig {
   ide?: Ide;
   /** The repo's dev shell, if it declares one. */
   shell?: ShellSpec;
+  checkQueue: CheckQueue;
   /** Lifecycle hooks, from the root `config.yml` only. Present only when there are any. */
   hooks?: Hooks;
   /** Top panel buttons, from the root `config.yml` only. */
@@ -127,11 +142,13 @@ export const defaultConfig = (): ProjectConfig => ({
   apps: [],
   commands: {},
   review: { exclude: [], localDir: DEFAULT_PERSONA_DIR },
+  checkQueue: defaultCheckQueue(),
   buttons: [],
 });
 
-const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "shell", "hooks", "buttons"];
+const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "shell", "check-queue", "hooks", "buttons"];
 const SHELL_KEYS = ["enter", "env", "key"];
+const CHECK_QUEUE_KEYS = ["max-load-percent", "timeout-seconds", "stall-seconds", "wait-seconds"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
 const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
@@ -211,6 +228,17 @@ class Problems {
       else out.push(item);
     });
     return out;
+  }
+  /** A whole number from 1 to `max`, or undefined when the key is absent. */
+  positiveInt(obj: Record<string, unknown>, key: string, path: string, max = Number.MAX_SAFE_INTEGER): number | undefined {
+    const at = path ? `${path}.${key}` : key;
+    const v = obj[key];
+    if (v === undefined || v === null) return;
+    if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > max) {
+      this.add(at, `expected a whole number from 1${max === Number.MAX_SAFE_INTEGER ? " up" : ` to ${max}`} (got ${JSON.stringify(v)})`);
+      return;
+    }
+    return v as number;
   }
   oneOf<T extends string>(value: string | undefined, choices: readonly T[], path: string): T | undefined {
     if (value === undefined) return;
@@ -464,6 +492,21 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       const key = p.stringList(shell, "key", "shell") ?? [];
       if (key.length && !env) p.add("shell.key", "needs shell.env: the key only invalidates a cached env");
       if (enter) config.shell = { enter, ...(env ? { env } : {}), key };
+    }
+  }
+
+  const checkQueue = raw["check-queue"];
+  if (checkQueue !== undefined && checkQueue !== null) {
+    if (!isObject(checkQueue)) p.add("check-queue", `expected a mapping with ${CHECK_QUEUE_KEYS.join(", ")}`);
+    else {
+      p.unknownKeys(checkQueue, CHECK_QUEUE_KEYS, "check-queue");
+      const set = (value: number | undefined, field: keyof CheckQueue) => {
+        if (value !== undefined) config.checkQueue = { ...config.checkQueue, [field]: value };
+      };
+      set(p.positiveInt(checkQueue, "max-load-percent", "check-queue"), "maxLoadPercent");
+      set(p.positiveInt(checkQueue, "timeout-seconds", "check-queue"), "timeoutSeconds");
+      set(p.positiveInt(checkQueue, "stall-seconds", "check-queue"), "stallSeconds");
+      set(p.positiveInt(checkQueue, "wait-seconds", "check-queue"), "waitSeconds");
     }
   }
 

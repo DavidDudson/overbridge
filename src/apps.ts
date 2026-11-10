@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { getRepo } from "./config";
 import * as git from "./git";
 import { wsDir } from "./paths";
+import { groupAlive } from "./proc";
 import type { AppSpec } from "./project-config";
 import { readState } from "./state";
 import { fail, run, spawnCwd } from "./util";
@@ -13,6 +14,8 @@ import { fail, run, spawnCwd } from "./util";
  * stops as a whole tree. Its pid and port live in
  * `<workspace>/.overbridge/apps/<repo>/<id>.json`, its output in `<id>.log`.
  */
+
+export { groupAlive };
 
 export const AppStatus = {
   Stopped: "stopped",
@@ -71,23 +74,6 @@ function procState(pid: number): string | undefined {
 export const processAlive = (pid: number): boolean => {
   const state = procState(pid);
   return state !== undefined && state !== "Z";
-};
-
-/** True while any non-zombie process is in the group, even after its leader exits. */
-export const groupAlive = (pgid: number): boolean => {
-  const r = run(["ps", "-A", "-o", "pgid=,stat="]);
-  if (!r.ok) {
-    try {
-      process.kill(-pgid, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  return r.stdout.split("\n").some((line) => {
-    const [group, state = ""] = line.trim().split(/\s+/);
-    return Number(group) === pgid && !state.startsWith("Z");
-  });
 };
 
 /** Replace `{port}` in a command or url. */

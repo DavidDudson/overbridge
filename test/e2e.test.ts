@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -273,4 +273,98 @@ describe("dev shells", () => {
     expect(run.stdout.toString().split("\n")[0]).toBe("FOO=");
     expect(existsSync(join(root, ".overbridge", "agent", "dsa.shell"))).toBe(false);
   });
+});
+
+describe("check queue", () => {
+  // the runner's own load must never hold a test at the gate, and each test spawns several CLIs
+  const CHECK_TEST_MS = 20_000;
+  const cq = () => join(root, "cq");
+  const queue = () => join(root, ".overbridge", "check-queue");
+  const config = (extra = "") =>
+    writeFileSync(join(cq(), "app", "overbridge.yml"), `shell: env FOO=queued\ncheck-queue:\n  max-load-percent: 100000\n${extra}`);
+  const check = (args: string[]) => ws(["check", ...args], cq());
+  const spawnCheck = (args: string[]) =>
+    Bun.spawn({ cmd: [process.execPath, CLI, "check", ...args], cwd: cq(), env: env(), stdout: "pipe", stderr: "pipe" });
+  /** Tickets only: a holder rewrites its ticket through a `.tmp` file, so the directory briefly holds both. */
+  const tickets = () => readdirSync(queue()).filter((name) => name.endsWith(".json"));
+  const waitFor = async (done: () => boolean) => {
+    const deadline = Date.now() + 10_000;
+    let seen = done();
+    while (!seen && Date.now() < deadline) {
+      await Bun.sleep(25);
+      seen = done();
+    }
+    expect(seen).toBe(true);
+  };
+
+  test("runs in the repo's dev shell, passes the exit code through and leaves no ticket", () => {
+    expect(ws(["new", "cq", "-r", "app"]).code).toBe(0);
+    config();
+    const r = check(["--", "sh", "-c", 'echo "$FOO $OVERBRIDGE_CHECK_HELD"; exit 3']);
+    expect(r.code).toBe(3);
+    expect(r.out.trim()).toBe("queued 1");
+    expect(tickets()).toEqual([]);
+    expect(check(["app", "--", "true"]).code).toBe(0);
+    expect(check(["nope", "--", "true"]).err).toContain("nope is not in cq");
+    expect(check(["app"]).code).toBe(1);
+    expect(check(["--timeout-seconds", "x", "--", "true"]).err).toContain("--timeout-seconds expects a whole number");
+  }, CHECK_TEST_MS);
+
+  test("two runs take turns instead of overlapping", async () => {
+    const log = join(tmp, "turns.log");
+    const step = (name: string) => ["--", "sh", "-c", `echo start ${name} >> ${log}; sleep 1; echo end ${name} >> ${log}`];
+    const first = spawnCheck(step("a"));
+    await waitFor(() => existsSync(log));
+    const second = spawnCheck(step("b"));
+    expect(await first.exited).toBe(0);
+    expect(await second.exited).toBe(0);
+    expect(await new Response(second.stderr).text()).toContain("waiting behind 1 in the queue");
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "end a", "start b", "end b"]);
+  }, CHECK_TEST_MS);
+
+  test("a nested check inside a held run runs at once", () => {
+    const r = check(["--", "sh", "-c", `${process.execPath} ${CLI} check -- echo nested`]);
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe("nested");
+  }, CHECK_TEST_MS);
+
+  test("a run over its timeout is killed with 124", () => {
+    const r = check(["--timeout-seconds", "1", "--", "sleep", "30"]);
+    expect(r.code).toBe(124);
+    expect(r.err).toContain("stopped after 1s");
+  }, CHECK_TEST_MS);
+
+  test("a run that uses no CPU for stall-seconds is killed with 137", () => {
+    config("  stall-seconds: 1\n");
+    const started = Date.now();
+    const r = check(["--", "sleep", "30"]);
+    expect(r.code).toBe(137);
+    expect(r.err).toContain("used no CPU for 1s");
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, CHECK_TEST_MS);
+
+  test("a waiter gives up with 75 after wait-seconds", async () => {
+    config("  wait-seconds: 1\n");
+    const holder = spawnCheck(["--", "sleep", "3"]);
+    await waitFor(() => tickets().length === 1);
+    const r = check(["--", "true"]);
+    expect(r.code).toBe(75);
+    expect(r.err).toContain("still busy after 1s");
+    expect(await holder.exited).toBe(0);
+  }, CHECK_TEST_MS);
+
+  test("a dead holder's ticket is reaped and the command it left running is killed", async () => {
+    config();
+    const gone = Bun.spawn({ cmd: ["true"] });
+    await gone.exited;
+    const orphan = Bun.spawn({ cmd: ["sleep", "30"], detached: true, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+    const ticket = { pid: gone.pid, ws: "ghost", repo: "app", command: "sleep 30", queuedAtMs: 1, runPid: orphan.pid, runningSinceMs: 1 };
+    writeFileSync(join(queue(), `${String(1).padStart(15, "0")}-${gone.pid}.json`), JSON.stringify(ticket));
+    const r = check(["--", "echo", "after"]);
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe("after");
+    expect(r.err).toContain("holder from ghost died");
+    expect(await orphan.exited).not.toBe(0);
+    expect(tickets()).toEqual([]);
+  }, CHECK_TEST_MS);
 });

@@ -25,7 +25,8 @@ registers a new one (ask the user before registering).
 
 Each repo can carry an `overbridge.yml` (work-item provider, apps, check commands, review, ide).
 Read it with `overbridge config show [dir]` or one value with `overbridge config get <key> [dir]`.
-A repo with a `shell` key has a dev shell: run its tools and `commands.*` as `overbridge shell <repo> -- <cmd>` (it runs the command as it is when the repo has none).
+A repo with a `shell` key has a dev shell: run its tools as `overbridge shell <repo> -- <cmd>` (it runs the command as it is when the repo has none).
+Run `commands.lint`, `typecheck`, `test`, and `build` as `overbridge check <repo> -- <cmd>`. It queues them so only one runs at a time across workspaces, in the same dev shell. The `check-queue` key sets its load limit and timeouts.
 Apps it declares run with `overbridge app` (list), `overbridge app <id> start|stop|restart|status|log`.
 `overbridge item from-branch` names the work item the current branch belongs to.
 The top panel and sidebar show this state; do not edit `.overbridge/` under the workspaces root by hand.
