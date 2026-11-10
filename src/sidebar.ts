@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { type AgentState, glyphFor, readAgentState } from "./agent-state";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
-import { metaDir } from "./paths";
+import { metaDir, selfCommand } from "./paths";
 import { type Limits, limitRows, readLimits } from "./limits";
 import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
@@ -11,9 +11,9 @@ import { readState } from "./state";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache } from "./top";
 import { sidebarLabel } from "./top";
-import { naturalSort, run } from "./util";
+import { naturalSort, run, spawnCwd } from "./util";
 import { overbridgeVersion } from "./version";
-export const LEGEND = "⌥1-9 go  ⌥w next";
+export const LEGEND = "⌥1-9 go  ⌥w next  s new ws";
 
 /**
  * The vertical tab sidebar. Every tab runs its own copy, which marks its own tab as current.
@@ -188,7 +188,7 @@ export function queueRows(queue: { running?: Ticket; waiting: Ticket[] }, inner:
  * `offset` (an index into the workspaces), then a divider, the `queue` rows, the usage limits and the key legend,
  * with `version` set into the bottom border. `current` indexes the whole list.
  */
-export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = "", queue: string[] = []): string[] {
+export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = "", queue: string[] = [], footer: Footer = LEGEND_FOOTER): string[] {
   const inner = Math.max(0, width - 4);
   const pinned = pinnedCount(list);
   const cards = (from: number, to: number) => list.slice(from, to).flatMap((e, i) => entryLines(e, from + i, from + i === current, inner));
@@ -203,9 +203,147 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
     boxDivider(width),
     ...queue.map(boxRow),
     ...limitRows(limits, inner, now).map(boxRow),
-    boxRow(dim(fit(LEGEND, inner))),
+    boxRow(footerRow(footer, inner)),
     boxBottom(width, version, "grey"),
   ];
+}
+
+/** What the sidebar's last row shows. */
+export const FooterKind = { Legend: "legend", Prompt: "prompt", Busy: "busy", Error: "error" } as const;
+export type FooterKind = (typeof FooterKind)[keyof typeof FooterKind];
+
+/**
+ * The new-workspace prompt. `text` is what the user has typed. `id` is set once an id alone was
+ * submitted and the prompt is asking which repo it belongs to.
+ */
+export interface Prompt {
+  text: string;
+  id?: string;
+}
+
+export type Footer =
+  | { kind: typeof FooterKind.Legend }
+  | { kind: typeof FooterKind.Prompt; prompt: Prompt }
+  | { kind: typeof FooterKind.Busy; id: string }
+  | { kind: typeof FooterKind.Error; message: string };
+
+export const LEGEND_FOOTER: Footer = { kind: FooterKind.Legend };
+export const EMPTY_PROMPT: Footer = { kind: FooterKind.Prompt, prompt: { text: "" } };
+
+export const promptLabel = (p: Prompt) => (p.id === undefined ? "new ws: " : `repo for ${p.id}: `);
+
+/** `text` in `width` columns, keeping its end visible: a cut starts with an ellipsis. */
+function fitTail(text: string, width: number): string {
+  if (textWidth(text) <= width) {
+    return fit(text, width);
+  }
+  const tail = [...text].reduceRight((kept, ch) => (textWidth(ch + kept) <= width - 1 ? ch + kept : kept), "");
+  return fit(`…${tail}`, width);
+}
+
+/** The footer as one row `inner` columns wide. */
+export function footerRow(footer: Footer, inner: number): string {
+  switch (footer.kind) {
+    case FooterKind.Legend:
+      return dim(fit(LEGEND, inner));
+    case FooterKind.Prompt:
+      return fitTail(`${promptLabel(footer.prompt)}${footer.prompt.text}█`, inner);
+    case FooterKind.Busy:
+      return dim(fit(`starting ${footer.id}…`, inner));
+    case FooterKind.Error:
+      return colorize(fit(footer.message, inner), "red");
+  }
+}
+
+export const PromptStepKind = { Edit: "edit", Cancel: "cancel", Submit: "submit" } as const;
+export type PromptStepKind = (typeof PromptStepKind)[keyof typeof PromptStepKind];
+
+export type PromptStep =
+  | { kind: typeof PromptStepKind.Edit; prompt: Prompt }
+  | { kind: typeof PromptStepKind.Cancel }
+  | { kind: typeof PromptStepKind.Submit; prompt: Prompt };
+
+const isPrintable = (key: string) => [...key].length === 1 && key >= " " && key !== "\x7f";
+
+/**
+ * One input applied to the open prompt. Every key goes here while the prompt is open, so `q`, `j` and
+ * digits are typed rather than acting as sidebar keys. Esc and Ctrl-C cancel; clicks and arrows do nothing.
+ */
+export function promptInput(p: Prompt, input: Input): PromptStep {
+  if (input.kind !== "key") {
+    return { kind: PromptStepKind.Edit, prompt: p };
+  }
+  if (input.key === "escape" || input.key === "ctrl-c") {
+    return { kind: PromptStepKind.Cancel };
+  }
+  if (input.key === "enter") {
+    return { kind: PromptStepKind.Submit, prompt: p };
+  }
+  if (input.key === "\x7f" || input.key === "\b") {
+    return { kind: PromptStepKind.Edit, prompt: { ...p, text: [...p.text].slice(0, -1).join("") } };
+  }
+  if (isPrintable(input.key)) {
+    return { kind: PromptStepKind.Edit, prompt: { ...p, text: p.text + input.key } };
+  }
+  return { kind: PromptStepKind.Edit, prompt: p };
+}
+
+export const StartPlanKind = { Run: "run", AskRepo: "ask-repo", Invalid: "invalid" } as const;
+export type StartPlanKind = (typeof StartPlanKind)[keyof typeof StartPlanKind];
+
+export type StartPlan =
+  | { kind: typeof StartPlanKind.Run; repo: string; id: string }
+  | { kind: typeof StartPlanKind.AskRepo; id: string }
+  | { kind: typeof StartPlanKind.Invalid; message: string };
+
+/**
+ * What a submitted prompt asks for. `<repo> <id>` runs as typed. An id alone uses the one repo the
+ * workspace holds (`holds`); with none or several it asks for the repo, keeping the id.
+ */
+export function parseStart(p: Prompt, holds: readonly string[]): StartPlan {
+  const words = p.text.trim().split(/\s+/).filter(Boolean);
+  if (p.id !== undefined) {
+    return words.length === 1
+      ? { kind: StartPlanKind.Run, repo: words[0]!, id: p.id }
+      : { kind: StartPlanKind.Invalid, message: `type one repo name for ${p.id}, such as ${holds[0] ?? "my-repo"}` };
+  }
+  if (words.length === 2) {
+    return { kind: StartPlanKind.Run, repo: words[0]!, id: words[1]! };
+  }
+  if (words.length === 1) {
+    return holds.length === 1 ? { kind: StartPlanKind.Run, repo: holds[0]!, id: words[0]! } : { kind: StartPlanKind.AskRepo, id: words[0]! };
+  }
+  return { kind: StartPlanKind.Invalid, message: `type <repo> <id> or <id>, such as ${holds[0] ?? "my-repo"} 123` };
+}
+
+/** Exit code and stderr of a finished command. */
+export interface Finished {
+  code: number;
+  stderr: string;
+}
+
+export type Spawner = (cmd: string[]) => Promise<Finished>;
+
+const spawnAsync: Spawner = async (cmd) => {
+  const p = Bun.spawn({ cmd, cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "pipe" });
+  const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text()]);
+  return { code, stderr };
+};
+
+/** The last non-empty stderr line without the CLI's `overbridge: ` prefix, else a line naming the command. */
+export function startError(repo: string, id: string, result: Finished): string {
+  const last = result.stderr.split("\n").map((l) => l.trim()).filter(Boolean).at(-1);
+  return last?.replace(/^overbridge: /, "") ?? `overbridge start ${repo} ${id} failed with exit code ${result.code}`;
+}
+
+/**
+ * Run `overbridge start <repo> <id>` as a child process, so its git fetch does not freeze the pane and its
+ * output does not draw over it. The child inherits `ZELLIJ`, so it opens the new tab or focuses an existing one.
+ * Resolves to the footer to show next: the legend on success, the error otherwise.
+ */
+export async function runStart(repo: string, id: string, spawn: Spawner = spawnAsync): Promise<Footer> {
+  const result = await spawn([...selfCommand(), "start", repo, id]).catch((e: unknown): Finished => ({ code: -1, stderr: `could not run overbridge start: ${(e as Error).message}` }));
+  return result.code === 0 ? LEGEND_FOOTER : { kind: FooterKind.Error, message: startError(repo, id, result) };
 }
 
 /**
@@ -281,6 +419,7 @@ export async function sidebar(wsOpt?: string) {
   // Read once at start, so a pane left running across an upgrade shows the version it runs.
   const version = overbridgeVersion();
   let offset = 0;
+  let footer: Footer = LEGEND_FOOTER;
   let queueRowCount = 0;
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
   const draw = () => {
@@ -295,7 +434,47 @@ export async function sidebar(wsOpt?: string) {
     const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), queueRowCount);
     const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;
     offset = clampScroll(scrolled, workspaceHeights, rows);
-    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits(), Date.now(), version, queue), height, width));
+    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits(), Date.now(), version, queue, footer), height, width));
+  };
+  const show = (next: Footer) => {
+    footer = next;
+    draw();
+  };
+  const submit = (prompt: Prompt) => {
+    const plan = parseStart(prompt, Object.keys(readState().workspaces[self]?.repos ?? {}));
+    switch (plan.kind) {
+      case StartPlanKind.AskRepo:
+        return show({ kind: FooterKind.Prompt, prompt: { text: "", id: plan.id } });
+      case StartPlanKind.Invalid:
+        return show({ kind: FooterKind.Error, message: plan.message });
+      case StartPlanKind.Run:
+        show({ kind: FooterKind.Busy, id: plan.id });
+        return void runStart(plan.repo, plan.id).then(show);
+    }
+  };
+  /** Feed one input to the footer; true when the footer took it and the sidebar keys skip it. */
+  const footerTakes = (input: Input): boolean => {
+    if (footer.kind === FooterKind.Prompt) {
+      const step = promptInput(footer.prompt, input);
+      if (step.kind === PromptStepKind.Cancel) {
+        show(LEGEND_FOOTER);
+      } else if (step.kind === PromptStepKind.Submit) {
+        submit(step.prompt);
+      } else {
+        show({ kind: FooterKind.Prompt, prompt: step.prompt });
+      }
+      return true;
+    }
+    if (footer.kind === FooterKind.Error) {
+      show(LEGEND_FOOTER);
+    }
+    if (input.kind === "key" && input.key === "s") {
+      if (footer.kind !== FooterKind.Busy) {
+        show(EMPTY_PROMPT);
+      }
+      return true;
+    }
+    return false;
   };
 
   await new Promise<void>((resolve) => {
@@ -311,6 +490,9 @@ export async function sidebar(wsOpt?: string) {
     process.stdin.resume();
     process.stdin.on("data", (buf) => {
       for (const input of decodeInput(buf.toString())) {
+        if (footerTakes(input)) {
+          continue;
+        }
         if (input.kind === "key" && (input.key === "q" || input.key === "ctrl-c")) return quit();
         if (input.kind === "key" && input.key === "n") {
           next(self);

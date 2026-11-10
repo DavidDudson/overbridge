@@ -6,7 +6,7 @@ import { agentStateFile, glyphFor, readAgentState, UNKNOWN_GLYPH } from "../src/
 import { sidebarWidth } from "../src/config";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { clampScroll, type Entry, entryAt, entryLines, queueRows, renderSidebar, scrollFor, Section, bodyRowsFor, pinnedCount, pinnedRowsFor, sidebarLabel, stripConventional, switchTab, targetFor, wrapText } from "../src/sidebar";
+import { bodyRowsFor, clampScroll, EMPTY_PROMPT, type Entry, entryAt, entryLines, type Finished, type Footer, FooterKind, footerRow, LEGEND, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stripConventional, switchTab, targetFor, wrapText } from "../src/sidebar";
 import { type Input, textWidth } from "../src/term";
 
 const entry = (tab: string, glyph = "○", label = tab, section: Section = Section.Workspaces): Entry => ({ tab, section, glyph, label });
@@ -252,6 +252,102 @@ describe("sidebarLabel", () => {
     expect(sidebarLabel("w1", {})).toBe("w1");
     expect(sidebarLabel("w1", { headline: "12" })).toBe("w1");
     expect(stripConventional("fix:")).toBe("fix:");
+  });
+});
+
+describe("new workspace prompt", () => {
+  const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+  const type = (text: string, start = { text: "" }) =>
+    [...text].reduce((p, ch) => {
+      const step = promptInput(p, key(ch));
+      if (step.kind !== PromptStepKind.Edit) throw new Error(`unexpected ${step.kind} on '${ch}'`);
+      return step.prompt;
+    }, start);
+
+  test("the legend names the s key and shows in the footer by default", () => {
+    expect(LEGEND).toContain("s new ws");
+    const rows = renderSidebar(list, 0, 0, 20, 60, undefined, 0);
+    expect(strip(rows.at(-2)!)).toContain("s new ws");
+  });
+
+  test("printable keys type, including sidebar keys; backspace deletes one character", () => {
+    expect(type("q j 9").text).toBe("q j 9");
+    const step = promptInput({ text: "ab" }, key("\x7f"));
+    expect(step).toEqual({ kind: PromptStepKind.Edit, prompt: { text: "a" } });
+    expect(promptInput({ text: "" }, key("\b"))).toEqual({ kind: PromptStepKind.Edit, prompt: { text: "" } });
+  });
+
+  test("Esc and Ctrl-C cancel, Enter submits, arrows and clicks do nothing", () => {
+    const p = { text: "overbridge 79" };
+    expect(promptInput(p, key("escape"))).toEqual({ kind: PromptStepKind.Cancel });
+    expect(promptInput(p, key("ctrl-c"))).toEqual({ kind: PromptStepKind.Cancel });
+    expect(promptInput(p, key("enter"))).toEqual({ kind: PromptStepKind.Submit, prompt: p });
+    expect(promptInput(p, key("up"))).toEqual({ kind: PromptStepKind.Edit, prompt: p });
+    expect(promptInput(p, { kind: "click", col: 0, row: 0 })).toEqual({ kind: PromptStepKind.Edit, prompt: p });
+  });
+
+  test("the footer shows the prompt, keeping the end of long text visible", () => {
+    expect(strip(footerRow(EMPTY_PROMPT, 20)).trimEnd()).toBe("new ws: █");
+    const long: Footer = { kind: FooterKind.Prompt, prompt: { text: "web-monorepo ENG-12345" } };
+    expect(strip(footerRow(long, 16))).toBe("…repo ENG-12345█");
+    expect(strip(footerRow({ kind: FooterKind.Prompt, prompt: { text: "", id: "79" } }, 30)).trimEnd()).toBe("repo for 79: █");
+  });
+
+  test("busy and error footers", () => {
+    expect(strip(footerRow({ kind: FooterKind.Busy, id: "79" }, 20)).trimEnd()).toBe("starting 79…");
+    const err = footerRow({ kind: FooterKind.Error, message: "79: not found in github" }, 30);
+    expect(err).toContain("\x1b[31m");
+    expect(strip(err).trimEnd()).toBe("79: not found in github");
+  });
+
+  test("<repo> <id> runs as typed", () => {
+    expect(parseStart({ text: " web-monorepo  ENG-123 " }, ["overbridge"])).toEqual({ kind: StartPlanKind.Run, repo: "web-monorepo", id: "ENG-123" });
+  });
+
+  test("an id alone uses the one repo the workspace holds", () => {
+    expect(parseStart({ text: "79" }, ["overbridge"])).toEqual({ kind: StartPlanKind.Run, repo: "overbridge", id: "79" });
+  });
+
+  test("an id alone asks for the repo when the workspace holds none or several, then runs with the answer", () => {
+    expect(parseStart({ text: "79" }, [])).toEqual({ kind: StartPlanKind.AskRepo, id: "79" });
+    expect(parseStart({ text: "79" }, ["a", "b"])).toEqual({ kind: StartPlanKind.AskRepo, id: "79" });
+    expect(parseStart({ text: "overbridge", id: "79" }, ["a", "b"])).toEqual({ kind: StartPlanKind.Run, repo: "overbridge", id: "79" });
+  });
+
+  test("empty or extra words are invalid, with an example", () => {
+    expect(parseStart({ text: "  " }, ["overbridge"])).toEqual({ kind: StartPlanKind.Invalid, message: "type <repo> <id> or <id>, such as overbridge 123" });
+    expect(parseStart({ text: "a b c" }, []).kind).toBe(StartPlanKind.Invalid);
+    expect(parseStart({ text: "", id: "79" }, []).kind).toBe(StartPlanKind.Invalid);
+    expect(parseStart({ text: "a b", id: "79" }, []).kind).toBe(StartPlanKind.Invalid);
+  });
+});
+
+describe("runStart", () => {
+  const spawner = (result: Finished) => {
+    const calls: string[][] = [];
+    return { calls, spawn: async (cmd: string[]) => (calls.push(cmd), result) };
+  };
+
+  test("runs overbridge start with the repo and id, and returns to the legend on success", async () => {
+    const s = spawner({ code: 0, stderr: "ENG-1 already exists; switching to it\n" });
+    expect(await runStart("web-monorepo", "ENG-1", s.spawn)).toEqual({ kind: FooterKind.Legend });
+    expect(s.calls[0]!.slice(-3)).toEqual(["start", "web-monorepo", "ENG-1"]);
+  });
+
+  test("a failed start shows the last stderr line without the CLI prefix", async () => {
+    const s = spawner({ code: 1, stderr: "fetching\noverbridge: 79: not found in github\n\n" });
+    expect(await runStart("overbridge", "79", s.spawn)).toEqual({ kind: FooterKind.Error, message: "79: not found in github" });
+  });
+
+  test("a failure with no stderr names the command and exit code", async () => {
+    expect(await runStart("x", "1", spawner({ code: 2, stderr: "" }).spawn)).toEqual({ kind: FooterKind.Error, message: "overbridge start x 1 failed with exit code 2" });
+  });
+
+  test("a spawn that throws becomes an error footer, not a crash", async () => {
+    const footer = await runStart("x", "1", async () => {
+      throw new Error("ENOENT");
+    });
+    expect(footer).toEqual({ kind: FooterKind.Error, message: "could not run overbridge start: ENOENT" });
   });
 });
 
