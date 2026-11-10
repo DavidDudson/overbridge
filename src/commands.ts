@@ -123,7 +123,16 @@ export function removeWorkspace(ws: string, force: boolean) {
     const ok = runHooks("pre-remove", { ws, repo, ...(claim.branch ? { branch: claim.branch } : {}), ...(claim.pr ? { pr: claim.pr } : {}) });
     if (!ok && !force) fail(`a pre-remove hook for ${ws}/${repo} failed; nothing was removed (use --force to remove anyway)`);
   }
-  for (const r of Object.keys(w.repos)) git.removeWorktree(getRepo(r), worktreePath(ws, r), force);
+  const removed: string[] = [];
+  for (const r of Object.keys(w.repos)) {
+    try {
+      git.removeWorktree(getRepo(r), worktreePath(ws, r), force);
+    } catch (e) {
+      const cause = `removing the ${r} worktree failed: ${(e as Error).message}`;
+      fail(removed.length ? `${ws} is partly removed (the ${removed.join(", ")} worktrees are gone); ${cause}` : `${ws}: ${cause}; nothing was removed`);
+    }
+    removed.push(r);
+  }
   untrustFolder(wsDir(ws));
   rmSync(wsDir(ws), { recursive: true, force: true });
   // per-workspace files outside the workspace dir: top cache, agent state, sidebar pane, tab layout

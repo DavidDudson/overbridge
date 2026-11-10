@@ -331,6 +331,11 @@ export function cleanable(ws: string): boolean {
     return false;
   }
   if (!readTopCache(ws).prsOpen && readAgentState(ws) !== "empty") return false;
+  return gitClean(ws);
+}
+
+/** No repo in `ws` holds uncommitted changes or unpushed commits. Local and fast, so it can run before the tab closes. */
+export function gitClean(ws: string): boolean {
   return Object.keys(getWorkspace(readState(), ws).repos).every((repo) => {
     const wt = worktreePath(ws, repo);
     return !git.isDirty(wt) && !git.hasUnpushed(wt);
