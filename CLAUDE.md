@@ -39,6 +39,10 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors. The root `config.yml`'s `guard` block (`GuardConfig`) adds
   `read-paths` (reads only) and `deny` rules; it is never read from a repo file, so a branch can't loosen the guard.
+- `src/claude-trust.ts` records Claude folder trust in `~/.claude.json` (`$CLAUDE_CONFIG_DIR` when set) for workspace
+  folders only: `createWorkspace` and `claude()` trust, `removeWorkspace` untrusts. Claude rewrites that file while
+  it runs, so change only the one key and write it with an atomic rename. `bunfig.toml` preloads
+  `test/helpers/isolate-claude-config.ts` so tests never touch the real file.
 - `src/state.ts`: all claim mutations go through `withState()` (lockfile + atomic rename; throw = no write).
 - `test/e2e.test.ts` drives the real CLI against a temp `OVERBRIDGE_ROOT` and a local bare "remote".
 - Generated files (`<ws>/.claude/settings.json`, `<ws>/CLAUDE.md`, layout) come from
