@@ -16,8 +16,13 @@ export type RunResult = { ok: boolean; code: number; stdout: string; stderr: str
  */
 export function spawnCwd(cwd?: string): string {
   if (cwd) return cwd;
-  const here = process.cwd();
-  return existsSync(here) ? here : homedir();
+  try {
+    const here = process.cwd();
+    if (existsSync(here)) return here;
+  } catch {
+    // Linux: process.cwd() throws once the directory is gone (macOS returns the stale path)
+  }
+  return homedir();
 }
 
 export function run(cmd: string[], opts: { cwd?: string } = {}): RunResult {
