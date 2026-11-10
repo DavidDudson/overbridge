@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentStateFile, readAgentState } from "../src/agent-state";
+import { agentStateFile, EndReason, readAgentState } from "../src/agent-state";
 import { clearCompact, COMPACT_MARKER_MS, markCompact, nextState, recordState, takeCompactRestart } from "../src/agent-hook";
 import { limitColor, limitRows, readLimits, timeLeft, WEEK_SECS } from "../src/limits";
 import { landingTab, pickNext } from "../src/next";
@@ -202,6 +202,13 @@ describe("nextState", () => {
     expect(nextState("Notification", undefined, "empty")).toBeUndefined();
     expect(nextState("Notification", undefined, "busy")).toBe("waiting");
     expect(nextState("UserPromptSubmit", undefined, "empty")).toBe("busy");
+  });
+  test("a session ended by /clear or /resume records nothing; any other end is end", () => {
+    expect(nextState("SessionEnd", undefined, undefined, EndReason.Clear)).toBeUndefined();
+    expect(nextState("SessionEnd", undefined, undefined, EndReason.Resume)).toBeUndefined();
+    expect(nextState("SessionEnd", undefined, undefined, EndReason.PromptInputExit)).toBe("end");
+    expect(nextState("SessionEnd", undefined, undefined, EndReason.Other)).toBe("end");
+    expect(nextState("SessionEnd", undefined, undefined)).toBe("end");
   });
 });
 

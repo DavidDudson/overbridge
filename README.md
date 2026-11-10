@@ -40,11 +40,12 @@ overbridge repo add infra git@github.com:you/infra.git
 overbridge spinup                       # fresh zellij session over the existing workspaces ('scratch' if none)
 overbridge start app 12                 # workspace gh-app-12 on the issue's branch, in a new tab running /start-item
 overbridge start app ENG-123            # a Jira item: workspace ENG-123
+overbridge start app --task file-x --prompt 'file a ticket for X'   # no item yet: workspace file-x on branch task/file-x
 ```
 
 `overbridge spinup` always rebuilds the session, killing running panes. Use `overbridge up` to just
-attach. `overbridge start` adds a tab to the running session; an item that already has a workspace is
-focused instead of started again. Workspaces can also be made by hand: `overbridge new <name> -r app -r infra`.
+attach. `overbridge start` adds a tab to the running session in the background, so you stay on your tab; an
+item that already has a workspace is focused instead of started again. Workspaces can also be made by hand: `overbridge new <name> -r app -r infra`.
 
 **Cleanup.** A workspace with at least one open PR, where every other claimed branch has a merged PR, with no
 uncommitted changes and no unpushed commits, shows a **Cleanup** button in its top panel. Press it twice within
@@ -52,7 +53,14 @@ five seconds. If a repo has uncommitted changes or unpushed commits by then, Cle
 Otherwise the tab closes at once, the workspace leaves every sidebar, and you land on the next tab that needs
 attention, or else the tab next to it. A background process then re-checks the PRs, stops the workspace's apps, and
 runs `overbridge rm`. If any of that fails, the workspace comes back with the error on its sidebar card, and its tab
-reopens. A merged claim does not block it; a closed (unmerged) PR or a branch with no PR does, and one PR must still be open.
+reopens. A merged claim does not block it; a closed (unmerged) PR or a branch with no PR does.
+
+**Ending a session.** When you exit a workspace's Claude on purpose (`/exit` or Ctrl-D), overbridge removes the
+workspace the way Cleanup does. Its tab closes, it leaves every sidebar, and a background process finishes the removal.
+It doesn't need an open PR. If a repo has uncommitted changes or unpushed commits, the workspace stays in the list,
+marked `ended · unsaved work`, and goes once that work is pushed or thrown away. `/clear` and `/resume` don't count as
+ending a session. Nor does a session that ends because zellij quit or the machine restarted, so those workspaces resume
+on the next `overbridge up`. If you're on another tab when it goes, you stay there.
 
 **Removal once every PR merges.** When every claimed branch has a merged PR, overbridge removes the workspace through
 the same background flow, without a key press. Any open sidebar can run the check (`overbridge top sweep`), and only
@@ -99,22 +107,19 @@ green build, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev lo
 `scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`) and `read-handoff` (continue from a handoff file after `/clear`). They read the
 repo's `overbridge.yml` (`project-management`, `commands`) and work with work items through `overbridge item`.
 `loop-tech-debt` files items with `overbridge item create --tech-debt`, so set `project-management.tech-debt`.
-`audit-vulns` reads Dependabot alerts, so it needs a GitHub repo. Install:
+`audit-vulns` reads Dependabot alerts, so it needs a GitHub repo.
 
-```
-/plugin marketplace add ~/repos/overbridge
-/plugin install overbridge@overbridge
-```
+You don't install it. Every workspace and orchestration Claude starts with both plugins enabled from the
+installed overbridge (`extraKnownMarketplaces` and `enabledPlugins`, written to `.claude/settings.json` and passed
+with `--settings`), so the skills always match the running version. `overbridge start` stops with a fix when the
+install has no plugins, and warns when Claude has another `overbridge` marketplace registered, such as one added
+by hand. Remove that one with `claude plugin marketplace remove overbridge`.
 
 `plugin-review/` is a second plugin, `overbridge-review`, with the review panel: `mob-review`, `review-pr`,
 `update-personas` and the `persona-*` reviewers (security, code-quality, naming, comments, error-handling,
 architecture, test-design, integration-test, performance, resilience, pr-size, api-design, database,
 github-actions, shell, typing, a11y, async-state, ac-check, production-protector, skills). It reads `review.*`
-from `overbridge.yml` (see below). Install it next to the first:
-
-```
-/plugin install overbridge-review@overbridge
-```
+from `overbridge.yml` (see below). It is enabled in the same way as the first.
 
 `mob-review` uses only the built-in `code-review` skill. `review-pr` claims the PR with `overbridge checkout`.
 `loop-item` calls `mob-review` when this plugin is installed. Nothing in it needs `pickup`; `merge-main` and
@@ -544,11 +549,15 @@ tabs closed since are skipped, and a failed switch leaves it as it was. Switches
 The new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. Long titles wrap under their text (up to three rows).
 
-The sidebar has two frames. The Orchestration frame is on top, lists the orchestration tabs and does
+The sidebar has two frames. The Orchestration frame is on top, lists the orchestration tabs, and does
 not scroll. It has one tab, `@root`, which runs Claude in the overbridge root (`$OVERBRIDGE_ROOT`,
-`~/workspaces` by default). That Claude loads the agent-state hooks through
-`claude --settings <meta>/orchestration/@root.settings.json` and has no guard, so it can run admin
-commands such as `overbridge start` and `overbridge new`. The Workspaces frame is below it. Keys,
+`~/workspaces` by default). That Claude coordinates and doesn't do the work itself. It loads the
+agent-state hooks and a guard through `claude --settings <meta>/orchestration/@root.settings.json`, and gets
+a brief through `--append-system-prompt`. The guard lets it read anything, run read-only `git` and `gh`
+commands, check status, and start or remove workspaces. It blocks file edits, branch changes, commits,
+pushes, and changes to PRs and issues, and its message tells Claude to start a workspace instead. When you
+ask it for a task, it runs `overbridge start` with your request as `--prompt`, and the new workspace's
+Claude does the work. The Workspaces frame is below it. Keys,
 clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
 and sidebar files never share a name with a workspace's.
@@ -573,7 +582,7 @@ width = 60    # 12 to 200
 
 `s` opens a one-line prompt at the foot of the sidebar. Type `<repo> <id>`, such as `overbridge 79` or
 `web-monorepo ENG-123`. If the tab's workspace holds one repo, the id alone is enough; otherwise the prompt asks for
-the repo next. Enter runs `overbridge start`, which opens the item's workspace in a new tab, or switches to its tab if
+the repo next. Enter runs `overbridge start`, which opens the item's workspace in a new background tab, or switches to its tab if
 it already has one. Esc cancels. While the prompt is open, every key goes into it. If the start fails (unknown repo,
 item not found, or a refused claim), the footer shows the error until you press another key.
 
@@ -588,7 +597,7 @@ waiting for input first, then finished, then finished with background tasks runn
 
 Each workspace's `.claude/settings.json` registers `overbridge hook` for `SessionStart`,
 `UserPromptSubmit`, `PostToolUse`, `Notification`, `PreCompact`, `Stop` and `SessionEnd`, next to the guard.
-It records `empty` (a session just started or cleared; Claude's later idle notification does not turn it into `waiting`, and the workspace becomes a Cleanup candidate if nothing is uncommitted or unpushed), `idle`, `busy`, `waiting`, `done` or `end` in `<meta>/agent/<ws>.json`. On `Stop` it also records the pids of shells still running under the session (background tasks); `done` reads as `bg` while any is alive. Plan-mode plans are written to `<ws>/plans/` (`plansDirectory` in the generated settings), not `~/.claude/plans`.
+It records `empty` (a session just started or cleared; Claude's later idle notification does not turn it into `waiting`, and the workspace becomes a Cleanup candidate if nothing is uncommitted or unpushed), `idle`, `busy`, `waiting`, `done` or `end` (with Claude's SessionEnd `reason`; `/clear` and `/resume` record nothing) in `<meta>/agent/<ws>.json`. On `Stop` it also records the pids of shells still running under the session (background tasks); `done` reads as `bg` while any is alive. Plan-mode plans are written to `<ws>/plans/` (`plansDirectory` in the generated settings), not `~/.claude/plans`.
 The root tab's Claude records its state the same way, under its tab name (`<meta>/agent/@root.json`).
 The hook
 never blocks or fails the agent and loads none of the rest of the CLI. A `busy` state with no

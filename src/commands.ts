@@ -8,7 +8,8 @@ import { isOrchestrationTab, orchestrationRemoveMessage, type OrchestrationTab }
 import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
 import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
-import { scaffold, scaffoldOrchestration } from "./scaffold";
+import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins } from "./scaffold";
+import { openTab, TabFocus, type ZellijExec } from "./tab";
 import { runCheck } from "./check-queue";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
@@ -59,9 +60,10 @@ export function sync() {
   }
 }
 
-export function newWorkspace(name: string | undefined, repos: string[]) {
+export function newWorkspace(name: string | undefined, repos: string[], exec?: ZellijExec) {
   if (!name) fail("usage: overbridge new <name> [-r repo]... (name it for its work item, e.g. ENG-123 or gh-app-12)");
   createWorkspace(name, repos);
+  openTab(name, undefined, TabFocus.Background, exec);
   console.log(name);
 }
 
@@ -347,7 +349,7 @@ export function claude(ws: string, extra: string[]) {
   trustFolder(wsDir(ws));
   const [only] = repos;
   const spec = repos.length === 1 && only ? loadRepoConfig(worktreePath(ws, only), only).shell : undefined;
-  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, ["claude", ...extra], wsDir(ws));
+  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, ["claude", "--settings", scaffoldPlugins(), ...extra], wsDir(ws));
   mkdirSync(dirname(agentShellFile(ws)), { recursive: true });
   if (spec && only) writeFileSync(agentShellFile(ws), only);
   else rmSync(agentShellFile(ws), { force: true });
@@ -355,8 +357,20 @@ export function claude(ws: string, extra: string[]) {
 }
 
 /**
- * Run an orchestration tab's Claude in its folder, with the agent-state hooks and no workspace guard, and
- * start a fresh session each time one ends, so the tab always has one. `extra` applies to the first
+ * The orchestrator's `claude` argv: its settings (hooks and guard) and its brief appended to the system prompt.
+ */
+export const orchestrationArgs = (settings: string, extra: readonly string[]) => [
+  "claude",
+  "--settings",
+  settings,
+  "--append-system-prompt",
+  orchestratorPrompt(),
+  ...extra,
+];
+
+/**
+ * Run an orchestration tab's Claude in its folder, with the agent-state hooks, the orchestrator guard and its
+ * brief, and start a fresh session each time one ends, so the tab always has one. `extra` applies to the first
  * session only. Closing the tab or the session (a hang-up or terminate signal) stops the loop.
  * `OVERBRIDGE_NAME` is blanked so a value inherited from the launching shell cannot bind it to a workspace.
  */
@@ -366,7 +380,7 @@ export function claudeOrchestration(t: OrchestrationTab, extra: string[]): never
   process.on("SIGINT", () => {});
   const session = (args: string[], streak: number): never => {
     const startedMs = Date.now();
-    const p = Bun.spawnSync({ cmd: ["claude", "--settings", scaffoldOrchestration(t.tab), ...args], cwd: t.dir(), env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+    const p = Bun.spawnSync({ cmd: orchestrationArgs(scaffoldOrchestration(t.tab), args), cwd: t.dir(), env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
     if (p.signalCode && STOP_SIGNALS.has(String(p.signalCode))) {
       process.exit(1);
     }

@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { ghReposCache, metaDir, ORCHESTRATION_ENV, root, selfCommand, worktreePath, wsDir } from "./paths";
+import { pluginSettings } from "./plugins";
 import { loadRepoConfig } from "./project-config";
 import { getWorkspace, readState } from "./state";
 import { shellQuote } from "./util";
@@ -36,6 +37,7 @@ export function scaffold(ws: string) {
   mkdirSync(join(dir, ".claude"), { recursive: true });
   const settings = {
     env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
+    ...pluginSettings(),
     // plan-mode plans live in the workspace folder, not ~/.claude/plans
     plansDirectory: PLANS_DIR,
     permissions: { allow: ALLOWED_COMMANDS },
@@ -64,16 +66,59 @@ function agentStateHooks() {
 export const orchestrationSettingsPath = (tab: string) => join(metaDir(), "orchestration", `${tab}.settings.json`);
 
 /**
- * (Re)write the settings an orchestration tab's Claude loads with `--settings`: the agent-state hooks and no
- * guard, so it can run the admin commands a workspace Claude may not. Idempotent.
+ * (Re)write the settings an orchestration tab's Claude loads with `--settings`: the agent-state hooks and the
+ * guard, which sees `OVERBRIDGE_TAB` and applies the orchestrator's allow list. Idempotent.
  */
 export function scaffoldOrchestration(tab: string): string {
   const file = orchestrationSettingsPath(tab);
   mkdirSync(dirname(file), { recursive: true });
-  const settings = { env: { [ORCHESTRATION_ENV]: tab, OVERBRIDGE_ROOT: root() }, hooks: agentStateHooks() };
+  const settings = {
+    env: { [ORCHESTRATION_ENV]: tab, OVERBRIDGE_ROOT: root(), OVERBRIDGE_NAME: "" },
+    hooks: { PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }], ...agentStateHooks() },
+    ...pluginSettings(),
+  };
   writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
   return file;
 }
+
+/** The plugin settings a workspace Claude loads with `--settings`, kept in the meta dir like the orchestration ones. */
+export const pluginSettingsPath = () => join(metaDir(), "plugins.settings.json");
+
+/**
+ * (Re)write the plugin settings and return their path. A workspace Claude gets them through `--settings` as well
+ * as its settings.json, because Claude ignores a project's marketplaces in a folder it does not trust, and a
+ * folder trusted by `claude-trust.ts` can lose that trust.
+ */
+export function scaffoldPlugins(): string {
+  const file = pluginSettingsPath();
+  mkdirSync(dirname(file), { recursive: true });
+  // every tab's Claude launches at once when the session starts, so none may read a half-written file
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(pluginSettings(), null, 2) + "\n");
+  renameSync(tmp, file);
+  return file;
+}
+
+/** The orchestrator's brief, appended to its system prompt: it coordinates and starts workspaces for all work. */
+export const orchestratorPrompt = () => `You are the overbridge orchestrator, running in the overbridge root (${root()}).
+You coordinate: you read, check status and start workspaces. You never do the work yourself. A guard blocks
+editing files, changing branches, committing, pushing, and creating or changing PRs and issues here.
+
+When the user asks for any task (fixing something, filing a ticket, planning a spike, picking up or reviewing
+a PR), start a workspace for it first, passing their request on, then stop:
+
+- For a work item: \`overbridge start <repo> <id> --prompt "<the request, in the user's words>"\`
+- For a PR: find its item with \`overbridge item from-branch <its head branch>\`, then
+  \`overbridge start <repo> <that id> --prompt "/pickup #<pr> <anything else they asked>"\`. A PR with no item
+  uses \`--task pr-<number>\` instead of an id.
+- With no item yet: \`overbridge start <repo> --task <short-slug> --prompt "<the request, in the user's words>"\`
+
+The new workspace opens in its own tab and its Claude does the work. Tell the user which workspace and tab
+opened. If \`overbridge start\` refuses, say why and stop.
+
+You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge item view\`, read-only
+\`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`release\`, \`up\`, \`repo add\`). You may also message
+workspace Claudes with \`ListAgents\` and \`SendMessage\`, for example to tell every tab to resume its work.`;
 
 /**
  * Tells the agent to run repo commands through `overbridge shell` when the workspace holds several repos and

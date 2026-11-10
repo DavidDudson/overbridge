@@ -28,8 +28,12 @@ overbridge repo ls
 overbridge sync                                   # fetch all bare repos
 
 overbridge start <repo> <id>                      # workspace named for the item (ENG-123, gh-app-12), on its
-                                          # branch, in a new tab running /start-item; focuses an existing one
-overbridge new <name> -r <repo> [-r <repo>...]    # by hand; name it for its work item
+                                          # branch, in a new tab running /start-item; focuses an existing
+                                          # one's tab, or opens it when it has none
+overbridge start <repo> --task <slug> --prompt <text>  # no item yet (a ticket to file, a spike): workspace <slug>
+                                          # on branch task/<slug>, its Claude starting with <text>
+overbridge new <name> -r <repo> [-r <repo>...]    # by hand; name it for its work item; opens its tab
+overbridge tab <name> [--prompt text]             # reopen a workspace's closed tab (focuses it when open)
 overbridge add <repo> --ws <name>                 # add another repo to an existing workspace
 overbridge rm <name> [--force]                    # refuses with uncommitted changes unless --force
 overbridge status --all
@@ -37,7 +41,7 @@ overbridge status --all
 overbridge spinup                                 # rebuild the zellij session over existing workspaces
                                           # (creates an empty 'scratch' one if there are none; kills running panes)
 overbridge up [--fresh]                           # zellij session "workspaces": the @root tab (Claude in the
-                                          # root, no guard), then one tab per workspace with a sidebar,
+                                          # root, guarded to coordinate only), then one tab per workspace with a sidebar,
                                           # a top panel, and the agent
 overbridge layout                                 # print the layout `up` would use (stderr says where from)
 overbridge claude <name|@root>                    # run a bound Claude, or the root Claude, outside zellij

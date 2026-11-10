@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { AppStatus, appAvailable, appStatus, appUrl, readRecord } from "./apps";
-import { readAgentState } from "./agent-state";
+import { readAgentState, sessionEndedForGood } from "./agent-state";
 import * as git from "./git";
 import { isOrchestrationTab } from "./orchestration";
 import { metaDir, wsDir, worktreePath } from "./paths";
@@ -332,15 +332,17 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 }
 
 /**
- * Whether `ws` can be wiped: every claimed PR has merged, or its agent is empty (just started or cleared), or at least one claimed branch has an open PR and every other one has
- * merged (from the cache), and `noUnsavedWork` holds (read from git now, so it is never stale).
+ * Whether `ws` can be wiped: every claimed PR has merged, its agent is empty (just started or cleared), its session was
+ * closed on purpose, or at least one claimed branch has an open PR and every other one has merged (from the cache), and
+ * `noUnsavedWork` holds (read from git now, so it is never stale).
  */
 export function cleanable(ws: string): boolean {
   if (isOrchestrationTab(ws)) {
     return false;
   }
   const cache = readTopCache(ws);
-  if (!cache.merged && !cache.prsOpen && readAgentState(ws) !== "empty") {
+  const finished = cache.merged !== undefined || cache.prsOpen || readAgentState(ws) === "empty" || sessionEndedForGood(ws);
+  if (!finished) {
     return false;
   }
   return noUnsavedWork(ws, cache);
