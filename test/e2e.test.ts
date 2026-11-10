@@ -116,10 +116,12 @@ describe("workflow", () => {
     expect(ws(["rm", "empty"]).code).toBe(0);
   });
 
-  test("layout has one tab per workspace, each with sidebar and top panel", () => {
+  test("layout opens the root orchestration tab, then one tab per workspace, each with sidebar and top panel", () => {
     for (const n of ["ws3", "ws4", "ws5"]) ws(["new", n]);
     const kdl = ws(["layout"]).out;
-    expect(kdl.match(/\btab name=/g)?.length).toBe(5);
+    expect(kdl.match(/\btab name=/g)?.length).toBe(6);
+    expect(kdl.indexOf('tab name="@root"')).toBeLessThan(kdl.indexOf('tab name="ws'));
+    expect(kdl).toContain('"claude" "@root"');
     expect(kdl).toContain('"claude" "ws5"');
     expect(kdl).toContain('"sidebar" "--ws" "ws5"');
     expect(kdl).toContain('"top" "--ws" "ws5"');

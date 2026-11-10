@@ -4,9 +4,10 @@ import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./c
 import * as git from "./git";
 import { configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, rootConfigPath } from "./project-config";
 import { chooseLayout, userLayoutPath } from "./layout";
-import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
+import { type OrchestrationTab } from "./orchestration";
+import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
-import { scaffold } from "./scaffold";
+import { scaffold, scaffoldOrchestration } from "./scaffold";
 import { shellInvocation } from "./shell";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
 import { type Claim, claimOwner, getWorkspace, readState, withState } from "./state";
@@ -333,6 +334,16 @@ export function claude(ws: string, extra: string[]) {
   if (spec && only) writeFileSync(agentShellFile(ws), only);
   else rmSync(agentShellFile(ws), { force: true });
   process.exit(exec(inv.cmd, { cwd: inv.cwd, env: { ...inv.env, OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() } }));
+}
+
+/**
+ * Launch an orchestration tab's Claude in its folder, with the agent-state hooks and no workspace guard.
+ * `OVERBRIDGE_NAME` is blanked so a value inherited from the launching shell cannot bind it to a workspace.
+ */
+export function claudeOrchestration(t: OrchestrationTab, extra: string[]) {
+  const settings = scaffoldOrchestration(t.tab);
+  const env = { OVERBRIDGE_NAME: "", [ORCHESTRATION_ENV]: t.tab, OVERBRIDGE_ROOT: root() };
+  process.exit(exec(["claude", "--settings", settings, ...extra], { cwd: t.dir(), env }));
 }
 
 /** `overbridge shell <repo> -- <cmd>`: run `cmd` in the repo's dev shell, or as it is when the repo has none. */

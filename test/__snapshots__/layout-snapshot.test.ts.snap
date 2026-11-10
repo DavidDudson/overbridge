@@ -8,7 +8,17 @@ exports[`generated layout two workspaces, one resuming 1`] = `
       plugin location="zellij:status-bar"
     }
   }
-  tab name="ws1" focus=true {
+  tab name="@root" focus=true {
+    pane split_direction="vertical" {
+      pane name="sidebar" command="overbridge" cwd="/ws-root" size=60 borderless=true focus=true {
+        args "sidebar" "--ws" "@root"
+      }
+      pane name="@root · claude" command="overbridge" cwd="/ws-root" {
+        args "claude" "@root"
+      }
+    }
+  }
+  tab name="ws1" {
     pane split_direction="vertical" {
       pane name="sidebar" command="overbridge" cwd="/ws-root/ws1" size=60 borderless=true focus=true {
         args "sidebar" "--ws" "ws1"
@@ -50,7 +60,17 @@ exports[`generated layout a wide sidebar and a self command with arguments 1`] =
       plugin location="zellij:status-bar"
     }
   }
-  tab name="ws1" focus=true {
+  tab name="@root" focus=true {
+    pane split_direction="vertical" {
+      pane name="sidebar" command="/usr/bin/bun" cwd="/ws-root" size=40 borderless=true focus=true {
+        args "/opt/overbridge/src/cli.ts" "sidebar" "--ws" "@root"
+      }
+      pane name="@root · claude" command="/usr/bin/bun" cwd="/ws-root" {
+        args "/opt/overbridge/src/cli.ts" "claude" "@root"
+      }
+    }
+  }
+  tab name="ws1" {
     pane split_direction="vertical" {
       pane name="sidebar" command="/usr/bin/bun" cwd="/ws-root/ws1" size=40 borderless=true focus=true {
         args "/opt/overbridge/src/cli.ts" "sidebar" "--ws" "ws1"

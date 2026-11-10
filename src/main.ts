@@ -6,6 +6,7 @@ import { extCommand } from "./ext";
 import { item } from "./item";
 import { next } from "./next";
 import { diff } from "./panes";
+import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
 import { start } from "./start";
 import { topPanel, topRefresh } from "./top-run";
@@ -26,7 +27,7 @@ Setup
                                         then finished with background tasks (zellij binds it to a key)
   overbridge diff [--ws name]                   changes since the default branch, whitespace ignored, via delta
   overbridge sync                            fetch every bare repo
-  overbridge sidebar [--ws name]                tab sidebar pane (run by the generated layout)
+  overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
 
 Work items (the repo's project-management provider)
@@ -57,9 +58,10 @@ Branches & PRs (workspace inferred from $OVERBRIDGE_NAME or cwd)
 
 Zellij
   overbridge spinup                             rebuild the session (creates an empty 'scratch' workspace if none)
-  overbridge up [--fresh]                       attach/launch session, one tab per workspace
+  overbridge up [--fresh]                       attach/launch session: the orchestration tabs (@root: Claude in
+                                        the root, no guard), then one tab per workspace
   overbridge layout                             print the generated zellij layout
-  overbridge claude <name> [-- args]            run Claude bound to a workspace
+  overbridge claude <name|@tab> [-- args]       run Claude bound to a workspace, or an orchestration tab's Claude
 
 Hooks
   overbridge guard                              Claude PreToolUse hook (reads JSON on stdin)
@@ -200,7 +202,10 @@ async function main(argv: string[]): Promise<number> {
     case "claude": {
       const [name, ...extra] = rest;
       if (!name) throw new OverbridgeError("usage: overbridge claude <name> [-- claude args]");
-      cmd.claude(name, extra[0] === "--" ? extra.slice(1) : extra);
+      const args = extra[0] === "--" ? extra.slice(1) : extra;
+      const tab = orchestrationTab(name);
+      if (tab) cmd.claudeOrchestration(tab, args);
+      else cmd.claude(name, args);
       break;
     }
     case "shell": {

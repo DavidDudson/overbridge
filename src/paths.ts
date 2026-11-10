@@ -52,6 +52,8 @@ export const ghReposCache = () =>
   join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "overbridge", "github-repos.json");
 /** Resolved dev shell envs (`src/shell.ts`); outside OVERBRIDGE_ROOT like `ghReposCache`. */
 export const shellCacheDir = () => join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "overbridge", "shell");
+/** Set on an orchestration Claude (`src/orchestration.ts`) so the agent-state hook records its state under the tab name. */
+export const ORCHESTRATION_ENV = "OVERBRIDGE_TAB";
 export const wsDir =(ws: string) => join(root(), ws);
 export const worktreePath = (ws: string, repo: string) => join(wsDir(ws), repo);
 

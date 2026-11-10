@@ -12,11 +12,11 @@ import { withState } from "../src/state";
 
 describe("pickNext", () => {
   const list = [
-    { ws: "a", state: "done" as const },
-    { ws: "b", state: "waiting" as const },
-    { ws: "c", state: "bg" as const },
-    { ws: "d", state: "waiting" as const },
-    { ws: "e", state: "busy" as const },
+    { tab: "a", state: "done" as const },
+    { tab: "b", state: "waiting" as const },
+    { tab: "c", state: "bg" as const },
+    { tab: "d", state: "waiting" as const },
+    { tab: "e", state: "busy" as const },
   ];
   test("waiting beats done beats background, cycling from the current tab", () => {
     expect(pickNext(list, "a")).toBe("b");
@@ -27,9 +27,12 @@ describe("pickNext", () => {
     expect(pickNext(list.filter((e) => e.state !== "waiting"), "e")).toBe("a");
     expect(pickNext(list.filter((e) => e.state === "bg" || e.state === "busy"), "e")).toBe("c");
   });
+  test("an orchestration tab is picked like any workspace", () => {
+    expect(pickNext([{ tab: "@root", state: "waiting" }, { tab: "a", state: "done" }], "a")).toBe("@root");
+  });
   test("never picks the current tab, and nothing waiting is undefined", () => {
-    expect(pickNext([{ ws: "a", state: "waiting" }], "a")).toBeUndefined();
-    expect(pickNext([{ ws: "a", state: "busy" }, { ws: "b" }], undefined)).toBeUndefined();
+    expect(pickNext([{ tab: "a", state: "waiting" }], "a")).toBeUndefined();
+    expect(pickNext([{ tab: "a", state: "busy" }, { tab: "b" }], undefined)).toBeUndefined();
   });
 });
 

@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
-import { type Entry, renderSidebar } from "../src/sidebar";
+import { type Entry, renderSidebar, Section } from "../src/sidebar";
 import { ENTER_SCREEN, frame, LEAVE_SCREEN } from "../src/term";
 import { cell, layoutTop, paintTop, type TopApp, type TopSnapshot } from "../src/top";
 import { Screen } from "./helpers/screen";
 
-const entry = (ws: string, glyph: string, label = ws): Entry => ({ ws, glyph, label });
+const entry = (tab: string, glyph: string, label = tab, section: Section = Section.Workspaces): Entry => ({ tab, section, glyph, label });
 
 describe("virtual screen", () => {
   test("addresses cells, clears, and tracks styles", () => {

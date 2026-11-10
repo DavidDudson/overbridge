@@ -36,10 +36,11 @@ overbridge status --all
 
 overbridge spinup                                 # rebuild the zellij session over existing workspaces
                                           # (creates an empty 'scratch' one if there are none; kills running panes)
-overbridge up [--fresh]                           # zellij session "workspaces": one tab per workspace with a
-                                          # sidebar, a top panel, and the agent above a shell
+overbridge up [--fresh]                           # zellij session "workspaces": the @root tab (Claude in the
+                                          # root, no guard), then one tab per workspace with a sidebar,
+                                          # a top panel, and the agent
 overbridge layout                                 # print the layout `up` would use (stderr says where from)
-overbridge claude <name>                          # run one bound Claude outside zellij
+overbridge claude <name|@root>                    # run a bound Claude, or the root Claude, outside zellij
 ```
 
 ## Config

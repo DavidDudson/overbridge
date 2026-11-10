@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { SIDEBAR_WIDTH, sidebarWidth } from "./config";
+import { ORCHESTRATION_TABS, type OrchestrationTab } from "./orchestration";
 import { wsDir } from "./paths";
 
 export { SIDEBAR_WIDTH };
@@ -51,6 +52,24 @@ export function tabKdl(ws: string, self: string[], opts: TabOptions = {}): strin
   }`;
 }
 
+/** An orchestration tab: the sidebar down the left, Claude in the tab's folder filling the rest. No top panel. */
+export function orchestrationTabKdl(t: OrchestrationTab, self: string[], opts: Omit<TabOptions, "prompt"> = {}): string {
+  const [cmd, ...baseArgs] = self;
+  const width = opts.sidebarWidth ?? SIDEBAR_WIDTH;
+  const args = (...rest: string[]) => [...baseArgs, ...rest].map(q).join(" ");
+  const dir = t.dir();
+  return `  tab name=${q(t.tab)}${opts.focus ? " focus=true" : ""} {
+    pane split_direction="vertical" {
+      pane name=${q("sidebar")} command=${q(cmd!)} cwd=${q(dir)} size=${width} borderless=true focus=true {
+        args ${args("sidebar", "--ws", t.tab)}
+      }
+      pane name=${q(`${t.tab} · claude`)} command=${q(cmd!)} cwd=${q(dir)} {
+        args ${args("claude", t.tab, ...(opts.resume ? ["--continue"] : []))}
+      }
+    }
+  }`;
+}
+
 const TAB_TEMPLATE = `  default_tab_template {
     children
     pane size=1 borderless=true {
@@ -59,17 +78,18 @@ const TAB_TEMPLATE = `  default_tab_template {
   }`;
 
 /**
- * Zellij layout: one tab per workspace, see `tabKdl`.
- * A pure function of its arguments, so regenerating it is idempotent.
+ * Zellij layout: the orchestration tabs (`orchestrationTabKdl`), then one tab per workspace (`tabKdl`).
+ * The first tab has focus. A pure function of its arguments, so regenerating it is idempotent.
  */
 export function layoutKdl(workspaces: string[], self: string[], opts: LayoutOptions = {}): string {
-  const tabs = workspaces.map((ws, i) =>
-    tabKdl(ws, self, {
-      resume: opts.resume?.has(ws) ?? false,
-      ...(opts.sidebarWidth === undefined ? {} : { sidebarWidth: opts.sidebarWidth }),
-      focus: i === 0,
-    }),
+  const width = opts.sidebarWidth === undefined ? {} : { sidebarWidth: opts.sidebarWidth };
+  const orchestration = ORCHESTRATION_TABS.map((t, i) =>
+    orchestrationTabKdl(t, self, { resume: opts.resume?.has(t.tab) ?? false, ...width, focus: i === 0 }),
   );
+  const tabs = [
+    ...orchestration,
+    ...workspaces.map((ws, i) => tabKdl(ws, self, { resume: opts.resume?.has(ws) ?? false, ...width, focus: orchestration.length + i === 0 })),
+  ];
   return `layout {
 ${TAB_TEMPLATE}
 ${tabs.join("\n")}
@@ -98,14 +118,20 @@ export const userLayoutPath = (configDir = zellijConfigDir()) => join(configDir,
 /** The directory Claude keeps transcripts in for sessions started in `dir`. */
 export const transcriptDir = (dir: string, home = homedir()) => join(home, ".claude", "projects", dir.replace(/[^A-Za-z0-9]/g, "-"));
 
-/** Workspaces with a Claude transcript to resume. Reads the disk, so callers pass the result to `layoutKdl`. */
+const hasTranscript = (dir: string, home: string) => {
+  const transcripts = transcriptDir(dir, home);
+  return existsSync(transcripts) && readdirSync(transcripts).some((f) => f.endsWith(".jsonl"));
+};
+
+/**
+ * Workspaces and orchestration tabs with a Claude transcript to resume. Reads the disk, so callers pass the
+ * result to `layoutKdl`.
+ */
 export function resumable(workspaces: string[], home = homedir()): Set<string> {
-  const out = new Set<string>();
-  for (const ws of workspaces) {
-    const dir = transcriptDir(wsDir(ws), home);
-    if (existsSync(dir) && readdirSync(dir).some((f) => f.endsWith(".jsonl"))) out.add(ws);
-  }
-  return out;
+  return new Set([
+    ...workspaces.filter((ws) => hasTranscript(wsDir(ws), home)),
+    ...ORCHESTRATION_TABS.filter((t) => hasTranscript(t.dir(), home)).map((t) => t.tab),
+  ]);
 }
 
 export type LayoutChoice = { source: "user"; path: string } | { source: "generated"; kdl: string };

@@ -112,10 +112,10 @@ describe("claimRefresh", () => {
 });
 
 describe("overbridge hook", () => {
-  const hook = (input: string, name: string | undefined) => {
+  const hook = (input: string, name: string | undefined, extra: Record<string, string> = {}) => {
     const p = Bun.spawnSync({
       cmd: [process.execPath, CLI, "hook"],
-      env: { ...process.env, OVERBRIDGE_ROOT: tmp, OVERBRIDGE_NAME: name ?? "", OVERBRIDGE_SELF: "true" },
+      env: { ...process.env, OVERBRIDGE_ROOT: tmp, OVERBRIDGE_NAME: name ?? "", OVERBRIDGE_SELF: "true", ...extra },
       stdin: Buffer.from(input),
       stdout: "pipe",
       stderr: "pipe",
@@ -134,6 +134,13 @@ describe("overbridge hook", () => {
     expect(existsSync(agentStatePath(meta, "w2"))).toBe(false);
     expect(hook(JSON.stringify({ hook_event_name: "Stop" }), undefined).code).toBe(0);
     expect(existsSync(join(meta, "agent"))).toBe(false);
+  });
+
+  test("records an orchestration tab's state under its tab name, without a top panel refresh", () => {
+    const r = hook(JSON.stringify({ hook_event_name: "Stop" }), undefined, { OVERBRIDGE_TAB: "@root" });
+    expect(r).toEqual({ code: 0, out: "", err: "" });
+    expect(stateOf("@root").state).toBe("done");
+    expect(existsSync(join(meta, "top"))).toBe(false);
   });
 
   test("bad input never fails the agent", () => {
