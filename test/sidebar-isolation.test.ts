@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentStateFile, UNKNOWN_GLYPH } from "../src/agent-state";
-import { CleanupCause, CleanupOutcome } from "../src/cleanup-log";
+import { CleanupCause, CleanupOutcome, cleanupRecords, cleanupRows } from "../src/cleanup-log";
 import { metaDir } from "../src/paths";
 import { EMPTY_MODEL, type Entry, entries, entryLines, gather, inFlightCleanups, type Model, renderSidebar, Section, type SidebarReaders } from "../src/sidebar";
 import { type State, tryReadState, withState, workspaceFault } from "../src/state";
@@ -16,6 +16,8 @@ const writeCache = (ws: string, text: string) => {
   writeFileSync(cacheFile(ws), text);
 };
 const workspace = (title?: string) => ({ created: "now", repos: { r: { branch: "b" } }, ...(title ? { title } : {}) });
+/** A state whose records are raw JSON shapes, including malformed ones `State` forbids. */
+const malformedState = (workspaces: Record<string, unknown>): State => ({ version: 1, workspaces }) as unknown as State;
 const byTab = (list: Entry[]) => Object.fromEntries(list.filter((e) => e.section === Section.Workspaces).map((e) => [e.tab, e]));
 
 let tmp: string;
@@ -47,7 +49,7 @@ describe("top cache shape", () => {
       writeCache("w1", text);
       const read = readTopCacheChecked("w1");
       expect(read.cache).toEqual({ links: [], at: 0 });
-      expect(read.error).toContain(why);
+      expect(read.fault).toContain(why);
       expect(readTopCache("w1")).toEqual({ links: [], at: 0 });
     }
   });
@@ -81,7 +83,7 @@ describe("workspace records", () => {
       writeFileSync(join(metaDir(), "state.json"), text);
       const read = tryReadState(fallback);
       expect(read.state).toBe(fallback);
-      expect(read.error).toContain("state.json");
+      expect(read.fault).toContain("state.json");
     }
     writeFileSync(join(metaDir(), "state.json"), JSON.stringify(fallback));
     expect(tryReadState()).toEqual({ state: fallback });
@@ -148,14 +150,11 @@ describe("one bad workspace in the list", () => {
 
   test("a malformed removing record is left out of the cleanups in flight", () => {
     const since = new Date().toISOString();
-    const state = {
-      version: 1 as const,
-      workspaces: {
-        going: { ...workspace(), removing: { since } },
-        broken: { ...workspace(), removing: {} },
-        gone: null,
-      },
-    } as unknown as State;
+    const state = malformedState({
+      going: { ...workspace(), removing: { since } },
+      broken: { ...workspace(), removing: {} },
+      gone: null,
+    });
     expect(inFlightCleanups(state).map((r) => r.label)).toEqual(["going"]);
   });
 });
@@ -188,7 +187,7 @@ describe("one poll of the sidebar", () => {
   test("a state file that will not parse keeps the last good list and names the file; the next poll recovers", () => {
     const first = gather(okReaders(), 26, EMPTY_MODEL);
     const readers = okReaders();
-    readers.readState = (fallback) => ({ state: fallback, error: "state.json: Unexpected token" });
+    readers.readState = (fallback) => ({ state: fallback, fault: "state.json: Unexpected token" });
     readers.entries = (_order, state) => list(state);
     const broken = gather(readers, 26, first);
     expect(broken.fault).toBe("state.json: Unexpected token");
@@ -211,8 +210,7 @@ describe("one poll of the sidebar", () => {
       ["limits", (m) => expect(m.limits).toBeUndefined()],
     ];
     for (const [name, check] of cases) {
-      const readers = okReaders();
-      (readers as unknown as Record<string, unknown>)[name] = throwing(name);
+      const readers: SidebarReaders = { ...okReaders(), [name]: throwing(name) };
       const model = gather(readers, 26, last);
       expect(model.fault).toContain(`${name} broke`);
       check(model);
@@ -236,16 +234,19 @@ describe("one poll of the sidebar", () => {
 });
 
 describe("cleanup records from state", () => {
-  test("rows skip a record without a label or a time", async () => {
-    const { cleanupRows } = await import("../src/cleanup-log");
+  test("a record without a label or a time is left out, and so is a log that is not a list", () => {
     const now = 100_000;
+    const good = { ws: "a", label: "#a fix", atMs: now - 1000, outcome: CleanupOutcome.Removed, cause: CleanupCause.Cleanup };
     const log = [
-      { ws: "a", label: "#a fix", atMs: now - 1000, outcome: CleanupOutcome.Removed, cause: CleanupCause.Cleanup },
+      good,
       { ws: "b", atMs: now - 1000, outcome: CleanupOutcome.Removed, cause: CleanupCause.Cleanup },
       { ws: "c", label: "#c fix", outcome: CleanupOutcome.Failed, cause: CleanupCause.Cleanup },
       { ws: "d", label: 7, atMs: "then" },
       null,
     ];
-    expect(plain(cleanupRows([], log, 30, now, now - 5000)).slice(1)).toEqual(["🧹 removed #a fix"]);
+    expect(cleanupRecords(log)).toEqual([good]);
+    expect(cleanupRecords(undefined)).toEqual([]);
+    expect(cleanupRecords({ a: good })).toEqual([]);
+    expect(plain(cleanupRows([], cleanupRecords(log), 30, now, now - 5000)).slice(1)).toEqual(["🧹 removed #a fix"]);
   });
 });

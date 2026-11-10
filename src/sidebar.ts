@@ -5,14 +5,14 @@ import { type AgentState, glyphFor, readAgentState, UNKNOWN_GLYPH } from "./agen
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
-import { type CleanupInFlight, cleanupRows } from "./cleanup-log";
+import { type CleanupInFlight, cleanupRecords, cleanupRows } from "./cleanup-log";
 import { metaDir, selfCommand } from "./paths";
 import { type Limits, limitRows, readLimits } from "./limits";
 import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
 import { ensureOrchestrationTabs } from "./orchestration-keep";
 import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-history";
-import { isRemoving, RemovalBlock, readState, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
+import { isRemoving, isWorkspaceState, RemovalBlock, readState, type Removing, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
 import { claimSweep, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache, readTopCacheChecked, sidebarLabel } from "./top";
@@ -95,20 +95,24 @@ function guardedEntry(tab: string, section: Section, build: () => Entry): Entry 
 
 /** The card for workspace `ws` whose state record is `w`: a fault card when the record or its top cache is malformed. */
 function workspaceEntry(ws: string, w: unknown): Entry {
-  const fault = workspaceFault(w);
-  if (fault) {
-    return faultEntry(ws, Section.Workspaces, fault);
+  const recordFault = workspaceFault(w);
+  if (recordFault !== undefined || !isWorkspaceState(w)) {
+    return faultEntry(ws, Section.Workspaces, recordFault ?? "state record is malformed");
   }
-  const { removeError: error, removalBlocked: blocked } = w as WorkspaceState;
-  const { cache, error: cacheFault } = readTopCacheChecked(ws);
+  const { removeError: error, removalBlocked: blocked } = w;
+  const { cache, fault } = readTopCacheChecked(ws);
   const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
-  return { ...entry, ...(cacheFault ? { fault: cacheFault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}) };
+  return { ...entry, ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}) };
 }
 
-/** Whether `w` hides its workspace as being removed; a malformed record, or one that throws when read, never hides anything. */
+/** `w` as the record of a workspace being removed right now, else undefined; a malformed record is never one. */
+const removingRecord = (w: unknown, now = Date.now()): (WorkspaceState & { removing: Removing }) | undefined =>
+  isWorkspaceState(w) && w.removing && isRemoving(w, now) ? (w as WorkspaceState & { removing: Removing }) : undefined;
+
+/** Whether `w` hides its workspace as being removed; a record that throws when read never hides anything. */
 const hiddenByRemoval = (w: unknown): boolean => {
   try {
-    return workspaceFault(w) === undefined && isRemoving(w as WorkspaceState);
+    return removingRecord(w) !== undefined;
   } catch {
     return false;
   }
@@ -181,6 +185,15 @@ const BLOCK_TEXT: Record<RemovalBlock, { text: string; color: Color }> = {
 const UNSAVED_TEXT: { text: string; color: Color } = { text: "ended · unsaved work", color: "red" };
 const FAULT_COLOR: Color = "red";
 
+/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, then the agent state. */
+function statusFor(e: Entry): { text: string; color: Color } | undefined {
+  if (e.fault) return { text: `error: ${e.fault}`, color: FAULT_COLOR };
+  if (e.error) return { text: `cleanup failed: ${e.error}`, color: FAULT_COLOR };
+  if (e.blocked) return BLOCK_TEXT[e.blocked];
+  if (e.unsaved) return UNSAVED_TEXT;
+  return e.state ? STATE_TEXT[e.state] : undefined;
+}
+
 /** `text` broken at spaces into lines of at most `width` columns; an over-long word is split. */
 export function wrapText(text: string, width: number): string[] {
   const lines: string[] = [];
@@ -226,17 +239,7 @@ export const entryHeights = (list: Entry[], width: number) => list.map((e, i) =>
 /** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line. */
 export function entryLines(e: Entry, index: number, selected: boolean, inner: number): string[] {
   const titles = titleRows(e, index, inner).map((l) => fit(l, inner));
-  const status = e.fault
-    ? { text: `error: ${e.fault}`, color: FAULT_COLOR }
-    : e.error
-      ? { text: `cleanup failed: ${e.error}`, color: "red" as const }
-      : e.blocked
-        ? BLOCK_TEXT[e.blocked]
-        : e.unsaved
-          ? UNSAVED_TEXT
-          : e.state
-            ? STATE_TEXT[e.state]
-            : undefined;
+  const status = statusFor(e);
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
   const sub = fit(`${indent}${status?.text ?? ""}`, inner);
   if (selected) return [...titles, sub].map(inverse);
@@ -257,16 +260,11 @@ export function queueRows(queue: { running?: Ticket; waiting: Ticket[] }, inner:
   return [...running, ...waiting];
 }
 
-/** Workspaces being removed in the background right now, labelled as their cards were; a malformed record is skipped. */
+/** Workspaces being removed in the background right now, labelled as their cards were; a malformed record is skipped (its card reports it). */
 export function inFlightCleanups(state: State = readState(), now = Date.now()): CleanupInFlight[] {
   return Object.entries(state.workspaces as Record<string, unknown>).flatMap(([ws, w]) => {
-    try {
-      if (workspaceFault(w) !== undefined) return [];
-      const record = w as WorkspaceState;
-      return record.removing && isRemoving(record, now) ? [{ label: sidebarLabel(ws, readTopCache(ws)), sinceMs: Date.parse(record.removing.since) }] : [];
-    } catch {
-      return [];
-    }
+    const record = removingRecord(w, now);
+    return record ? [{ label: sidebarLabel(ws, readTopCache(ws)), sinceMs: Date.parse(record.removing.since) }] : [];
   });
 }
 
@@ -277,7 +275,7 @@ export interface SidebarReaders {
   keepOrchestration: (order: string[]) => void;
   /** Start the merged-PR sweep when this sidebar's turn comes. */
   sweep: () => void;
-  readState: (fallback: State) => { state: State; error?: string };
+  readState: (fallback: State) => { state: State; fault?: string };
   entries: (order: string[], state: State) => Entry[];
   reap: (list: Entry[]) => ReapResult;
   /** The rows under the divider: cleanups, then the check queue. */
@@ -300,11 +298,7 @@ export const EMPTY_MODEL: Model = { list: [], status: [], limits: undefined, sta
 
 const NO_REAP: ReapResult = { unsaved: new Set(), faults: new Map() };
 
-/**
- * One poll of the sidebar. Every reader runs on its own: the first that throws is recorded as the model's `fault`
- * and its part keeps `last`'s value (the list) or an empty one (status rows, limits), so the pane keeps drawing.
- * A state file that will not parse keeps the last good state and names the file.
- */
+/** One poll. Each reader runs on its own: the first failure becomes `fault`, and its part keeps `last`'s value or an empty one. */
 export function gather(readers: SidebarReaders, inner: number, last: Model): Model {
   const faults: string[] = [];
   const attempt = <T>(what: string, fn: () => T, fallback: T): T => {
@@ -319,10 +313,10 @@ export function gather(readers: SidebarReaders, inner: number, last: Model): Mod
   attempt("orchestration tabs", () => readers.keepOrchestration(order), undefined);
   attempt("merge sweep", readers.sweep, undefined);
   const read = attempt("state", () => readers.readState(last.state), { state: last.state });
-  if (read.error) {
-    faults.push(read.error);
+  if (read.fault) {
+    faults.push(read.fault);
   }
-  const state = read.error ? last.state : read.state;
+  const state = read.fault ? last.state : read.state;
   const listed = attempt("workspace list", () => readers.entries(order, state), last.list);
   const reaped = attempt("auto-remove", () => readers.reap(listed), NO_REAP);
   const list = listed.map((e) => {
@@ -653,7 +647,7 @@ export async function sidebar(wsOpt?: string) {
     readState: tryReadState,
     entries,
     reap: createReaper(),
-    status: (state, inner) => [...cleanupRows(inFlightCleanups(state), state.cleanups ?? [], inner, Date.now(), state.mergeSweepAt), ...queueRows(readQueue(), inner)],
+    status: (state, inner) => [...cleanupRows(inFlightCleanups(state), cleanupRecords(state.cleanups), inner, Date.now(), state.mergeSweepAt), ...queueRows(readQueue(), inner)],
     limits: readLimits,
   };
   let last: Model = EMPTY_MODEL;
@@ -667,12 +661,14 @@ export async function sidebar(wsOpt?: string) {
     pending = digit;
     digitTimer = digit ? setTimeout(commit, DIGIT_MS) : undefined;
   };
+  /** What the last key press threw, shown in the footer until the next key press; a poll does not clear it. */
+  let inputFault: string | undefined;
   /** Run `fn`; when it throws, the error goes to the footer instead of ending the pane. */
   const guarded = (what: string, fn: () => void) => {
     try {
       fn();
     } catch (e) {
-      last = { ...last, fault: `${what}: ${errorMessage(e)}` };
+      inputFault = `${what}: ${errorMessage(e)}`;
     }
   };
   const commit = () => {
@@ -687,12 +683,12 @@ export async function sidebar(wsOpt?: string) {
     draw();
   };
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
-  /** The footer to draw: the user's prompt or message first, else this poll's fault, else the legend. */
-  const footerToDraw = (): Footer => (footer.kind === FooterKind.Legend && last.fault ? { kind: FooterKind.Error, message: last.fault } : footer);
-  /**
-   * Gather, then paint. Neither may end the pane: a failed gather keeps the last good model and names the failure
-   * in the footer; a failed paint (which should not happen) paints the failure alone. The next poll tries again.
-   */
+  /** The footer to draw: the user's prompt or message first, else the last key press's fault, else this poll's, else the legend. */
+  const footerToDraw = (): Footer => {
+    const fault = inputFault ?? last.fault;
+    return footer.kind === FooterKind.Legend && fault ? { kind: FooterKind.Error, message: fault } : footer;
+  };
+  /** Gather, then paint; neither may end the pane, so a failure is named in the footer and the next poll tries again. */
   const draw = () => {
     const { height, width } = size();
     const inner = Math.max(0, width - 4);
@@ -772,12 +768,18 @@ export async function sidebar(wsOpt?: string) {
     process.stdin.resume();
     process.stdin.on("data", (buf) => {
       for (const input of decodeInput(buf.toString())) {
+        inputFault = undefined;
+        let taken = false;
+        guarded("key", () => {
+          taken = footerTakes(input);
+        });
+        if (taken) {
+          hold("");
+          continue;
+        }
+        // an open prompt takes q and ctrl-c as text and cancel, so quit only once the footer has passed on the key
         if (input.kind === "key" && (input.key === "q" || input.key === "ctrl-c")) return quit();
         guarded("key", () => {
-          if (footerTakes(input)) {
-            hold("");
-            return;
-          }
           if (input.kind === "key" && input.key === "n") {
             hold("");
             next(self);

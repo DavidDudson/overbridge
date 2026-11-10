@@ -46,7 +46,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   once git is clean, or marks the card `ended · unsaved work`.
   Every sidebar card is its own failure domain: `entries` builds each card in a guard (`workspaceFault`, `readTopCacheChecked`),
   the reaper reports a throw per workspace (`ReapResult.faults`), and the pane's poll is `gather` over injectable `SidebarReaders`,
-  keeping the last good `Model` and putting the first failure in the footer. The panes read state through `tryReadState`;
+  keeping the last good `Model` and putting the first failure in the footer. The sidebar reads state through `tryReadState`;
   writers keep `readState`, so a file `withState` cannot parse is never overwritten. A reader that can be fed a bad file must
   report, not throw.
   Once every claimed PR has merged (`TopCache.merged`, the PR head commits), `src/merge-sweep.ts` (`overbridge top sweep`) removes the workspace

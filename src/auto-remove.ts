@@ -40,11 +40,8 @@ const defaultDeps = (): ReapDeps => ({
 });
 
 /**
- * A function for the sidebar poll that removes every workspace whose session the user closed on purpose and whose
- * git work is all pushed. It returns the ended workspaces it kept because they hold uncommitted or unpushed work,
- * and those whose checks threw. Each workspace is handled on its own: a throw (a workspace gone from state since the
- * list was built, a locked state file, a git error) is reported for that workspace and the rest are still reaped.
- * Git checks and faults are remembered for `GIT_RECHECK_MS`, because the sidebar polls every second.
+ * Removes every workspace whose session the user closed on purpose and whose git work is all pushed, one workspace at a
+ * time: a throw (gone from state since the list was built, a locked state file) is reported for that workspace alone.
  */
 export function createReaper(deps: ReapDeps = defaultDeps()): (candidates: readonly ReapCandidate[]) => ReapResult {
   const checks = new Map<string, { atMs: number; clean: boolean }>();

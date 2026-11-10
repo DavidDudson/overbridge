@@ -47,27 +47,20 @@ export function readState(): State {
   }
 }
 
-/**
- * `readState` for a pane that must keep running: the state, or `fallback` and why when the file is unreadable,
- * not JSON, or has no `workspaces` mapping. Writers keep using `readState`, so a file `withState` cannot parse is
- * never overwritten.
- */
-export function tryReadState(fallback: State = { version: 1, workspaces: {} }): { state: State; error?: string } {
+/** `readState` for a pane that must keep running: `fallback` plus why when the file is unreadable; writers keep `readState` so `withState` never overwrites a file it cannot parse. */
+export function tryReadState(fallback: State = { version: 1, workspaces: {} }): { state: State; fault?: string } {
   let state: unknown;
   try {
     state = readState();
   } catch (e) {
-    return { state: fallback, error: `${STATE_FILE}: ${errorMessage(e)}` };
+    return { state: fallback, fault: `${STATE_FILE}: ${errorMessage(e)}` };
   }
-  if (!isRecord(state)) return { state: fallback, error: `${STATE_FILE}: expected a mapping, got ${describeValue(state)}` };
-  if (!isRecord(state.workspaces)) return { state: fallback, error: `${STATE_FILE}: workspaces is ${describeValue(state.workspaces)}, not a mapping` };
+  if (!isRecord(state)) return { state: fallback, fault: `${STATE_FILE}: expected a mapping, got ${describeValue(state)}` };
+  if (!isRecord(state.workspaces)) return { state: fallback, fault: `${STATE_FILE}: workspaces is ${describeValue(state.workspaces)}, not a mapping` };
   return { state: state as State };
 }
 
-/**
- * Why one workspace record in state cannot be trusted, or undefined when its shape is right. A record a hand edit
- * or a half-written file left malformed shows as an error on its own sidebar card instead of throwing in every reader.
- */
+/** Why one workspace record in state cannot be trusted (a hand edit, a half-written file), or undefined when its shape is right. */
 export function workspaceFault(w: unknown): string | undefined {
   if (!isRecord(w)) return `state record is ${describeValue(w)}, not a mapping`;
   if (!isRecord(w.repos)) return `state record has ${w.repos === undefined ? "no repos" : `repos as ${describeValue(w.repos)}`}`;
@@ -77,6 +70,9 @@ export function workspaceFault(w: unknown): string | undefined {
   }
   return undefined;
 }
+
+/** `workspaceFault` as a type guard, for callers that need no message. */
+export const isWorkspaceState = (w: unknown): w is WorkspaceState => workspaceFault(w) === undefined;
 
 function writeState(s: State) {
   const tmp = `${statePath()}.${process.pid}.tmp`;

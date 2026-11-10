@@ -223,20 +223,17 @@ export function topCacheFault(raw: unknown): string | undefined {
   );
 }
 
-/**
- * The cache file, checked: a missing file is the empty cache; one that is unreadable, not JSON, or misshapen is
- * the empty cache plus why, so the sidebar can show the error on that workspace's card alone.
- */
-export function readTopCacheChecked(ws: string): { cache: TopCache; error?: string } {
+/** The cache file, checked: a missing file is the empty cache; an unreadable or misshapen one is the empty cache plus why, for that workspace's card. */
+export function readTopCacheChecked(ws: string): { cache: TopCache; fault?: string } {
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(cacheFile(ws), "utf8"));
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return { cache: EMPTY_CACHE };
-    return { cache: EMPTY_CACHE, error: `top cache: ${errorMessage(e)}` };
+    return { cache: EMPTY_CACHE, fault: `top cache: ${errorMessage(e)}` };
   }
   const fault = topCacheFault(raw);
-  return fault ? { cache: EMPTY_CACHE, error: `top cache: ${fault}` } : { cache: raw as TopCache };
+  return fault ? { cache: EMPTY_CACHE, fault: `top cache: ${fault}` } : { cache: raw as TopCache };
 }
 
 /** The cache file as a `TopCache`; the empty cache when it is missing, unreadable or misshapen. */
