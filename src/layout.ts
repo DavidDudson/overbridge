@@ -70,13 +70,6 @@ export function orchestrationTabKdl(t: OrchestrationTab, self: string[], opts: O
   }`;
 }
 
-const TAB_TEMPLATE = `  default_tab_template {
-    children
-    pane size=1 borderless=true {
-      plugin location="zellij:status-bar"
-    }
-  }`;
-
 /**
  * Zellij layout: the orchestration tabs (`orchestrationTabKdl`), then one tab per workspace (`tabKdl`).
  * The first tab has focus. A pure function of its arguments, so regenerating it is idempotent.
@@ -91,7 +84,6 @@ export function layoutKdl(workspaces: string[], self: string[], opts: LayoutOpti
     ...workspaces.map((ws, i) => tabKdl(ws, self, { resume: opts.resume?.has(ws) ?? false, ...width, focus: orchestration.length + i === 0 })),
   ];
   return `layout {
-${TAB_TEMPLATE}
 ${tabs.join("\n")}
 }
 `;
@@ -100,7 +92,6 @@ ${tabs.join("\n")}
 /** A layout holding just `ws`'s tab, for `zellij action new-tab --layout`. */
 export function newTabKdl(ws: string, self: string[], opts: TabOptions = {}): string {
   return `layout {
-${TAB_TEMPLATE}
 ${tabKdl(ws, self, opts)}
 }
 `;
@@ -109,7 +100,6 @@ ${tabKdl(ws, self, opts)}
 /** A layout holding just orchestration tab `t`, for reopening it with `zellij action new-tab --layout`. */
 export function newOrchestrationTabKdl(t: OrchestrationTab, self: string[], opts: Omit<TabOptions, "prompt" | "resume"> = {}): string {
   return `layout {
-${TAB_TEMPLATE}
 ${orchestrationTabKdl(t, self, { ...opts, focus: true })}
 }
 `;

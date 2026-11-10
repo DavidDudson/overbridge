@@ -53,10 +53,11 @@ describe("layoutKdl", () => {
     expect(kdl).toContain(`size=${TOP_ROWS}`);
   });
 
-  test("the horizontal tab bar is gone, the status bar stays", () => {
+  test("neither the tab bar nor the status bar plugin is loaded", () => {
     const kdl = layoutKdl(["a"], self);
     expect(kdl).not.toContain("tab-bar");
-    expect(kdl).toContain("status-bar");
+    expect(kdl).not.toContain("status-bar");
+    expect(kdl).not.toContain("default_tab_template");
   });
 
   test("the sidebar takes focus in its tab", () => {
@@ -121,7 +122,7 @@ describe("newTabKdl", () => {
     expect(tabs(kdl)).toBe(1);
     expect(kdl).toContain('tab name="gh-app-12" focus=true');
     expect(kdl).toContain('"sidebar" "--ws" "gh-app-12"');
-    expect(kdl).toContain("zellij:status-bar");
+    expect(kdl).not.toContain("status-bar");
   });
 
   test("a prompt reaches the agent after `--`; resuming wins over it", () => {
