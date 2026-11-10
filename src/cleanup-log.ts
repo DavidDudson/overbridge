@@ -5,6 +5,10 @@ import { type Color, colorize, fit } from "./term";
 export const CleanupOutcome = { Removed: "removed", Failed: "failed" } as const;
 export type CleanupOutcome = (typeof CleanupOutcome)[keyof typeof CleanupOutcome];
 
+/** What removed a workspace: the Cleanup button, the merged-PR sweep, or the session-end reaper. */
+export const CleanupCause = { Cleanup: "cleanup", Merged: "merged", SessionEnded: "session-ended" } as const;
+export type CleanupCause = (typeof CleanupCause)[keyof typeof CleanupCause];
+
 /** One finished removal, kept in state so every sidebar can list it. */
 export interface CleanupRecord {
   ws: string;
@@ -12,6 +16,7 @@ export interface CleanupRecord {
   label: string;
   atMs: number;
   outcome: CleanupOutcome;
+  cause: CleanupCause;
 }
 
 /** A removal still in flight. */
@@ -46,10 +51,15 @@ export function shortAge(ms: number): string {
   return secs < 3600 ? `${Math.floor(secs / 60)}m` : `${Math.floor(secs / 3600)}h`;
 }
 
-const OUTCOME_STYLE: Record<CleanupOutcome, { glyph: string; word: string; color: Color }> = {
-  removed: { glyph: "🧹", word: "removed", color: "grey" },
-  failed: { glyph: "✗", word: "failed", color: "red" },
+/** The word a removed row leads with, naming what removed it. */
+const CAUSE_WORD: Record<CleanupCause, string> = {
+  [CleanupCause.Cleanup]: "cleaned",
+  [CleanupCause.Merged]: "merged",
+  [CleanupCause.SessionEnded]: "exited",
 };
+
+const rowStyle = (r: CleanupRecord): { glyph: string; word: string; color: Color } =>
+  r.outcome === CleanupOutcome.Failed ? { glyph: "✗", word: "failed", color: "red" } : { glyph: "🧹", word: CAUSE_WORD[r.cause], color: "grey" };
 
 /**
  * The cleanup rows under the sidebar's divider, each `inner` columns wide: removals in flight first, then those
@@ -61,7 +71,7 @@ export function cleanupRows(inFlight: readonly CleanupInFlight[], log: readonly 
     .filter((r) => now - r.atMs < CLEANUP_SHOW_MS)
     .toSorted((a, b) => b.atMs - a.atMs)
     .map((r) => {
-      const style = OUTCOME_STYLE[r.outcome];
+      const style = rowStyle(r);
       return colorize(fit(`${style.glyph} ${shortAge(now - r.atMs)} ${style.word} ${r.label}`, inner), style.color);
     });
   return [...running, ...finished].slice(0, CLEANUP_ROWS);

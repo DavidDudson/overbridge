@@ -1,14 +1,14 @@
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { CleanupRecord } from "./cleanup-log";
+import type { CleanupCause, CleanupRecord } from "./cleanup-log";
 import { metaDir } from "./paths";
 import { pidAlive } from "./proc";
 import { type Cover, overlaps } from "./stack";
 import { fail } from "./util";
 
 export type Claim = { branch?: string; pr?: number };
-/** A background removal in flight: when it started and, once spawned, the worker's pid. */
-export type Removing = { since: string; pid?: number };
+/** A background removal in flight: when it started, what started it and, once spawned, the worker's pid. */
+export type Removing = { since: string; cause?: CleanupCause; pid?: number };
 /** Why a workspace that would be removed by itself is kept; shown on its sidebar card. */
 export const RemovalBlock = { MergedUnsaved: "merged-unsaved" } as const;
 export type RemovalBlock = (typeof RemovalBlock)[keyof typeof RemovalBlock];

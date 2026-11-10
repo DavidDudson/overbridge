@@ -71,6 +71,12 @@ branch's commits off the default branch. A workspace also stays while its agent 
 idle or has ended. A claim with no PR, or a PR closed without merging, keeps the workspace. Orchestration tabs are never
 removed this way.
 
+**Seeing what was removed.** Every removal shows at the bottom of the sidebar, so none happens unseen. A yellow
+`🧹 4s removing <title>` row shows one in progress. A finished one stays for an hour and names what removed it:
+`🧹 3m merged <title>` for the merged-PR check, `exited` for an ended session, and `cleaned` for the Cleanup button.
+A failed removal shows as a red `✗ 1m failed <title>`. The sidebar shows at most three of these rows, newest first,
+and `state.json` keeps the last 20 under `cleanups`.
+
 Inside a workspace (shell pane or its Claude):
 
 ```nu
@@ -569,7 +575,8 @@ opens it again at the front and returns focus to the tab you were on. A lock in
 `<meta>/orchestration/@root.reopen.lock` makes sure only one sidebar reopens it. A user layout
 (`layouts/overbridge.kdl`) decides its own tabs, so nothing is reopened when one exists.
 
-Under the list, while the [check queue](#check-queue) is busy, a `▶` row shows the running command, its
+Under the list, up to three rows show workspaces being removed or removed in the last hour (see **Seeing what was
+removed** above). Below them, while the [check queue](#check-queue) is busy, a `▶` row shows the running command, its
 workspace, and how long it has run, and a `⧗` row lists the workspaces waiting.
 
 The width (default 60) comes from the global config:

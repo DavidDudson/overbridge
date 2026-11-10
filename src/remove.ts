@@ -1,7 +1,7 @@
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { AppStatus, stopApp } from "./apps";
-import { CleanupOutcome, recordCleanup } from "./cleanup-log";
+import { CleanupCause, CleanupOutcome, recordCleanup } from "./cleanup-log";
 import { removeWorkspace } from "./commands";
 import { landingTab } from "./next";
 import { isOrchestrationTab, orchestrationRemoveMessage } from "./orchestration";
@@ -75,10 +75,11 @@ export function parseTabIds(listTabs: string): Map<string, string> {
 /**
  * Remove `ws` without making the user wait: refuse at once when git holds unsaved work, otherwise mark it
  * removing (every sidebar hides it), start the worker that does the slow part, switch to the landing tab
- * and close `ws`'s tab. `previous` is the tab the user came from, when known. Returns a refusal message,
+ * and close `ws`'s tab. `previous` is the tab the user came from, when known; `cause` is what the cleanup log
+ * credits, the Cleanup button unless set. Returns a refusal message,
  * or undefined once the removal is under way.
  */
-export function beginRemoval(ws: string, opts: { previous?: string; landing?: Landing; deps?: RemovalDeps } = {}): string | undefined {
+export function beginRemoval(ws: string, opts: { previous?: string; landing?: Landing; cause?: CleanupCause; deps?: RemovalDeps } = {}): string | undefined {
   if (isOrchestrationTab(ws)) {
     return orchestrationRemoveMessage(ws);
   }
@@ -98,7 +99,7 @@ export function beginRemoval(ws: string, opts: { previous?: string; landing?: La
       return false;
     }
     const { removeError: _, ...rest } = current;
-    s.workspaces[ws] = { ...rest, removing: { since: new Date().toISOString() } };
+    s.workspaces[ws] = { ...rest, removing: { since: new Date().toISOString(), cause: opts.cause ?? CleanupCause.Cleanup } };
     return true;
   });
   if (!claimed) {
@@ -143,6 +144,7 @@ function waitTabGone(ws: string) {
  */
 export async function finishRemoval(ws: string): Promise<void> {
   const label = sidebarLabel(ws, readTopCache(ws));
+  const cause = readState().workspaces[ws]?.removing?.cause ?? CleanupCause.Cleanup;
   try {
     if (process.env.ZELLIJ) {
       waitTabGone(ws);
@@ -156,10 +158,10 @@ export async function finishRemoval(ws: string): Promise<void> {
       .filter((app) => app.status === AppStatus.Running || app.status === AppStatus.Starting)
       .forEach((app) => stopApp(ws, app.repo, app.spec, app.repoDir));
     removeWorkspace(ws, false);
-    recordCleanup({ ws, label, atMs: Date.now(), outcome: CleanupOutcome.Removed });
+    recordCleanup({ ws, label, atMs: Date.now(), outcome: CleanupOutcome.Removed, cause });
   } catch (e) {
     restore(ws, (e as Error).message);
-    recordCleanup({ ws, label, atMs: Date.now(), outcome: CleanupOutcome.Failed });
+    recordCleanup({ ws, label, atMs: Date.now(), outcome: CleanupOutcome.Failed, cause });
     throw e;
   }
 }

@@ -1,5 +1,6 @@
 import { type AgentState, readAgentState } from "./agent-state";
 import { isOrchestrationTab } from "./orchestration";
+import { CleanupCause } from "./cleanup-log";
 import { beginRemoval, Landing } from "./remove";
 import { isRemoving, RemovalBlock, readState, withState, type WorkspaceState } from "./state";
 import { MERGE_SWEEP_MS } from "./sweep-trigger";
@@ -59,7 +60,7 @@ const defaultSweepDeps = (): SweepDeps => ({
   refresh: (ws) => {
     refreshTop(ws);
   },
-  remove: (ws) => beginRemoval(ws, { landing: Landing.IfFocused }),
+  remove: (ws) => beginRemoval(ws, { landing: Landing.IfFocused, cause: CleanupCause.Merged }),
   now: Date.now(),
 });
 
