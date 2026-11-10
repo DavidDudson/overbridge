@@ -1,6 +1,7 @@
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { AppStatus, stopApp } from "./apps";
+import { CleanupOutcome, recordCleanup } from "./cleanup-log";
 import { removeWorkspace } from "./commands";
 import { landingTab } from "./next";
 import { isOrchestrationTab, orchestrationRemoveMessage } from "./orchestration";
@@ -8,7 +9,7 @@ import { metaDir, root, selfCommand } from "./paths";
 import { entries, switchTab, tabOrder } from "./sidebar";
 import { openTab } from "./tab";
 import { getWorkspace, isRemoving, readState, withState } from "./state";
-import { cleanable, gitClean, refreshTop, snapshotTop } from "./top";
+import { cleanable, gitClean, readTopCache, refreshTop, sidebarLabel, snapshotTop } from "./top";
 import { fail, type RunResult, run } from "./util";
 
 /** The internal `rm` flag that runs `finishRemoval` in the detached worker. */
@@ -121,8 +122,10 @@ function waitTabGone(ws: string) {
 /**
  * The worker's half: re-check from the network that `ws` is still cleanable, stop its apps and run a
  * non-force remove. On any failure the workspace comes back with the error on its sidebar card and its tab reopened.
+ * Either way the outcome goes in the cleanup log the sidebar lists.
  */
 export async function finishRemoval(ws: string): Promise<void> {
+  const label = sidebarLabel(ws, readTopCache(ws));
   try {
     if (process.env.ZELLIJ) {
       waitTabGone(ws);
@@ -136,8 +139,10 @@ export async function finishRemoval(ws: string): Promise<void> {
       .filter((app) => app.status === AppStatus.Running || app.status === AppStatus.Starting)
       .forEach((app) => stopApp(ws, app.repo, app.spec, app.repoDir));
     removeWorkspace(ws, false);
+    recordCleanup({ ws, label, atMs: Date.now(), outcome: CleanupOutcome.Removed });
   } catch (e) {
     restore(ws, (e as Error).message);
+    recordCleanup({ ws, label, atMs: Date.now(), outcome: CleanupOutcome.Failed });
     throw e;
   }
 }

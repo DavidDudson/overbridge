@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentStateFile } from "../src/agent-state";
+import { CleanupOutcome } from "../src/cleanup-log";
 import { beginRemoval, FINISH_FLAG, parseTabIds, type RemovalDeps } from "../src/remove";
 import { entries, entryLines } from "../src/sidebar";
 import { isRemoving, readState, REMOVING_GRACE_MS, watchState, withState, type WorkspaceState } from "../src/state";
@@ -186,6 +187,7 @@ describe("the background worker", () => {
     expect(existsSync(join(root, "e1"))).toBe(true);
     expect(await until(() => !readState().workspaces.e1)).toBe(true);
     expect(existsSync(join(root, "e1"))).toBe(false);
+    expect(readState().cleanups?.filter((c) => c.ws === "e1").map((c) => c.outcome)).toEqual([CleanupOutcome.Removed]);
   });
 
   test("a failure brings the workspace back with the error on its card and nothing removed", async () => {
@@ -205,6 +207,7 @@ describe("the background worker", () => {
     const card = entries().find((e) => e.tab === "f1")!;
     expect(card.error).toContain("pre-remove");
     expect(entryLines(card, 1, false, 80).at(-1)).toContain("cleanup failed: a pre-remove hook");
+    expect(readState().cleanups?.filter((c) => c.ws === "f1").map((c) => c.outcome)).toEqual([CleanupOutcome.Failed]);
   });
 
   test("a new Cleanup clears the old error", () => {

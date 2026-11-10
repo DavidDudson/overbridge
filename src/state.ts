@@ -1,5 +1,6 @@
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { CleanupRecord } from "./cleanup-log";
 import { metaDir } from "./paths";
 import { pidAlive } from "./proc";
 import { type Cover, overlaps } from "./stack";
@@ -16,7 +17,12 @@ export type WorkspaceState = {
   /** Why the last background removal failed; shown on the workspace's sidebar card. */
   removeError?: string;
 };
-export type State = { version: 1; workspaces: Record<string, WorkspaceState> };
+export type State = {
+  version: 1;
+  workspaces: Record<string, WorkspaceState>;
+  /** Finished workspace removals, newest last, for the sidebar to list. */
+  cleanups?: CleanupRecord[];
+};
 
 const STATE_FILE = "state.json";
 const statePath = () => join(metaDir(), STATE_FILE);

@@ -4,13 +4,14 @@ import { join } from "node:path";
 import { type AgentState, glyphFor, readAgentState } from "./agent-state";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
+import { type CleanupInFlight, cleanupRows } from "./cleanup-log";
 import { metaDir, selfCommand } from "./paths";
 import { type Limits, limitRows, readLimits } from "./limits";
 import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
 import { ensureOrchestrationTabs } from "./orchestration-keep";
 import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-history";
-import { isRemoving, readState, watchState } from "./state";
+import { isRemoving, readState, type State, watchState } from "./state";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache } from "./top";
 import { sidebarLabel } from "./top";
@@ -90,7 +91,7 @@ export const pinnedRowsFor = (heights: number[], pinned: number) => (pinned ? 2 
 
 /**
  * Rows between the Workspaces frame's top border and its divider, for a pane `height` rows tall, after the
- * Orchestration frame and the check queue rows under the divider.
+ * Orchestration frame and the status rows (cleanups, check queue) under the divider.
  */
 export const bodyRowsFor = (height: number, pinnedRows = 0, queueRowCount = 0) =>
   Math.max(1, height - pinnedRows - CHROME_TOP - CHROME_BOTTOM - queueRowCount);
@@ -194,10 +195,17 @@ export function queueRows(queue: { running?: Ticket; waiting: Ticket[] }, inner:
   return [...running, ...waiting];
 }
 
+/** Workspaces being removed in the background right now, labelled as their cards were. */
+export function inFlightCleanups(state: State = readState(), now = Date.now()): CleanupInFlight[] {
+  return Object.entries(state.workspaces).flatMap(([ws, w]) =>
+    w.removing && isRemoving(w, now) ? [{ label: sidebarLabel(ws, readTopCache(ws)), sinceMs: Date.parse(w.removing.since) }] : [],
+  );
+}
+
 /**
  * The whole sidebar as `height` rows of `width` columns. A rounded frame titled "Orchestration" holds a card per
  * orchestration tab; below it a frame titled "Workspaces" holds a card per workspace (title wraps), scrolled by
- * `offset` (an index into the workspaces), then a divider, the `queue` rows, the usage limits and the key legend,
+ * `offset` (an index into the workspaces), then a divider, the `queue` rows (recent cleanups, then the check queue), the usage limits and the key legend,
  * with `version` set into the bottom border. `current` indexes the whole list.
  */
 export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = "", queue: string[] = [], footer: Footer = LEGEND_FOOTER, pending = ""): string[] {
@@ -507,7 +515,7 @@ export async function sidebar(wsOpt?: string) {
   const userLayout = existsSync(userLayoutPath());
   let offset = 0;
   let footer: Footer = LEGEND_FOOTER;
-  let queueRowCount = 0;
+  let statusRowCount = 0;
   let pending = "";
   let digitTimer: ReturnType<typeof setTimeout> | undefined;
   const hold = (digit: string) => {
@@ -537,12 +545,14 @@ export async function sidebar(wsOpt?: string) {
     const heights = entryHeights(list, width);
     const pinned = pinnedCount(list);
     const workspaceHeights = heights.slice(pinned);
-    const queue = queueRows(readQueue(), Math.max(0, width - 4));
-    queueRowCount = queue.length;
-    const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), queueRowCount);
+    const inner = Math.max(0, width - 4);
+    const state = readState();
+    const status = [...cleanupRows(inFlightCleanups(state), state.cleanups ?? [], inner), ...queueRows(readQueue(), inner)];
+    statusRowCount = status.length;
+    const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount);
     const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;
     offset = clampScroll(scrolled, workspaceHeights, rows);
-    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits(), Date.now(), version, queue, footer, pending), height, width));
+    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits(), Date.now(), version, status, footer, pending), height, width));
   };
   const show = (next: Footer) => {
     footer = next;
@@ -615,7 +625,7 @@ export async function sidebar(wsOpt?: string) {
         const { height, width } = size();
         const heights = entryHeights(list, width);
         const pinned = pinnedCount(list);
-        const step = stepFor(input, current, offset, heights, bodyRowsFor(height, pinnedRowsFor(heights, pinned), queueRowCount), pinned, pending);
+        const step = stepFor(input, current, offset, heights, bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount), pinned, pending);
         hold(step.pending);
         if (step.travel !== undefined) {
           travelTab(self, step.travel, list);
