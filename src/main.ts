@@ -8,6 +8,7 @@ import { next } from "./next";
 import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
+import { FINISH_FLAG, finishRemoval } from "./remove";
 import { start } from "./start";
 import { topPanel, topRefresh } from "./top-run";
 import { silenceLegacyWarnings } from "./paths";
@@ -155,9 +156,13 @@ async function main(argv: string[]): Promise<number> {
       break;
     }
     case "rm": {
-      const { values, positionals } = opts(rest, { force: { type: "boolean", short: "f" } });
+      const { values, positionals } = opts(rest, { force: { type: "boolean", short: "f" }, [FINISH_FLAG]: { type: "boolean" } });
       if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge rm <name> [--force]");
-      cmd.removeWorkspace(positionals[0]!, !!values.force);
+      if (values[FINISH_FLAG]) {
+        await finishRemoval(positionals[0]!);
+      } else {
+        cmd.removeWorkspace(positionals[0]!, !!values.force);
+      }
       break;
     }
     case "status":

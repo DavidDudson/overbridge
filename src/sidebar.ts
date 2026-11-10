@@ -10,7 +10,7 @@ import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
 import { ensureOrchestrationTabs } from "./orchestration-keep";
 import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-history";
-import { readState } from "./state";
+import { isRemoving, readState, watchState } from "./state";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache } from "./top";
 import { sidebarLabel } from "./top";
@@ -50,18 +50,29 @@ export interface Entry {
   state?: AgentState | undefined;
   /** Item id and title when known, else the workspace name. */
   label: string;
+  /** Why the last background removal failed; replaces the status line. */
+  error?: string;
 }
 
 export { sidebarLabel, stripConventional } from "./top";
 
+/** `run`, but a missing `zellij` binary reads as a failed call, the same as running outside a session. */
+const zellijQuery = (cmd: string[]): { ok: boolean; stdout: string } => {
+  try {
+    return run(cmd);
+  } catch {
+    return { ok: false, stdout: "" };
+  }
+};
+
 /** Workspace names in zellij's tab order; empty outside zellij. */
-export function tabOrder(exec: (cmd: string[]) => { ok: boolean; stdout: string } = (cmd) => run(cmd)): string[] {
+export function tabOrder(exec: (cmd: string[]) => { ok: boolean; stdout: string } = zellijQuery): string[] {
   const r = exec(["zellij", "action", "query-tab-names"]);
   return r.ok ? r.stdout.split("\n").map((s) => s.trim()).filter(Boolean) : [];
 }
 
 /** The workspace whose tab is focused; undefined outside zellij. */
-export function currentTab(exec: (cmd: string[]) => { ok: boolean; stdout: string } = (cmd) => run(cmd)): string | undefined {
+export function currentTab(exec: (cmd: string[]) => { ok: boolean; stdout: string } = zellijQuery): string | undefined {
   const r = exec(["zellij", "action", "current-tab-info"]);
   return r.ok ? /^name: (.+)$/m.exec(r.stdout)?.[1]?.trim() : undefined;
 }
@@ -76,11 +87,16 @@ const entryFor = (tab: string, section: Section, label: string): Entry => {
  * The generated layout opens the orchestration tabs first, so their digits come first in tab order too.
  */
 export function entries(order: string[] = tabOrder()): Entry[] {
-  const names = Object.keys(readState().workspaces).sort(naturalSort);
+  const workspaces = readState().workspaces;
+  const names = Object.keys(workspaces).filter((ws) => !isRemoving(workspaces[ws]!)).sort(naturalSort);
   const rank = (ws: string) => { const i = order.indexOf(ws); return i < 0 ? order.length : i; };
   return [
     ...ORCHESTRATION_TABS.map((t) => entryFor(t.tab, Section.Orchestration, t.label)),
-    ...names.toSorted((a, b) => rank(a) - rank(b)).map((ws) => entryFor(ws, Section.Workspaces, sidebarLabel(ws, readTopCache(ws)))),
+    ...names.toSorted((a, b) => rank(a) - rank(b)).map((ws) => {
+      const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, readTopCache(ws)));
+      const error = workspaces[ws]!.removeError;
+      return error ? { ...entry, error } : entry;
+    }),
   ];
 }
 
@@ -175,7 +191,7 @@ export const entryHeights = (list: Entry[], width: number) => list.map((e, i) =>
 /** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line. */
 export function entryLines(e: Entry, index: number, selected: boolean, inner: number): string[] {
   const titles = titleRows(e, index, inner).map((l) => fit(l, inner));
-  const status = e.state ? STATE_TEXT[e.state] : undefined;
+  const status = e.error ? { text: `cleanup failed: ${e.error}`, color: "red" as const } : e.state ? STATE_TEXT[e.state] : undefined;
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
   const sub = fit(`${indent}${status?.text ?? ""}`, inner);
   if (selected) return [...titles, sub].map(inverse);
@@ -591,6 +607,7 @@ export async function sidebar(wsOpt?: string) {
     const quit = () => {
       clearInterval(timer);
       hold("");
+      stopWatch();
       process.stdout.write(LEAVE_SCREEN);
       process.stdin.setRawMode(false);
       rmSync(paneFile(self), { force: true });
@@ -628,6 +645,7 @@ export async function sidebar(wsOpt?: string) {
     });
     process.stdout.on("resize", draw);
     const timer = setInterval(draw, POLL_MS);
+    const stopWatch = watchState(draw);
     draw();
   });
 }

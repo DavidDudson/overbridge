@@ -48,8 +48,11 @@ focused instead of started again. Workspaces can also be made by hand: `overbrid
 
 **Cleanup.** A workspace with at least one open PR, where every other claimed branch has a merged PR, with no
 uncommitted changes and no unpushed commits, shows a **Cleanup** button in its top panel. Press it twice within
-five seconds: it re-checks, stops the workspace's apps, runs `overbridge rm` and closes the tab. A merged claim
-does not block it; a closed (unmerged) PR or a branch with no PR does, and one PR must still be open.
+five seconds. If a repo has uncommitted changes or unpushed commits by then, Cleanup refuses and nothing changes.
+Otherwise the tab closes at once, the workspace leaves every sidebar, and you land on the next tab that needs
+attention, or else the tab next to it. A background process then re-checks the PRs, stops the workspace's apps, and
+runs `overbridge rm`. If any of that fails, the workspace comes back with the error on its sidebar card, and its tab
+reopens. A merged claim does not block it; a closed (unmerged) PR or a branch with no PR does, and one PR must still be open.
 
 Inside a workspace (shell pane or its Claude):
 

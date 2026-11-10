@@ -5,10 +5,27 @@ import { join } from "node:path";
 import { agentStateFile, readAgentState } from "../src/agent-state";
 import { clearCompact, COMPACT_MARKER_MS, markCompact, nextState, recordState, takeCompactRestart } from "../src/agent-hook";
 import { limitColor, limitRows, readLimits, timeLeft, WEEK_SECS } from "../src/limits";
-import { pickNext } from "../src/next";
+import { landingTab, pickNext } from "../src/next";
 import { findPane, togglePane, type ZellijPane } from "../src/panes";
 import { fit, textWidth } from "../src/term";
 import { withState } from "../src/state";
+
+describe("landingTab", () => {
+  const list = [{ tab: "@root" }, { tab: "a" }, { tab: "b", state: "done" as const }, { tab: "c" }];
+  test("the tab the user came from wins while it is still listed", () => {
+    expect(landingTab(list, "a", "c")).toBe("c");
+    expect(landingTab(list, "a", "gone")).toBe("b");
+  });
+  test("then the next tab needing attention", () => {
+    expect(landingTab(list, "c")).toBe("b");
+  });
+  test("then the tab after the removed one, else the one before", () => {
+    const quiet = list.map(({ tab }) => ({ tab }));
+    expect(landingTab(quiet, "a")).toBe("b");
+    expect(landingTab(quiet, "c")).toBe("b");
+    expect(landingTab([{ tab: "only" }], "only")).toBeUndefined();
+  });
+});
 
 describe("pickNext", () => {
   const list = [
