@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkout, createWorkspace, repoAdd } from "../src/commands";
-import { openTab, start } from "../src/start";
+import { openTab, start, startTask } from "../src/start";
 import { readState } from "../src/state";
 import type { RunResult } from "../src/util";
 import { fakeProvider } from "./helpers/fake-provider";
@@ -121,5 +121,36 @@ describe("start inside zellij", () => {
     const z = fakeZellij("mine", false);
     openTab("ws-b", undefined, z.exec);
     expect(z.actions()).toEqual(["current-tab-info", "new-tab"]);
+  });
+});
+
+describe("start --task", () => {
+  test("creates a workspace named for the task, on a claimed task/<slug> branch", () => {
+    startTask("app", "file-ticket", "file a ticket for X");
+    const w = readState().workspaces["file-ticket"]!;
+    expect(w.repos.app?.branch).toBe("task/file-ticket");
+    expect(existsSync(join(tmp, "workspaces", "file-ticket", ".claude", "settings.json"))).toBe(true);
+  });
+
+  test("a task that already has a workspace is not started twice", () => {
+    const before = Object.keys(readState().workspaces).length;
+    startTask("app", "file-ticket", "file a ticket for X");
+    expect(Object.keys(readState().workspaces).length).toBe(before);
+  });
+
+  test("an invalid slug is an error and creates nothing", () => {
+    expect(() => startTask("app", "../escape", "x")).toThrow("invalid task name");
+    expect(() => startTask("app", "@root", "x")).toThrow("invalid task name");
+  });
+
+  test("an empty prompt is an error", () => {
+    expect(() => startTask("app", "no-prompt", "  ")).toThrow("needs --prompt");
+    expect(readState().workspaces["no-prompt"]).toBeUndefined();
+  });
+
+  test("a refused claim leaves no workspace behind", () => {
+    checkout(["app", "task/taken"], "holder");
+    expect(() => startTask("app", "taken", "x")).toThrow("claimed by workspace holder");
+    expect(readState().workspaces["taken"]).toBeUndefined();
   });
 });

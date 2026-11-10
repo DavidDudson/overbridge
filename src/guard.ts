@@ -2,13 +2,15 @@
  * Claude Code PreToolUse hook. Installed into every workspace's
  * .claude/settings.json; keeps a workspace Claude inside its workspace and
  * routes branch changes through `overbridge checkout` so claims stay authoritative.
+ * An orchestration tab's Claude gets the stricter `checkOrchestrator` (guard-orchestrator.ts) instead.
  *
  * Exit 2 blocks the tool call and shows stderr to Claude.
  */
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { currentWorkspace, isInside, root } from "./paths";
+import { checkOrchestrator } from "./guard-orchestrator";
+import { currentWorkspace, isInside, ORCHESTRATION_ENV, root } from "./paths";
 import { type GuardConfig, loadRootLayers } from "./project-config";
 
 export type HookInput = { cwd?: string; tool_name?: string; tool_input?: Record<string, unknown> };
@@ -107,10 +109,7 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
 export async function guardMain(): Promise<number> {
   try {
     const input: HookInput = JSON.parse(await Bun.stdin.text());
-    const ws = currentWorkspace(input.cwd ?? process.cwd());
-    if (!ws) return 0;
-    // a config.yml that can't be read throws, and the catch below blocks: the guard fails closed
-    const reason = check(input, { root: root(), ws, home: homedir(), extra: loadRootLayers().guard });
+    const reason = guardReason(input, process.env);
     if (!reason) return 0;
     console.error(`overbridge guard: ${reason}`);
     return 2;
@@ -118,4 +117,21 @@ export async function guardMain(): Promise<number> {
     console.error(`overbridge guard: internal error, blocking to be safe: ${e}`);
     return 2;
   }
+}
+
+/**
+ * Which guard applies: the orchestrator's when the call comes from an orchestration tab's Claude, which has
+ * `OVERBRIDGE_TAB` set and no workspace name, wherever its cwd is; else the workspace guard, if the call is
+ * inside a workspace.
+ */
+export function guardReason(input: HookInput, env: Record<string, string | undefined>): string | undefined {
+  if (env[ORCHESTRATION_ENV] && !env.OVERBRIDGE_NAME) {
+    return checkOrchestrator(input);
+  }
+  const ws = currentWorkspace(input.cwd ?? process.cwd());
+  if (!ws) {
+    return undefined;
+  }
+  // a config.yml that can't be read throws, and guardMain's catch blocks: the guard fails closed
+  return check(input, { root: root(), ws, home: homedir(), extra: loadRootLayers().guard });
 }
