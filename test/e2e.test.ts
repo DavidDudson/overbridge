@@ -77,6 +77,10 @@ describe("workflow", () => {
     expect(settings.permissions.allow).toContain("Bash(gh stack push:*)");
     expect(settings.permissions.allow).not.toContain("Bash(gh pr merge:*)");
     expect(settings.autoMode.allow[0]).toBe("$defaults");
+    const marketplace = settings.extraKnownMarketplaces.overbridge.source;
+    expect(marketplace.source).toBe("directory");
+    expect(existsSync(join(marketplace.path, ".claude-plugin", "marketplace.json"))).toBe(true);
+    expect(settings.enabledPlugins).toEqual({ "overbridge@overbridge": true, "overbridge-review@overbridge": true });
     for (const event of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "PreCompact", "Stop", "SessionEnd"]) {
       expect(settings.hooks[event][0].hooks[0].command).toMatch(/ hook$/);
     }

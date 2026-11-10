@@ -5,6 +5,7 @@ import { getRepo, type RepoSpec } from "./config";
 import * as git from "./git";
 import { newTabKdl } from "./layout";
 import { barePath, metaDir, NAME_RE, selfCommand } from "./paths";
+import { type PluginProblems, pluginProblems } from "./plugins";
 import { providerFor } from "./pm";
 import type { Provider } from "./pm/provider";
 import { CONFIG_FILE, type ProjectConfig, parseYaml, ROOT_CONFIG_FILE, resolveConfig } from "./project-config";
@@ -49,7 +50,12 @@ export function openTab(ws: string, prompt?: string) {
  * (`ENG-123`, `gh-app-12`), holding `repo` on the item's branch, in a new tab whose agent runs
  * `/start-item`. An item that already has a workspace just gets its tab focused.
  */
-export function start(repo: string, id: string, prompt?: string, deps: { provider?: Provider } = {}) {
+export function start(repo: string, id: string, prompt?: string, deps: { provider?: Provider; plugins?: () => PluginProblems } = {}) {
+  const plugins = (deps.plugins ?? pluginProblems)();
+  if (plugins.errors.length) {
+    fail(`the new tab would not have the overbridge skills, so /start-item would be unknown:\n${plugins.errors.join("\n")}`);
+  }
+  plugins.warnings.forEach((w) => log(w));
   const spec = getRepo(repo);
   git.fetch(spec);
   const provider = deps.provider ?? providerForRepo(spec);

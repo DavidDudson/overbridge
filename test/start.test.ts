@@ -40,11 +40,12 @@ afterAll(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
+const noProblems = () => ({ errors: [], warnings: [] });
 const provider = () => fakeProvider([{ id: "12", title: "Add dark mode", url: "" }]);
 
 describe("start", () => {
   test("creates a workspace named for the item, on the item's branch", () => {
-    start("app", "12", undefined, { provider: provider() });
+    start("app", "12", undefined, { provider: provider(), plugins: noProblems });
     const w = readState().workspaces["gh-app-12"]!;
     expect(w.repos.app?.branch).toBe("feat/12-add-dark-mode");
     expect(existsSync(join(tmp, "workspaces", "gh-app-12", "app", ".git"))).toBe(true);
@@ -52,7 +53,7 @@ describe("start", () => {
   });
 
   test("an item that already has a workspace is not started twice", () => {
-    start("app", "12", undefined, { provider: provider() });
+    start("app", "12", undefined, { provider: provider(), plugins: noProblems });
     expect(Object.keys(readState().workspaces)).toEqual(["gh-app-12"]);
   });
 
@@ -60,12 +61,19 @@ describe("start", () => {
     const p = fakeProvider([{ id: "13", title: "Other", url: "" }]);
     createWorkspace("holder", ["app"]);
     checkout(["app", "feat/13-other"], "holder");
-    expect(() => start("app", "13", undefined, { provider: p })).toThrow("claimed by workspace holder");
+    expect(() => start("app", "13", undefined, { provider: p, plugins: noProblems })).toThrow("claimed by workspace holder");
     expect(readState().workspaces["gh-app-13"]).toBeUndefined();
     expect(existsSync(join(tmp, "workspaces", "gh-app-13"))).toBe(false);
   });
 
+  test("a missing plugin bundle stops the start before any workspace exists", () => {
+    const plugins = () => ({ errors: ["marketplace.json is missing"], warnings: [] });
+    expect(() => start("app", "12", undefined, { provider: provider(), plugins })).toThrow("marketplace.json is missing");
+    expect(() => start("app", "13", undefined, { provider: provider(), plugins })).toThrow("/start-item would be unknown");
+    expect(readState().workspaces["gh-app-13"]).toBeUndefined();
+  });
+
   test("an unknown item is an error", () => {
-    expect(() => start("app", "99", undefined, { provider: provider() })).toThrow("99: not found");
+    expect(() => start("app", "99", undefined, { provider: provider(), plugins: noProblems })).toThrow("99: not found");
   });
 });
