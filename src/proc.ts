@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename } from "node:path";
 
 /**
@@ -37,7 +38,7 @@ const hasProc = existsSync("/proc/self");
 const PS_FIELDS = "pid=,ppid=,stat=,comm=";
 
 function ps(args: string[]): Proc[] {
-  const r = spawnSync("ps", ["-o", PS_FIELDS, ...args], { encoding: "utf8", timeout: 5_000 });
+  const r = spawnSync("ps", ["-o", PS_FIELDS, ...args], { cwd: homedir(), encoding: "utf8", timeout: 5_000 });
   if (r.status !== 0 || !r.stdout) return [];
   return r.stdout.split("\n").flatMap((l) => parsePsLine(l) ?? []);
 }

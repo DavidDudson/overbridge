@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+
 export class OverbridgeError extends Error {}
 
 export function fail(msg: string): never {
@@ -6,8 +9,19 @@ export function fail(msg: string): never {
 
 export type RunResult = { ok: boolean; code: number; stdout: string; stderr: string };
 
+/**
+ * The cwd to spawn a child in: `cwd` when given, else this process's cwd while it still exists, else home.
+ * A long-lived pane (sidebar, top) keeps the cwd of a workspace that `rm` deleted, and posix_spawn then
+ * fails with ENOENT on every child.
+ */
+export function spawnCwd(cwd?: string): string {
+  if (cwd) return cwd;
+  const here = process.cwd();
+  return existsSync(here) ? here : homedir();
+}
+
 export function run(cmd: string[], opts: { cwd?: string } = {}): RunResult {
-  const p = Bun.spawnSync({ cmd, cwd: opts.cwd, stdout: "pipe", stderr: "pipe" });
+  const p = Bun.spawnSync({ cmd, cwd: spawnCwd(opts.cwd), stdout: "pipe", stderr: "pipe" });
   return {
     ok: p.exitCode === 0,
     code: p.exitCode ?? 1,
@@ -27,7 +41,7 @@ export function must(cmd: string[], opts: { cwd?: string } = {}): string {
 export function exec(cmd: string[], opts: { cwd?: string; env?: Record<string, string> } = {}): number {
   const p = Bun.spawnSync({
     cmd,
-    cwd: opts.cwd,
+    cwd: spawnCwd(opts.cwd),
     env: { ...process.env, ...opts.env },
     stdin: "inherit",
     stdout: "inherit",
