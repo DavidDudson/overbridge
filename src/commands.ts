@@ -9,6 +9,7 @@ import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
 import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
 import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins } from "./scaffold";
+import { openTab, TabFocus, type ZellijExec } from "./tab";
 import { runCheck } from "./check-queue";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
@@ -59,9 +60,10 @@ export function sync() {
   }
 }
 
-export function newWorkspace(name: string | undefined, repos: string[]) {
+export function newWorkspace(name: string | undefined, repos: string[], exec?: ZellijExec) {
   if (!name) fail("usage: overbridge new <name> [-r repo]... (name it for its work item, e.g. ENG-123 or gh-app-12)");
   createWorkspace(name, repos);
+  openTab(name, undefined, TabFocus.Background, exec);
   console.log(name);
 }
 

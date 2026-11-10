@@ -1,10 +1,12 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkout, createWorkspace, repoAdd } from "../src/commands";
-import { openTab, start, startTask } from "../src/start";
+import { checkout, createWorkspace, newWorkspace, repoAdd } from "../src/commands";
+import { metaDir } from "../src/paths";
+import { showTab, start, startTask } from "../src/start";
 import { readState } from "../src/state";
+import { openTab, TabFocus } from "../src/tab";
 import type { RunResult } from "../src/util";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -79,12 +81,18 @@ describe("start", () => {
   });
 });
 
-/** A fake zellij: `current-tab-info` names `current` (or fails when undefined), `new-tab` succeeds when `opens`. */
-const fakeZellij = (current: string | undefined, opens = true) => {
+/**
+ * A fake zellij: `current-tab-info` names `current` (or fails when undefined), `new-tab` succeeds when `opens`,
+ * and `query-tab-names` lists `tabs`.
+ */
+const fakeZellij = (current: string | undefined, opens = true, tabs: string[] = []) => {
   const calls: string[][] = [];
   const exec = (cmd: string[]): RunResult => {
     calls.push(cmd);
     const action = cmd[2];
+    if (action === "query-tab-names") {
+      return { ok: true, code: 0, stdout: tabs.join("\n"), stderr: "" };
+    }
     if (action === "current-tab-info") {
       return { ok: current !== undefined, code: current === undefined ? 1 : 0, stdout: current === undefined ? "" : `name: ${current}\nposition: 0`, stderr: "" };
     }
@@ -113,21 +121,21 @@ describe("start inside zellij", () => {
   });
 
   test("an item that already has a workspace switches to its tab", () => {
-    const z = fakeZellij("mine");
+    const z = fakeZellij("mine", true, ["mine", "gh-app-20"]);
     start("app", "20", undefined, { provider: fakeProvider([{ id: "20", title: "Background", url: "" }]), exec: z.exec, plugins: noProblems });
-    expect(z.calls[0]).toEqual(["zellij", "action", "go-to-tab-name", "gh-app-20"]);
-    expect(z.actions()).not.toContain("new-tab");
+    expect(z.actions()).toEqual(["query-tab-names", "go-to-tab-name"]);
+    expect(z.calls[1]).toEqual(["zellij", "action", "go-to-tab-name", "gh-app-20"]);
   });
 
   test("no current tab means nothing to go back to", () => {
     const z = fakeZellij(undefined);
-    openTab("ws-a", undefined, z.exec);
+    openTab("ws-a", undefined, TabFocus.Background, z.exec);
     expect(z.actions()).toEqual(["current-tab-info", "new-tab"]);
   });
 
   test("a tab that fails to open does not move focus", () => {
     const z = fakeZellij("mine", false);
-    openTab("ws-b", undefined, z.exec);
+    openTab("ws-b", undefined, TabFocus.Background, z.exec);
     expect(z.actions()).toEqual(["current-tab-info", "new-tab"]);
   });
 });
@@ -166,5 +174,77 @@ describe("start --task", () => {
     checkout(["app", "task/taken"], "holder");
     expect(() => startTask("app", "taken", "x", { plugins: noProblems })).toThrow("claimed by workspace holder");
     expect(readState().workspaces["taken"]).toBeUndefined();
+  });
+});
+
+const tabLayout = (ws: string) => readFileSync(join(metaDir(), "tabs", `${ws}.kdl`), "utf8");
+
+describe("tabs", () => {
+  let errors: string[];
+  let spy: ReturnType<typeof spyOn>;
+
+  beforeAll(() => {
+    process.env.ZELLIJ = "0";
+  });
+
+  afterAll(() => {
+    process.env.ZELLIJ = "";
+  });
+
+  const captureLog = () => {
+    errors = [];
+    spy = spyOn(console, "error").mockImplementation((msg: string) => {
+      errors.push(msg);
+    });
+  };
+
+  afterEach(() => {
+    spy?.mockRestore();
+  });
+
+  test("start on a workspace with no tab opens one in front, running /start-item", () => {
+    const z = fakeZellij("mine");
+    start("app", "12", undefined, { provider: provider(), exec: z.exec, plugins: noProblems });
+    expect(z.actions()).toEqual(["query-tab-names", "new-tab"]);
+    expect(z.calls[1]).toContain("gh-app-12");
+    expect(tabLayout("gh-app-12")).toContain("/start-item 12");
+  });
+
+  test("start on a workspace with no tab opens one running the given prompt", () => {
+    const z = fakeZellij("mine");
+    start("app", "12", "fix the build", { provider: provider(), exec: z.exec, plugins: noProblems });
+    expect(z.actions()).toEqual(["query-tab-names", "new-tab"]);
+    expect(tabLayout("gh-app-12")).toContain("fix the build");
+  });
+
+  test("start on a workspace whose tab is open switches to it", () => {
+    captureLog();
+    const z = fakeZellij("mine", true, ["mine", "gh-app-12"]);
+    start("app", "12", undefined, { provider: provider(), exec: z.exec, plugins: noProblems });
+    expect(z.actions()).toEqual(["query-tab-names", "go-to-tab-name"]);
+    expect(errors.some((e) => e.includes("prompt not sent"))).toBe(false);
+  });
+
+  test("start with --prompt on a workspace whose tab is open says the prompt was not sent", () => {
+    captureLog();
+    const z = fakeZellij("mine", true, ["mine", "gh-app-12"]);
+    start("app", "12", "fix the build", { provider: provider(), exec: z.exec, plugins: noProblems });
+    expect(z.actions()).not.toContain("new-tab");
+    expect(errors).toContain("gh-app-12 already has a tab; prompt not sent");
+  });
+
+  test("new opens the workspace's tab in the background with a bare agent", () => {
+    const z = fakeZellij("mine");
+    newWorkspace("fresh", [], z.exec);
+    expect(z.actions()).toEqual(["current-tab-info", "new-tab", "go-to-tab-name"]);
+    expect(z.calls[1]).toContain("fresh");
+    expect(tabLayout("fresh")).toContain('"claude" "fresh"\n');
+  });
+
+  test("showTab reopens a closed tab in front with the prompt", () => {
+    const z = fakeZellij("mine", true, ["mine"]);
+    showTab("fresh", { prompt: "carry on" }, z.exec);
+    expect(z.actions()).toEqual(["query-tab-names", "new-tab"]);
+    expect(tabLayout("fresh")).toContain("carry on");
   });
 });

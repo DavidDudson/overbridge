@@ -28,10 +28,12 @@ overbridge repo ls
 overbridge sync                                   # fetch all bare repos
 
 overbridge start <repo> <id>                      # workspace named for the item (ENG-123, gh-app-12), on its
-                                          # branch, in a new tab running /start-item; focuses an existing one
+                                          # branch, in a new tab running /start-item; focuses an existing
+                                          # one's tab, or opens it when it has none
 overbridge start <repo> --task <slug> --prompt <text>  # no item yet (a ticket to file, a spike): workspace <slug>
                                           # on branch task/<slug>, its Claude starting with <text>
-overbridge new <name> -r <repo> [-r <repo>...]    # by hand; name it for its work item
+overbridge new <name> -r <repo> [-r <repo>...]    # by hand; name it for its work item; opens its tab
+overbridge tab <name> [--prompt text]             # reopen a workspace's closed tab (focuses it when open)
 overbridge add <repo> --ws <name>                 # add another repo to an existing workspace
 overbridge rm <name> [--force]                    # refuses with uncommitted changes unless --force
 overbridge status --all

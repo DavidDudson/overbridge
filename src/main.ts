@@ -9,7 +9,7 @@ import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
 import { FINISH_FLAG, finishRemoval } from "./remove";
-import { start, startTask } from "./start";
+import { showTab, start, startTask } from "./start";
 import { topPanel, topRefresh } from "./top-run";
 import { silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
@@ -43,11 +43,13 @@ Skill extensions
 
 Workspaces
   overbridge start <repo> <id> [--prompt text]  workspace named for a work item (ENG-123, gh-app-12), on its
-                                        branch, in a new tab running /start-item; focuses an existing one
+                                        branch, in a new tab running /start-item; focuses an existing one's
+                                        tab, or opens it when it has none
   overbridge start <repo> --task <slug> --prompt <text>
                                         work with no item yet (a ticket to file, a spike): workspace <slug>
                                         on branch task/<slug>, in a new tab whose Claude starts with <text>
-  overbridge new <name> [-r repo]...            create a workspace
+  overbridge new <name> [-r repo]...            create a workspace and open its tab
+  overbridge tab <name> [--prompt text]         open a workspace's tab when it has none, else focus it
   overbridge add <repo> [--ws name]             add a repo worktree to a workspace
   overbridge shell <repo> [--ws name] -- <cmd>  run a command in the repo's dev shell (its shell key in
                                         overbridge.yml); as it is when the repo has none
@@ -204,6 +206,12 @@ async function main(argv: string[]): Promise<number> {
       opts(rest, {});
       cmd.spinup();
       break;
+    case "tab": {
+      const { values, positionals } = opts(rest, { prompt: { type: "string" } });
+      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge tab <name> [--prompt text]");
+      showTab(cmd.requireWs(positionals[0]!), { prompt: values.prompt });
+      break;
+    }
     case "start": {
       const { values, positionals } = opts(rest, { prompt: { type: "string" }, task: { type: "string" } });
       if (values.task !== undefined) {
