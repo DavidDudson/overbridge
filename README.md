@@ -517,9 +517,16 @@ Use `--repo <name>` when two repos declare the same id and `--no-wait` to skip t
 
 `overbridge sidebar` is the pane down the left of every tab. It lists each workspace with
 its agent state emoji (🆕 empty: just started or cleared, 💤 idle, 🔄 busy, ✅ done, ⏳ done but background tasks still running, ❓ waiting for you, ❌ ended, `·` unknown)
-and its item title when cached (no id, no conventional-commit prefix; the workspace name until then), with the key that jumps to it (`⌥1` to `⌥9`, in tab order). Each tab runs its own copy and marks its own tab.
-Up/Down or `j`/`k` step to the neighbouring tab, a digit (1-9) jumps, a click picks a row;
-the new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
+and its item title when cached (no id, no conventional-commit prefix; the workspace name until then), with its number in tab order (`⌥1` to `⌥9`, then `10` and up). Each tab runs its own copy and marks its own tab.
+Up/Down or `j`/`k` step to the neighbouring tab, a click picks a row, and a tab's number jumps to it.
+A digit that could start a two-digit number waits 0.6 s for a second one, so with 14 tabs `1` then `2`
+goes to tab 12 and `1` alone goes to tab 1. If you leave the tab some other way while a digit waits, the digit is dropped.
+The legend shows the range the digits reach, such as `1-14`.
+Left/Right or `h`/`l` go back and forward through the tabs visited from the sidebar, like a browser.
+Every tab's sidebar shares one history per zellij session (`<meta>/sidebar-history/<session>.json`),
+tabs closed since are skipped, and a failed switch leaves it as it was. Switches made outside the sidebar
+(zellij keys, the tab bar, `overbridge next`) are not recorded.
+The new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. Long titles wrap under their text (up to three rows).
 
 The sidebar has two frames. The Orchestration frame is on top, lists the orchestration tabs and does

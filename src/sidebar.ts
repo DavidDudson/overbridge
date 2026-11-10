@@ -7,13 +7,25 @@ import { metaDir } from "./paths";
 import { type Limits, limitRows, readLimits } from "./limits";
 import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
+import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-history";
 import { readState } from "./state";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache } from "./top";
 import { sidebarLabel } from "./top";
 import { naturalSort, run } from "./util";
 import { overbridgeVersion } from "./version";
-export const LEGEND = "⌥1-9 go  ⌥w next";
+
+/** How long a held digit waits for a second one before it goes to its one-digit tab. */
+export const DIGIT_MS = 600;
+
+/** The key legend: the tab numbers the digits reach for `count` tabs, or the digit held while one waits. */
+export function legend(count: number, pending = ""): string {
+  if (pending) {
+    return `${pending}…`;
+  }
+  const digits = count > 1 ? `1-${count} go  ` : count === 1 ? "1 go  " : "";
+  return `${digits}←→ back  ⌥w next`;
+}
 
 /**
  * The vertical tab sidebar. Every tab runs its own copy, which marks its own tab as current.
@@ -145,7 +157,7 @@ export function wrapText(text: string, width: number): string[] {
 
 /** The unstyled title rows of an entry: the digit hint and glyph lead the first, the rest are indented under the text. */
 function titleRows(e: Entry, index: number, inner: number): string[] {
-  const digit = index < 9 ? `⌥${index + 1}` : "  ";
+  const digit = index < 9 ? `⌥${index + 1}` : String(index + 1).padStart(2);
   const lead = `${digit} ${e.glyph} `;
   const lines = wrapText(e.label, Math.max(1, inner - textWidth(lead)));
   const clipped = lines.length > MAX_TITLE_ROWS ? [...lines.slice(0, MAX_TITLE_ROWS - 1), `${lines.slice(MAX_TITLE_ROWS - 1).join(" ")}`] : lines;
@@ -188,7 +200,7 @@ export function queueRows(queue: { running?: Ticket; waiting: Ticket[] }, inner:
  * `offset` (an index into the workspaces), then a divider, the `queue` rows, the usage limits and the key legend,
  * with `version` set into the bottom border. `current` indexes the whole list.
  */
-export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = "", queue: string[] = []): string[] {
+export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = "", queue: string[] = [], pending = ""): string[] {
   const inner = Math.max(0, width - 4);
   const pinned = pinnedCount(list);
   const cards = (from: number, to: number) => list.slice(from, to).flatMap((e, i) => entryLines(e, from + i, from + i === current, inner));
@@ -203,7 +215,7 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
     boxDivider(width),
     ...queue.map(boxRow),
     ...limitRows(limits, inner, now).map(boxRow),
-    boxRow(dim(fit(LEGEND, inner))),
+    boxRow(dim(fit(legend(list.length, pending), inner))),
     boxBottom(width, version, "grey"),
   ];
 }
@@ -234,8 +246,8 @@ function clickTarget(row: number, offset: number, heights: number[], rows: numbe
 
 /**
  * Which tab an input asks for, as an index into the whole list; undefined for none or for the current one.
- * Up/`k` and down/`j` step across both frames (no wrap), a digit jumps, a click picks a row. The first `pinned`
- * entries are the Orchestration frame's; `offset` scrolls the rest.
+ * Up/`k` and down/`j` step across both frames (no wrap), a click picks a row. The first `pinned`
+ * entries are the Orchestration frame's; `offset` scrolls the rest. Digits go through `stepFor`.
  */
 export function targetFor(input: Input, current: number, offset: number, heights: number[], rows: number, pinned = 0): number | undefined {
   const count = heights.length;
@@ -243,8 +255,56 @@ export function targetFor(input: Input, current: number, offset: number, heights
   if (input.kind === "click") target = clickTarget(input.row, offset, heights, rows, pinned);
   else if (input.key === "up" || input.key === "k") target = current - 1;
   else if (input.key === "down" || input.key === "j") target = current + 1;
-  else if (/^[1-9]$/.test(input.key)) target = Number(input.key) - 1;
-  return target !== undefined && target >= 0 && target < count && target !== current ? target : undefined;
+  return inRange(target, count, current);
+}
+
+const inRange = (target: number | undefined, count: number, current: number) =>
+  target !== undefined && target >= 0 && target < count && target !== current ? target : undefined;
+
+/** What one input does: a tab to go to, a way to travel through the history, and the digit held after it. */
+export interface Step {
+  target?: number;
+  travel?: Travel;
+  /** A digit waiting for a second one; empty for none. */
+  pending: string;
+}
+
+/**
+ * Like `targetFor`, plus ←/`h` and →/`l` for the history and one- or two-digit tab numbers. A digit is held in
+ * `pending` only when a two-digit number could start with it; a second digit then picks that tab, falling back to the
+ * held digit's own tab when the number is past the end. Any other input drops a held digit.
+ */
+export function stepFor(input: Input, current: number, offset: number, heights: number[], rows: number, pinned = 0, pending = ""): Step {
+  const count = heights.length;
+  if (input.kind === "key" && /^[0-9]$/.test(input.key)) {
+    if (pending) {
+      const number = Number(pending + input.key);
+      return { target: inRange((number <= count ? number : Number(pending)) - 1, count, current), pending: "" };
+    }
+    const held = Number(input.key);
+    if (held === 0) {
+      return { pending: "" };
+    }
+    return count >= held * 10 ? { pending: input.key } : { target: inRange(held - 1, count, current), pending: "" };
+  }
+  if (input.kind === "key" && (input.key === "left" || input.key === "h")) {
+    return { travel: Travel.Back, pending: "" };
+  }
+  if (input.kind === "key" && (input.key === "right" || input.key === "l")) {
+    return { travel: Travel.Forward, pending: "" };
+  }
+  return { target: targetFor(input, current, offset, heights, rows, pinned), pending: "" };
+}
+
+/**
+ * The tab a digit held by `self`'s sidebar goes to once the wait runs out. None when `focused` (the tab zellij has
+ * focused now) is another one, so leaving the tab some other way drops the digit instead of pulling you back.
+ */
+export function commitDigit(pending: string, list: Entry[], self: string, focused: string | undefined): number | undefined {
+  if (!pending || focused !== self) {
+    return undefined;
+  }
+  return inRange(Number(pending) - 1, list.length, list.findIndex((e) => e.tab === self));
 }
 
 /** Each sidebar records its zellij pane id here, so another tab's sidebar can focus it. */
@@ -265,11 +325,37 @@ const sidebarPane = (ws: string): string | undefined => {
   }
 };
 
-/** Switch to `tab` and focus its sidebar. */
-export function switchTab(tab: string, exec: (cmd: string[]) => unknown = (cmd) => run(cmd)) {
-  exec(["zellij", "action", "go-to-tab-name", tab]);
+/**
+ * Switch to `tab` and focus its sidebar; false when zellij could not go to the tab. Focusing the sidebar exits 2
+ * when it already has focus, so its result is ignored.
+ */
+export function switchTab(tab: string, exec: (cmd: string[]) => { ok: boolean } = (cmd) => run(cmd)): boolean {
+  const went = exec(["zellij", "action", "go-to-tab-name", tab]).ok;
+  if (!went) {
+    return false;
+  }
   const pane = sidebarPane(tab);
-  if (pane !== undefined) exec(["zellij", "action", "focus-pane-id", `terminal_${pane}`]);
+  if (pane !== undefined) {
+    exec(["zellij", "action", "focus-pane-id", `terminal_${pane}`]);
+  }
+  return true;
+}
+
+/** Go from `self` to `tab`, picked any way but ← and →, recording the visit in the session's history. */
+export function visitTab(self: string, tab: string, exec?: (cmd: string[]) => { ok: boolean }): boolean {
+  const before = readHistory();
+  return moveWithHistory(before, visit(before, self), () => switchTab(tab, exec));
+}
+
+/** ← or → from `self`, skipping tabs no longer in `list`; false when there is nowhere to go or the switch failed. */
+export function travelTab(self: string, way: Travel, list: Entry[], exec?: (cmd: string[]) => { ok: boolean }): boolean {
+  const before = readHistory();
+  const moved = travel(before, way, self, new Set(list.map((e) => e.tab)));
+  if (moved.target === undefined) {
+    return false;
+  }
+  const target = moved.target;
+  return moveWithHistory(before, moved.history, () => switchTab(target, exec));
 }
 
 /** `overbridge sidebar [--ws]`. `q` or Ctrl-C quits. */
@@ -282,6 +368,22 @@ export async function sidebar(wsOpt?: string) {
   const version = overbridgeVersion();
   let offset = 0;
   let queueRowCount = 0;
+  let pending = "";
+  let digitTimer: ReturnType<typeof setTimeout> | undefined;
+  const hold = (digit: string) => {
+    clearTimeout(digitTimer);
+    pending = digit;
+    digitTimer = digit ? setTimeout(commit, DIGIT_MS) : undefined;
+  };
+  const commit = () => {
+    const list = entries();
+    const target = commitDigit(pending, list, self, currentTab());
+    hold("");
+    if (target !== undefined) {
+      visitTab(self, list[target]!.tab);
+    }
+    draw();
+  };
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
   const draw = () => {
     const list = entries();
@@ -295,12 +397,13 @@ export async function sidebar(wsOpt?: string) {
     const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), queueRowCount);
     const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;
     offset = clampScroll(scrolled, workspaceHeights, rows);
-    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits(), Date.now(), version, queue), height, width));
+    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits(), Date.now(), version, queue, pending), height, width));
   };
 
   await new Promise<void>((resolve) => {
     const quit = () => {
       clearInterval(timer);
+      hold("");
       process.stdout.write(LEAVE_SCREEN);
       process.stdin.setRawMode(false);
       rmSync(paneFile(self), { force: true });
@@ -313,6 +416,7 @@ export async function sidebar(wsOpt?: string) {
       for (const input of decodeInput(buf.toString())) {
         if (input.kind === "key" && (input.key === "q" || input.key === "ctrl-c")) return quit();
         if (input.kind === "key" && input.key === "n") {
+          hold("");
           next(self);
           continue;
         }
@@ -321,11 +425,15 @@ export async function sidebar(wsOpt?: string) {
         const { height, width } = size();
         const heights = entryHeights(list, width);
         const pinned = pinnedCount(list);
-        const target = targetFor(input, current, offset, heights, bodyRowsFor(height, pinnedRowsFor(heights, pinned), queueRowCount), pinned);
-        if (target !== undefined) {
-          switchTab(list[target]!.tab);
+        const step = stepFor(input, current, offset, heights, bodyRowsFor(height, pinnedRowsFor(heights, pinned), queueRowCount), pinned, pending);
+        hold(step.pending);
+        if (step.travel !== undefined) {
+          travelTab(self, step.travel, list);
+        } else if (step.target !== undefined) {
+          visitTab(self, list[step.target]!.tab);
         }
       }
+      draw();
     });
     process.stdout.on("resize", draw);
     const timer = setInterval(draw, POLL_MS);
