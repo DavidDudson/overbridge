@@ -28,12 +28,13 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   (`groupCpuSeconds` in `src/proc.ts`). Its pure parts are unit-tested; `test/e2e.test.ts` drives the real queue.
 - `src/layout.ts` builds the zellij layout (the orchestration tabs, `orchestrationTabKdl`, then one tab per workspace, `tabKdl`); a user `layouts/overbridge.kdl` replaces it.
 - `src/orchestration.ts` lists the orchestration tabs (`@root`: Claude in the root). Their names start with `@` so they never
-  match `NAME_RE`. The sidebar pins them in its Orchestration frame; their Claude gets the agent-state hooks and no guard
-  through `claude --settings` (`scaffoldOrchestration`), and `OVERBRIDGE_TAB` names it for the hook.
+  match `NAME_RE`. The sidebar pins them in its Orchestration frame; their Claude gets the agent-state hooks, the orchestrator guard
+  (`src/guard-orchestrator.ts`: an allow list, fail closed) and a brief (`orchestratorPrompt`) through `claude --settings`
+  (`scaffoldOrchestration`); `OVERBRIDGE_TAB` with no `OVERBRIDGE_NAME` selects that guard.
   They never go away: every removal path checks `isOrchestrationTab` (`removeWorkspace`, `cleanable`, `beginRemoval`; add it to any
   new one), `claudeOrchestration` restarts Claude when it exits (`restartAfter`), and the sidebar poll reopens a closed tab
   (`ensureOrchestrationTabs` in `src/orchestration-keep.ts`, one owner per tab through a reopen lock).
-- `src/start.ts` is `overbridge start <repo> <id>`: one workspace per work item, named by `Provider.workspaceName`,
+- `src/start.ts` is `overbridge start <repo> <id>` (or `--task <slug>` for work with no item, on `task/<slug>`): one workspace per work item, named by `Provider.workspaceName`,
   added to the running session with `openTab`. Cleanup (`cleanable`, `pressCleanup` in `src/top.ts`; `beginRemoval`, `finishRemoval` in `src/remove.ts`)
   offers to remove a workspace whose PRs are open with nothing uncommitted or unpushed. `beginRemoval` marks it `removing` in state
   (the sidebar hides it), switches to `landingTab` (`src/next.ts`), closes its tab by id, and starts a detached `rm --background-finish` worker.

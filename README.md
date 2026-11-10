@@ -40,6 +40,7 @@ overbridge repo add infra git@github.com:you/infra.git
 overbridge spinup                       # fresh zellij session over the existing workspaces ('scratch' if none)
 overbridge start app 12                 # workspace gh-app-12 on the issue's branch, in a new tab running /start-item
 overbridge start app ENG-123            # a Jira item: workspace ENG-123
+overbridge start app --task file-x --prompt 'file a ticket for X'   # no item yet: workspace file-x on branch task/file-x
 ```
 
 `overbridge spinup` always rebuilds the session, killing running panes. Use `overbridge up` to just
@@ -535,11 +536,15 @@ tabs closed since are skipped, and a failed switch leaves it as it was. Switches
 The new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. Long titles wrap under their text (up to three rows).
 
-The sidebar has two frames. The Orchestration frame is on top, lists the orchestration tabs and does
+The sidebar has two frames. The Orchestration frame is on top, lists the orchestration tabs, and does
 not scroll. It has one tab, `@root`, which runs Claude in the overbridge root (`$OVERBRIDGE_ROOT`,
-`~/workspaces` by default). That Claude loads the agent-state hooks through
-`claude --settings <meta>/orchestration/@root.settings.json` and has no guard, so it can run admin
-commands such as `overbridge start` and `overbridge new`. The Workspaces frame is below it. Keys,
+`~/workspaces` by default). That Claude coordinates and doesn't do the work itself. It loads the
+agent-state hooks and a guard through `claude --settings <meta>/orchestration/@root.settings.json`, and gets
+a brief through `--append-system-prompt`. The guard lets it read anything, run read-only `git` and `gh`
+commands, check status, and start or remove workspaces. It blocks file edits, branch changes, commits,
+pushes, and changes to PRs and issues, and its message tells Claude to start a workspace instead. When you
+ask it for a task, it runs `overbridge start` with your request as `--prompt`, and the new workspace's
+Claude does the work. The Workspaces frame is below it. Keys,
 clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
 and sidebar files never share a name with a workspace's.

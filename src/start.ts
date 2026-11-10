@@ -65,22 +65,45 @@ export function start(repo: string, id: string, prompt?: string, deps: { provide
   const title = provider.title(id) ?? fail(`${id}: not found in ${provider.name}`);
   const name = provider.workspaceName(id, repo);
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}' for ${id}`);
+  openWorkspace(name, repo, provider.branchName({ id, title }), prompt ?? `/start-item ${id}`, deps.exec);
+}
 
+/** Branch prefix for a workspace started with no work item. */
+export const TASK_BRANCH_PREFIX = "task/";
+
+/**
+ * `overbridge start <repo> --task <slug> --prompt <text>`: work with no item yet, such as filing a ticket or a
+ * spike. The workspace is named `slug` and holds `repo` on a new claimed `task/<slug>` branch; its agent starts
+ * with `prompt`, since there is no item to read.
+ */
+export function startTask(repo: string, slug: string, prompt: string, deps: { exec?: Exec } = {}) {
+  if (!NAME_RE.test(slug)) fail(`invalid task name '${slug}': use letters, digits, '.', '_' and '-'`);
+  if (!prompt.trim()) fail("a task needs --prompt: say what the workspace's Claude should do");
+  const spec = getRepo(repo);
+  git.fetch(spec);
+  openWorkspace(slug, repo, `${TASK_BRANCH_PREFIX}${slug}`, prompt, deps.exec);
+}
+
+/**
+ * Create workspace `name` holding `repo` on `branch` and open its tab in the background, or focus it when it
+ * already exists, since you asked for it.
+ */
+function openWorkspace(name: string, repo: string, branch: string, prompt: string, exec?: Exec) {
   if (readState().workspaces[name]) {
     log(`${name} already exists${process.env.ZELLIJ ? "; switching to it" : ""}`);
-    if (process.env.ZELLIJ) switchTab(name, deps.exec);
+    if (process.env.ZELLIJ) switchTab(name, exec);
     return console.log(name);
   }
 
   createWorkspace(name, [repo]);
   try {
-    checkout([repo, provider.branchName({ id, title })], name);
+    checkout([repo, branch], name);
   } catch (e) {
     // a refused claim must not leave an empty workspace behind
     removeWorkspace(name, true);
     throw e;
   }
   scaffold(name);
-  openTab(name, prompt ?? `/start-item ${id}`, deps.exec);
+  openTab(name, prompt, exec);
   console.log(name);
 }
