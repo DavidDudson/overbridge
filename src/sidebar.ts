@@ -11,6 +11,7 @@ import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInpu
 import { readTopCache } from "./top";
 import { sidebarLabel } from "./top";
 import { naturalSort, run } from "./util";
+import { overbridgeVersion } from "./version";
 export const LEGEND = "⌥1-9 go  ⌥w next";
 
 /**
@@ -165,10 +166,10 @@ export function entryLines(e: Entry, index: number, selected: boolean, inner: nu
 /**
  * The whole sidebar as `height` rows of `width` columns. A rounded frame titled "Orchestration" holds a card per
  * orchestration tab; below it a frame titled "Workspaces" holds a card per workspace (title wraps), scrolled by
- * `offset` (an index into the workspaces), then a divider, the usage limits and the key legend. `current` indexes
- * the whole list.
+ * `offset` (an index into the workspaces), then a divider, the usage limits and the key legend, with `version`
+ * set into the bottom border. `current` indexes the whole list.
  */
-export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now()): string[] {
+export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = ""): string[] {
   const inner = Math.max(0, width - 4);
   const pinned = pinnedCount(list);
   const cards = (from: number, to: number) => list.slice(from, to).flatMap((e, i) => entryLines(e, from + i, from + i === current, inner));
@@ -183,7 +184,7 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
     boxDivider(width),
     ...limitRows(limits, inner, now).map(boxRow),
     boxRow(dim(fit(LEGEND, inner))),
-    boxBottom(width),
+    boxBottom(width, version, "grey"),
   ];
 }
 
@@ -257,6 +258,8 @@ export async function sidebar(wsOpt?: string) {
   if (!process.stdin.isTTY) throw new Error("overbridge sidebar needs a terminal");
   registerPane(self);
 
+  // Read once at start, so a pane left running across an upgrade shows the version it runs.
+  const version = overbridgeVersion();
   let offset = 0;
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
   const draw = () => {
@@ -269,7 +272,7 @@ export async function sidebar(wsOpt?: string) {
     const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned));
     const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;
     offset = clampScroll(scrolled, workspaceHeights, rows);
-    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits()), height, width));
+    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits(), Date.now(), version), height, width));
   };
 
   await new Promise<void>((resolve) => {

@@ -49,6 +49,14 @@ describe("entry cards", () => {
     expect(rows.join("\n")).toContain("Hourly");
   });
 
+  test("the version sits in the bottom-left corner, and the border stays plain without one", () => {
+    const plain = (r: string) => r.replace(/\x1b\[[0-9;]*m/g, "");
+    const last = plain(renderSidebar(list, 0, 0, 20, 30, undefined, 0, "v1.2.3").at(-1)!);
+    expect(last.startsWith("╰─ v1.2.3 ─")).toBe(true);
+    expect(textWidth(last)).toBe(30);
+    expect(plain(renderSidebar(list, 0, 0, 20, 30, undefined, 0).at(-1)!)).toBe(`╰${"─".repeat(28)}╯`);
+  });
+
   test("a window starts at the offset", () => {
     const rows = renderSidebar(list, 3, 3, 12, 30, undefined, 0);
     expect(rows[1]).toContain("⌥4 ");
