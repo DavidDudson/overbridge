@@ -8,7 +8,7 @@ import { metaDir, root, selfCommand } from "./paths";
 import { currentTab, entries, switchTab, tabOrder } from "./sidebar";
 import { openTab } from "./tab";
 import { getWorkspace, isRemoving, readState, withState } from "./state";
-import { cleanable, gitClean, refreshTop, snapshotTop } from "./top";
+import { cleanable, noUnsavedWork, refreshTop, snapshotTop } from "./top";
 import { fail, type RunResult, run } from "./util";
 
 /** The internal `rm` flag that runs `finishRemoval` in the detached worker. */
@@ -86,7 +86,7 @@ export function beginRemoval(ws: string, opts: { previous?: string; landing?: La
   if (isRemoving(getWorkspace(readState(), ws))) {
     return alreadyRemoving;
   }
-  if (!gitClean(ws)) {
+  if (!noUnsavedWork(ws)) {
     return `${ws} has uncommitted changes or unpushed commits; not removing`;
   }
   const list = deps.inZellij ? entries() : [];
@@ -146,7 +146,7 @@ export async function finishRemoval(ws: string): Promise<void> {
     }
     refreshTop(ws);
     if (!cleanable(ws)) {
-      fail(`${ws} is no longer clean (no open PR, or uncommitted or unpushed work); not removed`);
+      fail(`${ws} is no longer clean (no open or merged PRs, or uncommitted or unpushed work); not removed`);
     }
     const { apps } = await snapshotTop(ws);
     apps

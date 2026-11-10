@@ -76,6 +76,8 @@ item, do not switch this workspace: `overbridge start <repo> <id>` makes the ite
 (see `start-item`). Once a workspace's PRs are open and nothing is uncommitted or unpushed, the top panel
 shows a Cleanup button; wiping a workspace is the user's call, so never run `overbridge rm` yourself. A workspace
 also removes itself when the user exits its Claude with every repo clean and pushed.
+Once every PR has merged and nothing is unsaved, overbridge removes the workspace after your turn ends.
+Commit and push everything before then. Otherwise the workspace stays, marked "merged · unsaved work".
 
 ## Branch naming
 

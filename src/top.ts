@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { AppStatus, appAvailable, appStatus, appUrl, readRecord } from "./apps";
 import { readAgentState, sessionEndedForGood } from "./agent-state";
@@ -61,6 +61,7 @@ export interface PrView extends ReviewerView {
   title?: string;
   isDraft?: boolean;
   state?: string;
+  headRefOid?: string;
   mergeable?: string;
   mergeStateStatus?: string;
   statusCheckRollup?: { status?: string; conclusion?: string; state?: string }[];
@@ -101,6 +102,8 @@ export interface TopCache {
   links: TopLink[];
   /** Every claimed repo's PR is open (and there is at least one claim). Half of what makes a workspace cleanable. */
   prsOpen?: boolean;
+  /** Set when every claimed branch's PR has merged: each repo's PR head commit, keyed by repo. */
+  merged?: Record<string, string>;
   /** What each configured button's `status` printed, keyed `<repo>/<id>`. A missing entry hides the button. */
   buttons?: Record<string, ButtonState>;
   message?: string;
@@ -251,6 +254,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   const claimed = claims.filter(([, c]) => c.branch).length;
   let openPrs = 0;
   let mergedPrs = 0;
+  const mergedHeads: Record<string, string> = {};
   let headline: string | undefined;
   let itemTitle: string | undefined;
   let itemLink: TopLink | undefined;
@@ -287,7 +291,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       if (out !== undefined) buttonStates[`${repo}/${spec.id}`] = parseButtonStatus(out);
     }
     if (claim.pr !== undefined) {
-      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,title,isDraft,state,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments"], dir));
+      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,title,isDraft,state,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments"], dir));
       if (view?.url) {
         const threads = threadsCommand(view.url);
         if (threads) view.unresolved = parseUnresolved(exec(threads, dir));
@@ -303,6 +307,9 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       else problems.push(`${repo}: no URL for PR #${claim.pr}`);
       if (view?.state === "OPEN") openPrs++;
       else if (view?.state === "MERGED") mergedPrs++;
+      if (claim.branch && view?.state === "MERGED" && view.headRefOid) {
+        mergedHeads[repo] = view.headRefOid;
+      }
     }
   }
 
@@ -314,6 +321,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     // released repos hold no branch, so only claimed branches need an open PR
     // an open PR somewhere, and every other claim already merged: a merged branch is finished, not a reason to keep the workspace
     prsOpen: claimed > 0 && openPrs > 0 && openPrs + mergedPrs === claimed,
+    // a claim with no PR, a closed PR or an unreadable one leaves this unset, so the workspace stays
+    ...(claimed > 0 && Object.keys(mergedHeads).length === claimed ? { merged: mergedHeads } : {}),
     ...(Object.keys(buttonStates).length ? { buttons: buttonStates } : {}),
     ...(problems.length ? { message: problems.join("; ") } : {}),
     at: Date.now(),
@@ -323,19 +332,43 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 }
 
 /**
- * Whether `ws` can be wiped: its agent is empty (just started or cleared), its session was closed on purpose, or at least
- * one claimed branch has an open PR and every other one has merged (from the cache), and no repo holds uncommitted changes
- * or unpushed commits (read from git now, so it is never stale).
+ * Whether `ws` can be wiped: every claimed PR has merged, its agent is empty (just started or cleared), its session was
+ * closed on purpose, or at least one claimed branch has an open PR and every other one has merged (from the cache), and
+ * `noUnsavedWork` holds (read from git now, so it is never stale).
  */
 export function cleanable(ws: string): boolean {
   if (isOrchestrationTab(ws)) {
     return false;
   }
-  const finished = readTopCache(ws).prsOpen || readAgentState(ws) === "empty" || sessionEndedForGood(ws);
+  const cache = readTopCache(ws);
+  const finished = cache.merged !== undefined || cache.prsOpen || readAgentState(ws) === "empty" || sessionEndedForGood(ws);
   if (!finished) {
     return false;
   }
-  return gitClean(ws);
+  return noUnsavedWork(ws, cache);
+}
+
+/** `mergedClean` once every PR has merged, else `gitClean`. */
+export function noUnsavedWork(ws: string, cache: Pick<TopCache, "merged"> = readTopCache(ws)): boolean {
+  return cache.merged ? mergedClean(ws, cache.merged) : gitClean(ws);
+}
+
+/**
+ * No repo in `ws` holds uncommitted changes, and each merged repo's HEAD is its PR's head commit. A squash merge keeps the branch's commits off every remote branch, so
+ * comparing with the PR head is what tells pushed-and-merged from local work. A repo with no merged PR (released) falls back to the unpushed check.
+ */
+export function mergedClean(ws: string, heads: Record<string, string>): boolean {
+  return Object.keys(getWorkspace(readState(), ws).repos).every((repo) => {
+    const wt = worktreePath(ws, repo);
+    if (!existsSync(wt)) {
+      return true;
+    }
+    if (git.isDirty(wt)) {
+      return false;
+    }
+    const head = heads[repo];
+    return head === undefined ? !git.hasUnpushed(wt) : git.headSha(wt) === head;
+  });
 }
 
 /** No repo in `ws` holds uncommitted changes or unpushed commits. Local and fast, so it can run before the tab closes. */
