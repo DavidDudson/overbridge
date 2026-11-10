@@ -56,14 +56,23 @@ export interface Entry {
 
 export { sidebarLabel, stripConventional } from "./top";
 
+/** `run`, but a missing `zellij` binary reads as a failed call, the same as running outside a session. */
+const zellijQuery = (cmd: string[]): { ok: boolean; stdout: string } => {
+  try {
+    return run(cmd);
+  } catch {
+    return { ok: false, stdout: "" };
+  }
+};
+
 /** Workspace names in zellij's tab order; empty outside zellij. */
-export function tabOrder(exec: (cmd: string[]) => { ok: boolean; stdout: string } = (cmd) => run(cmd)): string[] {
+export function tabOrder(exec: (cmd: string[]) => { ok: boolean; stdout: string } = zellijQuery): string[] {
   const r = exec(["zellij", "action", "query-tab-names"]);
   return r.ok ? r.stdout.split("\n").map((s) => s.trim()).filter(Boolean) : [];
 }
 
 /** The workspace whose tab is focused; undefined outside zellij. */
-export function currentTab(exec: (cmd: string[]) => { ok: boolean; stdout: string } = (cmd) => run(cmd)): string | undefined {
+export function currentTab(exec: (cmd: string[]) => { ok: boolean; stdout: string } = zellijQuery): string | undefined {
   const r = exec(["zellij", "action", "current-tab-info"]);
   return r.ok ? /^name: (.+)$/m.exec(r.stdout)?.[1]?.trim() : undefined;
 }
