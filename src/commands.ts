@@ -8,7 +8,7 @@ import { isOrchestrationTab, orchestrationRemoveMessage, type OrchestrationTab }
 import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
 import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
-import { orchestratorPrompt, scaffold, scaffoldOrchestration } from "./scaffold";
+import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins } from "./scaffold";
 import { runCheck } from "./check-queue";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
@@ -347,7 +347,7 @@ export function claude(ws: string, extra: string[]) {
   trustFolder(wsDir(ws));
   const [only] = repos;
   const spec = repos.length === 1 && only ? loadRepoConfig(worktreePath(ws, only), only).shell : undefined;
-  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, ["claude", ...extra], wsDir(ws));
+  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, ["claude", "--settings", scaffoldPlugins(), ...extra], wsDir(ws));
   mkdirSync(dirname(agentShellFile(ws)), { recursive: true });
   if (spec && only) writeFileSync(agentShellFile(ws), only);
   else rmSync(agentShellFile(ws), { force: true });

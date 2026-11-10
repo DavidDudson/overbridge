@@ -53,6 +53,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - `src/stack.ts` reads gh-stack's catalog (`<bare>/gh-stack`); claims cover whole stacks via `cover()`.
 - Installed from nix-home's `ws` flake input (to be renamed `overbridge`), which is pinned. After a PR merges to `main`, bump it in
   nix-home (`nix flake update ws`, own commit + PR) or the installed `ws` stays on the old rev.
+- `src/plugins.ts` enables both plugins from the installed package (`packageRoot()`) as a directory marketplace,
+  through each workspace's settings.json and `claude --settings` (`scaffoldPlugins`); `start` refuses when the
+  package ships no plugins. The flake copies `.claude-plugin`, `plugin` and `plugin-review` beside `src`.
 - Plugin skills in `plugin/skills/`; keep them in sync with CLI commands/flags. Skills mark extension points with
   `ext: <phase>` lines (`src/ext.ts`, `overbridge ext`); a new or renamed phase goes in the skill's Extensions
   section and the README's phase table.
