@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { AppStatus, appAvailable, appStatus, appUrl, readRecord } from "./apps";
-import { readAgentState } from "./agent-state";
+import { readAgentState, sessionEndedForGood } from "./agent-state";
 import * as git from "./git";
 import { isOrchestrationTab } from "./orchestration";
 import { metaDir, wsDir, worktreePath } from "./paths";
@@ -323,14 +323,18 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 }
 
 /**
- * Whether `ws` can be wiped: its agent is empty (just started or cleared), or at least one claimed branch has an open PR and every other one has merged (from the cache), and no repo
- * holds uncommitted changes or unpushed commits (read from git now, so it is never stale).
+ * Whether `ws` can be wiped: its agent is empty (just started or cleared), its session was closed on purpose, or at least
+ * one claimed branch has an open PR and every other one has merged (from the cache), and no repo holds uncommitted changes
+ * or unpushed commits (read from git now, so it is never stale).
  */
 export function cleanable(ws: string): boolean {
   if (isOrchestrationTab(ws)) {
     return false;
   }
-  if (!readTopCache(ws).prsOpen && readAgentState(ws) !== "empty") return false;
+  const finished = readTopCache(ws).prsOpen || readAgentState(ws) === "empty" || sessionEndedForGood(ws);
+  if (!finished) {
+    return false;
+  }
   return gitClean(ws);
 }
 

@@ -39,6 +39,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   offers to remove a workspace whose PRs are open with nothing uncommitted or unpushed. `beginRemoval` marks it `removing` in state
   (the sidebar hides it), switches to `landingTab` (`src/next.ts`), closes its tab by id, and starts a detached `rm --background-finish` worker.
   A failed worker sets `removeError` (shown on the sidebar card) and reopens the tab.
+  A session the user exits on purpose (`endedForGood`, reason `prompt_input_exit`) also makes a workspace cleanable.
+  Each sidebar's poll runs `createReaper` (`src/auto-remove.ts`), which calls `beginRemoval` with `Landing.IfFocused`
+  once git is clean, or marks the card `ended · unsaved work`.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors. The root `config.yml`'s `guard` block (`GuardConfig`) adds
   `read-paths` (reads only) and `deny` rules; it is never read from a repo file, so a branch can't loosen the guard.

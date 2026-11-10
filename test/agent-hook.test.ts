@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claimRefresh, EVENT_STATE, recordState, REFRESH_AFTER_MS } from "../src/agent-hook";
-import { AGENT_STATES, agentStatePath, readAgentState, STALE_MS } from "../src/agent-state";
+import { AGENT_STATES, agentStatePath, EndReason, endedForGood, readAgentState, sessionEndedForGood, STALE_MS } from "../src/agent-state";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 let tmp: string;
@@ -81,6 +81,38 @@ describe("stale expiry", () => {
     put("done", now - STALE_MS.done - 1);
     expect(readAgentState("w1", now)).toBeUndefined();
   });
+
+  test("an ended session never goes stale", () => {
+    const now = 10_000_000_000;
+    put("end", now - 30 * 24 * 3600_000);
+    expect(readAgentState("w1", now)).toBe("end");
+  });
+});
+
+describe("session end reasons", () => {
+  const putEnd = (reason?: string) => {
+    mkdirSync(join(meta, "agent"), { recursive: true });
+    writeFileSync(agentStatePath(meta, "w1"), JSON.stringify({ state: "end", at: Date.now(), ...(reason ? { reason } : {}) }));
+  };
+
+  test("only a deliberate exit counts as ended for good", () => {
+    expect(endedForGood(EndReason.PromptInputExit)).toBe(true);
+    [EndReason.Other, EndReason.Logout, EndReason.Clear, EndReason.Resume, undefined].forEach((reason) => expect(endedForGood(reason)).toBe(false));
+  });
+
+  test("reads the recorded reason", () => {
+    putEnd(EndReason.PromptInputExit);
+    expect(sessionEndedForGood("w1")).toBe(true);
+    putEnd(EndReason.Other);
+    expect(sessionEndedForGood("w1")).toBe(false);
+    putEnd();
+    expect(sessionEndedForGood("w1")).toBe(false);
+  });
+
+  test("recordState writes the reason with end", () => {
+    recordState(meta, "w1", "end", 1000, [], EndReason.PromptInputExit);
+    expect(stateOf("w1")).toEqual({ state: "end", at: 1000, reason: EndReason.PromptInputExit });
+  });
 });
 
 describe("claimRefresh", () => {
@@ -141,6 +173,19 @@ describe("overbridge hook", () => {
     expect(r).toEqual({ code: 0, out: "", err: "" });
     expect(stateOf("@root").state).toBe("done");
     expect(existsSync(join(meta, "top"))).toBe(false);
+  });
+
+  test("a deliberate exit records end with its reason", () => {
+    hook(JSON.stringify({ hook_event_name: "SessionEnd", reason: EndReason.PromptInputExit }), "w1");
+    expect(stateOf("w1")).toMatchObject({ state: "end", reason: EndReason.PromptInputExit });
+  });
+
+  test("/clear and /resume do not end the workspace's session", () => {
+    hook(JSON.stringify({ hook_event_name: "UserPromptSubmit" }), "w1");
+    [EndReason.Clear, EndReason.Resume].forEach((reason) => {
+      hook(JSON.stringify({ hook_event_name: "SessionEnd", reason }), "w1");
+      expect(stateOf("w1").state).toBe("busy");
+    });
   });
 
   test("bad input never fails the agent", () => {
