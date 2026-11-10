@@ -2,7 +2,7 @@ import { existsSync, readFileSync, realpathSync, renameSync, writeFileSync } fro
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isInside, root } from "./paths";
-import { fail, log } from "./util";
+import { fail, isRecord, log } from "./util";
 
 type Project = Record<string, unknown>;
 type ClaudeConfig = { projects?: Record<string, Project> } & Record<string, unknown>;
@@ -29,7 +29,7 @@ function readConfig(file: string): ClaudeConfig | undefined {
   }
   try {
     const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+    if (isRecord(parsed)) {
       return parsed as ClaudeConfig;
     }
   } catch {

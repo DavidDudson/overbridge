@@ -61,6 +61,21 @@ export function shellQuote(arg: string): string {
 
 export const naturalSort = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
 
+/** A plain object: what a JSON mapping parses to. */
+export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** What `v` is, for an error about a value that should have been something else: `null`, `missing`, `an array`, `a number`. */
+export function describeValue(v: unknown): string {
+  if (v === null) return "null";
+  if (v === undefined) return "missing";
+  if (Array.isArray(v)) return "an array";
+  const type = typeof v;
+  return `${/^[aeiou]/.test(type) ? "an" : "a"} ${type}`;
+}
+
+/** The message of whatever was thrown; a non-Error throw is stringified. */
+export const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
 export function log(msg: string) {
   console.error(msg);
 }
