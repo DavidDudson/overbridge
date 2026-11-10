@@ -3,7 +3,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { SIDEBAR_WIDTH, sidebarWidth } from "./config";
 import { ORCHESTRATION_TABS, type OrchestrationTab } from "./orchestration";
-import { wsDir } from "./paths";
+import { worktreePath, wsDir } from "./paths";
+import { readState } from "./state";
 
 export { SIDEBAR_WIDTH };
 /** Rows the top panel takes: the frame's two borders, a row per PR (one is typical) and the row of launchers. */
@@ -14,6 +15,8 @@ export interface LayoutOptions {
   /** Workspaces whose agent should resume its last conversation (`claude --continue`). */
   resume?: ReadonlySet<string>;
   sidebarWidth?: number;
+  /** Where each workspace's agent starts (`agentDirs`); a workspace missing here uses its root. */
+  agentDirs?: Readonly<Record<string, string>>;
 }
 
 export interface TabOptions {
@@ -23,6 +26,8 @@ export interface TabOptions {
   /** First message for the agent, e.g. `/start-item 51`. Sent after the resumed conversation when `resume` is set. */
   prompt?: string;
   focus?: boolean;
+  /** Folder the agent pane opens in (`agentDir`); the workspace root when unset. */
+  agentCwd?: string;
 }
 
 /**
@@ -44,7 +49,7 @@ export function tabKdl(ws: string, self: string[], opts: TabOptions = {}): strin
         pane name=${q("top")} command=${q(cmd!)} cwd=${q(wsDir(ws))} size=${TOP_ROWS} borderless=true {
           args ${args("top", "--ws", ws)}
         }
-        pane name=${q(`${ws} · claude`)} command=${q(cmd!)} cwd=${q(wsDir(ws))} {
+        pane name=${q(`${ws} · claude`)} command=${q(cmd!)} cwd=${q(opts.agentCwd ?? wsDir(ws))} {
           args ${agent}
         }
       }
@@ -70,13 +75,6 @@ export function orchestrationTabKdl(t: OrchestrationTab, self: string[], opts: O
   }`;
 }
 
-const TAB_TEMPLATE = `  default_tab_template {
-    children
-    pane size=1 borderless=true {
-      plugin location="zellij:status-bar"
-    }
-  }`;
-
 /**
  * Zellij layout: the orchestration tabs (`orchestrationTabKdl`), then one tab per workspace (`tabKdl`).
  * The first tab has focus. A pure function of its arguments, so regenerating it is idempotent.
@@ -88,10 +86,16 @@ export function layoutKdl(workspaces: string[], self: string[], opts: LayoutOpti
   );
   const tabs = [
     ...orchestration,
-    ...workspaces.map((ws, i) => tabKdl(ws, self, { resume: opts.resume?.has(ws) ?? false, ...width, focus: orchestration.length + i === 0 })),
+    ...workspaces.map((ws, i) =>
+      tabKdl(ws, self, {
+        resume: opts.resume?.has(ws) ?? false,
+        ...width,
+        focus: orchestration.length + i === 0,
+        ...(opts.agentDirs?.[ws] ? { agentCwd: opts.agentDirs[ws] } : {}),
+      }),
+    ),
   ];
   return `layout {
-${TAB_TEMPLATE}
 ${tabs.join("\n")}
 }
 `;
@@ -100,7 +104,6 @@ ${tabs.join("\n")}
 /** A layout holding just `ws`'s tab, for `zellij action new-tab --layout`. */
 export function newTabKdl(ws: string, self: string[], opts: TabOptions = {}): string {
   return `layout {
-${TAB_TEMPLATE}
 ${tabKdl(ws, self, opts)}
 }
 `;
@@ -109,7 +112,6 @@ ${tabKdl(ws, self, opts)}
 /** A layout holding just orchestration tab `t`, for reopening it with `zellij action new-tab --layout`. */
 export function newOrchestrationTabKdl(t: OrchestrationTab, self: string[], opts: Omit<TabOptions, "prompt" | "resume"> = {}): string {
   return `layout {
-${TAB_TEMPLATE}
 ${orchestrationTabKdl(t, self, { ...opts, focus: true })}
 }
 `;
@@ -133,12 +135,27 @@ const hasTranscript = (dir: string, home: string) => {
 };
 
 /**
+ * The folder `ws`'s agent starts in, so Claude finds the repo's `overbridge.yml` from its cwd. One repo: that
+ * repo's worktree. Several: the first claimed, which is the repo `overbridge start` was given. None: the workspace
+ * root. A workspace whose only transcripts are in its root keeps starting there, so `--continue` still resumes it.
+ */
+export function agentDir(ws: string, repos: readonly string[], home = homedir()): string {
+  const [first] = repos;
+  if (!first) return wsDir(ws);
+  const repo = worktreePath(ws, first);
+  return !hasTranscript(repo, home) && hasTranscript(wsDir(ws), home) ? wsDir(ws) : repo;
+}
+
+/** `agentDir` for a workspace in the state file; the root for one that is not in it. */
+export const agentDirOf = (ws: string, home = homedir()) => agentDir(ws, Object.keys(readState().workspaces[ws]?.repos ?? {}), home);
+
+/**
  * Workspaces and orchestration tabs with a Claude transcript to resume. Reads the disk, so callers pass the
  * result to `layoutKdl`.
  */
-export function resumable(workspaces: string[], home = homedir()): Set<string> {
+export function resumable(workspaces: string[], home = homedir(), agentDirs: Readonly<Record<string, string>> = {}): Set<string> {
   return new Set([
-    ...workspaces.filter((ws) => hasTranscript(wsDir(ws), home)),
+    ...workspaces.filter((ws) => hasTranscript(agentDirs[ws] ?? wsDir(ws), home)),
     ...ORCHESTRATION_TABS.filter((t) => hasTranscript(t.dir(), home)).map((t) => t.tab),
   ]);
 }
@@ -148,5 +165,6 @@ export type LayoutChoice = { source: "user"; path: string } | { source: "generat
 /** The layout `up` would use: the user's file when it exists, else the generated one. */
 export function chooseLayout(workspaces: string[], self: string[], userPath = userLayoutPath()): LayoutChoice {
   if (existsSync(userPath)) return { source: "user", path: userPath };
-  return { source: "generated", kdl: layoutKdl(workspaces, self, { resume: resumable(workspaces), sidebarWidth: sidebarWidth() }) };
+  const agentDirs = Object.fromEntries(workspaces.map((ws) => [ws, agentDirOf(ws)]));
+  return { source: "generated", kdl: layoutKdl(workspaces, self, { resume: resumable(workspaces, homedir(), agentDirs), sidebarWidth: sidebarWidth(), agentDirs }) };
 }

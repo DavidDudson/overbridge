@@ -6,8 +6,9 @@ import { queueDir, stopChecksFor, ticketName, type Ticket } from "../src/check-q
 import { handoffStamp, HandoffReason, renderHandoff } from "../src/handoff";
 import { icebox, type IceboxDeps, THAW_PROMPT, thaw } from "../src/icebox";
 import { entries, icedRows } from "../src/sidebar";
-import { isIceboxed, readState } from "../src/state";
+import { isIceboxed, readState, withState } from "../src/state";
 import { newTabKdl } from "../src/layout";
+import { showTab } from "../src/start";
 import type { RunResult } from "../src/util";
 import { mkdirSync } from "node:fs";
 
@@ -141,6 +142,16 @@ describe("icebox and thaw", () => {
 
   test("a thawed tab continues the conversation and reads the handoff", () => {
     expect(newTabKdl("calm", ["ob"], { resume: true, prompt: THAW_PROMPT })).toContain('"--continue" "--" "/read-handoff"');
+  });
+});
+
+describe("asking for an iceboxed workspace's tab", () => {
+  test("thaws it instead of opening a tab beside the mark", () => {
+    withState((st) => {
+      st.workspaces.calm!.iceboxed = { since: new Date().toISOString() };
+    });
+    showTab("calm");
+    expect(isIceboxed(readState().workspaces.calm)).toBe(false);
   });
 });
 

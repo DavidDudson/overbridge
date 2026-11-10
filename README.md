@@ -6,6 +6,8 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   `~/workspaces/.bare/<repo>.git`; every workspace gets a `git worktree` of it.
 - **One workspace per work item.** Named for the item (`ENG-123` for Jira, `gh-app-12` for GitHub issue 12 of
   `app`), created by `overbridge start`, wiped when its PR is open and nothing is left locally.
+  Related work stays in one workspace: a `task/` workspace (a ticket writer, a spike) continues into the item
+  it filed or explored when `overbridge start` runs inside it, and `--here` re-binds any clean workspace.
 - **Workspaces hold several repos.** `~/workspaces/ENG-123/{app,infra}` etc.
 - **Claims.** Each workspace tracks the branch/PR it is on per repo. A branch or PR
   claimed by one workspace cannot be checked out by another. A `<type>/<n>-<slug>` branch
@@ -41,6 +43,10 @@ overbridge spinup                       # fresh zellij session over the existing
 overbridge start app 12                 # workspace gh-app-12 on the issue's branch, in a new tab running /start-item
 overbridge start app ENG-123            # a Jira item: workspace ENG-123
 overbridge start app --task file-x --prompt 'file a ticket for X'   # no item yet: workspace file-x on branch task/file-x
+overbridge start app --stack 12 13 14   # items in dependency order, bottom first: workspace gh-app-12-stack (or --name <slug>)
+                                        # holding a gh stack with one layer per item, claim and HEAD on layer 1
+overbridge start app 12                 # inside file-x once it filed #12: re-binds file-x to the item, no new workspace
+overbridge start app 12 --here          # re-bind the current workspace from any claim, if nothing is uncommitted or unpushed
 ```
 
 `overbridge spinup` always rebuilds the session, killing running panes. Use `overbridge up` to just
@@ -79,11 +85,10 @@ iceboxed. Claims and worktrees stay, so nothing else can take its branch or PR. 
 reopens the tab, the agent continuing its conversation and reading the handoff. If every PR of an iceboxed
 workspace merges, the merged-PR check removes it like any other.
 
-**Seeing what was removed.** Every removal shows at the bottom of the sidebar, so none happens unseen. A yellow
-`🧹 4s removing <title>` row shows one in progress. A finished one stays for an hour and names what removed it:
-`🧹 3m merged <title>` for the merged-PR check, `exited` for an ended session, and `cleaned` for the Cleanup button.
-A failed removal shows as a red `✗ 1m failed <title>`. The sidebar shows at most three of these rows, newest first,
-and `state.json` keeps the last 20 under `cleanups`.
+**Seeing what was removed.** The bottom of the sidebar shows `🧹 next check 42s`, a countdown to the next merged-PR check.
+Below it, a yellow `🧹 removing <title>` row shows a removal in progress and a grey `🧹 removed <title>` row one that finished;
+a failed one shows red as `✗ failed <title>`. Finished rows stay until the next check, then drop off. The sidebar shows at most
+three removal rows, and `state.json` keeps the last 20 under `cleanups`.
 
 Inside a workspace (shell pane or its Claude):
 
@@ -559,7 +564,7 @@ The legend shows the range the digits reach, such as `1-14`.
 Left/Right or `h`/`l` go back and forward through the tabs visited from the sidebar, like a browser.
 Every tab's sidebar shares one history per zellij session (`<meta>/sidebar-history/<session>.json`),
 tabs closed since are skipped, and a failed switch leaves it as it was. Switches made outside the sidebar
-(zellij keys, the tab bar, `overbridge next`) are not recorded.
+(zellij keys, the tab bar, `overbridge next`, `overbridge go`) are not recorded.
 The new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. Long titles wrap under their text (up to three rows).
 
@@ -608,6 +613,11 @@ seconds); unknown or over six hours old shows `–`.
 
 `overbridge next` (the `n` key in the sidebar, and a zellij binding) goes to the next tab that needs you:
 waiting for input first, then finished, then finished with background tasks running, cycling from the current tab.
+
+`overbridge go <n>|<name>|next|prev` switches tab by its sidebar number (`go 1` is the root tab, like `⌥1`), by name,
+or to the neighbouring tab (wrapping), and lands on that tab's Claude pane. It works from outside the session too,
+so a window-manager key (say Hyprland `SUPER+ALT+<n>`) can be bound to it: without `$ZELLIJ` it targets the session by
+name, `$OVERBRIDGE_SESSION` or `workspaces`.
 #### Agent state
 
 Each workspace's `.claude/settings.json` registers `overbridge hook` for `SessionStart`,

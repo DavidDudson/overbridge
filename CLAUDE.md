@@ -21,7 +21,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - Apps: `src/apps.ts` (launch, teardown, port pool, status) and `src/app-command.ts` (`overbridge app`).
 - Panes: `src/top.ts` (pure model, layout, cache) + `src/top-run.ts` (tty loop); `src/sidebar.ts`; shared terminal
   helpers in `src/term.ts`; the sidebar's bottom border shows `src/version.ts`'s version (package.json's when real,
-  else `OVERBRIDGE_VERSION`, which the flake sets to the git rev, else `dev`), read once when the pane starts; `src/agent-state.ts` reads what `src/agent-hook.ts` writes; `src/panes.ts` is the terminal/diff/claude pane toggles and `overbridge diff`; `src/pr-actions.ts` is the top panel's Ready/Draft and Merge (PR or `gh stack`); `src/next.ts` picks the next tab needing attention; `src/limits.ts` reads the usage limits Claude's statusline writes. Pure parts are unit-tested.
+  else `OVERBRIDGE_VERSION`, which the flake sets to the git rev, else `dev`), read once when the pane starts; `src/agent-state.ts` reads what `src/agent-hook.ts` writes; `src/panes.ts` is the terminal/diff/claude pane toggles and `overbridge diff`; `src/pr-actions.ts` is the top panel's Ready/Draft and Merge (PR or `gh stack`); `src/next.ts` picks the next tab needing attention; `src/go.ts` is `overbridge go` (tab by sidebar number, name, next/prev; `sessionExec` in `src/tab.ts` reaches the session by name from outside zellij); `src/limits.ts` reads the usage limits Claude's statusline writes. Pure parts are unit-tested.
 - `src/shell.ts` resolves a repo's dev shell (`shell` key): prefix or cached env (`$XDG_CACHE_HOME/overbridge/shell`); used by `overbridge shell`, `claude()` (one repo: agent starts inside it, marker `<meta>/agent/<ws>.shell`), the terminal pane and the generated CLAUDE.md. Keep it tool-agnostic.
 - `src/check-queue.ts` is `overbridge check`: tickets in `<meta>/check-queue/` (the first live ticket holds the turn, no lock),
   a load gate, then the command in its own process group, killed on `timeout-seconds` or a CPU stall
@@ -34,7 +34,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   They never go away: every removal path checks `isOrchestrationTab` (`removeWorkspace`, `cleanable`, `beginRemoval`, `verdictFor`; add it to any
   new one), `claudeOrchestration` restarts Claude when it exits (`restartAfter`), and the sidebar poll reopens a closed tab
   (`ensureOrchestrationTabs` in `src/orchestration-keep.ts`, one owner per tab through a reopen lock).
-- `src/start.ts` is `overbridge start <repo> <id>` (or `--task <slug>` for work with no item, on `task/<slug>`): one workspace per work item, named by `Provider.workspaceName`,
+- `src/start.ts` is `overbridge start <repo> <id>` (or `--task <slug>` for work with no item, on `task/<slug>`, or `--stack <id>...`, bottom first:
+  `startStack` claims the bottom branch, runs `gh stack init` for every layer, and leaves HEAD on layer 1; the catalog then makes the claim cover all
+  layers, and a failed init is undone by `undoStack`; layers already on origin are refused): one workspace per work item, named by `Provider.workspaceName`,
   added to the running session with `openTab`. Cleanup (`cleanable`, `pressCleanup` in `src/top.ts`; `beginRemoval`, `finishRemoval` in `src/remove.ts`)
   offers to remove a workspace whose PRs are open with nothing uncommitted or unpushed. `beginRemoval` marks it `removing` in state
   (the sidebar hides it), switches to `landingTab` (`src/next.ts`), closes its tab by id, and starts a detached `rm --background-finish` worker.
@@ -47,7 +49,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   leaves no remote branch holding those commits, so `hasUnpushed` cannot do that check. Unsaved work sets `removalBlocked`, which the sidebar card shows.
   The sidebar starts the sweep; `claimSweep` (`src/sweep-trigger.ts`) lets one sidebar run it per `MERGE_SWEEP_MS`.
   Every removal is visible: `beginRemoval` stores its `CleanupCause` in `removing`, `finishRemoval` appends the outcome to
-  `State.cleanups` (`src/cleanup-log.ts`), and the sidebar lists in-flight and recent ones under its divider (`cleanupRows`).
+  `State.cleanups` (`src/cleanup-log.ts`), and the sidebar shows a countdown to the next sweep, the removals in flight and those finished since the last sweep (`cleanupRows`).
 - `src/icebox.ts` is `overbridge icebox`/`thaw`: a paused workspace keeps its claims and worktrees, has `iceboxed` in state and no
   tab. `icebox` refuses on `unsavedRepos`, stops apps (`stopApps`) and checks (`stopChecksFor`), writes a handoff (`src/handoff.ts`)
   and closes the tab last (`leaveTab`); `thaw` reopens it with `--continue` and `/read-handoff`. `entries()` leaves iceboxed
@@ -64,6 +66,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - `test/e2e.test.ts` drives the real CLI against a temp `OVERBRIDGE_ROOT` and a local bare "remote".
 - Generated files (`<ws>/.claude/settings.json`, `<ws>/CLAUDE.md`, layout) come from
   `src/scaffold.ts` / `src/layout.ts`; they must stay idempotent.
+  The agent starts in `agentDir` (`src/layout.ts`: the first repo's worktree, so `overbridge.yml`, `item`, `config` and `ext`
+  resolve; the workspace root with no repo or only root transcripts) and loads `<meta>/workspaces/<ws>.settings.json`
+  through `--settings`, since Claude reads `.claude/settings.json` only from its own folder.
 - `src/stack.ts` reads gh-stack's catalog (`<bare>/gh-stack`); claims cover whole stacks via `cover()`.
 - Installed from nix-home's `ws` flake input (to be renamed `overbridge`), which is pinned. After a PR merges to `main`, bump it in
   nix-home (`nix flake update ws`, own commit + PR) or the installed `ws` stays on the old rev.

@@ -1,8 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sidebarWidth } from "./config";
-import { newTabKdl } from "./layout";
-import { metaDir, selfCommand } from "./paths";
+import { agentDirOf, newTabKdl } from "./layout";
+import { metaDir, selfCommand, sessionName } from "./paths";
 import { log, run } from "./util";
 
 /** Runs a zellij command; tests pass a fake to see the calls without a session. */
@@ -20,6 +20,15 @@ export const zellijQuery: ZellijExec = (cmd) => {
     return { ok: false, stdout: "" };
   }
 };
+
+/**
+ * `zellijQuery`, reaching the session by name when run outside it (a window-manager keybind has no `$ZELLIJ`):
+ * `zellij action ...` becomes `zellij --session <name> action ...`. Inside zellij the calls pass through unchanged.
+ */
+export function sessionExec(inside = process.env.ZELLIJ !== undefined, session = sessionName(), exec: ZellijExec = zellijQuery): ZellijExec {
+  if (inside) return exec;
+  return (cmd) => exec(cmd[0] === "zellij" && cmd[1] === "action" ? ["zellij", "--session", session, ...cmd.slice(1)] : cmd);
+}
 
 /** Workspace names in zellij's tab order; empty outside zellij. */
 export function tabOrder(exec: ZellijExec = zellijQuery): string[] {
@@ -44,7 +53,7 @@ export function openTab(ws: string, prompt?: string, focus: TabFocus = TabFocus.
   const dir = join(metaDir(), "tabs");
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${ws}.kdl`);
-  writeFileSync(file, newTabKdl(ws, selfCommand(), { sidebarWidth: sidebarWidth(), focus: true, ...(prompt ? { prompt } : {}), ...(resume ? { resume } : {}) }));
+  writeFileSync(file, newTabKdl(ws, selfCommand(), { sidebarWidth: sidebarWidth(), focus: true, agentCwd: agentDirOf(ws), ...(prompt ? { prompt } : {}), ...(resume ? { resume } : {}) }));
   const back = focus === TabFocus.Background ? currentTab(exec) : undefined;
   const r = exec(["zellij", "action", "new-tab", "--layout", file, "--name", ws]);
   if (!r.ok) {

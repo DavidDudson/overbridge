@@ -28,6 +28,9 @@ export function envVar(name: "ROOT" | "NAME" | "SELF" | "SESSION"): string | und
   return legacy;
 }
 
+/** The zellij session `up` creates and `go` targets from outside it: `$OVERBRIDGE_SESSION`, else `workspaces`. */
+export const sessionName = () => envVar("SESSION") ?? "workspaces";
+
 /**
  * The workspaces root, with symlinks resolved once it exists. `process.cwd()` and the guard's paths are
  * real paths, so an unresolved root (macOS `/var` → `/private/var`, a symlinked `~/workspaces`) would

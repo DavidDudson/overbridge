@@ -3,12 +3,12 @@ import { dirname, join, resolve } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
 import { configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, rootConfigPath } from "./project-config";
-import { chooseLayout, userLayoutPath } from "./layout";
+import { agentDirOf, chooseLayout, userLayoutPath } from "./layout";
 import { isOrchestrationTab, orchestrationRemoveMessage, type OrchestrationTab } from "./orchestration";
 import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
-import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
+import { barePath, currentWorkspace, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, sessionName, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
-import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins } from "./scaffold";
+import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, workspaceSettingsPath } from "./scaffold";
 import { openTab, TabFocus, type ZellijExec } from "./tab";
 import { runCheck } from "./check-queue";
 import { trustFolder, untrustFolder } from "./claude-trust";
@@ -17,10 +17,8 @@ import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf
 import { type Claim, claimOwner, getWorkspace, isIceboxed, readState, withState } from "./state";
 import { exec, fail, log, must, naturalSort, run, shellQuote } from "./util";
 
-const SESSION = () => envVar("SESSION") ?? "workspaces";
-
 /** What a workspace really holds in `repo`: its claim, its worktree head, and the stacks of either. */
-const holdings = (repo: string, stacks: Stack[]) => (ws: string, c: Claim) =>
+export const holdings = (repo: string, stacks: Stack[]) => (ws: string, c: Claim) =>
   cover(stacks, [c.branch, git.currentBranch(worktreePath(ws, repo))], [c.pr]);
 
 export function requireWs(explicit?: string): string {
@@ -135,10 +133,11 @@ export function removeWorkspace(ws: string, force: boolean) {
     }
     removed.push(r);
   }
+  for (const repo of Object.keys(w.repos)) untrustFolder(worktreePath(ws, repo)); // the agent may have started in one
   untrustFolder(wsDir(ws));
   rmSync(wsDir(ws), { recursive: true, force: true });
   // per-workspace files outside the workspace dir: top cache, agent state, sidebar pane, tab layout
-  for (const f of [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("sidebars", ws), join("tabs", `${ws}.kdl`)])
+  for (const f of [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`)])
     rmSync(join(metaDir(), f), { force: true });
   withState((s) => {
     delete s.workspaces[ws];
@@ -146,7 +145,12 @@ export function removeWorkspace(ws: string, force: boolean) {
   log(`removed ${ws}`);
 }
 
-export function checkout(args: string[], wsOpt?: string) {
+/**
+ * `overbridge checkout <repo> <branch|#pr>`: claim `ref` for the workspace and switch its worktree to it.
+ * A branch that exists neither locally nor on origin is created from `opts.base` (default: the remote default
+ * branch); `start` passes `HEAD` to carry a task branch's work onto the item's branch.
+ */
+export function checkout(args: string[], wsOpt?: string, opts: { base?: string } = {}) {
   const ws = requireWs(wsOpt);
   let [repo, ref] = args;
   const owned = Object.keys(getWorkspace(readState(), ws).repos);
@@ -164,7 +168,7 @@ export function checkout(args: string[], wsOpt?: string) {
   let branch = ref;
   let pr: number | undefined;
   let prUrl: string | undefined;
-  let base = `origin/${git.defaultBranch(spec)}`;
+  let base = opts.base ?? `origin/${git.defaultBranch(spec)}`;
   let remote: Stack | undefined;
   const selector = git.parsePrRef(ref);
   if (selector) {
@@ -315,7 +319,7 @@ export function up(fresh: boolean) {
     writeFileSync(file, choice.kdl);
   }
 
-  const session = SESSION();
+  const session = sessionName();
   const sessions = run(["zellij", "list-sessions", "--short", "--no-formatting"]).stdout.split("\n");
   let exists = sessions.includes(session);
   if (exists && fresh) {
@@ -343,16 +347,21 @@ export function spinup() {
 }
 
 /**
- * Launch the agent. With exactly one repo that declares a dev shell it starts inside it, cwd still the workspace
- * root; with several it starts plain and the workspace CLAUDE.md points it at `overbridge shell`.
+ * Launch the agent in `agentDir` (the repo folder, so its `overbridge.yml` is found; see `layout.ts`). With
+ * exactly one repo that declares a dev shell it starts inside it; with several it starts plain and the workspace
+ * CLAUDE.md points it at `overbridge shell`. Started in a repo folder it loads the workspace settings through
+ * `--settings`, because Claude reads `.claude/settings.json` only from its own folder (CLAUDE.md it finds upward).
  */
 export function claude(ws: string, extra: string[]) {
   const repos = Object.keys(getWorkspace(readState(), ws).repos);
   scaffold(ws);
+  const cwd = agentDirOf(ws);
   trustFolder(wsDir(ws));
+  if (cwd !== wsDir(ws)) trustFolder(cwd);
   const [only] = repos;
   const spec = repos.length === 1 && only ? loadRepoConfig(worktreePath(ws, only), only).shell : undefined;
-  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, ["claude", "--settings", scaffoldPlugins(), ...extra], wsDir(ws));
+  const settings = cwd === wsDir(ws) ? scaffoldPlugins() : workspaceSettingsPath(ws);
+  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, ["claude", "--settings", settings, ...extra], cwd);
   mkdirSync(dirname(agentShellFile(ws)), { recursive: true });
   if (spec && only) writeFileSync(agentShellFile(ws), only);
   else rmSync(agentShellFile(ws), { force: true });
