@@ -3,12 +3,12 @@ import { dirname, join, resolve } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
 import { configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, rootConfigPath } from "./project-config";
-import { chooseLayout, userLayoutPath } from "./layout";
+import { agentDirOf, chooseLayout, userLayoutPath } from "./layout";
 import { isOrchestrationTab, orchestrationRemoveMessage, type OrchestrationTab } from "./orchestration";
 import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
 import { barePath, currentWorkspace, envVar, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
-import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins } from "./scaffold";
+import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, workspaceSettingsPath } from "./scaffold";
 import { openTab, TabFocus, type ZellijExec } from "./tab";
 import { runCheck } from "./check-queue";
 import { trustFolder, untrustFolder } from "./claude-trust";
@@ -135,10 +135,11 @@ export function removeWorkspace(ws: string, force: boolean) {
     }
     removed.push(r);
   }
+  for (const repo of Object.keys(w.repos)) untrustFolder(worktreePath(ws, repo)); // the agent may have started in one
   untrustFolder(wsDir(ws));
   rmSync(wsDir(ws), { recursive: true, force: true });
   // per-workspace files outside the workspace dir: top cache, agent state, sidebar pane, tab layout
-  for (const f of [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("sidebars", ws), join("tabs", `${ws}.kdl`)])
+  for (const f of [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`)])
     rmSync(join(metaDir(), f), { force: true });
   withState((s) => {
     delete s.workspaces[ws];
@@ -340,16 +341,21 @@ export function spinup() {
 }
 
 /**
- * Launch the agent. With exactly one repo that declares a dev shell it starts inside it, cwd still the workspace
- * root; with several it starts plain and the workspace CLAUDE.md points it at `overbridge shell`.
+ * Launch the agent in `agentDir` (the repo folder, so its `overbridge.yml` is found; see `layout.ts`). With
+ * exactly one repo that declares a dev shell it starts inside it; with several it starts plain and the workspace
+ * CLAUDE.md points it at `overbridge shell`. Started in a repo folder it loads the workspace settings through
+ * `--settings`, because Claude reads `.claude/settings.json` only from its own folder (CLAUDE.md it finds upward).
  */
 export function claude(ws: string, extra: string[]) {
   const repos = Object.keys(getWorkspace(readState(), ws).repos);
   scaffold(ws);
+  const cwd = agentDirOf(ws);
   trustFolder(wsDir(ws));
+  if (cwd !== wsDir(ws)) trustFolder(cwd);
   const [only] = repos;
   const spec = repos.length === 1 && only ? loadRepoConfig(worktreePath(ws, only), only).shell : undefined;
-  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, ["claude", "--settings", scaffoldPlugins(), ...extra], wsDir(ws));
+  const settings = cwd === wsDir(ws) ? scaffoldPlugins() : workspaceSettingsPath(ws);
+  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, ["claude", "--settings", settings, ...extra], cwd);
   mkdirSync(dirname(agentShellFile(ws)), { recursive: true });
   if (spec && only) writeFileSync(agentShellFile(ws), only);
   else rmSync(agentShellFile(ws), { force: true });
