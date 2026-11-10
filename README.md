@@ -55,6 +55,13 @@ attention, or else the tab next to it. A background process then re-checks the P
 runs `overbridge rm`. If any of that fails, the workspace comes back with the error on its sidebar card, and its tab
 reopens. A merged claim does not block it; a closed (unmerged) PR or a branch with no PR does, and one PR must still be open.
 
+**Ending a session.** When you exit a workspace's Claude on purpose (`/exit` or Ctrl-D), overbridge removes the
+workspace the way Cleanup does. Its tab closes, it leaves every sidebar, and a background process finishes the removal.
+It doesn't need an open PR. If a repo has uncommitted changes or unpushed commits, the workspace stays in the list,
+marked `ended · unsaved work`, and goes once that work is pushed or thrown away. `/clear` and `/resume` don't count as
+ending a session. Nor does a session that ends because zellij quit or the machine restarted, so those workspaces resume
+on the next `overbridge up`. If you're on another tab when it goes, you stay there.
+
 Inside a workspace (shell pane or its Claude):
 
 ```nu
@@ -581,7 +588,7 @@ waiting for input first, then finished, then finished with background tasks runn
 
 Each workspace's `.claude/settings.json` registers `overbridge hook` for `SessionStart`,
 `UserPromptSubmit`, `PostToolUse`, `Notification`, `PreCompact`, `Stop` and `SessionEnd`, next to the guard.
-It records `empty` (a session just started or cleared; Claude's later idle notification does not turn it into `waiting`, and the workspace becomes a Cleanup candidate if nothing is uncommitted or unpushed), `idle`, `busy`, `waiting`, `done` or `end` in `<meta>/agent/<ws>.json`. On `Stop` it also records the pids of shells still running under the session (background tasks); `done` reads as `bg` while any is alive. Plan-mode plans are written to `<ws>/plans/` (`plansDirectory` in the generated settings), not `~/.claude/plans`.
+It records `empty` (a session just started or cleared; Claude's later idle notification does not turn it into `waiting`, and the workspace becomes a Cleanup candidate if nothing is uncommitted or unpushed), `idle`, `busy`, `waiting`, `done` or `end` (with Claude's SessionEnd `reason`; `/clear` and `/resume` record nothing) in `<meta>/agent/<ws>.json`. On `Stop` it also records the pids of shells still running under the session (background tasks); `done` reads as `bg` while any is alive. Plan-mode plans are written to `<ws>/plans/` (`plansDirectory` in the generated settings), not `~/.claude/plans`.
 The root tab's Claude records its state the same way, under its tab name (`<meta>/agent/@root.json`).
 The hook
 never blocks or fails the agent and loads none of the rest of the CLI. A `busy` state with no

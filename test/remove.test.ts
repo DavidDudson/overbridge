@@ -2,8 +2,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentStateFile } from "../src/agent-state";
-import { beginRemoval, FINISH_FLAG, parseTabIds, type RemovalDeps } from "../src/remove";
+import { agentStateFile, EndReason, sessionEndedForGood } from "../src/agent-state";
+import { createReaper } from "../src/auto-remove";
+import { beginRemoval, FINISH_FLAG, Landing, parseTabIds, type RemovalDeps } from "../src/remove";
+import { cleanable, gitClean } from "../src/top";
 import { entries, entryLines } from "../src/sidebar";
 import { isRemoving, readState, REMOVING_GRACE_MS, watchState, withState, type WorkspaceState } from "../src/state";
 import type { RunResult } from "../src/util";
@@ -26,14 +28,17 @@ const ob = (args: string[]) => sh([process.execPath, CLI, ...args], tmp);
 
 const ok = (stdout = ""): RunResult => ({ ok: true, code: 0, stdout, stderr: "" });
 
-/** Deps that record every zellij call and pretend to start a worker. */
-function fakeDeps(listTabs: string) {
+/** Deps that record every zellij call and pretend to start a worker; `focused` is the tab zellij reports as current. */
+function fakeDeps(listTabs: string, focused = "") {
   const calls: string[][] = [];
   const spawned: string[] = [];
   const deps: RemovalDeps = {
     exec: (cmd) => {
       calls.push(cmd);
-      return cmd[2] === "list-tabs" ? ok(listTabs) : ok();
+      if (cmd[2] === "list-tabs") {
+        return ok(listTabs);
+      }
+      return cmd[2] === "current-tab-info" && focused ? ok(`name: ${focused}\n`) : ok();
     },
     spawnWorker: (ws) => {
       spawned.push(ws);
@@ -167,6 +172,84 @@ describe("beginRemoval", () => {
     expect(readState().workspaces.d1!.removing).toBeUndefined();
     expect(spawned).toEqual([]);
     expect(calls).toEqual([]);
+  });
+
+  test("Landing.IfFocused closes another tab without pulling the user off theirs", () => {
+    ob(["new", "g1", "-r", "app"]);
+    const { deps, calls } = fakeDeps("TAB_ID  POSITION  NAME\n0  0  @root\n7  1  g1\n", "@root");
+    expect(beginRemoval("g1", { deps, landing: Landing.IfFocused })).toBeUndefined();
+    expect(calls.some((c) => c[2] === "go-to-tab-name")).toBe(false);
+    expect(calls.at(-1)).toEqual(["zellij", "action", "close-tab-by-id", "7"]);
+  });
+
+  test("Landing.IfFocused still lands elsewhere when the removed tab has focus", () => {
+    ob(["new", "g2", "-r", "app"]);
+    const { deps, calls } = fakeDeps("TAB_ID  POSITION  NAME\n0  0  @root\n8  1  g2\n", "g2");
+    expect(beginRemoval("g2", { deps, landing: Landing.IfFocused })).toBeUndefined();
+    expect(calls.some((c) => c[2] === "go-to-tab-name")).toBe(true);
+    expect(calls.at(-1)).toEqual(["zellij", "action", "close-tab-by-id", "8"]);
+  });
+});
+
+describe("a session closed on purpose", () => {
+  const endSession = (ws: string, reason: string) => {
+    mkdirSync(join(root, ".overbridge", "agent"), { recursive: true });
+    writeFileSync(agentStateFile(ws), JSON.stringify({ state: "end", at: Date.now(), reason }));
+  };
+
+  test("makes a clean workspace cleanable, without a PR", () => {
+    ob(["new", "h1", "-r", "app"]);
+    expect(cleanable("h1")).toBe(false);
+    endSession("h1", EndReason.PromptInputExit);
+    expect(cleanable("h1")).toBe(true);
+  });
+
+  test("any other end leaves it alone", () => {
+    ob(["new", "h2", "-r", "app"]);
+    endSession("h2", EndReason.Other);
+    expect(cleanable("h2")).toBe(false);
+  });
+
+  test("unsaved work keeps it, until the work is gone", () => {
+    ob(["new", "h3", "-r", "app"]);
+    endSession("h3", EndReason.PromptInputExit);
+    const wt = join(root, "h3", "app");
+    writeFileSync(join(wt, "dirty.txt"), "x");
+    expect(cleanable("h3")).toBe(false);
+    sh(["git", "add", "dirty.txt"], wt);
+    sh(["git", "commit", "-q", "-m", "wip"], wt);
+    expect(cleanable("h3")).toBe(false);
+    sh(["git", "reset", "-q", "--hard", "HEAD~1"], wt);
+    expect(cleanable("h3")).toBe(true);
+  });
+
+  test("never makes an orchestration tab cleanable", () => {
+    endSession("@root", EndReason.PromptInputExit);
+    expect(cleanable("@root")).toBe(false);
+  });
+
+  test("the sidebar reaper removes it in the background and marks a dirty one", async () => {
+    ob(["new", "i1", "-r", "app"]);
+    ob(["new", "i2", "-r", "app"]);
+    endSession("i1", EndReason.PromptInputExit);
+    endSession("i2", EndReason.PromptInputExit);
+    writeFileSync(join(root, "i2", "app", "dirty.txt"), "x");
+    const realSpawn = (ws: string) => {
+      const proc = Bun.spawn({ cmd: [process.execPath, CLI, "rm", ws, `--${FINISH_FLAG}`], cwd: tmp, env: process.env, stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true });
+      proc.unref();
+      return proc.pid;
+    };
+    const deps: RemovalDeps = { exec: () => ok(), spawnWorker: realSpawn, inZellij: false };
+    const reap = createReaper({ endedForGood: sessionEndedForGood, gitClean, remove: (ws) => beginRemoval(ws, { landing: Landing.IfFocused, deps }), now: Date.now });
+
+    const unsaved = reap(entries().filter((e) => e.tab === "i1" || e.tab === "i2"));
+
+    expect([...unsaved]).toEqual(["i2"]);
+    expect(entries().map((e) => e.tab)).not.toContain("i1");
+    expect(await until(() => !readState().workspaces.i1)).toBe(true);
+    expect(existsSync(join(root, "i1"))).toBe(false);
+    expect(readState().workspaces.i2!.removing).toBeUndefined();
+    expect(entryLines({ ...entries().find((e) => e.tab === "i2")!, unsaved: true }, 1, false, 80).at(-1)).toContain("ended · unsaved work");
   });
 });
 
