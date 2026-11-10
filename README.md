@@ -54,6 +54,15 @@ attention, or else the tab next to it. A background process then re-checks the P
 runs `overbridge rm`. If any of that fails, the workspace comes back with the error on its sidebar card, and its tab
 reopens. A merged claim does not block it; a closed (unmerged) PR or a branch with no PR does, and one PR must still be open.
 
+**Removal once every PR merges.** When every claimed branch has a merged PR, overbridge removes the workspace through
+the same background flow, without a key press. Any open sidebar can run the check (`overbridge top sweep`), and only
+one of them runs it each minute, so it works whether or not the workspace's tab is open. The workspace stays if a repo
+has uncommitted changes or its HEAD is not the merged PR's head commit, and its sidebar card reads "merged · unsaved
+work". The check compares HEAD with the PR's head rather than the default branch, because a squash merge leaves the
+branch's commits off the default branch. A workspace also stays while its agent is working, and goes once the agent is
+idle or has ended. A claim with no PR, or a PR closed without merging, keeps the workspace. Orchestration tabs are never
+removed this way.
+
 Inside a workspace (shell pane or its Claude):
 
 ```nu

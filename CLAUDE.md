@@ -30,7 +30,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - `src/orchestration.ts` lists the orchestration tabs (`@root`: Claude in the root). Their names start with `@` so they never
   match `NAME_RE`. The sidebar pins them in its Orchestration frame; their Claude gets the agent-state hooks and no guard
   through `claude --settings` (`scaffoldOrchestration`), and `OVERBRIDGE_TAB` names it for the hook.
-  They never go away: every removal path checks `isOrchestrationTab` (`removeWorkspace`, `cleanable`, `beginRemoval`; add it to any
+  They never go away: every removal path checks `isOrchestrationTab` (`removeWorkspace`, `cleanable`, `beginRemoval`, `verdictFor`; add it to any
   new one), `claudeOrchestration` restarts Claude when it exits (`restartAfter`), and the sidebar poll reopens a closed tab
   (`ensureOrchestrationTabs` in `src/orchestration-keep.ts`, one owner per tab through a reopen lock).
 - `src/start.ts` is `overbridge start <repo> <id>`: one workspace per work item, named by `Provider.workspaceName`,
@@ -38,6 +38,10 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   offers to remove a workspace whose PRs are open with nothing uncommitted or unpushed. `beginRemoval` marks it `removing` in state
   (the sidebar hides it), switches to `landingTab` (`src/next.ts`), closes its tab by id, and starts a detached `rm --background-finish` worker.
   A failed worker sets `removeError` (shown on the sidebar card) and reopens the tab.
+  Once every claimed PR has merged (`TopCache.merged`, the PR head commits), `src/auto-remove.ts` (`overbridge top sweep`) removes the workspace
+  through `beginRemoval` with `Focus.KeepUnlessCurrent`, after `mergedClean` checks that each HEAD is its PR head. A squash merge
+  leaves no remote branch holding those commits, so `hasUnpushed` cannot do that check. Unsaved work sets `removalBlocked`, which the sidebar card shows.
+  The sidebar starts the sweep; `claimSweep` (`src/sweep-trigger.ts`) lets one sidebar run it per `MERGE_SWEEP_MS`.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors. The root `config.yml`'s `guard` block (`GuardConfig`) adds
   `read-paths` (reads only) and `deny` rules; it is never read from a repo file, so a branch can't loosen the guard.

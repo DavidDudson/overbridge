@@ -8,6 +8,9 @@ import { fail } from "./util";
 export type Claim = { branch?: string; pr?: number };
 /** A background removal in flight: when it started and, once spawned, the worker's pid. */
 export type Removing = { since: string; pid?: number };
+/** Why a workspace that would be removed by itself is kept; shown on its sidebar card. */
+export const RemovalBlock = { MergedUnsaved: "merged-unsaved" } as const;
+export type RemovalBlock = (typeof RemovalBlock)[keyof typeof RemovalBlock];
 export type WorkspaceState = {
   created: string;
   repos: Record<string, Claim>;
@@ -15,8 +18,11 @@ export type WorkspaceState = {
   removing?: Removing;
   /** Why the last background removal failed; shown on the workspace's sidebar card. */
   removeError?: string;
+  /** Set by the merged-PR sweep when the workspace would be removed but holds unsaved work. */
+  removalBlocked?: RemovalBlock;
 };
-export type State = { version: 1; workspaces: Record<string, WorkspaceState> };
+/** `mergeSweepAt` is when a sidebar last took the merged-PR sweep (ms), so only one sidebar runs it per interval. */
+export type State = { version: 1; workspaces: Record<string, WorkspaceState>; mergeSweepAt?: number };
 
 const STATE_FILE = "state.json";
 const statePath = () => join(metaDir(), STATE_FILE);

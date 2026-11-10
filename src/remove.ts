@@ -5,10 +5,10 @@ import { removeWorkspace } from "./commands";
 import { landingTab } from "./next";
 import { isOrchestrationTab, orchestrationRemoveMessage } from "./orchestration";
 import { metaDir, root, selfCommand } from "./paths";
-import { entries, switchTab, tabOrder } from "./sidebar";
+import { currentTab, entries, switchTab, tabOrder } from "./sidebar";
 import { openTab } from "./start";
 import { getWorkspace, isRemoving, readState, withState } from "./state";
-import { cleanable, gitClean, refreshTop, snapshotTop } from "./top";
+import { cleanable, noUnsavedWork, refreshTop, snapshotTop } from "./top";
 import { fail, type RunResult, run } from "./util";
 
 /** The internal `rm` flag that runs `finishRemoval` in the detached worker. */
@@ -26,6 +26,15 @@ export interface RemovalDeps {
   /** Whether this runs inside zellij, so there is a tab to switch away from and close. */
   inZellij: boolean;
 }
+
+/** Where the user ends up when a workspace's tab closes. */
+export const Focus = {
+  /** Always move to the landing tab: the user pressed Cleanup in this workspace. */
+  Land: "land",
+  /** Move only when the removed workspace is the focused tab: removal started from elsewhere, such as the merged-PR sweep. */
+  KeepUnlessCurrent: "keep-unless-current",
+} as const;
+export type Focus = (typeof Focus)[keyof typeof Focus];
 
 const defaultDeps = (): RemovalDeps => ({
   exec: (cmd) => run(cmd),
@@ -70,7 +79,7 @@ export function parseTabIds(listTabs: string): Map<string, string> {
  * and close `ws`'s tab. `previous` is the tab the user came from, when known. Returns a refusal message,
  * or undefined once the removal is under way.
  */
-export function beginRemoval(ws: string, opts: { previous?: string; deps?: RemovalDeps } = {}): string | undefined {
+export function beginRemoval(ws: string, opts: { previous?: string; deps?: RemovalDeps; focus?: Focus } = {}): string | undefined {
   if (isOrchestrationTab(ws)) {
     return orchestrationRemoveMessage(ws);
   }
@@ -79,7 +88,7 @@ export function beginRemoval(ws: string, opts: { previous?: string; deps?: Remov
   if (isRemoving(w)) {
     return `${ws} is already being removed`;
   }
-  if (!gitClean(ws)) {
+  if (!noUnsavedWork(ws)) {
     return `${ws} has uncommitted changes or unpushed commits; not removing`;
   }
   const list = deps.inZellij ? entries() : [];
@@ -95,7 +104,8 @@ export function beginRemoval(ws: string, opts: { previous?: string; deps?: Remov
     }
   });
   if (deps.inZellij) {
-    leaveTab(ws, landingTab(list, ws, opts.previous), deps.exec);
+    const moveFocus = opts.focus !== Focus.KeepUnlessCurrent || currentTab(deps.exec) === ws;
+    leaveTab(ws, moveFocus ? landingTab(list, ws, opts.previous) : undefined, deps.exec);
   }
   return undefined;
 }
@@ -129,7 +139,7 @@ export async function finishRemoval(ws: string): Promise<void> {
     }
     refreshTop(ws);
     if (!cleanable(ws)) {
-      fail(`${ws} is no longer clean (no open PR, or uncommitted or unpushed work); not removed`);
+      fail(`${ws} is no longer clean (no open or merged PRs, or uncommitted or unpushed work); not removed`);
     }
     const { apps } = await snapshotTop(ws);
     apps

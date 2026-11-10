@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentStateFile } from "../src/agent-state";
-import { beginRemoval, FINISH_FLAG, parseTabIds, type RemovalDeps } from "../src/remove";
+import { beginRemoval, FINISH_FLAG, Focus, parseTabIds, type RemovalDeps } from "../src/remove";
 import { entries, entryLines } from "../src/sidebar";
 import { isRemoving, readState, REMOVING_GRACE_MS, watchState, withState, type WorkspaceState } from "../src/state";
 import type { RunResult } from "../src/util";
@@ -150,6 +150,36 @@ describe("beginRemoval", () => {
     const { deps, calls } = fakeDeps("");
     beginRemoval("c1", { deps, previous: "b2" });
     expect(calls[0]).toEqual(["zellij", "action", "go-to-tab-name", "b2"]);
+  });
+
+  test("removal started from elsewhere closes the tab without moving the user, unless that tab is focused", () => {
+    ob(["new", "g1", "-r", "app"]);
+    ob(["new", "g2", "-r", "app"]);
+    const withFocus = (focused: string) => {
+      const calls: string[][] = [];
+      const deps: RemovalDeps = {
+        exec: (cmd) => {
+          calls.push(cmd);
+          if (cmd[2] === "current-tab-info") {
+            return ok(`name: ${focused}`);
+          }
+          return cmd[2] === "list-tabs" ? ok("TAB_ID  POSITION  NAME\n6  0  g1\n7  1  g2\n8  2  b2\n") : ok();
+        },
+        spawnWorker: () => process.pid,
+        inZellij: true,
+      };
+      return { deps, calls };
+    };
+
+    const away = withFocus("b2");
+    expect(beginRemoval("g1", { deps: away.deps, focus: Focus.KeepUnlessCurrent })).toBeUndefined();
+    expect(away.calls.filter((c) => c[2] === "go-to-tab-name")).toEqual([]);
+    expect(away.calls.at(-1)).toEqual(["zellij", "action", "close-tab-by-id", "6"]);
+
+    const here = withFocus("g2");
+    expect(beginRemoval("g2", { deps: here.deps, focus: Focus.KeepUnlessCurrent })).toBeUndefined();
+    expect(here.calls.some((c) => c[2] === "go-to-tab-name")).toBe(true);
+    expect(here.calls.at(-1)).toEqual(["zellij", "action", "close-tab-by-id", "7"]);
   });
 
   test("refuses an orchestration tab without touching zellij", () => {

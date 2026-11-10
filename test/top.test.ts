@@ -285,11 +285,13 @@ describe("cleanable", () => {
   const sh = (cmd: string[], cwd: string) => {
     const p = Bun.spawnSync({ cmd, cwd, env: gitEnv, stdout: "pipe", stderr: "pipe" });
     if (p.exitCode !== 0) throw new Error(`${cmd.join(" ")}: ${p.stderr}`);
+    return p.stdout.toString().trim();
   };
   const items = [{ id: "12", title: "Add dark mode", url: "x" }];
   /** Cache the PR state as `gh` would report it. */
-  const cachePr = (state: string) =>
-    refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson(state) });
+  const cachePr = (state: string, extra: Record<string, unknown> = {}) =>
+    refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson(state, extra) });
+  const headSha = () => sh(["git", "rev-parse", "HEAD"], wt);
 
   beforeEach(() => {
     tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-clean-")));
@@ -374,6 +376,40 @@ describe("cleanable", () => {
     sh(["git", "switch", "-q", "-c", "feat/local-only"], wt);
     sh(["git", "commit", "-q", "--allow-empty", "-m", "local"], wt);
     expect(cleanable("w1")).toBe(false);
+  });
+
+  test("every PR merged at the local HEAD is a candidate, even once a squash merge deleted the remote branch", () => {
+    const head = headSha();
+    sh(["git", "push", "-q", "origin", "--delete", "feat/12-dark-mode"], wt);
+    expect(cachePr("MERGED", { headRefOid: head }).merged).toEqual({ r: head });
+    expect(cleanable("w1")).toBe(true);
+  });
+
+  test("a merged workspace with uncommitted changes, or a HEAD past the PR head, is not", () => {
+    cachePr("MERGED", { headRefOid: headSha() });
+    writeFileSync(join(wt, "scratch.txt"), "x");
+    expect(cleanable("w1")).toBe(false);
+    rmSync(join(wt, "scratch.txt"));
+    expect(cleanable("w1")).toBe(true);
+    sh(["git", "commit", "-q", "--allow-empty", "-m", "after merge"], wt);
+    expect(cleanable("w1")).toBe(false);
+  });
+
+  test("merged is set only when every claimed branch has a merged PR with a head commit", () => {
+    const head = headSha();
+    expect(cachePr("MERGED").merged).toBeUndefined();
+    expect(cachePr("CLOSED", { headRefOid: head }).merged).toBeUndefined();
+    expect(cachePr("OPEN", { headRefOid: head }).merged).toBeUndefined();
+    withState((s) => {
+      s.workspaces.w1!.repos.r2 = { branch: "feat/13-other" };
+    });
+    expect(cachePr("MERGED", { headRefOid: head }).merged).toBeUndefined();
+    withState((s) => {
+      s.workspaces.w1!.repos.r2 = { branch: "feat/13-other", pr: 4 };
+    });
+    const states = (state4: string) => refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => prJson(cmd[3] === "4" ? state4 : "MERGED", { headRefOid: head }) }).merged;
+    expect(states("CLOSED")).toBeUndefined();
+    expect(states("MERGED")).toEqual({ r: head, r2: head });
   });
 
   test("snapshotTop offers Cleanup only for a candidate", async () => {

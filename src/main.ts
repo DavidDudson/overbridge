@@ -9,6 +9,7 @@ import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
 import { FINISH_FLAG, finishRemoval } from "./remove";
+import { sweepMerged } from "./auto-remove";
 import { start } from "./start";
 import { topPanel, topRefresh } from "./top-run";
 import { silenceLegacyWarnings } from "./paths";
@@ -30,6 +31,7 @@ Setup
   overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
+  overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
 
 Work items (the repo's project-management provider)
   overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
@@ -137,7 +139,8 @@ async function main(argv: string[]): Promise<number> {
     case "top": {
       const { values, positionals } = opts(rest, ws);
       if (positionals[0] === "refresh") topRefresh(values.ws);
-      else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh] [--ws name]");
+      else if (positionals[0] === "sweep") sweepMerged();
+      else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh|sweep] [--ws name]");
       else await topPanel(values.ws);
       break;
     }
