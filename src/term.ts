@@ -111,11 +111,11 @@ export const boxTop = (title: string, width: number) => {
   return `${edge("╭─")}${bold(label)}${edge(`${"─".repeat(Math.max(0, width - 3 - textWidth(label)))}╮`)}`;
 };
 export const boxDivider = (width: number) => edge(`├${"─".repeat(Math.max(0, width - 2))}┤`);
-/** The bottom border, with an optional `label` (a message) set into it in yellow. */
-export const boxBottom = (width: number, label = "") => {
+/** The bottom border, with an optional `label` set into it in `color` (yellow, for a message, by default). */
+export const boxBottom = (width: number, label = "", color: Color = "yellow") => {
   if (!label) return edge(`╰${"─".repeat(Math.max(0, width - 2))}╯`);
   const text = ` ${fit(label, Math.max(1, width - 6)).trimEnd()} `;
-  return `${edge("╰─")}${colorize(text, "yellow")}${edge(`${"─".repeat(Math.max(0, width - 3 - textWidth(text)))}╯`)}`;
+  return `${edge("╰─")}${colorize(text, color)}${edge(`${"─".repeat(Math.max(0, width - 3 - textWidth(text)))}╯`)}`;
 };
 /** A row of content (already styled, fitted to `width - 4`) between the side borders with one column of padding. */
 export const boxRow = (content: string) => `${edge("│")} ${content} ${edge("│")}`;

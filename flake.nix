@@ -24,6 +24,7 @@
             makeWrapper ${pkgs.bun}/bin/bun $out/bin/overbridge \
               --add-flags $out/share/overbridge/src/cli.ts \
               --set-default OVERBRIDGE_SELF overbridge \
+              --set OVERBRIDGE_VERSION ${self.shortRev or self.dirtyShortRev or "dev"} \
               --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.git pkgs.gh pkgs.zellij ]}
             ln -s overbridge $out/bin/ws
           '';

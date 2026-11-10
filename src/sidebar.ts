@@ -10,6 +10,7 @@ import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInpu
 import { readTopCache } from "./top";
 import { sidebarLabel } from "./top";
 import { naturalSort, run } from "./util";
+import { overbridgeVersion } from "./version";
 export const LEGEND = "⌥1-9 go  ⌥w next";
 
 /**
@@ -143,9 +144,10 @@ export function entryLines(e: Entry, index: number, selected: boolean, inner: nu
 
 /**
  * The whole sidebar as `height` rows of `width` columns: a rounded frame titled "Workspaces" with
- * a padded card per workspace (title wraps), then a divider, the usage limits and the key legend.
+ * a padded card per workspace (title wraps), then a divider, the usage limits and the key legend,
+ * with `version` set into the bottom border.
  */
-export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now()): string[] {
+export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = ""): string[] {
   const inner = Math.max(0, width - 4);
   const bodyRows = Math.max(0, height - CHROME_TOP - CHROME_BOTTOM);
   const body: string[] = [];
@@ -157,7 +159,7 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
     boxDivider(width),
     ...limitRows(limits, inner, now).map(boxRow),
     boxRow(dim(fit(LEGEND, inner))),
-    boxBottom(width),
+    boxBottom(width, version, "grey"),
   ];
 }
 
@@ -217,6 +219,8 @@ export async function sidebar(wsOpt?: string) {
   if (!process.stdin.isTTY) throw new Error("overbridge sidebar needs a terminal");
   registerPane(self);
 
+  // Read once at start, so a pane left running across an upgrade shows the version it runs.
+  const version = overbridgeVersion();
   let offset = 0;
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
   const draw = () => {
@@ -226,7 +230,7 @@ export async function sidebar(wsOpt?: string) {
     const heights = entryHeights(list, width);
     const rows = bodyRowsFor(height);
     offset = clampScroll(scrollFor(current, offset, heights, rows), heights, rows);
-    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits()), height, width));
+    process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits(), Date.now(), version), height, width));
   };
 
   await new Promise<void>((resolve) => {
