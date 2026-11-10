@@ -41,6 +41,8 @@ overbridge spinup                       # fresh zellij session over the existing
 overbridge start app 12                 # workspace gh-app-12 on the issue's branch, in a new tab running /start-item
 overbridge start app ENG-123            # a Jira item: workspace ENG-123
 overbridge start app --task file-x --prompt 'file a ticket for X'   # no item yet: workspace file-x on branch task/file-x
+overbridge start app --stack 12 13 14   # items in dependency order, bottom first: workspace gh-app-12-stack (or --name <slug>)
+                                        # holding a gh stack with one layer per item, claim and HEAD on layer 1
 ```
 
 `overbridge spinup` always rebuilds the session, killing running panes. Use `overbridge up` to just

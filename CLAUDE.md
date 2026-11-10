@@ -34,7 +34,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   They never go away: every removal path checks `isOrchestrationTab` (`removeWorkspace`, `cleanable`, `beginRemoval`, `verdictFor`; add it to any
   new one), `claudeOrchestration` restarts Claude when it exits (`restartAfter`), and the sidebar poll reopens a closed tab
   (`ensureOrchestrationTabs` in `src/orchestration-keep.ts`, one owner per tab through a reopen lock).
-- `src/start.ts` is `overbridge start <repo> <id>` (or `--task <slug>` for work with no item, on `task/<slug>`): one workspace per work item, named by `Provider.workspaceName`,
+- `src/start.ts` is `overbridge start <repo> <id>` (or `--task <slug>` for work with no item, on `task/<slug>`, or `--stack <id>...`, bottom first:
+  `startStack` claims the bottom branch, runs `gh stack init` for every layer, and leaves HEAD on layer 1; the catalog then makes the claim cover all
+  layers, and a failed init is undone by `undoStack`; layers already on origin are refused): one workspace per work item, named by `Provider.workspaceName`,
   added to the running session with `openTab`. Cleanup (`cleanable`, `pressCleanup` in `src/top.ts`; `beginRemoval`, `finishRemoval` in `src/remove.ts`)
   offers to remove a workspace whose PRs are open with nothing uncommitted or unpushed. `beginRemoval` marks it `removing` in state
   (the sidebar hides it), switches to `landingTab` (`src/next.ts`), closes its tab by id, and starts a detached `rm --background-finish` worker.
