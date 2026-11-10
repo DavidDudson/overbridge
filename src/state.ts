@@ -1,13 +1,14 @@
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { CleanupCause, CleanupRecord } from "./cleanup-log";
 import { metaDir } from "./paths";
 import { pidAlive } from "./proc";
 import { type Cover, overlaps } from "./stack";
 import { fail } from "./util";
 
 export type Claim = { branch?: string; pr?: number };
-/** A background removal in flight: when it started and, once spawned, the worker's pid. */
-export type Removing = { since: string; pid?: number };
+/** A background removal in flight: when it started, what started it and, once spawned, the worker's pid. */
+export type Removing = { since: string; cause?: CleanupCause; pid?: number };
 /** Why a workspace that would be removed by itself is kept; shown on its sidebar card. */
 export const RemovalBlock = { MergedUnsaved: "merged-unsaved" } as const;
 export type RemovalBlock = (typeof RemovalBlock)[keyof typeof RemovalBlock];
@@ -21,8 +22,14 @@ export type WorkspaceState = {
   /** Set by the merged-PR sweep when the workspace would be removed but holds unsaved work. */
   removalBlocked?: RemovalBlock;
 };
-/** `mergeSweepAt` is when a sidebar last took the merged-PR sweep (ms), so only one sidebar runs it per interval. */
-export type State = { version: 1; workspaces: Record<string, WorkspaceState>; mergeSweepAt?: number };
+export type State = {
+  version: 1;
+  workspaces: Record<string, WorkspaceState>;
+  /** When a sidebar last took the merged-PR sweep (ms), so only one sidebar runs it per interval. */
+  mergeSweepAt?: number;
+  /** Finished workspace removals, newest last, for the sidebar to list. */
+  cleanups?: CleanupRecord[];
+};
 
 const STATE_FILE = "state.json";
 const statePath = () => join(metaDir(), STATE_FILE);

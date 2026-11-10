@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentStateFile, EndReason, sessionEndedForGood } from "../src/agent-state";
 import { createReaper } from "../src/auto-remove";
+import { CleanupCause, CleanupOutcome } from "../src/cleanup-log";
 import { beginRemoval, FINISH_FLAG, Landing, parseTabIds, type RemovalDeps } from "../src/remove";
 import { cleanable, gitClean } from "../src/top";
 import { entries, entryLines } from "../src/sidebar";
@@ -157,6 +158,14 @@ describe("beginRemoval", () => {
     expect(calls[0]).toEqual(["zellij", "action", "go-to-tab-name", "b2"]);
   });
 
+  test("records what started the removal, for the cleanup log", () => {
+    ob(["new", "m1", "-r", "app"]);
+    markEmpty("m1");
+    const { deps } = fakeDeps("");
+    expect(beginRemoval("m1", { deps, cause: CleanupCause.Merged })).toBeUndefined();
+    expect(readState().workspaces.m1!.removing?.cause).toBe(CleanupCause.Merged);
+  });
+
   test("refuses an orchestration tab without touching zellij", () => {
     const { deps, calls, spawned } = fakeDeps("");
     expect(beginRemoval("@root", { deps })).toContain("orchestration tab");
@@ -269,6 +278,7 @@ describe("the background worker", () => {
     expect(existsSync(join(root, "e1"))).toBe(true);
     expect(await until(() => !readState().workspaces.e1)).toBe(true);
     expect(existsSync(join(root, "e1"))).toBe(false);
+    expect(readState().cleanups?.filter((c) => c.ws === "e1").map((c) => [c.outcome, c.cause])).toEqual([[CleanupOutcome.Removed, CleanupCause.Cleanup]]);
   });
 
   test("a failure brings the workspace back with the error on its card and nothing removed", async () => {
@@ -288,6 +298,7 @@ describe("the background worker", () => {
     const card = entries().find((e) => e.tab === "f1")!;
     expect(card.error).toContain("pre-remove");
     expect(entryLines(card, 1, false, 80).at(-1)).toContain("cleanup failed: a pre-remove hook");
+    expect(readState().cleanups?.filter((c) => c.ws === "f1").map((c) => c.outcome)).toEqual([CleanupOutcome.Failed]);
   });
 
   test("a new Cleanup clears the old error", () => {

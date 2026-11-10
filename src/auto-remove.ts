@@ -1,5 +1,6 @@
 import { sessionEndedForGood } from "./agent-state";
 import { isOrchestrationTab } from "./orchestration";
+import { CleanupCause } from "./cleanup-log";
 import { beginRemoval, Landing } from "./remove";
 import { gitClean } from "./top";
 
@@ -24,7 +25,7 @@ export interface ReapCandidate {
 const defaultDeps = (): ReapDeps => ({
   endedForGood: (ws) => sessionEndedForGood(ws),
   gitClean,
-  remove: (ws) => beginRemoval(ws, { landing: Landing.IfFocused }),
+  remove: (ws) => beginRemoval(ws, { landing: Landing.IfFocused, cause: CleanupCause.SessionEnded }),
   now: Date.now,
 });
 
