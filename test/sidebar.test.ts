@@ -6,10 +6,10 @@ import { agentStateFile, glyphFor, readAgentState, UNKNOWN_GLYPH } from "../src/
 import { sidebarWidth } from "../src/config";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { clampScroll, type Entry, entryAt, entryLines, renderSidebar, scrollFor, sidebarLabel, stripConventional, switchTab, targetFor, wrapText } from "../src/sidebar";
+import { clampScroll, type Entry, entryAt, entryLines, renderSidebar, scrollFor, Section, bodyRowsFor, pinnedCount, pinnedRowsFor, sidebarLabel, stripConventional, switchTab, targetFor, wrapText } from "../src/sidebar";
 import { type Input, textWidth } from "../src/term";
 
-const entry = (ws: string, glyph = "○", label = ws): Entry => ({ ws, glyph, label });
+const entry = (tab: string, glyph = "○", label = tab, section: Section = Section.Workspaces): Entry => ({ tab, section, glyph, label });
 const key = (k: string): Input => ({ kind: "key", key: k });
 const list = Array.from({ length: 12 }, (_, i) => entry(`w${i + 1}`));
 
@@ -60,6 +60,58 @@ describe("entry cards", () => {
   test("a window starts at the offset", () => {
     const rows = renderSidebar(list, 3, 3, 12, 30, undefined, 0);
     expect(rows[1]).toContain("⌥4 ");
+  });
+});
+
+describe("orchestration frame", () => {
+  const root = entry("@root", "○", "overbridge root", Section.Orchestration);
+  const withRoot = [root, ...list];
+  const plain = (rows: string[]) => rows.map((r) => r.replace(/\x1b\[[0-9;]*m/g, ""));
+
+  test("draws above Workspaces, takes ⌥1, and the workspace window scrolls under it", () => {
+    const rows = plain(renderSidebar(withRoot, 0, 2, 20, 30, undefined, 0));
+    expect(rows).toHaveLength(20);
+    expect(rows[0]).toContain("Orchestration");
+    expect(rows[1]).toContain("⌥1 ○ overbridge root");
+    expect(rows[3]).toMatch(/^╰─+╯$/);
+    expect(rows[4]).toContain("Workspaces");
+    expect(rows[5]).toContain("⌥4 ○ w3");
+  });
+
+  test("the current entry is inverse in either frame", () => {
+    expect(renderSidebar(withRoot, 0, 0, 20, 30, undefined, 0)[1]).toContain("\x1b[7m");
+    expect(renderSidebar(withRoot, 1, 0, 20, 30, undefined, 0)[1]).not.toContain("\x1b[7m");
+    expect(renderSidebar(withRoot, 1, 0, 20, 30, undefined, 0)[5]).toContain("\x1b[7m");
+  });
+
+  test("no orchestration entries, no frame", () => {
+    expect(plain(renderSidebar(list, 0, 0, 20, 30, undefined, 0))[0]).toContain("Workspaces");
+  });
+
+  test("a click picks a pinned card, or a workspace card through the offset; borders pick nothing", () => {
+    const h = Array(withRoot.length).fill(2);
+    const rows = bodyRowsFor(20, pinnedRowsFor(h, 1));
+    expect(rows).toBe(10);
+    const click = (row: number, current = 3) => targetFor({ kind: "click", col: 3, row }, current, 2, h, rows, 1);
+    expect(click(0)).toBeUndefined();
+    expect(click(1)).toBe(0);
+    expect(click(2)).toBe(0);
+    expect(click(3)).toBeUndefined();
+    expect(click(4)).toBeUndefined();
+    expect(click(5, 0)).toBe(3);
+    expect(click(7, 0)).toBe(4);
+  });
+
+  test("keys step and jump across both frames", () => {
+    const h = Array(withRoot.length).fill(2);
+    expect(targetFor(key("up"), 1, 0, h, 10, 1)).toBe(0);
+    expect(targetFor(key("down"), 0, 0, h, 10, 1)).toBe(1);
+    expect(targetFor(key("1"), 4, 0, h, 10, 1)).toBe(0);
+  });
+
+  test("pinnedCount counts the orchestration entries", () => {
+    expect(pinnedCount(withRoot)).toBe(1);
+    expect(pinnedCount(list)).toBe(0);
   });
 });
 

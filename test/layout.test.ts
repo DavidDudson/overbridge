@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { wsDir } from "../src/paths";
+import { ORCHESTRATION_TABS } from "../src/orchestration";
+import { root, wsDir } from "../src/paths";
 import { chooseLayout, layoutKdl, newTabKdl, resumable, SIDEBAR_WIDTH, TOP_ROWS, transcriptDir, userLayoutPath, zellijConfigDir } from "../src/layout";
 
 const self = ["overbridge"];
@@ -22,8 +23,23 @@ afterEach(() => {
 });
 
 describe("layoutKdl", () => {
-  test("one tab per workspace, however many there are", () => {
-    for (const n of [1, 4, 5, 9]) expect(tabs(layoutKdl(Array.from({ length: n }, (_, i) => `w${i}`), self))).toBe(n);
+  test("one tab per workspace, however many there are, after the orchestration tabs", () => {
+    for (const n of [0, 1, 4, 5, 9]) expect(tabs(layoutKdl(Array.from({ length: n }, (_, i) => `w${i}`), self))).toBe(n + ORCHESTRATION_TABS.length);
+  });
+
+  test("the root orchestration tab comes first and has focus: sidebar and Claude in the root, no top panel", () => {
+    const kdl = layoutKdl(["a", "b"], self);
+    const [first, ...rest] = kdl.split(/\n(?=  tab )/).slice(1);
+    expect(first).toStartWith('  tab name="@root" focus=true {');
+    expect(first).toContain(`cwd=${JSON.stringify(root())}`);
+    expect(first).toContain('args "sidebar" "--ws" "@root"');
+    expect(first).toContain('args "claude" "@root"\n');
+    expect(first).not.toContain('"top"');
+    for (const tab of rest) expect(tab.split("\n")[0]).not.toContain("focus=true");
+  });
+
+  test("the root tab resumes with --continue when it has a transcript", () => {
+    expect(layoutKdl(["a"], self, { resume: new Set(["@root"]) })).toContain('args "claude" "@root" "--continue"');
   });
 
   test("every tab has sidebar, top panel, and agent in the workspace dir", () => {
@@ -69,6 +85,13 @@ describe("transcripts", () => {
     writeFileSync(join(transcriptDir(wsDir("a"), home), "s.jsonl"), "{}\n");
     mkdirSync(transcriptDir(wsDir("b"), home), { recursive: true });
     expect([...resumable(["a", "b", "c"], home)]).toEqual(["a"]);
+  });
+
+  test("resumable sees a transcript for the root as the root orchestration tab", () => {
+    const home = join(tmp, "home");
+    mkdirSync(transcriptDir(root(), home), { recursive: true });
+    writeFileSync(join(transcriptDir(root(), home), "s.jsonl"), "{}\n");
+    expect([...resumable(["a"], home)]).toEqual(["@root"]);
   });
 });
 

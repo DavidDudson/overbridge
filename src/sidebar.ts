@@ -5,6 +5,7 @@ import { requireWs } from "./commands";
 import { metaDir } from "./paths";
 import { type Limits, limitRows, readLimits } from "./limits";
 import { next } from "./next";
+import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
 import { readState } from "./state";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache } from "./top";
@@ -21,8 +22,14 @@ export const LEGEND = "⌥1-9 go  ⌥w next";
 
 const POLL_MS = 1_000;
 
+/** The sidebar frame an entry is drawn in. */
+export const Section = { Orchestration: "orchestration", Workspaces: "workspaces" } as const;
+export type Section = (typeof Section)[keyof typeof Section];
+
 export interface Entry {
-  ws: string;
+  /** The zellij tab name: a workspace, or an orchestration tab such as `@root`. */
+  tab: string;
+  section: Section;
   /** Agent state glyph. */
   glyph: string;
   state?: AgentState | undefined;
@@ -44,18 +51,32 @@ export function currentTab(exec: (cmd: string[]) => { ok: boolean; stdout: strin
   return r.ok ? /^name: (.+)$/m.exec(r.stdout)?.[1]?.trim() : undefined;
 }
 
-/** Entries for every workspace, in tab order so the Alt+digit keys match the digits shown. */
+const entryFor = (tab: string, section: Section, label: string): Entry => {
+  const state = readAgentState(tab);
+  return { tab, section, glyph: glyphFor(state), state, label };
+};
+
+/**
+ * The orchestration tabs, then every workspace in tab order, so the Alt+digit keys match the digits shown.
+ * The generated layout opens the orchestration tabs first, so their digits come first in tab order too.
+ */
 export function entries(order: string[] = tabOrder()): Entry[] {
   const names = Object.keys(readState().workspaces).sort(naturalSort);
   const rank = (ws: string) => { const i = order.indexOf(ws); return i < 0 ? order.length : i; };
-  return [...names].sort((a, b) => rank(a) - rank(b)).map((ws) => {
-    const state = readAgentState(ws);
-    return { ws, glyph: glyphFor(state), state, label: sidebarLabel(ws, readTopCache(ws)) };
-  });
+  return [
+    ...ORCHESTRATION_TABS.map((t) => entryFor(t.tab, Section.Orchestration, t.label)),
+    ...names.toSorted((a, b) => rank(a) - rank(b)).map((ws) => entryFor(ws, Section.Workspaces, sidebarLabel(ws, readTopCache(ws)))),
+  ];
 }
 
-/** Rows between the top border and the divider for a pane `height` rows tall. */
-export const bodyRowsFor = (height: number) => Math.max(1, height - CHROME_TOP - CHROME_BOTTOM);
+/** How many leading entries sit in the Orchestration frame, which never scrolls. */
+export const pinnedCount = (list: Entry[]) => list.filter((e) => e.section === Section.Orchestration).length;
+
+/** Rows the Orchestration frame takes: its two borders and its cards, or none when it is empty. */
+export const pinnedRowsFor = (heights: number[], pinned: number) => (pinned ? 2 + heights.slice(0, pinned).reduce((n, h) => n + h, 0) : 0);
+
+/** Rows between the Workspaces frame's top border and its divider, for a pane `height` rows tall. */
+export const bodyRowsFor = (height: number, pinnedRows = 0) => Math.max(1, height - pinnedRows - CHROME_TOP - CHROME_BOTTOM);
 
 /** The scroll offset closest to `offset` that shows entry `selected`, given each entry's row `heights`. */
 export function scrollFor(selected: number, offset: number, heights: number[], rows: number): number {
@@ -74,7 +95,7 @@ export function clampScroll(offset: number, heights: number[], rows: number): nu
   return start;
 }
 
-/** Rows above the list (top border) and below it (divider, two limit rows, key legend, bottom border). */
+/** Rows above the workspace list (top border) and below it (divider, two limit rows, key legend, bottom border). */
 export const CHROME_TOP = 1;
 export const CHROME_BOTTOM = 5;
 /** Longest a title may wrap to. */
@@ -143,17 +164,21 @@ export function entryLines(e: Entry, index: number, selected: boolean, inner: nu
 }
 
 /**
- * The whole sidebar as `height` rows of `width` columns: a rounded frame titled "Workspaces" with
- * a padded card per workspace (title wraps), then a divider, the usage limits and the key legend,
- * with `version` set into the bottom border.
+ * The whole sidebar as `height` rows of `width` columns. A rounded frame titled "Orchestration" holds a card per
+ * orchestration tab; below it a frame titled "Workspaces" holds a card per workspace (title wraps), scrolled by
+ * `offset` (an index into the workspaces), then a divider, the usage limits and the key legend, with `version`
+ * set into the bottom border. `current` indexes the whole list.
  */
 export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = ""): string[] {
   const inner = Math.max(0, width - 4);
-  const bodyRows = Math.max(0, height - CHROME_TOP - CHROME_BOTTOM);
-  const body: string[] = [];
-  for (let i = offset; i < list.length && body.length < bodyRows; i++) body.push(...entryLines(list[i]!, i, i === current, inner));
-  while (body.length < bodyRows) body.push(" ".repeat(inner));
+  const pinned = pinnedCount(list);
+  const cards = (from: number, to: number) => list.slice(from, to).flatMap((e, i) => entryLines(e, from + i, from + i === current, inner));
+  const pinnedFrame = pinned ? [boxTop("Orchestration", width), ...cards(0, pinned).map(boxRow), boxBottom(width)] : [];
+  const bodyRows = Math.max(0, height - pinnedFrame.length - CHROME_TOP - CHROME_BOTTOM);
+  const visible = cards(pinned + offset, list.length).slice(0, bodyRows);
+  const body = [...visible, ...Array<string>(bodyRows - visible.length).fill(" ".repeat(inner))];
   return [
+    ...pinnedFrame,
     boxTop("Workspaces", width),
     ...body.slice(0, bodyRows).map(boxRow),
     boxDivider(width),
@@ -163,25 +188,39 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
   ];
 }
 
-/** The entry index under screen row `row`, given each entry's row `heights`; undefined for none. */
-export function entryAt(row: number, offset: number, heights: number[], rows: number): number | undefined {
-  let y = CHROME_TOP;
+/**
+ * The entry index under screen row `row`, given each entry's row `heights` and a list drawn from row `top`
+ * for `rows` rows; undefined for none.
+ */
+export function entryAt(row: number, offset: number, heights: number[], rows: number, top = CHROME_TOP): number | undefined {
+  let y = top;
   for (let i = offset; i < heights.length; i++) {
-    if (y + heights[i]! > CHROME_TOP + rows) return undefined;
+    if (y + heights[i]! > top + rows) return undefined;
     if (row < y + heights[i]!) return row >= y ? i : undefined;
     y += heights[i]!;
   }
   return undefined;
 }
 
+/** The entry index under a click on screen row `row`, in the Orchestration frame or the scrolled Workspaces one. */
+function clickTarget(row: number, offset: number, heights: number[], rows: number, pinned: number): number | undefined {
+  const pinnedRows = pinnedRowsFor(heights, pinned);
+  if (row < pinnedRows) {
+    return entryAt(row, 0, heights.slice(0, pinned), pinnedRows - 2, 1);
+  }
+  const hit = entryAt(row, offset, heights.slice(pinned), rows, pinnedRows + CHROME_TOP);
+  return hit === undefined ? undefined : pinned + hit;
+}
+
 /**
- * Which tab an input asks for, as an entry index; undefined for none or for the current one.
- * Up/`k` and down/`j` step (no wrap), a digit jumps, a click picks a row.
+ * Which tab an input asks for, as an index into the whole list; undefined for none or for the current one.
+ * Up/`k` and down/`j` step across both frames (no wrap), a digit jumps, a click picks a row. The first `pinned`
+ * entries are the Orchestration frame's; `offset` scrolls the rest.
  */
-export function targetFor(input: Input, current: number, offset: number, heights: number[], rows: number): number | undefined {
+export function targetFor(input: Input, current: number, offset: number, heights: number[], rows: number, pinned = 0): number | undefined {
   const count = heights.length;
   let target: number | undefined;
-  if (input.kind === "click") target = entryAt(input.row, offset, heights, rows);
+  if (input.kind === "click") target = clickTarget(input.row, offset, heights, rows, pinned);
   else if (input.key === "up" || input.key === "k") target = current - 1;
   else if (input.key === "down" || input.key === "j") target = current + 1;
   else if (/^[1-9]$/.test(input.key)) target = Number(input.key) - 1;
@@ -206,16 +245,16 @@ const sidebarPane = (ws: string): string | undefined => {
   }
 };
 
-/** Switch to `ws`'s tab and focus its sidebar. */
-export function switchTab(ws: string, exec: (cmd: string[]) => unknown = (cmd) => run(cmd)) {
-  exec(["zellij", "action", "go-to-tab-name", ws]);
-  const pane = sidebarPane(ws);
+/** Switch to `tab` and focus its sidebar. */
+export function switchTab(tab: string, exec: (cmd: string[]) => unknown = (cmd) => run(cmd)) {
+  exec(["zellij", "action", "go-to-tab-name", tab]);
+  const pane = sidebarPane(tab);
   if (pane !== undefined) exec(["zellij", "action", "focus-pane-id", `terminal_${pane}`]);
 }
 
 /** `overbridge sidebar [--ws]`. `q` or Ctrl-C quits. */
 export async function sidebar(wsOpt?: string) {
-  const self = requireWs(wsOpt);
+  const self = (wsOpt === undefined ? undefined : orchestrationTab(wsOpt)?.tab) ?? requireWs(wsOpt);
   if (!process.stdin.isTTY) throw new Error("overbridge sidebar needs a terminal");
   registerPane(self);
 
@@ -225,11 +264,14 @@ export async function sidebar(wsOpt?: string) {
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
   const draw = () => {
     const list = entries();
-    const current = Math.max(0, list.findIndex((e) => e.ws === self));
+    const current = Math.max(0, list.findIndex((e) => e.tab === self));
     const { height, width } = size();
     const heights = entryHeights(list, width);
-    const rows = bodyRowsFor(height);
-    offset = clampScroll(scrollFor(current, offset, heights, rows), heights, rows);
+    const pinned = pinnedCount(list);
+    const workspaceHeights = heights.slice(pinned);
+    const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned));
+    const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;
+    offset = clampScroll(scrolled, workspaceHeights, rows);
     process.stdout.write(frame(renderSidebar(list, current, offset, height, width, readLimits(), Date.now(), version), height, width));
   };
 
@@ -252,10 +294,14 @@ export async function sidebar(wsOpt?: string) {
           continue;
         }
         const list = entries();
-        const current = list.findIndex((e) => e.ws === self);
+        const current = list.findIndex((e) => e.tab === self);
         const { height, width } = size();
-        const target = targetFor(input, current, offset, entryHeights(list, width), bodyRowsFor(height));
-        if (target !== undefined) switchTab(list[target]!.ws);
+        const heights = entryHeights(list, width);
+        const pinned = pinnedCount(list);
+        const target = targetFor(input, current, offset, heights, bodyRowsFor(height, pinnedRowsFor(heights, pinned)), pinned);
+        if (target !== undefined) {
+          switchTab(list[target]!.tab);
+        }
       }
     });
     process.stdout.on("resize", draw);

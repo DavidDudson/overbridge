@@ -19,9 +19,12 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   its own, no raw `git switch`/`checkout <branch>`/`gh pr checkout`/`gh stack checkout`/
   `gh stack trunk`/`git worktree`,
   no workspace admin commands.
-- **Zellij tabs.** `overbridge up` opens a session with one tab per workspace: a sidebar down the
-  left, the top panel across the top, then the agent. Terminal and diff panes open on demand to the agent's right (top panel buttons). The agent resumes with
-  `--continue` when Claude has a transcript for the workspace dir. A file at
+- **Zellij tabs.** `overbridge up` opens a session whose first tab is the orchestration tab. It runs
+  Claude in the overbridge root without the workspace guard, for work that spans workspaces, such as
+  filing issues or starting workspaces. After it comes one tab per workspace: a sidebar down the left,
+  the top panel across the top, and then the agent. Terminal and diff panes open to the agent's right
+  when you press their top panel buttons. Each agent resumes with `--continue` when Claude has a
+  transcript for its folder. A file at
   `<zellij config dir>/layouts/overbridge.kdl` replaces the generated layout;
   `overbridge layout` prints what would be used and where it came from.
 
@@ -490,7 +493,18 @@ its agent state emoji (🆕 empty: just started or cleared, 💤 idle, 🔄 busy
 and its item title when cached (no id, no conventional-commit prefix; the workspace name until then), with the key that jumps to it (`⌥1` to `⌥9`, in tab order). Each tab runs its own copy and marks its own tab.
 Up/Down or `j`/`k` step to the neighbouring tab, a digit (1-9) jumps, a click picks a row;
 the new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
-current tab visible. Long titles wrap under their text (up to three rows). The width (default 60) comes from the global config:
+current tab visible. Long titles wrap under their text (up to three rows).
+
+The sidebar has two frames. The Orchestration frame is on top, lists the orchestration tabs and does
+not scroll. It has one tab, `@root`, which runs Claude in the overbridge root (`$OVERBRIDGE_ROOT`,
+`~/workspaces` by default). That Claude loads the agent-state hooks through
+`claude --settings <meta>/orchestration/@root.settings.json` and has no guard, so it can run admin
+commands such as `overbridge start` and `overbridge new`. The Workspaces frame is below it. Keys,
+clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
+Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
+and sidebar files never share a name with a workspace's.
+
+The width (default 60) comes from the global config:
 
 ```toml
 # repos.toml
@@ -510,6 +524,7 @@ waiting for input first, then finished, then finished with background tasks runn
 Each workspace's `.claude/settings.json` registers `overbridge hook` for `SessionStart`,
 `UserPromptSubmit`, `PostToolUse`, `Notification`, `PreCompact`, `Stop` and `SessionEnd`, next to the guard.
 It records `empty` (a session just started or cleared; Claude's later idle notification does not turn it into `waiting`, and the workspace becomes a Cleanup candidate if nothing is uncommitted or unpushed), `idle`, `busy`, `waiting`, `done` or `end` in `<meta>/agent/<ws>.json`. On `Stop` it also records the pids of shells still running under the session (background tasks); `done` reads as `bg` while any is alive. Plan-mode plans are written to `<ws>/plans/` (`plansDirectory` in the generated settings), not `~/.claude/plans`.
+The root tab's Claude records its state the same way, under its tab name (`<meta>/agent/@root.json`).
 The hook
 never blocks or fails the agent and loads none of the rest of the CLI. A `busy` state with no
 update for 10 minutes (the agent died mid-turn) and any state older than a day show as unknown.

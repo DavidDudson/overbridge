@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { ghReposCache, root, selfCommand, worktreePath, wsDir } from "./paths";
+import { ghReposCache, metaDir, ORCHESTRATION_ENV, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { loadRepoConfig } from "./project-config";
 import { getWorkspace, readState } from "./state";
 import { shellQuote } from "./util";
@@ -34,8 +34,6 @@ export const AUTO_MODE_ALLOW = [
 export function scaffold(ws: string) {
   const dir = wsDir(ws);
   mkdirSync(join(dir, ".claude"), { recursive: true });
-  const hook = (sub: string) => ({ type: "command", command: [...selfCommand(), sub].map(shellQuote).join(" ") });
-  const state = [{ hooks: [hook("hook")] }];
   const settings = {
     env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
     // plan-mode plans live in the workspace folder, not ~/.claude/plans
@@ -44,15 +42,37 @@ export function scaffold(ws: string) {
     autoMode: { allow: ["$defaults", ...AUTO_MODE_ALLOW] },
     hooks: {
       PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }],
-      // agent state for the sidebar: see agent-hook.ts
-      ...Object.fromEntries(
-        ["SessionStart", "UserPromptSubmit", "Notification", "PreCompact", "Stop", "SessionEnd"].map((event) => [event, state]),
-      ),
-      PostToolUse: [{ matcher: "*", hooks: [hook("hook")] }],
+      ...agentStateHooks(),
     },
   };
   writeFileSync(join(dir, ".claude", "settings.json"), JSON.stringify(settings, null, 2) + "\n");
   writeFileSync(join(dir, "CLAUDE.md"), claudeMd(ws, dir, devShellSection(ws)));
+}
+
+const hook = (sub: string) => ({ type: "command", command: [...selfCommand(), sub].map(shellQuote).join(" ") });
+
+/** The hooks that record what an agent is doing, for the sidebar glyphs: see agent-hook.ts. */
+function agentStateHooks() {
+  const state = [{ hooks: [hook("hook")] }];
+  return {
+    ...Object.fromEntries(["SessionStart", "UserPromptSubmit", "Notification", "PreCompact", "Stop", "SessionEnd"].map((event) => [event, state])),
+    PostToolUse: [{ matcher: "*", hooks: [hook("hook")] }],
+  };
+}
+
+/** An orchestration tab's Claude settings, kept in the meta dir so no Claude starting in a folder picks them up. */
+export const orchestrationSettingsPath = (tab: string) => join(metaDir(), "orchestration", `${tab}.settings.json`);
+
+/**
+ * (Re)write the settings an orchestration tab's Claude loads with `--settings`: the agent-state hooks and no
+ * guard, so it can run the admin commands a workspace Claude may not. Idempotent.
+ */
+export function scaffoldOrchestration(tab: string): string {
+  const file = orchestrationSettingsPath(tab);
+  mkdirSync(dirname(file), { recursive: true });
+  const settings = { env: { [ORCHESTRATION_ENV]: tab, OVERBRIDGE_ROOT: root() }, hooks: agentStateHooks() };
+  writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
+  return file;
 }
 
 /**

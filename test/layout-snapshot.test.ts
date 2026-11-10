@@ -15,9 +15,10 @@ describe("generated layout", () => {
     expect(layoutKdl(["ws1"], ["/usr/bin/bun", "/opt/overbridge/src/cli.ts"], { sidebarWidth: 40 })).toMatchSnapshot();
   });
 
-  test("structure: every tab is sidebar | (top panel over agent)", () => {
+  test("structure: the orchestration tab is sidebar | agent, every workspace tab sidebar | (top panel over agent)", () => {
     const kdl = layoutKdl(["a", "b", "c"], ["overbridge"]);
-    const tabs = kdl.split(/\n(?=  tab )/).slice(1);
+    const [orchestration, ...tabs] = kdl.split(/\n(?=  tab )/).slice(1);
+    expect([...orchestration!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@root · claude"]);
     expect(tabs).toHaveLength(3);
     for (const tab of tabs) {
       const order = [...tab.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1]!.replace(/^\w+ · /, ""));

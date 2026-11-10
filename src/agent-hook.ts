@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { type AgentState, agentStatePath, readAgentState } from "./agent-state";
 import { backgroundShells } from "./bg-tasks";
-import { envVar, root, selfCommand, silenceLegacyWarnings } from "./paths";
+import { envVar, ORCHESTRATION_ENV, root, selfCommand, silenceLegacyWarnings } from "./paths";
 
 /**
  * Claude Code hook that records what a workspace's agent is doing, for the sidebar glyphs.
@@ -118,7 +118,9 @@ function startRefresh(ws: string) {
 export async function hookMain(): Promise<number> {
   try {
     silenceLegacyWarnings();
-    const ws = envVar("NAME");
+    const workspace = envVar("NAME");
+    // an orchestration tab has no top panel, so it records state but never refreshes a top cache
+    const ws = workspace || process.env[ORCHESTRATION_ENV];
     if (!ws) return 0;
     const input = JSON.parse(await Bun.stdin.text()) as { hook_event_name?: string; source?: string; trigger?: string; stop_hook_active?: boolean };
     const meta = join(root(), ".overbridge");
@@ -133,7 +135,7 @@ export async function hookMain(): Promise<number> {
     }
     const state = nextState(event, input.source, event === "Notification" ? readAgentState(ws) : undefined);
     if (state) recordState(meta, ws, state, Date.now(), state === "done" ? backgroundShells() : []);
-    if (claimRefresh(meta, ws)) startRefresh(ws);
+    if (workspace && claimRefresh(meta, workspace)) startRefresh(workspace);
   } catch {
     // a status hook must never get in the way of the agent
   }
