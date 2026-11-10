@@ -1,12 +1,12 @@
-import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkout, createWorkspace, newWorkspace, repoAdd } from "../src/commands";
 import { metaDir } from "../src/paths";
 import { localStacks } from "../src/stack";
 import { showTab, start, startStack, startTask } from "../src/start";
-import { readState } from "../src/state";
+import { readState, withState } from "../src/state";
 import { openTab, TabFocus } from "../src/tab";
 import type { RunResult } from "../src/util";
 import { fakeProvider } from "./helpers/fake-provider";
@@ -65,7 +65,17 @@ describe("start", () => {
     const p = fakeProvider([{ id: "13", title: "Other", url: "" }]);
     createWorkspace("holder", ["app"]);
     checkout(["app", "feat/13-other"], "holder");
-    expect(() => start("app", "13", undefined, { provider: p, plugins: noProblems })).toThrow("claimed by workspace holder");
+    // A workspace being removed still holds its claim but is not one to switch to, so the claim is refused.
+    withState((s) => {
+      s.workspaces.holder!.removing = { since: new Date().toISOString(), pid: process.pid };
+    });
+    try {
+      expect(() => start("app", "13", undefined, { provider: p, plugins: noProblems })).toThrow("claimed by workspace holder");
+    } finally {
+      withState((s) => {
+        delete s.workspaces.holder!.removing;
+      });
+    }
     expect(readState().workspaces["gh-app-13"]).toBeUndefined();
     expect(existsSync(join(tmp, "workspaces", "gh-app-13"))).toBe(false);
   });
@@ -326,5 +336,124 @@ describe("tabs", () => {
     showTab("fresh", { prompt: "carry on" }, z.exec);
     expect(z.actions()).toEqual(["query-tab-names", "new-tab"]);
     expect(tabLayout("fresh")).toContain("carry on");
+  });
+});
+
+describe("start inside a task workspace", () => {
+  const wt = (ws: string) => join(tmp, "workspaces", ws, "app");
+  const out = (cmd: string[], cwd: string) => Bun.spawnSync({ cmd, cwd, env: process.env, stdout: "pipe", stderr: "pipe" }).stdout.toString().trim();
+  const hasBranch = (ws: string, branch: string) => out(["git", "branch", "--list", branch], wt(ws)) !== "";
+  const commit = (ws: string, file: string) => {
+    writeFileSync(join(wt(ws), file), file);
+    sh(["git", "add", "."], wt(ws));
+    sh(["git", "commit", "-qm", file], wt(ws));
+  };
+  const items = () =>
+    fakeProvider([
+      { id: "70", title: "Carry", url: "" },
+      { id: "71", title: "Kept", url: "" },
+      { id: "72", title: "Other", url: "" },
+      { id: "73", title: "Fresh", url: "" },
+      { id: "74", title: "Dirty", url: "" },
+    ]);
+  /** Run `fn` as the workspace's own Claude would: with `OVERBRIDGE_NAME` set. */
+  const inside = (ws: string, fn: () => void) => {
+    process.env.OVERBRIDGE_NAME = ws;
+    try {
+      fn();
+    } finally {
+      process.env.OVERBRIDGE_NAME = "";
+    }
+  };
+  let errors: string[];
+  let spy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    errors = [];
+    spy = spyOn(console, "error").mockImplementation((msg: string) => {
+      errors.push(msg);
+    });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  test("re-binds the task workspace to the item, carrying its commits and uncommitted work", () => {
+    startTask("app", "spike-a", "spike it", { plugins: noProblems });
+    commit("spike-a", "spike.txt");
+    writeFileSync(join(wt("spike-a"), "wip.txt"), "wip");
+    const before = Object.keys(readState().workspaces);
+
+    inside("spike-a", () => start("app", "70", undefined, { provider: items(), plugins: noProblems }));
+
+    expect(Object.keys(readState().workspaces)).toEqual(before);
+    expect(readState().workspaces["spike-a"]!.repos.app?.branch).toBe("feat/70-carry");
+    expect(out(["git", "branch", "--show-current"], wt("spike-a"))).toBe("feat/70-carry");
+    expect(out(["git", "log", "--oneline"], wt("spike-a"))).toContain("spike.txt");
+    expect(existsSync(join(wt("spike-a"), "wip.txt"))).toBe(true);
+    expect(hasBranch("spike-a", "task/spike-a")).toBe(false);
+    expect(errors.some((e) => e.includes("deleted task/spike-a"))).toBe(true);
+    expect(errors.some((e) => e.includes("spike-a/app now on 70"))).toBe(true);
+  });
+
+  test("keeps the task branch when the item branch already exists without its commits", () => {
+    startTask("app", "spike-b", "spike it", { plugins: noProblems });
+    sh(["git", "push", "-q", "origin", "HEAD:refs/heads/feat/71-kept"], wt("spike-b"));
+    commit("spike-b", "only-here.txt");
+
+    inside("spike-b", () => start("app", "71", undefined, { provider: items(), plugins: noProblems }));
+
+    expect(readState().workspaces["spike-b"]!.repos.app?.branch).toBe("feat/71-kept");
+    expect(hasBranch("spike-b", "task/spike-b")).toBe(true);
+    expect(errors.some((e) => e.includes("kept task/spike-b"))).toBe(true);
+  });
+
+  test("a claim that is not a task branch still starts the item's own workspace", () => {
+    createWorkspace("busy", ["app"]);
+    checkout(["app", "feat/other-work"], "busy");
+
+    inside("busy", () => start("app", "72", undefined, { provider: items(), plugins: noProblems }));
+
+    expect(readState().workspaces["gh-app-72"]?.repos.app?.branch).toBe("feat/72-other");
+    expect(readState().workspaces["busy"]!.repos.app?.branch).toBe("feat/other-work");
+  });
+
+  test("--here re-binds a clean workspace on a fresh branch and keeps the old one", () => {
+    createWorkspace("clean", ["app"]);
+    checkout(["app", "feat/clean-work"], "clean");
+
+    inside("clean", () => start("app", "73", undefined, { provider: items(), plugins: noProblems, here: true }));
+
+    expect(readState().workspaces["clean"]!.repos.app?.branch).toBe("feat/73-fresh");
+    expect(readState().workspaces["gh-app-73"]).toBeUndefined();
+    expect(hasBranch("clean", "feat/clean-work")).toBe(true);
+  });
+
+  test("--here refuses a workspace with uncommitted changes and changes nothing", () => {
+    createWorkspace("dirty", ["app"]);
+    checkout(["app", "feat/dirty-work"], "dirty");
+    writeFileSync(join(wt("dirty"), "wip.txt"), "wip");
+
+    expect(() => inside("dirty", () => start("app", "74", undefined, { provider: items(), plugins: noProblems, here: true }))).toThrow(
+      "uncommitted changes or unpushed commits",
+    );
+
+    expect(readState().workspaces["dirty"]!.repos.app?.branch).toBe("feat/dirty-work");
+    expect(readState().workspaces["gh-app-74"]).toBeUndefined();
+  });
+
+  test("an item some workspace already claims by branch gets that workspace's tab, not a new workspace", () => {
+    process.env.ZELLIJ = "0";
+    try {
+      const z = fakeZellij("mine", true, ["mine", "spike-a"]);
+      start("app", "70", undefined, { provider: items(), exec: z.exec, plugins: noProblems });
+      expect(z.actions()).toEqual(["query-tab-names", "go-to-tab-name"]);
+      expect(z.calls[1]).toEqual(["zellij", "action", "go-to-tab-name", "spike-a"]);
+      expect(readState().workspaces["gh-app-70"]).toBeUndefined();
+      expect(errors.some((e) => e.includes("70 is in spike-a"))).toBe(true);
+    } finally {
+      process.env.ZELLIJ = "";
+    }
   });
 });

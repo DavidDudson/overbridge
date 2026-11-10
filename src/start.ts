@@ -1,7 +1,7 @@
 import { checkout, createWorkspace, holdings, removeWorkspace } from "./commands";
 import { getRepo, type RepoSpec } from "./config";
 import * as git from "./git";
-import { barePath, NAME_RE, worktreePath } from "./paths";
+import { barePath, currentWorkspace, NAME_RE, worktreePath } from "./paths";
 import { type PluginProblems, pluginProblems } from "./plugins";
 import { providerFor } from "./pm";
 import type { Provider } from "./pm/provider";
@@ -10,7 +10,7 @@ import { scaffold } from "./scaffold";
 import { switchTab } from "./sidebar";
 import { openTab, TabFocus, tabOrder, type ZellijExec } from "./tab";
 import { cover, hasGhStack, localStacks } from "./stack";
-import { claimOwner, readState } from "./state";
+import { type Claim, claimOwner, isRemoving, readState, type State } from "./state";
 import { fail, log, must, run } from "./util";
 
 /**
@@ -47,12 +47,21 @@ export function showTab(ws: string, prompts: TabPrompt = {}, exec: ZellijExec = 
   openTab(ws, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Foreground, exec);
 }
 
+/** What `start` may inject: the provider, the zellij runner, the plugin check, and `--here`. */
+type StartDeps = { provider?: Provider; exec?: ZellijExec; plugins?: () => PluginProblems; here?: boolean };
+
 /**
  * `overbridge start <repo> <id>`: the work item gets its own workspace, named by its provider
  * (`ENG-123`, `gh-app-12`), holding `repo` on the item's branch, in a new tab opened in the background
- * whose agent runs `/start-item`. An item that already has a workspace gets its tab focused, or opened when it has none.
+ * whose agent runs `/start-item`. An item that already has a workspace, by name or by claim, gets its tab
+ * focused, or opened when it has none.
+ *
+ * Run inside a workspace that holds `repo` on a `task/` branch with no PR (a ticket writer, a spike), it re-binds
+ * that workspace to the item instead: the item's branch is claimed in place, carrying the task branch's commits
+ * and uncommitted work, and no tab opens. `here` (`--here`) does the same from any workspace whose worktree is
+ * clean, on a fresh branch from the default branch.
  */
-export function start(repo: string, id: string, prompt?: string, deps: { provider?: Provider; exec?: ZellijExec; plugins?: () => PluginProblems } = {}) {
+export function start(repo: string, id: string, prompt?: string, deps: StartDeps = {}) {
   requirePlugins(deps.plugins);
   const spec = getRepo(repo);
   git.fetch(spec);
@@ -60,11 +69,61 @@ export function start(repo: string, id: string, prompt?: string, deps: { provide
   const title = provider.title(id) ?? fail(`${id}: not found in ${provider.name}`);
   const name = provider.workspaceName(id, repo);
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}' for ${id}`);
-  openWorkspace(name, repo, provider.branchName({ id, title }), { prompt, defaultPrompt: `/start-item ${id}` }, deps.exec);
+  const branch = provider.branchName({ id, title });
+  const prompts = { prompt, defaultPrompt: `/start-item ${id}` };
+
+  const state = readState();
+  const ws = currentWorkspace();
+  const claim = ws ? state.workspaces[ws]?.repos[repo] : undefined;
+  if (ws && claim && claim.branch !== branch && (deps.here || isTaskClaim(claim))) {
+    return rebind(ws, repo, id, branch, claim, prompt);
+  }
+  const holder = workspaceOf(state, repo, branch, provider);
+  if (holder) {
+    log(`${id} is in ${holder}`);
+    showTab(holder, prompts, deps.exec);
+    return console.log(holder);
+  }
+  openWorkspace(name, repo, branch, prompts, deps.exec);
 }
 
 /** Branch prefix for a workspace started with no work item. */
 export const TASK_BRANCH_PREFIX = "task/";
+
+/** A claim on a `task/` branch that has no PR yet: work with no item that can continue into one. */
+const isTaskClaim = (c: Claim) => c.branch?.startsWith(TASK_BRANCH_PREFIX) === true && c.pr === undefined;
+
+/**
+ * Move workspace `ws`'s claim on `repo` from `claim` to the item's `branch`, in place. A task branch is the
+ * base, so its commits and uncommitted changes carry over, and it is deleted afterwards when the item branch
+ * holds everything it had (`git branch -d` refuses otherwise, and the branch is kept). Any other claim must be
+ * clean, since the item's branch then starts from the default branch and nothing carries over.
+ */
+function rebind(ws: string, repo: string, id: string, branch: string, claim: Claim, prompt?: string) {
+  const wt = worktreePath(ws, repo);
+  const old = claim.branch;
+  const task = isTaskClaim(claim);
+  if (!task && (git.isDirty(wt) || git.hasUnpushed(wt))) {
+    fail(`${ws}/${repo} has uncommitted changes or unpushed commits${old ? ` on ${old}` : ""}; commit and push them, or run without --here`);
+  }
+  checkout([repo, branch], ws, task ? { base: "HEAD" } : {});
+  if (task && old) {
+    if (run(["git", "-C", wt, "branch", "-d", old]).ok) log(`deleted ${old}`);
+    else log(`kept ${old}: it has commits not on ${branch}`);
+  }
+  log(`${ws}/${repo} now on ${id}`);
+  if (prompt) log(`${ws} already has its agent; prompt not sent`);
+  console.log(ws);
+}
+
+/** The workspace, if any, whose claim on `repo` is the item `branch` names; a workspace being removed does not count. */
+function workspaceOf(s: State, repo: string, branch: string, provider: Provider): string | undefined {
+  const id = provider.idFromBranch(branch);
+  for (const [ws, w] of Object.entries(s.workspaces)) {
+    const b = w.repos[repo]?.branch;
+    if (b && !isRemoving(w) && (b === branch || (id !== undefined && provider.idFromBranch(b) === id))) return ws;
+  }
+}
 
 /**
  * `overbridge start <repo> --task <slug> --prompt <text>`: work with no item yet, such as filing a ticket or a

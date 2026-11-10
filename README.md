@@ -6,6 +6,8 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   `~/workspaces/.bare/<repo>.git`; every workspace gets a `git worktree` of it.
 - **One workspace per work item.** Named for the item (`ENG-123` for Jira, `gh-app-12` for GitHub issue 12 of
   `app`), created by `overbridge start`, wiped when its PR is open and nothing is left locally.
+  Related work stays in one workspace: a `task/` workspace (a ticket writer, a spike) continues into the item
+  it filed or explored when `overbridge start` runs inside it, and `--here` re-binds any clean workspace.
 - **Workspaces hold several repos.** `~/workspaces/ENG-123/{app,infra}` etc.
 - **Claims.** Each workspace tracks the branch/PR it is on per repo. A branch or PR
   claimed by one workspace cannot be checked out by another. A `<type>/<n>-<slug>` branch
@@ -43,6 +45,8 @@ overbridge start app ENG-123            # a Jira item: workspace ENG-123
 overbridge start app --task file-x --prompt 'file a ticket for X'   # no item yet: workspace file-x on branch task/file-x
 overbridge start app --stack 12 13 14   # items in dependency order, bottom first: workspace gh-app-12-stack (or --name <slug>)
                                         # holding a gh stack with one layer per item, claim and HEAD on layer 1
+overbridge start app 12                 # inside file-x once it filed #12: re-binds file-x to the item, no new workspace
+overbridge start app 12 --here          # re-bind the current workspace from any claim, if nothing is uncommitted or unpushed
 ```
 
 `overbridge spinup` always rebuilds the session, killing running panes. Use `overbridge up` to just

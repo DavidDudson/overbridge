@@ -66,6 +66,16 @@ Each item gets its own workspace, named for it (`ENG-123`, `gh-app-12`). Look at
   later layer, run `gh stack up` until HEAD is on its branch, then `overbridge pr <repo>` to move the claim, and go to step 5.
   Never `overbridge checkout` or `gh stack init/add` a layer that exists.
 - **This workspace holds no claims** (a fresh `scratch` or by-hand workspace): claim in place.
+- **Its claim is a `task/` branch with no PR** (it filed this ticket, or spiked it): the work continues here. Run
+
+  ```sh
+  overbridge start <repo> <id>
+  ```
+
+  Inside a `task/` workspace it re-binds this workspace to the item: the item's branch is claimed in place
+  from the task branch's HEAD, so its commits and uncommitted changes carry over, and the task branch is
+  deleted (kept, with a log line, if the item branch already existed without its commits). No new workspace
+  or tab. Go to step 5 here. If it refuses (the item is claimed elsewhere), stop and say which workspace holds it.
 - **It holds a claim for a different item**: hand off. Run
 
   ```sh

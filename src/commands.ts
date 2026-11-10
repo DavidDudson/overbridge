@@ -145,7 +145,12 @@ export function removeWorkspace(ws: string, force: boolean) {
   log(`removed ${ws}`);
 }
 
-export function checkout(args: string[], wsOpt?: string) {
+/**
+ * `overbridge checkout <repo> <branch|#pr>`: claim `ref` for the workspace and switch its worktree to it.
+ * A branch that exists neither locally nor on origin is created from `opts.base` (default: the remote default
+ * branch); `start` passes `HEAD` to carry a task branch's work onto the item's branch.
+ */
+export function checkout(args: string[], wsOpt?: string, opts: { base?: string } = {}) {
   const ws = requireWs(wsOpt);
   let [repo, ref] = args;
   const owned = Object.keys(getWorkspace(readState(), ws).repos);
@@ -163,7 +168,7 @@ export function checkout(args: string[], wsOpt?: string) {
   let branch = ref;
   let pr: number | undefined;
   let prUrl: string | undefined;
-  let base = `origin/${git.defaultBranch(spec)}`;
+  let base = opts.base ?? `origin/${git.defaultBranch(spec)}`;
   let remote: Stack | undefined;
   const selector = git.parsePrRef(ref);
   if (selector) {
