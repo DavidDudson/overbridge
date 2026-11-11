@@ -1,9 +1,12 @@
 ---
 name: whip
 description: From the orchestrator (the overbridge root tab), find every workspace that still has work outstanding (a draft PR, a PR conflicting with main, review feedback or red CI, uncommitted changes, commits with no PR, an item not yet shipped) and send its Claude session a tailored "continue" message, skipping workspaces that are done (PR mergeable and awaiting merge, branch merged, sitting on the default branch with nothing changed) and detached ones with no claim, then print a table of who was sent what and who was skipped and why. Use when the user says "whip", "whip the workspaces", "tell every tab to continue", "nudge everyone", "send continue to all", or invokes /whip. Pass `--dry-run` to print the table without sending. Runs only in the orchestrator, never inside a workspace.
+requires: gh-stack
 ---
 
 # Whip
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 Send a plain "continue" to every workspace Claude that still has something to finish. The orchestrator
 only coordinates, so this skill reads git and GitHub, decides, and messages. It changes nothing itself.

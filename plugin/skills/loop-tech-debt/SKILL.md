@@ -1,9 +1,12 @@
 ---
 name: loop-tech-debt
 description: Turn a described tech-debt problem into a tracked, shipped fix. File a tech-debt work item (GitHub issue or Jira ticket, under the repo's tech-debt container), then drive it end to end with loop-item. Use when the user describes a code or quality problem they want fixed and tracked ("there's tech debt in X, fix it and track it", "file a tech-debt item for this and do it", "loop tech debt", "clean this up under an item").
+requires: gh-stack
 ---
 
 # Loop tech debt
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 Take a free-text problem statement, file it as a tech-debt item, then run the full lifecycle:
 

@@ -45,6 +45,14 @@ describe("sidebar on screen", () => {
     expect(s.line(15)).toMatch(/^╰─+╯$/);
   });
 
+  test("a stacked card shows its layers under the status line", () => {
+    const items = [{ ...entry("ws1", "●", "12 Add dark mode"), state: "busy" as const, stacks: [{ prs: [11, 12, 13], current: 12 }] }, entry("ws2", "·")];
+    const s = draw(0, 0, 16, 34, items);
+    expect(s.line(2)).toMatch(/^│ +working +│$/);
+    expect(s.line(3)).toMatch(/^│ +stack 11·\[12\]·13 +│$/);
+    expect(s.line(4)).toMatch(/^│ ⌥2 /);
+  });
+
   test("long labels wrap under their text inside the padding, never over the border", () => {
     const s = draw(3, 3, 20, 24);
     expect(s.line(1)).toBe("│ ⌥4 ✔ 7 Fix the login │");
@@ -138,6 +146,24 @@ describe("top panel on screen", () => {
     expect(s.line(3)).toContain("web :3000");
     expect(s.line(3)).toContain("diff");
     expect(s.line(1)).not.toContain("diff");
+  });
+
+  test("a three-layer stack draws a numbered row per PR, bottom to top", () => {
+    const stack = [11, 12, 13];
+    const links = stack.map((n) => ({
+      label: `PR #${n}`,
+      url: `u${n}`,
+      status: "mergeable" as const,
+      pr: { repo: "api", number: n, title: "feat: x", draft: false, dir: "/w/w1/api", stack, layer: { n: stack.indexOf(n) + 1, of: 3 }, claimed: n === 12 },
+    }));
+    const f = layoutTop({ ...snap, links }, 140, 10);
+    const s = new Screen(140, 10).write(paintTop(f, 0));
+    expect(s.line(1)).toContain("api #11 1/3");
+    expect(s.line(2)).toContain("api #12 2/3");
+    expect(s.line(2)).toContain("Merge stack");
+    expect(s.line(3)).toContain("api #13 3/3");
+    expect(s.line(1)).not.toContain("Merge");
+    expect(s.line(3)).not.toContain("Merge");
   });
 
   test("resizing is a redraw: wide to narrow to wide gives the same screen as drawing wide", () => {
