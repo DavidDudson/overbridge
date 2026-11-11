@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { githubRows, rowsFromGraphql, slugFromUrl } from "../src/pm/board-github";
+import { githubRows, MAX_PAGES, nextCursor, rowsFromGraphql, slugFromUrl } from "../src/pm/board-github";
 
 const reply = JSON.stringify({
   data: {
@@ -52,5 +52,40 @@ describe("github board", () => {
     expect(slugFromUrl("git@github.com:DavidDudson/overbridge.git")).toBe("DavidDudson/overbridge");
     expect(slugFromUrl("https://github.com/a/b")).toBe("a/b");
     expect(slugFromUrl("git@gitlab.com:a/b.git")).toBeUndefined();
+  });
+
+  const page = (n: number, next?: string) =>
+    JSON.stringify({
+      data: { repository: { issues: { pageInfo: { hasNextPage: !!next, endCursor: next ?? null }, nodes: [{ number: n, title: `t${n}`, url: `u${n}`, updatedAt: "2026-01-01T00:00:00Z", labels: { nodes: [] }, parent: null, blockedBy: { nodes: [] } }] } } },
+    });
+  const ok = (stdout: string) => ({ ok: true, stdout, stderr: "", code: 0 });
+
+  test("nextCursor is the end cursor only while another page exists", () => {
+    expect(nextCursor(page(1, "c1"))).toBe("c1");
+    expect(nextCursor(page(1))).toBeUndefined();
+    expect(nextCursor("{}")).toBeUndefined();
+  });
+
+  test("reads every page, passing each end cursor as `after`", () => {
+    const replies = [page(1, "c1"), page(2, "c2"), page(3)];
+    const calls: string[][] = [];
+    const rows = githubRows("o/r", "ob", (cmd) => {
+      calls.push(cmd);
+      return cmd[2] === "user" ? ok("me") : ok(replies.shift()!);
+    });
+    expect(rows.map((r) => r.id)).toEqual(["1", "2", "3"]);
+    expect(calls.filter((c) => c.includes("graphql"))).toHaveLength(3);
+    expect(calls[1]).not.toContain("after=c1");
+    expect(calls[2]).toContain("after=c1");
+    expect(calls[3]).toContain("after=c2");
+  });
+
+  test("a page that fails midway fails the whole read", () => {
+    let n = 0;
+    expect(() => githubRows("o/r", "ob", (cmd) => (cmd[2] === "user" ? ok("me") : ++n === 1 ? ok(page(1, "c1")) : { ok: false, stdout: "", stderr: "rate limit", code: 1 }))).toThrow("rate limit");
+  });
+
+  test("a cursor that never ends stops at the page cap", () => {
+    expect(() => githubRows("o/r", "ob", (cmd) => (cmd[2] === "user" ? ok("me") : ok(page(1, "again"))))).toThrow(`more than ${MAX_PAGES * 100}`);
   });
 });
