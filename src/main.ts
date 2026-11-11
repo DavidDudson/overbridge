@@ -13,10 +13,10 @@ import { FINISH_FLAG, finishRemoval } from "./remove";
 import { sweepMerged } from "./merge-sweep";
 import { showTab, start, startStack, startTask } from "./start";
 import { topPanel, topRefresh } from "./top-run";
-import { worklistPane } from "./worklist-run";
+import { refreshWorklist, worklistPane } from "./worklist-run";
 import { silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
-import { exec, OverbridgeError } from "./util";
+import { exec, log, OverbridgeError } from "./util";
 
 const START_USAGE =
   "usage: overbridge start <repo> <id> [--prompt text] [--here] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] | overbridge start <repo> --task <slug> --prompt <text>";
@@ -39,6 +39,7 @@ Setup
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
+  overbridge worklist [refresh]                 work list pane (the @work tab); refresh reads every board into its cache
 
 Work items (the repo's project-management provider)
   overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
@@ -161,9 +162,18 @@ async function main(argv: string[]): Promise<number> {
       diff(cmd.requireWs(values.ws));
       break;
     }
-    case "worklist":
-      await worklistPane();
+    case "worklist": {
+      const sub = rest[0];
+      if (sub === "refresh") {
+        const cache = refreshWorklist();
+        log(`worklist: ${cache.rows.length} open item(s)${cache.notes.length ? `; ${cache.notes.join("; ")}` : ""}`);
+      } else if (sub !== undefined) {
+        throw new OverbridgeError("usage: overbridge worklist [refresh]");
+      } else {
+        await worklistPane();
+      }
       break;
+    }
     case "top": {
       const { values, positionals } = opts(rest, ws);
       if (positionals[0] === "refresh") topRefresh(values.ws);

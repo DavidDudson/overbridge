@@ -1,19 +1,20 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadRepos } from "./config";
-import { metaDir } from "./paths";
+import { metaDir, selfCommand } from "./paths";
 import { githubRows, slugFromUrl } from "./pm/board-github";
 import { jiraRows } from "./pm/board-jira";
 import { rank, type Ranked, type WorkRow } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
 import type { ProjectManagement } from "./project-config";
 import { committedConfig } from "./start";
+import { spawnCwd } from "./util";
 import { bold, boxBottom, boxRow, boxTop, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN, type Color } from "./term";
 
 /** Rows the frame uses besides the item rows: top border, header, reasons, legend, bottom border. */
 const CHROME = 5;
 
-/** The panel is a prototype (spike #108): one list, refreshed in the background, never fetched while drawing. */
+/** The panel is a prototype (spike #108): one list, refreshed by a child process, never fetched while drawing. */
 export const WORKLIST_REFRESH_MS = 60_000;
 
 export interface WorklistCache {
@@ -117,6 +118,28 @@ export function refreshWorklist(now = Date.now()): WorklistCache {
   return cache;
 }
 
+export interface RefreshResult {
+  ok: boolean;
+  /** The first line the child printed to stderr, or its exit code, when it failed. */
+  error: string;
+}
+
+/** Starts a process and resolves with its exit code and stderr. */
+export type RefreshSpawner = (cmd: string[]) => Promise<{ code: number; stderr: string }>;
+
+const spawnRefresh: RefreshSpawner = async (cmd) => {
+  const child = Bun.spawn({ cmd, cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "pipe" });
+  const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+  return { code, stderr };
+};
+
+/** Runs `overbridge worklist refresh` in a child, so the pane keeps drawing and taking keys while the boards are read. */
+export async function refreshInChild(spawn: RefreshSpawner = spawnRefresh, self: string[] = selfCommand()): Promise<RefreshResult> {
+  const { code, stderr } = await spawn([...self, "worklist", "refresh"]);
+  const firstLine = stderr.split("\n").find((l) => l.trim())?.trim();
+  return code === 0 ? { ok: true, error: "" } : { ok: false, error: firstLine ?? `worklist refresh exited with code ${code}` };
+}
+
 /** The prompt shown while choosing which repo to start an item in. Digits pick; the list is at most nine long. */
 export const repoPrompt = (key: string, repos: readonly string[]) =>
   `start ${key} in: ${repos.slice(0, 9).map((r, i) => `${i + 1} ${r}`).join("  ")}   esc cancel`;
@@ -173,22 +196,21 @@ export async function worklistPane() {
     process.stdout.write(frame(renderWorklist(list, selected, offset, height, process.stdout.columns ?? 80, message, cache.notes), height, process.stdout.columns ?? 80));
   };
 
+  /** When the last refresh started, so a failing one waits a full interval before the next try. */
+  let refreshStartedAtMs = 0;
+
   const refresh = () => {
     if (busy) return;
     busy = true;
+    refreshStartedAtMs = Date.now();
     message = "refreshing…";
     draw();
-    // gh calls are synchronous; let the "refreshing" frame paint first
-    setTimeout(() => {
-      try {
-        cache = refreshWorklist();
-        message = "";
-      } catch (e) {
-        message = `error: ${(e as Error).message.split("\n")[0]}`;
-      }
+    void refreshInChild().then((result) => {
+      cache = readWorklist();
+      message = result.ok ? "" : `error: ${result.error}`;
       busy = false;
       draw();
-    }, 10);
+    });
   };
 
   const quit = () => {
@@ -242,7 +264,7 @@ export async function worklistPane() {
   });
   process.stdout.on("resize", draw);
   setInterval(() => {
-    if (Date.now() - cache.at >= WORKLIST_REFRESH_MS) refresh();
+    if (Date.now() - Math.max(cache.at, refreshStartedAtMs) >= WORKLIST_REFRESH_MS) refresh();
   }, 1000);
   setInterval(() => {
     cache = readWorklist().at > cache.at ? readWorklist() : cache;

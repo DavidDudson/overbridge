@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { rank, type WorkRow } from "../src/pm/worklist";
 import type { ProjectManagement } from "../src/project-config";
-import { boardSources, pickRepo, readBoards, renderWorklist, repoPrompt } from "../src/worklist-run";
+import { boardSources, pickRepo, readBoards, refreshInChild, renderWorklist, repoPrompt } from "../src/worklist-run";
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
@@ -93,5 +93,22 @@ describe("repo picker", () => {
 
   test("the prompt numbers the repos", () => {
     expect(repoPrompt("ABC-1", ["web", "api"])).toBe("start ABC-1 in: 1 web  2 api   esc cancel");
+  });
+});
+
+describe("refreshInChild", () => {
+  test("runs `worklist refresh` under the self command and reports success", async () => {
+    const calls: string[][] = [];
+    const result = await refreshInChild(async (cmd) => {
+      calls.push(cmd);
+      return { code: 0, stderr: "worklist: 3 open item(s)\n" };
+    }, ["ob"]);
+    expect(calls).toEqual([["ob", "worklist", "refresh"]]);
+    expect(result).toEqual({ ok: true, error: "" });
+  });
+
+  test("a failing child reports its first stderr line, or its exit code when it printed nothing", async () => {
+    expect(await refreshInChild(async () => ({ code: 1, stderr: "\noverbridge: config.yml: bad key\nmore\n" }), ["ob"])).toEqual({ ok: false, error: "overbridge: config.yml: bad key" });
+    expect(await refreshInChild(async () => ({ code: 137, stderr: "" }), ["ob"])).toEqual({ ok: false, error: "worklist refresh exited with code 137" });
   });
 });
