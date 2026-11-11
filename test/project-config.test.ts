@@ -162,3 +162,14 @@ describe("board columns", () => {
     expect(() => parseConfig("board:\n  column: {}\n")).toThrow("board");
   });
 });
+
+describe("worklist-scope", () => {
+  const pm = (extra: string) => `project-management:\n  name: github\n  project: o/r\n${extra}`;
+  test("reads a scope and defaults to none set", () => {
+    expect(parseConfig(pm("  worklist-scope: all\n")).projectManagement?.worklistScope).toBe("all");
+    expect(parseConfig(pm("")).projectManagement?.worklistScope).toBeUndefined();
+  });
+  test("rejects an unknown scope", () => {
+    expect(() => parseConfig(pm("  worklist-scope: everyone\n"))).toThrow("worklist-scope");
+  });
+});

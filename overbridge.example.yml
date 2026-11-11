@@ -12,6 +12,7 @@ project-management:
   # workspace: "{id}"                    # {id} {number} {repo}; default: github gh-{repo}-{number}, jira {id}
   # branch-types: { Bug: fix, default: feat }   # item type or label -> {type}; default: feat
   # issue-type: Task                     # Jira only: issue type for new items; default: Task
+  # worklist-scope: assigned             # GitHub only: assigned (yours) | unassigned (nobody's, on a project board) | all; default: assigned
   # worklist-jql: "sprint in openSprints()"   # Jira only: narrows the @work list; default: open sprint or in progress; "" lists all
 
 # GitHub Projects v2 only: how the board's Status column maps to the @work list. Needs `gh auth refresh -s read:project`.

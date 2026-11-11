@@ -358,6 +358,8 @@ it has run, and who is waiting.
 | `project-management.branch-types` | none | the `{type}` for each item type: a Jira issue type, or a GitHub label. The first of the item's types with an entry wins, ignoring case, then `default`, then `feat`. Looking up the type needs the network, so it happens only when `branch` uses `{type}` |
 | `project-management.issue-type` | `Task` | Jira issue type for new items |
 | `project-management.worklist-jql` | `(sprint in openSprints() OR statusCategory = "In Progress")` | Jira only: JQL that narrows the `@work` tab to some of your open tickets. Set it to `""` to list every open ticket. Repos on the same project and filter share one read, so each ticket appears once and `s` asks which repo to start it in |
+| `project-management.worklist-scope` | `assigned` | GitHub only: whose open issues `@work` lists. `assigned` is yours; `unassigned` is nobody's issues that sit on a Projects v2 board; `all` is both |
+| `board.columns` | none | GitHub Projects v2 only: maps a `Status` column name (any case) to `todo`, `in-progress`, `blocked` or `done`. Unlisted names fall back to common ones (done, in progress, blocked), then to labels. Needs `gh auth refresh -s read:project` |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
 | `check-queue.max-load-percent` | `70` | start a queued run only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. See [Check queue](#check-queue) |

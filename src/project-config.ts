@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoOf, root, worktreePath } from "./paths";
+import { WORKLIST_SCOPES, type WorklistScope } from "./pm/board-github";
 import type { WorkStatus } from "./pm/worklist";
 import { fail, isRecord } from "./util";
 
@@ -34,6 +35,8 @@ export interface ProjectManagement {
   issueType?: string;
   /** JQL that narrows the work list's Jira query. Unset means `DEFAULT_WORKLIST_JQL`; empty means no narrowing. */
   worklistJql?: string;
+  /** GitHub only: whose issues the work list shows. Unset means `assigned`. */
+  worklistScope?: WorklistScope;
 }
 
 export const BRANCH_PLACEHOLDERS = ["id", "number", "slug", "type"] as const;
@@ -161,7 +164,7 @@ const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
 const BOARD_KEYS = ["columns"];
-const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql"];
+const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql", "worklist-scope"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
 
 function distance(a: string, b: string): number {
@@ -373,6 +376,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       if (workspace) for (const problem of templateProblems(workspace, WORKSPACE_PLACEHOLDERS, true)) p.add("project-management.workspace", problem);
       const issueType = p.string(pm, "issue-type", "project-management", false);
       const worklistJql = pm["worklist-jql"] === "" ? "" : p.string(pm, "worklist-jql", "project-management", false);
+      const worklistScope = p.oneOf(p.string(pm, "worklist-scope", "project-management", false), WORKLIST_SCOPES, "project-management.worklist-scope");
       let branchTypes: Record<string, string> | undefined;
       const types = pm["branch-types"];
       if (types !== undefined && types !== null) {
@@ -396,6 +400,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
           ...(branchTypes ? { branchTypes } : {}),
           ...(issueType ? { issueType } : {}),
           ...(worklistJql !== undefined ? { worklistJql } : {}),
+          ...(worklistScope ? { worklistScope } : {}),
         };
       }
     }
