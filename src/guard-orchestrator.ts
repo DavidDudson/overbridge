@@ -123,6 +123,7 @@ const OVERBRIDGE_ALLOWED: Record<string, readonly string[]> = {
   rm: [],
   icebox: [],
   thaw: [],
+  cleanup: [],
   release: [],
   up: [],
   layout: [],

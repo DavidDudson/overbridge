@@ -12,7 +12,7 @@ import { getWorkspace, readState } from "./state";
 import { boxBottom, boxRow, boxTop, type Color, COLORS, colorize, fit, inverse, textWidth } from "./term";
 import { parseUnresolved, REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses, threadsCommand } from "./reviewers";
 import { stackOf, localStacks } from "./stack";
-import { run } from "./util";
+import { describeValue, errorMessage, isRecord, run } from "./util";
 
 const safeStacks = (repo: string) => {
   try {
@@ -205,13 +205,43 @@ export const IDE_COMMANDS: Record<Ide, string> = { vscode: "code", zed: "zed", w
 
 const cacheFile = (ws: string) => join(metaDir(), "top", `${ws}.json`);
 
-export function readTopCache(ws: string): TopCache {
-  try {
-    return JSON.parse(readFileSync(cacheFile(ws), "utf8"));
-  } catch {
-    return { links: [], at: 0 };
-  }
+const EMPTY_CACHE: TopCache = { links: [], at: 0 };
+
+/**
+ * Why a parsed cache file is not a `TopCache`, or undefined when every field the panes read has the right type:
+ * the optional fields when present, and `links` and `at` always (the sweep's age check needs a real `at`).
+ */
+export function topCacheFault(raw: unknown): string | undefined {
+  if (!isRecord(raw)) return `expected a mapping, got ${describeValue(raw)}`;
+  const wrong = (field: string, ok: boolean) => (ok ? undefined : `${field} is ${describeValue(raw[field])}`);
+  const optional = (field: string, ok: boolean) => (raw[field] === undefined ? undefined : wrong(field, ok));
+  return (
+    optional("headline", typeof raw.headline === "string") ??
+    optional("title", typeof raw.title === "string") ??
+    optional("message", typeof raw.message === "string") ??
+    optional("prsOpen", typeof raw.prsOpen === "boolean") ??
+    optional("merged", isRecord(raw.merged)) ??
+    optional("buttons", isRecord(raw.buttons)) ??
+    wrong("links", Array.isArray(raw.links)) ??
+    wrong("at", typeof raw.at === "number" && Number.isFinite(raw.at))
+  );
 }
+
+/** The cache file, checked: a missing file is the empty cache; an unreadable or misshapen one is the empty cache plus why, for that workspace's card. */
+export function readTopCacheChecked(ws: string): { cache: TopCache; fault?: string } {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(cacheFile(ws), "utf8"));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { cache: EMPTY_CACHE };
+    return { cache: EMPTY_CACHE, fault: `top cache: ${errorMessage(e)}` };
+  }
+  const fault = topCacheFault(raw);
+  return fault ? { cache: EMPTY_CACHE, fault: `top cache: ${fault}` } : { cache: raw as TopCache };
+}
+
+/** The cache file as a `TopCache`; the empty cache when it is missing, unreadable or misshapen. */
+export const readTopCache = (ws: string): TopCache => readTopCacheChecked(ws).cache;
 
 function writeTopCache(ws: string, cache: TopCache) {
   mkdirSync(join(metaDir(), "top"), { recursive: true });

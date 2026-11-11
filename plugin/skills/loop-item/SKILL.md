@@ -44,7 +44,7 @@ for the PR body's summary, and for the check in step 3 that the work has not out
   without asking.
   Run `test`, `typecheck` and `lint` through the check queue: `overbridge check <repo> -- <command>`. It runs one at a
   time across workspaces, in the repo's dev shell. Run `format` through `overbridge shell <repo> -- <command>`.
-  Exit 124 means a check went over its time limit, 137 that it stopped using CPU, and 75 that no turn came: report
+  Exit 124 means a check went over its time limit, 137 that it stopped using CPU, and 75 that it could not start in time: report
   it rather than retrying in a loop.
 - If the work shows the plan was wrong, re-plan in place and carry on. Stop only when the item has
   outgrown its scope (it now touches work the scope check would have called a `SPLIT`): put that to the

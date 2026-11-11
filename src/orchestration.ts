@@ -11,9 +11,14 @@ export interface OrchestrationTab {
   label: string;
   /** Where its Claude runs. */
   dir: () => string;
+  /** A pane that replaces Claude: the tab runs `overbridge <pane>` beside its sidebar and has no agent. */
+  pane?: string;
 }
 
-export const ORCHESTRATION_TABS: readonly OrchestrationTab[] = [{ tab: "@root", label: "overbridge root", dir: root }];
+export const ORCHESTRATION_TABS: readonly OrchestrationTab[] = [
+  { tab: "@root", label: "overbridge root", dir: root },
+  { tab: "@work", label: "work list", dir: root, pane: "worklist" },
+];
 
 export const orchestrationTab = (tab: string): OrchestrationTab | undefined => ORCHESTRATION_TABS.find((t) => t.tab === tab);
 

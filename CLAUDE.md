@@ -20,11 +20,14 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   Providers and apps take injectable runners so tests never need `gh`, `jira` or real processes.
 - Apps: `src/apps.ts` (launch, teardown, port pool, status) and `src/app-command.ts` (`overbridge app`).
 - Panes: `src/top.ts` (pure model, layout, cache) + `src/top-run.ts` (tty loop); `src/sidebar.ts`; shared terminal
-  helpers in `src/term.ts`; the sidebar's bottom border shows `src/version.ts`'s version (package.json's when real,
+  helpers in `src/term.ts`; both panes read zellij's tab order and focused tab through `src/zellij-view.ts`
+  (`readView`: one shared file, refreshed by one pane per second), do their full poll only on the focused tab
+  (`shouldPoll`, every `HIDDEN_POLL_MS` when hidden), and write a frame only when it changed (`createPainter`); the sidebar's bottom border shows `src/version.ts`'s version (package.json's when real,
   else `OVERBRIDGE_VERSION`, which the flake sets to the git rev, else `dev`), read once when the pane starts; `src/agent-state.ts` reads what `src/agent-hook.ts` writes; `src/panes.ts` is the terminal/diff/claude pane toggles and `overbridge diff`; `src/pr-actions.ts` is the top panel's Ready/Draft and Merge (PR or `gh stack`); `src/next.ts` picks the next tab needing attention; `src/go.ts` is `overbridge go` (tab by sidebar number, name, next/prev; `sessionExec` in `src/tab.ts` reaches the session by name from outside zellij); `src/limits.ts` reads the usage limits Claude's statusline writes. Pure parts are unit-tested.
 - `src/shell.ts` resolves a repo's dev shell (`shell` key): prefix or cached env (`$XDG_CACHE_HOME/overbridge/shell`); used by `overbridge shell`, `claude()` (one repo: agent starts inside it, marker `<meta>/agent/<ws>.shell`), the terminal pane and the generated CLAUDE.md. Keep it tool-agnostic.
-- `src/check-queue.ts` is `overbridge check`: tickets in `<meta>/check-queue/` (the first live ticket holds the turn, no lock),
-  a load gate, then the command in its own process group, killed on `timeout-seconds` or a CPU stall
+- `src/check-queue.ts` is `overbridge check`: tickets in `<meta>/check-queue/`, no lock. `gateFor` starts a ticket once every live
+  ticket ahead is running, fewer than `max-parallel` are, and the load allows (`unsettledLoad` counts runs the 1-minute
+  average does not show yet); then the command runs in its own process group, killed on `timeout-seconds` or a CPU stall
   (`groupCpuSeconds` in `src/proc.ts`). Its pure parts are unit-tested; `test/e2e.test.ts` drives the real queue.
 - `src/layout.ts` builds the zellij layout (the orchestration tabs, `orchestrationTabKdl`, then one tab per workspace, `tabKdl`); a user `layouts/overbridge.kdl` replaces it.
 - `src/orchestration.ts` lists the orchestration tabs (`@root`: Claude in the root). Their names start with `@` so they never
@@ -44,6 +47,11 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   A session the user exits on purpose (`endedForGood`, reason `prompt_input_exit`) also makes a workspace cleanable.
   Each sidebar's poll runs `createReaper` (`src/auto-remove.ts`), which calls `beginRemoval` with `Landing.IfFocused`
   once git is clean, or marks the card `ended · unsaved work`.
+  Every sidebar card is its own failure domain: `entries` builds each card in a guard (`workspaceFault`, `readTopCacheChecked`),
+  the reaper reports a throw per workspace (`ReapResult.faults`), and the pane's poll is `gather` over injectable `SidebarReaders`,
+  keeping the last good `Model` and putting the first failure in the footer. The sidebar reads state through `tryReadState`;
+  writers keep `readState`, so a file `withState` cannot parse is never overwritten. A reader that can be fed a bad file must
+  report, not throw.
   Once every claimed PR has merged (`TopCache.merged`, the PR head commits), `src/merge-sweep.ts` (`overbridge top sweep`) removes the workspace
   through `beginRemoval` with `Landing.IfFocused`, after `mergedClean` checks that each HEAD is its PR head. A squash merge
   leaves no remote branch holding those commits, so `hasUnpushed` cannot do that check. Unsaved work sets `removalBlocked`, which the sidebar card shows.
@@ -55,6 +63,11 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   and closes the tab last (`leaveTab`); `thaw` reopens it with `--continue` and `/read-handoff`. `entries()` leaves iceboxed
   workspaces out (they have no tab, so no digit; the sidebar lists them under `icedRows`), and `workspaceNames()` skips them for
   `up`/`layout`. Any new code that lists workspaces for tabs must skip `isIceboxed`.
+- `overbridge cleanup` reports what the sweep leaves behind and removes nothing: `src/cleanup-scan.ts` is the pure `classify`
+  (facts → `CleanupVerdict` + `CleanupReason`; blockers turn a removal into a review, a failed read into `keep`),
+  `src/cleanup-gather.ts` reads the facts through injectable `GatherDeps` (git, `gh`, `Provider.status`), and `src/orphan.ts`
+  finds orphans (a folder state does not list that holds a registered worktree or `.claude`). `removeWorkspace` passes an
+  orphan to `removeOrphan`. The `cleanup` skill keeps the judgement; keep its verdict table in sync with `CleanupReason`.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors. The root `config.yml`'s `guard` block (`GuardConfig`) adds
   `read-paths` (reads only) and `deny` rules; it is never read from a repo file, so a branch can't loosen the guard.

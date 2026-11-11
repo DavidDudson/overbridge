@@ -90,6 +90,26 @@ Below it, a yellow `🧹 removing <title>` row shows a removal in progress and a
 a failed one shows red as `✗ failed <title>`. Finished rows stay until the next check, then drop off. The sidebar shows at most
 three removal rows, and `state.json` keeps the last 20 under `cleanups`.
 
+**What the merged-PR check leaves behind.** `overbridge cleanup` reports on every workspace the check does not remove, and
+on orphans: workspace folders under the root that `overbridge status` does not list. It removes nothing. Each one gets a
+verdict:
+
+- **`remove`**: every claimed PR has merged. Or a PR that names the item merged from another branch, so none was
+  recorded. Or the item is done and no PR is open. Or it is a `task/` branch with no PR and no commits whose session is
+  at rest. Or it is an orphan.
+- **`review`**: one of the above, but something would be lost. A repo has uncommitted changes, commits that are on no
+  remote branch and in no merged PR, or a stash made on its branch. Or the folder holds files that are neither worktrees
+  nor generated. Or the session is in the middle of a turn.
+- **`rebind`**: the workspace is named for a done item and holds an open PR for a different item.
+- **`ask`**: no PR, no commits, and nothing unsaved, and the item is not done. It was never started.
+- **`keep`**: work in progress, or a read failed.
+
+`overbridge cleanup --json` prints the facts behind each verdict, and `--no-fetch` skips fetching the repos first.
+`overbridge rm <name>` also removes an orphan: it removes the folder's registered worktrees from their bare repos,
+prunes them, and deletes the folder. Without `--force` it refuses when a worktree has uncommitted changes or
+unpushed commits, or the folder holds other files. The `cleanup` skill runs the scan from the orchestration tab,
+asks which `remove` workspaces to delete, and runs `overbridge rm` for those.
+
 Inside a workspace (shell pane or its Claude):
 
 ```nu
@@ -123,7 +143,12 @@ Run `overbridge help` for every command.
 
 `plugin/` ships skills: `workspace`, `ship-pr` (commit, PR, stacked PRs and splitting a branch into a stack,
 green build, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
-`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`) and `read-handoff` (continue from a handoff file after `/clear`). They read the
+`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`), `read-handoff` (continue from a handoff file after `/clear`) and `whip` (from the
+orchestration tab: find every workspace with work still outstanding, such as a draft PR, a conflict with main,
+review feedback, a red build, uncommitted or unpushed work or an item not yet shipped, and message its Claude a
+plain "continue" naming what is left; done workspaces are skipped; it ends with a sent/skipped table and takes
+`--dry-run`) and `cleanup` (from the orchestration tab: report the finished, orphaned, and never-started
+workspaces that `overbridge cleanup` finds, and remove the safe ones once you confirm; it also takes `--dry-run`). They read the
 repo's `overbridge.yml` (`project-management`, `commands`) and work with work items through `overbridge item`.
 `loop-tech-debt` files items with `overbridge item create --tech-debt`, so set `project-management.tech-debt`.
 `audit-vulns` reads Dependabot alerts, so it needs a GitHub repo.
@@ -299,21 +324,24 @@ Where it applies:
 ### Check queue
 
 `overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>` runs a heavy command, such as lint, typecheck,
-test or build, so that only one runs at a time across every workspace. The skills send the repo's `commands.lint`,
+test or build, in queue order across every workspace. Several run at once while the machine's load leaves room. The skills send the repo's `commands.lint`,
 `typecheck`, `test`, and `build` through it. The repo defaults to the one the current directory is in, then to the
 workspace's only repo.
 
-1. **Queue.** Each call writes a ticket to `.overbridge/check-queue/`. The oldest ticket whose process is still alive
-   holds the turn, and the others wait in order. Waiters remove tickets whose process has died. If a dead holder left
-   its command running, they kill that command too.
-2. **Load.** Once it holds the turn, the run waits until the 1-minute load average is under `max-load-percent` of the cores.
+1. **Queue.** Each call writes a ticket to `.overbridge/check-queue/`. Tickets start in the order they were queued:
+   a ticket waits until every ticket ahead of it, whose process is still alive, has started. Waiters remove tickets
+   whose process has died. If a dead ticket left its command running, they kill that command too.
+2. **Load.** The next ticket in line starts once the 1-minute load average is under `max-load-percent` of the cores,
+   whether or not other runs are still going. The average takes about a minute to show a new run, so each run that
+   started in the last minute counts as up to one extra core of load. Set `max-parallel` to cap how many run at once;
+   `max-parallel: 1` runs them one at a time.
 3. **Run.** The command runs in the repo's dev shell, as with `overbridge shell`, in a process group of its own. A
    command started inside a held run, such as a git hook, runs straight away instead of queueing behind its parent.
 4. **Stop.** The command is killed (TERM, then KILL after 10 seconds) when it runs past `timeout-seconds` (exit 124),
-   or when its process group uses no CPU for `stall-seconds` (exit 137). If no turn comes within `wait-seconds`, the
-   call gives up with exit 75. Otherwise it exits with the command's own code.
+   or when its process group uses no CPU for `stall-seconds` (exit 137). If a call cannot start within `wait-seconds`, it
+   gives up with exit 75. Otherwise it exits with the command's own code.
 
-`--timeout-seconds` raises or lowers the time limit for one run. The tab sidebar shows the running command, how long
+`--timeout-seconds` raises or lowers the time limit for one run. The tab sidebar shows each running command, how long
 it has run, and who is waiting.
 
 ### Keys and defaults
@@ -329,12 +357,14 @@ it has run, and who is waiting.
 | `project-management.workspace` | GitHub `gh-{repo}-{number}`, Jira `{id}` | workspace name template. Placeholders: `{id}`, `{number}`, and `{repo}`. It must use `{id}` or `{number}` |
 | `project-management.branch-types` | none | the `{type}` for each item type: a Jira issue type, or a GitHub label. The first of the item's types with an entry wins, ignoring case, then `default`, then `feat`. Looking up the type needs the network, so it happens only when `branch` uses `{type}` |
 | `project-management.issue-type` | `Task` | Jira issue type for new items |
+| `project-management.worklist-jql` | `(sprint in openSprints() OR statusCategory = "In Progress")` | Jira only: JQL that narrows the `@work` tab to some of your open tickets. Set it to `""` to list every open ticket. Repos on the same project and filter share one read, so each ticket appears once and `s` asks which repo to start it in |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
 | `check-queue.max-load-percent` | `70` | start a queued run only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. See [Check queue](#check-queue) |
+| `check-queue.max-parallel` | none | run at most this many commands at once; unset leaves the load as the only limit |
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
-| `check-queue.wait-seconds` | `900` | give up (exit 75) when a run gets no turn, or the load stays high, for this long |
+| `check-queue.wait-seconds` | `900` | give up (exit 75) when a run cannot start for this long, because of the queue ahead, `max-parallel`, or the load |
 | `shell` | none | the repo's dev shell: a command prefix (`nix develop --command`, `direnv exec .`), or a mapping `enter` (the prefix), `env` (a command printing the env NUL-separated, as `env -0` does) and `key` (repo-relative files whose contents invalidate the cached env; needs `env`). See [Dev shells](#dev-shells) |
 | `review.personas` | auto | reviewer personas to run; unset selects by diff signals |
 | `review.exclude` | `[]` | personas to skip, applied after selection |
@@ -576,7 +606,8 @@ a brief through `--append-system-prompt`. The guard lets it read anything, run r
 commands, check status, and start or remove workspaces. It blocks file edits, branch changes, commits,
 pushes, and changes to PRs and issues, and its message tells Claude to start a workspace instead. When you
 ask it for a task, it runs `overbridge start` with your request as `--prompt`, and the new workspace's
-Claude does the work. The Workspaces frame is below it. Keys,
+Claude does the work. `/whip` there messages every workspace whose work is still outstanding to continue, and
+`/cleanup` finds the workspaces that can go (see [Claude Code plugin](#claude-code-plugin)). The Workspaces frame is below it. Keys,
 clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
 and sidebar files never share a name with a workspace's.
@@ -589,8 +620,8 @@ opens it again at the front and returns focus to the tab you were on. A lock in
 (`layouts/overbridge.kdl`) decides its own tabs, so nothing is reopened when one exists.
 
 Under the list, up to three rows show workspaces being removed or removed in the last hour (see **Seeing what was
-removed** above). Below them, while the [check queue](#check-queue) is busy, a `▶` row shows the running command, its
-workspace, and how long it has run, and a `⧗` row lists the workspaces waiting.
+removed** above). Below them, while the [check queue](#check-queue) is busy, a `▶` row for each running command shows its
+workspace and how long it has run, and a `⧗` row lists the workspaces waiting.
 
 The width (default 60) comes from the global config:
 

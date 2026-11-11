@@ -1,6 +1,7 @@
 import { type State, withState } from "./state";
 import { MERGE_SWEEP_MS } from "./sweep-trigger";
 import { type Color, colorize, fit } from "./term";
+import { isRecord } from "./util";
 
 /** How a finished workspace removal ended. */
 export const CleanupOutcome = { Removed: "removed", Failed: "failed" } as const;
@@ -44,6 +45,12 @@ export function recordCleanup(record: CleanupRecord) {
 /** Seconds until the next merged-PR check, given when the last one ran; zero once it is due. */
 export const secondsToCheck = (sweepAt: number | undefined, now: number, intervalMs = MERGE_SWEEP_MS): number =>
   Math.max(0, Math.ceil((intervalMs - (now - (sweepAt ?? 0))) / 1000));
+
+/** Whether a record from state has the fields a row needs; a hand edit or a half-written file can leave one without. */
+export const isCleanupRecord = (r: unknown): r is CleanupRecord => isRecord(r) && typeof r.label === "string" && typeof r.atMs === "number" && Number.isFinite(r.atMs);
+
+/** The usable records of `State.cleanups` as read from disk; every consumer of that field goes through here. */
+export const cleanupRecords = (log: unknown): CleanupRecord[] => (Array.isArray(log) ? log : []).filter(isCleanupRecord);
 
 const rowStyle = (r: CleanupRecord): { glyph: string; word: string; color: Color } =>
   r.outcome === CleanupOutcome.Failed ? { glyph: "✗", word: "failed", color: "red" } : { glyph: "🧹", word: "removed", color: "grey" };

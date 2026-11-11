@@ -39,7 +39,10 @@ overbridge start <repo> <id> --here               # re-bind the current workspac
 overbridge new <name> -r <repo> [-r <repo>...]    # by hand; name it for its work item; opens its tab
 overbridge tab <name> [--prompt text]             # reopen a workspace's closed tab (focuses it when open)
 overbridge add <repo> --ws <name>                 # add another repo to an existing workspace
-overbridge rm <name> [--force]                    # refuses with uncommitted changes unless --force
+overbridge rm <name> [--force]                    # refuses with uncommitted changes unless --force; also removes
+                                          # an orphan (a workspace folder that status does not list)
+overbridge cleanup [--json] [--no-fetch]          # report which workspaces and orphans can go (remove, review,
+                                          # rebind, ask, keep); removes nothing. The cleanup skill acts on it
 overbridge icebox <name>                          # pause: stop apps and checks, write a handoff, close the tab; claims stay; refuses with unsaved work
 overbridge thaw <name>                            # reopen an iceboxed workspace; its agent resumes and reads the handoff
 overbridge status --all

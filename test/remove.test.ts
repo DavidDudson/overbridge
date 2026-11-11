@@ -251,9 +251,10 @@ describe("a session closed on purpose", () => {
     const deps: RemovalDeps = { exec: () => ok(), spawnWorker: realSpawn, inZellij: false };
     const reap = createReaper({ endedForGood: sessionEndedForGood, gitClean, remove: (ws) => beginRemoval(ws, { landing: Landing.IfFocused, deps }), now: Date.now });
 
-    const unsaved = reap(entries().filter((e) => e.tab === "i1" || e.tab === "i2"));
+    const { unsaved, faults } = reap(entries().filter((e) => e.tab === "i1" || e.tab === "i2"));
 
     expect([...unsaved]).toEqual(["i2"]);
+    expect(faults.size).toBe(0);
     expect(entries().map((e) => e.tab)).not.toContain("i1");
     expect(await until(() => !readState().workspaces.i1)).toBe(true);
     expect(existsSync(join(root, "i1"))).toBe(false);

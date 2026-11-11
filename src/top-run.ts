@@ -8,6 +8,7 @@ import { mergePr, setReady } from "./pr-actions";
 import { ALT_COMMANDS, type ActDeps, activate, applyOptimistic, type PrChange, type Button, CLEANUP_ARM_MS, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
 import { ENTER_SCREEN, LEAVE_SCREEN } from "./term";
 import { log, spawnCwd } from "./util";
+import { createPainter, isFocused, readView, shouldPoll } from "./zellij-view";
 
 const POLL_MS = 2_000;
 const REFRESH_MS = 60_000;
@@ -103,12 +104,16 @@ export async function topPanel(wsOpt?: string) {
     return app.spec.ready?.kind === "http" ? app.spec.ready.url.replaceAll("{port}", String(port)) : "";
   };
 
+  const painter = createPainter((text) => process.stdout.write(text));
   const draw = () => {
     frame = layoutTop({ ...snap, ...(note ? { message: note } : {}) }, process.stdout.columns ?? 80, process.stdout.rows ?? 0);
-    process.stdout.write(paintTop(frame, cursor));
+    painter.paint(paintTop(frame, cursor));
   };
 
+  let lastReloadAtMs = 0;
+  let lastRefreshAtMs = 0;
   const reload = async () => {
+    lastReloadAtMs = Date.now();
     snap = await snapshotTop(ws);
     cursor = Math.min(cursor, Math.max(0, frame.placed.length - 1));
     draw();
@@ -116,6 +121,7 @@ export async function topPanel(wsOpt?: string) {
 
   /** Rebuild the cache and redraw; `keep` is a message (an action's result) to leave on the message row afterwards. */
   const refresh = (keep?: string) => {
+    lastRefreshAtMs = Date.now();
     note = keep ?? "refreshing…";
     draw();
     const self = selfCommand();
@@ -143,6 +149,7 @@ export async function topPanel(wsOpt?: string) {
       resolve();
     };
     process.stdout.write(ENTER_SCREEN);
+    painter.invalidate();
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.on("data", (buf) => {
@@ -181,14 +188,25 @@ export async function topPanel(wsOpt?: string) {
       }
       draw();
     });
-    process.stdout.on("resize", draw);
+    process.stdout.on("resize", () => {
+      painter.invalidate();
+      draw();
+    });
   });
 
   draw();
-  const poll = setInterval(() => void reload(), POLL_MS);
-  const timer = setInterval(refresh, REFRESH_MS);
+  // a hidden tab's panel reloads only every HIDDEN_POLL_MS and leaves the git and gh refresh until its tab is focused
+  const tick = () => {
+    const view = readView();
+    const nowMs = Date.now();
+    if (isFocused(ws, view) && nowMs - lastRefreshAtMs >= REFRESH_MS) {
+      refresh();
+    } else if (shouldPoll(ws, view, lastReloadAtMs, nowMs)) {
+      void reload();
+    }
+  };
+  const poll = setInterval(tick, POLL_MS);
   refresh();
   await done;
   clearInterval(poll);
-  clearInterval(timer);
 }
