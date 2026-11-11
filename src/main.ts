@@ -15,7 +15,7 @@ import { FINISH_FLAG, finishRemoval } from "./remove";
 import { sweepMerged } from "./merge-sweep";
 import { showTab, start, startStack, startTask } from "./start";
 import { topPanel, topRefresh } from "./top-run";
-import { refreshWorklist, worklistPane } from "./worklist-run";
+import { readWorklist, refreshWorklist, showWorklist, worklistPane } from "./worklist-run";
 import { silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
 import { exec, log, OverbridgeError } from "./util";
@@ -41,7 +41,7 @@ Setup
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
-  overbridge worklist [refresh]                 work list pane (the @work tab); refresh reads every board into its cache
+  overbridge worklist [refresh|show]            work list pane (the @work tab); refresh reads every board into its cache; show prints it
 
 Work items (the repo's project-management provider)
   overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
@@ -177,8 +177,10 @@ async function main(argv: string[]): Promise<number> {
       if (sub === "refresh") {
         const cache = refreshWorklist();
         log(`worklist: ${cache.rows.length} open item(s)${cache.notes.length ? `; ${cache.notes.join("; ")}` : ""}`);
+      } else if (sub === "show") {
+        console.log(showWorklist(readWorklist()).join("\n"));
       } else if (sub !== undefined) {
-        throw new OverbridgeError("usage: overbridge worklist [refresh]");
+        throw new OverbridgeError("usage: overbridge worklist [refresh|show]");
       } else {
         await worklistPane();
       }
@@ -308,6 +310,7 @@ async function main(argv: string[]): Promise<number> {
       if (!name) throw new OverbridgeError("usage: overbridge claude <name> [-- claude args]");
       const args = extra[0] === "--" ? extra.slice(1) : extra;
       const tab = orchestrationTab(name);
+      if (tab?.pane) throw new OverbridgeError(`${tab.tab} runs \`overbridge ${tab.pane}\`, not Claude`);
       if (tab) cmd.claudeOrchestration(tab, args);
       else cmd.claude(name, args);
       break;

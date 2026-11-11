@@ -102,6 +102,7 @@ describe("icebox and thaw", () => {
   });
 
   test("refuses an orchestration tab", async () => {
+    await expect(icebox("@work", fakeDeps("").deps)).rejects.toThrow("orchestration");
     await expect(icebox("@root", fakeDeps("").deps)).rejects.toThrow("orchestration");
   });
 

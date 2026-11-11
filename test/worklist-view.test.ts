@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { rank, type WorkRow } from "../src/pm/worklist";
 import type { ProjectManagement } from "../src/project-config";
-import { boardSources, pickRepo, readBoards, refreshInChild, renderWorklist, repoPrompt } from "../src/worklist-run";
+import { boardSources, pickRepo, readBoards, refreshInChild, renderWorklist, repoPrompt, showWorklist } from "../src/worklist-run";
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
@@ -110,5 +110,18 @@ describe("refreshInChild", () => {
   test("a failing child reports its first stderr line, or its exit code when it printed nothing", async () => {
     expect(await refreshInChild(async () => ({ code: 1, stderr: "\noverbridge: config.yml: bad key\nmore\n" }), ["ob"])).toEqual({ ok: false, error: "overbridge: config.yml: bad key" });
     expect(await refreshInChild(async () => ({ code: 137, stderr: "" }), ["ob"])).toEqual({ ok: false, error: "worklist refresh exited with code 137" });
+  });
+});
+
+describe("showWorklist", () => {
+  test("prints ranked rows, tab separated, then the notes", () => {
+    const lines = showWorklist({ at: 0, rows: [row("2", { blockedBy: ["ob#1"] }), row("1", { labels: ["p0"] })], notes: ["jira X: down"] });
+    expect(lines[0]).toBe("1\tready\tob#1\ttitle 1\tready, priority p0, unblocks 1");
+    expect(lines[1]).toContain("2\ttodo\tob#2");
+    expect(lines[2]).toBe("note: jira X: down");
+  });
+
+  test("says so when nothing is assigned", () => {
+    expect(showWorklist({ at: 0, rows: [], notes: [] })).toEqual(["nothing assigned to you"]);
   });
 });
