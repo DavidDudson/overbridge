@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cacheStale } from "../src/agent-hook";
 import { createHandler, type HandlerDeps } from "../src/server";
+import { staleCandidates } from "../src/merge-sweep";
 import { serverRefresh, serverRefreshAll } from "../src/server-client";
-import { call, claimStart, notifyRefresh, socketPath, START_LOCK_MS, startServer, takePidFile, VERSION_HEADER } from "../src/server-net";
+import { withState } from "../src/state";
+import { call, CLIENT_START_HEADER, claimStart, notifyRefresh, socketPath, START_LOCK_MS, startServer, takePidFile, VERSION_HEADER } from "../src/server-net";
 import { pidAlive } from "../src/proc";
 import type { TopCache } from "../src/top";
 
@@ -74,6 +76,7 @@ function handlerDeps(over: Partial<HandlerDeps> = {}) {
       return cacheOf();
     },
     workspaceExists: (ws) => ws === "w1" || ws === "w2",
+    cacheFileAt: () => Date.now(),
     version: "v1",
     onVersionMismatch: () => {
       mismatches++;
@@ -134,12 +137,49 @@ describe("routes", () => {
     expect(s).toMatchObject({ version: "v1", hits: 1, misses: 1, fetches: 1, inFlight: 0, draining: false });
   });
 
-  test("a client of another version gets a 409 and the server is told to go", async () => {
+  test("a newer client of another version gets a 409 and the server is told to go", async () => {
     const { deps, mismatches } = handlerDeps();
     const h = createHandler(deps);
     expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v1" })).status).toBe(200);
-    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2" })).status).toBe(409);
+    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2", [CLIENT_START_HEADER]: String(Date.now() + 1_000) })).status).toBe(409);
     expect(mismatches()).toBe(1);
+  });
+
+  test("an older client, or one that does not say when it started, gets a 409 and the server stays", async () => {
+    const { deps, mismatches } = handlerDeps();
+    const h = createHandler(deps);
+    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2", [CLIENT_START_HEADER]: "1" })).status).toBe(409);
+    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2" })).status).toBe(409);
+    expect(mismatches()).toBe(0);
+  });
+
+  test("a cache file older than the ttl is refreshed though the entry is young, once for concurrent callers", async () => {
+    const { deps, refreshed } = handlerDeps({ cacheFileAt: () => 0 });
+    const h = createHandler(deps);
+    await Promise.all([post(h, "/refresh/top/w1"), post(h, "/refresh/top/w1?async=1"), post(h, "/refresh/top/w1")]);
+    expect(refreshed).toEqual(["w1"]);
+    await post(h, "/refresh/top/w1");
+    expect(refreshed).toEqual(["w1", "w1"]);
+  });
+
+  test("a failed refresh is logged, also when it runs behind an async reply", async () => {
+    const logged: string[] = [];
+    const h = createHandler(
+      handlerDeps({
+        log: (m) => logged.push(m),
+        refreshTop: async () => {
+          throw new Error("gh down");
+        },
+      }).deps,
+    );
+    expect((await post(h, "/refresh/top/w1?async=1")).status).toBe(202);
+    await Bun.sleep(5);
+    expect(logged).toEqual(["top:w1: gh down"]);
+  });
+
+  test("a malformed percent escape is a 400", async () => {
+    const h = createHandler(handlerDeps().deps);
+    expect((await post(h, "/refresh/top/%zz")).status).toBe(400);
   });
 });
 
@@ -148,7 +188,7 @@ describe("socket path", () => {
     expect(socketPath("/r")).toBe("/r/.overbridge/server.sock");
     const deep = socketPath(`/${"d".repeat(120)}`);
     expect(deep.length).toBeLessThan(104);
-    expect(deep).toMatch(/overbridge-[0-9a-f]{12}\.sock$/);
+    expect(deep).toMatch(/overbridge-\d+-[0-9a-f]{12}\.sock$/);
   });
 });
 
@@ -160,6 +200,15 @@ describe("pid file", () => {
     expect(readFileSync(file, "utf8")).toBe("100");
     expect(takePidFile(file, () => false, 200)).toBe(true);
     expect(readFileSync(file, "utf8")).toBe("200");
+  });
+
+  test("an empty file is a server still writing its pid, not a dead one", () => {
+    const file = join(tmp, "p.pid");
+    writeFileSync(file, "");
+    expect(takePidFile(file, () => false, 200)).toBe(false);
+    const old = Date.now() / 1000 - 60;
+    utimesSync(file, old, old);
+    expect(takePidFile(file, () => false, 200)).toBe(true);
   });
 });
 
@@ -180,8 +229,22 @@ describe("server stopped: callers fall back", () => {
     expect(await call("GET", "/status", { timeoutMs: 500 })).toBeUndefined();
     expect(await serverRefresh("w1", { start: false })).toBeUndefined();
     expect(await notifyRefresh("w1", { start: false })).toBe(false);
-    await serverRefreshAll(["w1", "w2"]).catch(() => undefined);
+    expect(await serverRefreshAll(["w1", "w2"], { start: false })).toEqual(["w1", "w2"]);
     expect(Date.now() - began).toBeLessThan(2_000);
+  });
+
+  test("OVERBRIDGE_NO_SERVER keeps every caller on its own path and starts nothing", async () => {
+    const stub = Bun.serve({ unix: socketPath(), fetch: () => Response.json({ ws: "w1", served: "fresh" }) });
+    try {
+      expect(await serverRefresh("w1", { start: false })).toMatchObject({ served: "fresh" });
+      process.env.OVERBRIDGE_NO_SERVER = "1";
+      expect(await serverRefresh("w1", { start: false })).toBeUndefined();
+      expect(await notifyRefresh("w1", { start: false })).toBe(false);
+      expect(startServer(() => expect.unreachable("started a server"))).toBe(false);
+    } finally {
+      delete process.env.OVERBRIDGE_NO_SERVER;
+      await stub.stop(true);
+    }
   });
 
   test("a stale socket file answers like no server", async () => {
@@ -198,6 +261,88 @@ describe("server stopped: callers fall back", () => {
     const old = Date.now() / 1000 - 120;
     utimesSync(file, old, old);
     expect(cacheStale(meta, "w1")).toBe(true);
+  });
+});
+
+describe("client replies", () => {
+  let stub: ReturnType<typeof Bun.serve>;
+  let status = 200;
+  let body = "{}";
+  const seen: string[] = [];
+  beforeEach(() => {
+    status = 200;
+    body = "{}";
+    seen.length = 0;
+    stub = Bun.serve({
+      unix: socketPath(),
+      fetch: (req) => {
+        seen.push(new URL(req.url).pathname + new URL(req.url).search);
+        return new Response(body, { status });
+      },
+    });
+  });
+  afterEach(async () => {
+    await stub.stop(true);
+  });
+
+  test("serverRefresh takes a 200, and a 502 as a failed refresh; any other reply sends the caller to its own path", async () => {
+    body = JSON.stringify({ ws: "w1", served: "fresh" });
+    expect(await serverRefresh("w1", { start: false })).toEqual({ ws: "w1", served: "fresh" });
+    status = 502;
+    body = JSON.stringify({ error: "gh down" });
+    expect(await serverRefresh("w1", { start: false })).toMatchObject({ error: "gh down" });
+    for (const s of [404, 409, 500]) {
+      status = s;
+      expect(await serverRefresh("w1", { start: false })).toBeUndefined();
+    }
+    status = 200;
+    body = "not json";
+    expect(await serverRefresh("w1", { start: false })).toBeUndefined();
+  });
+
+  test("force is sent as ?force=1 and only then", async () => {
+    body = JSON.stringify({ ws: "w1", served: "fresh" });
+    await serverRefresh("w1", { start: false });
+    await serverRefresh("w1", { force: true, start: false });
+    expect(seen).toEqual(["/refresh/top/w1", "/refresh/top/w1?force=1"]);
+  });
+
+  test("the hook's notify counts only an accepted request: a version refusal sends it to its own refresh", async () => {
+    status = 202;
+    expect(await notifyRefresh("w1", { start: false })).toBe(true);
+    expect(seen).toEqual(["/refresh/top/w1?async=1"]);
+    for (const s of [404, 409, 500]) {
+      status = s;
+      expect(await notifyRefresh("w1", { start: false })).toBe(false);
+    }
+  });
+
+  test("serverRefreshAll names the workspaces the server could not take", async () => {
+    body = JSON.stringify({ ws: "x", served: "fresh" });
+    expect(await serverRefreshAll(["w1", "w2"], { start: false })).toEqual([]);
+    status = 409;
+    expect(await serverRefreshAll(["w1", "w2"], { start: false })).toEqual(["w1", "w2"]);
+  });
+});
+
+describe("sweep candidates", () => {
+  test("stale ones are the workspaces whose claims all have PRs and whose cache is a sweep interval old", () => {
+    const claim = { branch: "b", pr: 1 };
+    withState((s) => {
+      s.workspaces = {
+        fresh: { created: "", repos: { app: claim } },
+        edge: { created: "", repos: { app: claim } },
+        old: { created: "", repos: { app: claim } },
+        nocache: { created: "", repos: { app: claim } },
+        nopr: { created: "", repos: { app: { branch: "b" } } },
+      };
+    });
+    const now = 10_000_000;
+    mkdirSync(join(meta, "top"), { recursive: true });
+    for (const [ws, at] of [["fresh", now - 1_000], ["edge", now - 60_000], ["old", now - 600_000]] as const) {
+      writeFileSync(join(meta, "top", `${ws}.json`), JSON.stringify({ links: [], at }));
+    }
+    expect(staleCandidates(now).sort()).toEqual(["edge", "nocache", "old"]);
   });
 });
 
@@ -228,10 +373,13 @@ describe("real server", () => {
     expect(pidOf()).not.toBe(999999999);
   });
 
-  test("a client of another version makes the server exit, and the next call finds none", async () => {
+  test("only a client started after the server, of another version, makes it exit; the next call finds none", async () => {
     const s = spawnServer();
     await until(() => existsSync(socketPath()));
-    const r = await call("POST", "/refresh/top/w1", { timeoutMs: 5_000, version: "other" });
+    const older = await call("POST", "/refresh/top/w1", { timeoutMs: 5_000, version: "other", startedAtMs: 1 });
+    expect(older?.status).toBe(409);
+    expect(pidAlive(s.pid)).toBe(true);
+    const r = await call("POST", "/refresh/top/w1", { timeoutMs: 5_000, version: "other", startedAtMs: Date.now() + 10_000 });
     expect(r?.status).toBe(409);
     expect(await s.exited).toBe(0);
     expect(existsSync(socketPath())).toBe(false);

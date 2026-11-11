@@ -1,3 +1,4 @@
+import { errorText } from "./server-cache";
 import { refreshTop } from "./top";
 
 /**
@@ -10,6 +11,6 @@ self.onmessage = (event: MessageEvent<{ ws: string }>) => {
   try {
     postMessage({ ok: true, cache: refreshTop(event.data.ws) });
   } catch (e) {
-    postMessage({ ok: false, error: (e as Error).message });
+    postMessage({ ok: false, error: errorText(e) });
   }
 };

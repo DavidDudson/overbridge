@@ -12,8 +12,7 @@ import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
 import { FINISH_FLAG, finishRemoval } from "./remove";
-import { staleCandidates, sweepMerged } from "./merge-sweep";
-import { serverRefreshAll } from "./server-client";
+import { sweepWithServer } from "./merge-sweep";
 import { showTab, start, startStack, startTask } from "./start";
 import { topPanel, topRefresh } from "./top-run";
 import { refreshWorklist, worklistPane } from "./worklist-run";
@@ -191,11 +190,7 @@ async function main(argv: string[]): Promise<number> {
     case "top": {
       const { values, positionals } = opts(rest, ws);
       if (positionals[0] === "refresh") topRefresh(values.ws);
-      else if (positionals[0] === "sweep") {
-        // stale caches refresh through the server first; the sweep then finds them fresh, or refreshes itself if it was down
-        await serverRefreshAll(staleCandidates());
-        sweepMerged();
-      }
+      else if (positionals[0] === "sweep") await sweepWithServer();
       else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh|sweep] [--ws name]");
       else await topPanel(values.ws);
       break;

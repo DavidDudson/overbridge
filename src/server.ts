@@ -1,10 +1,10 @@
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { NAME_RE, metaDir } from "./paths";
 import { pidAlive } from "./proc";
-import { Cache } from "./server-cache";
-import { pidFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
+import { Cache, errorText } from "./server-cache";
+import { CLIENT_START_HEADER, pidFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
 import { readState } from "./state";
-import type { TopCache } from "./top";
+import { readTopCache, type TopCache } from "./top";
 import { log } from "./util";
 import { overbridgeVersion } from "./version";
 
@@ -16,8 +16,6 @@ import { overbridgeVersion } from "./version";
 
 export const TOP_TTL_MS = 60_000;
 export const TOP_STALE_MS = 10 * 60_000;
-/** A forced refresh of one workspace is honoured at most this often. */
-export const FORCE_GAP_MS = 5_000;
 export const IDLE_EXIT_MS = 10 * 60_000;
 /** Refreshes running at once: each runs `gh` calls of its own. */
 export const MAX_REFRESHES = 4;
@@ -25,9 +23,13 @@ export const MAX_REFRESHES = 4;
 export interface HandlerDeps {
   refreshTop: (ws: string) => Promise<TopCache>;
   workspaceExists: (ws: string) => boolean;
+  /** When `ws`'s top cache file was last written (ms since epoch), 0 when it has none. */
+  cacheFileAt: (ws: string) => number;
   version: string;
-  /** Called after a request from a client of another version: finish what is running, then exit. */
+  /** Called when a client of another version, started after this server, calls: finish what is running, then exit. */
   onVersionMismatch: () => void;
+  /** Where a failed refresh is reported; the server's own stdio is ignored. */
+  log?: (msg: string) => void;
   now?: () => number;
 }
 
@@ -36,7 +38,8 @@ const json = (status: number, body: unknown) => Response.json(body, { status });
 /** The routes, apart from the socket, so tests call them directly. */
 export function createHandler(deps: HandlerDeps) {
   const now = deps.now ?? Date.now;
-  const cache = new Cache<TopCache>({ maxInFlight: MAX_REFRESHES, now });
+  const report = deps.log ?? (() => undefined);
+  const cache = new Cache<TopCache>({ maxInFlight: MAX_REFRESHES, now, onError: (key, e) => report(`${key}: ${e.message}`) });
   const startedAt = now();
   let lastRequestAt = now();
   let draining = false;
@@ -46,8 +49,12 @@ export function createHandler(deps: HandlerDeps) {
     const url = new URL(req.url);
     const theirs = req.headers.get(VERSION_HEADER);
     if (theirs && theirs !== deps.version) {
-      draining = true;
-      deps.onVersionMismatch();
+      // only a client started after this server may replace it: an older pane that outlived an upgrade must not
+      // keep killing the new server
+      if (Number(req.headers.get(CLIENT_START_HEADER)) > startedAt) {
+        draining = true;
+        deps.onVersionMismatch();
+      }
       return json(409, { error: "version mismatch", server: deps.version, client: theirs });
     }
     if (req.method === "GET" && url.pathname === "/status") {
@@ -55,13 +62,19 @@ export function createHandler(deps: HandlerDeps) {
     }
     const top = /^\/refresh\/top\/([^/]+)$/.exec(url.pathname);
     if (req.method === "POST" && top) {
-      const ws = decodeURIComponent(top[1]!);
+      let ws: string;
+      try {
+        ws = decodeURIComponent(top[1]!);
+      } catch {
+        return json(400, { error: "bad workspace name" });
+      }
       if (!NAME_RE.test(ws) || !deps.workspaceExists(ws)) return json(404, { error: `no workspace ${ws}` });
       const got = cache.get(`top:${ws}`, () => deps.refreshTop(ws), {
         ttlMs: TOP_TTL_MS,
         staleMs: TOP_STALE_MS,
         force: url.searchParams.get("force") === "1",
-        minForceGapMs: FORCE_GAP_MS,
+        // a cache file older than the TTL (rewritten, deleted or never written) is refreshed even when the entry is young
+        expired: now() - deps.cacheFileAt(ws) >= TOP_TTL_MS,
       });
       if (url.searchParams.get("async") === "1") {
         got.catch(() => undefined);
@@ -71,7 +84,7 @@ export function createHandler(deps: HandlerDeps) {
         const { served, error } = await got;
         return json(200, { ws, served, ...(error ? { error } : {}) });
       } catch (e) {
-        return json(502, { error: (e as Error).message });
+        return json(502, { error: errorText(e) });
       }
     }
     return json(404, { error: "not found" });
@@ -80,7 +93,7 @@ export function createHandler(deps: HandlerDeps) {
   return {
     handle,
     stats: () => cache.stats(),
-    idleFor: () => now() - lastRequestAt,
+    idleForMs: () => now() - lastRequestAt,
     busy: () => cache.busy,
   };
 }
@@ -124,6 +137,8 @@ export async function serve(): Promise<void> {
   const handler = createHandler({
     refreshTop: refreshInWorker,
     workspaceExists: (ws) => ws in readState().workspaces,
+    cacheFileAt: (ws) => readTopCache(ws).at,
+    log,
     version: overbridgeVersion(),
     onVersionMismatch: () => void shutdown(),
   });
@@ -140,7 +155,7 @@ export async function serve(): Promise<void> {
   try {
     chmodSync(sock, 0o600);
   } catch {
-    // the umask already did it
+    // the socket is already 0600 from the umask set before Bun.serve
   }
   log(`serving on ${sock}`);
 
@@ -157,7 +172,7 @@ export async function serve(): Promise<void> {
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
   setInterval(() => {
-    if (handler.idleFor() >= IDLE_EXIT_MS && !handler.busy()) void shutdown();
+    if (handler.idleForMs() >= IDLE_EXIT_MS && !handler.busy()) void shutdown();
   }, 30_000);
   await new Promise<void>(() => undefined);
 }

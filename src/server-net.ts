@@ -16,6 +16,10 @@ const SOCKET_PATH_MAX = 104;
 /** A client starts the server at most this often. */
 export const START_LOCK_MS = 30_000;
 export const VERSION_HEADER = "x-overbridge-version";
+/** When the calling process started (ms since epoch): only a client newer than the server may replace it. */
+export const CLIENT_START_HEADER = "x-overbridge-client-start";
+/** Set to anything non-empty to keep every caller on its own refresh and never start the server. */
+export const serverDisabled = (): boolean => !!process.env.OVERBRIDGE_NO_SERVER;
 
 const metaOf = () => join(root(), ".overbridge");
 export const pidFile = () => join(metaOf(), "server.pid");
@@ -25,8 +29,11 @@ export function socketPath(rootDir: string = root()): string {
   const direct = join(rootDir, ".overbridge", "server.sock");
   if (Buffer.byteLength(direct) < SOCKET_PATH_MAX) return direct;
   const hash = createHash("sha1").update(rootDir).digest("hex").slice(0, 12);
-  return join(process.env.XDG_RUNTIME_DIR || tmpdir(), `overbridge-${hash}.sock`);
+  // the uid keeps another user on a shared /tmp from binding the name first
+  return join(process.env.XDG_RUNTIME_DIR || tmpdir(), `overbridge-${process.getuid?.() ?? 0}-${hash}.sock`);
 }
+
+const PROCESS_START_MS = Date.now() - process.uptime() * 1000;
 
 export interface Reply {
   status: number;
@@ -35,9 +42,10 @@ export interface Reply {
 
 /**
  * One HTTP call over the server's socket. Resolves `undefined` when nothing answers (no socket, refused, timed out),
- * so the caller falls back to its local path. `wait: false` resolves once the request is written.
+ * so the caller falls back to its local path.
  */
-export function call(method: string, path: string, o: { timeoutMs: number; wait?: boolean; sock?: string; version?: string }): Promise<Reply | undefined> {
+export function call(method: string, path: string, o: { timeoutMs: number; sock?: string; version?: string; startedAtMs?: number }): Promise<Reply | undefined> {
+  if (serverDisabled()) return Promise.resolve(undefined);
   return new Promise((resolve) => {
     let settled = false;
     const done = (r: Reply | undefined) => {
@@ -47,7 +55,7 @@ export function call(method: string, path: string, o: { timeoutMs: number; wait?
     };
     try {
       const req = request(
-        { socketPath: o.sock ?? socketPath(), method, path, agent: false, headers: { [VERSION_HEADER]: o.version ?? overbridgeVersion(), connection: "close" }, timeout: o.timeoutMs },
+        { socketPath: o.sock ?? socketPath(), method, path, agent: false, headers: { [VERSION_HEADER]: o.version ?? overbridgeVersion(), [CLIENT_START_HEADER]: String(o.startedAtMs ?? PROCESS_START_MS), connection: "close" }, timeout: o.timeoutMs },
         (res) => {
           const chunks: Buffer[] = [];
           res.on("data", (c: Buffer) => chunks.push(c));
@@ -60,7 +68,6 @@ export function call(method: string, path: string, o: { timeoutMs: number; wait?
         done(undefined);
       });
       req.on("error", () => done(undefined));
-      if (o.wait === false) req.on("finish", () => done({ status: 202, body: "" }));
       req.end();
     } catch {
       done(undefined);
@@ -88,7 +95,7 @@ export function claimStart(now = Date.now()): boolean {
 
 /** Start `overbridge serve` detached, at most once per `START_LOCK_MS` across every client. */
 export function startServer(spawn: (cmd: string[]) => void = defaultSpawn, now = Date.now()): boolean {
-  if (!claimStart(now)) return false;
+  if (serverDisabled() || !claimStart(now)) return false;
   try {
     spawn([...selfCommand(), "serve"]);
     return true;
@@ -102,15 +109,16 @@ function defaultSpawn(cmd: string[]) {
 }
 
 /**
- * Ask the server to refresh `ws`'s top cache, without waiting for it. False when no server answered (and one is
- * being started), so the hook runs its own refresh instead.
+ * Ask the server to refresh `ws`'s top cache; it answers at once and refreshes behind the reply. False when no server
+ * took the request (none answered, and one is being started; or it refused), so the hook refreshes on its own.
  */
 export async function notifyRefresh(ws: string, o: { sock?: string; timeoutMs?: number; start?: boolean } = {}): Promise<boolean> {
-  const r = await call("POST", `/refresh/top/${encodeURIComponent(ws)}?async=1`, { timeoutMs: o.timeoutMs ?? 500, wait: false, ...(o.sock ? { sock: o.sock } : {}) });
-  if (r) return true;
-  if (o.start !== false) startServer();
-  return false;
+  const r = await call("POST", `/refresh/top/${encodeURIComponent(ws)}?async=1`, { timeoutMs: o.timeoutMs ?? 500, ...(o.sock ? { sock: o.sock } : {}) });
+  if (!r && o.start !== false) startServer();
+  return r?.status === 202;
 }
+
+const PID_WRITE_GRACE_MS = 2_000;
 
 /** Write `pid` into `file` if no live process holds it. Returns false when one does. */
 export function takePidFile(file: string, alive: (pid: number) => boolean, pid = process.pid): boolean {
@@ -121,6 +129,8 @@ export function takePidFile(file: string, alive: (pid: number) => boolean, pid =
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
       const holder = Number(readFileSync(file, "utf8"));
+      // an empty file is a server that created it a moment ago and has not written its pid yet
+      if (!holder && Date.now() - statSync(file).mtimeMs < PID_WRITE_GRACE_MS) return false;
       if (holder && holder !== pid && alive(holder)) return false;
       // stale: its process is gone
       rmSync(file, { force: true });

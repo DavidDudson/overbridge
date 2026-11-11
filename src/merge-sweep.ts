@@ -4,6 +4,7 @@ import { CleanupCause } from "./cleanup-log";
 import { beginRemoval, Landing } from "./remove";
 import { isRemoving, RemovalBlock, readState, withState, type WorkspaceState } from "./state";
 import { MERGE_SWEEP_MS } from "./sweep-trigger";
+import { serverRefreshAll } from "./server-client";
 import { noUnsavedWork, readTopCache, refreshTop, type TopCache } from "./top";
 import { log } from "./util";
 
@@ -69,6 +70,18 @@ const defaultSweepDeps = (): SweepDeps => ({
   remove: (ws) => beginRemoval(ws, { landing: Landing.IfFocused, cause: CleanupCause.Merged }),
   now: Date.now(),
 });
+
+/**
+ * `overbridge top sweep` with the server: stale caches refresh through it first, and the sweep refreshes in-process only
+ * the ones the server could not take (it was down, or on another version).
+ */
+export async function sweepWithServer(): Promise<Record<string, Verdict>> {
+  const stale = staleCandidates();
+  const unserved = new Set(await serverRefreshAll(stale));
+  const local = defaultSweepDeps();
+  const served = new Set(stale.filter((ws) => !unserved.has(ws)));
+  return sweepMerged({ ...local, refresh: (ws) => (served.has(ws) ? undefined : local.refresh(ws)) });
+}
 
 /**
  * `overbridge top sweep`: refresh every workspace whose claims all have PRs, remove the ones whose PRs have all merged with nothing unsaved and the agent

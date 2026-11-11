@@ -12,6 +12,8 @@ export interface CacheOptions {
   /** Entries kept; the oldest idle one goes first. */
   maxEntries?: number;
   now?: () => number;
+  /** Told of every failed fetch, including those whose caller gets a stale value instead. */
+  onError?: (key: string, error: Error) => void;
 }
 
 export interface GetOptions {
@@ -19,11 +21,12 @@ export interface GetOptions {
   ttlMs: number;
   /** An older value up to this age may be served while a refetch runs (with `swr`). */
   staleMs: number;
-  /** Skip the TTL, but not more often than `minForceGapMs`. */
+  /** Serve a value fetched after this call, whatever the TTL and any fetch already running. */
   force?: boolean;
-  minForceGapMs?: number;
   /** Return a stale value at once and refetch in the background instead of waiting. */
   swr?: boolean;
+  /** The caller knows the cached value is out of date (its file is gone): refetch, but share a fetch already running. */
+  expired?: boolean;
 }
 
 export type Served = "hit" | "stale" | "fresh" | "shared";
@@ -38,12 +41,13 @@ export interface Got<T> {
 interface Entry<T> {
   value?: T;
   /** When the fetch that produced `value` started. */
-  at?: number;
-  lastStart: number;
+  atMs?: number;
   failures: number;
-  retryAt: number;
+  retryAtMs: number;
   error?: string;
   flight?: Promise<T>;
+  /** The fetch a forced call queued behind the running one. */
+  forced?: Promise<T>;
 }
 
 export interface CacheStats {
@@ -53,28 +57,31 @@ export interface CacheStats {
   fetches: number;
   inFlight: number;
   queued: number;
-  keys: Record<string, { at?: number; failures: number; error?: string; retryAt?: number }>;
+  keys: Record<string, { atMs?: number; failures: number; error?: string; retryAtMs?: number }>;
 }
 
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+export const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+const asError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
 
 export class Cache<T> {
   private entries = new Map<string, Entry<T>>();
   private active = 0;
   private waiting: Array<() => void> = [];
   private counters = { hits: 0, misses: 0, shared: 0, fetches: 0 };
-  private readonly max: number;
-  private readonly base: number;
-  private readonly cap: number;
-  private readonly size: number;
+  private readonly maxInFlight: number;
+  private readonly backoffBaseMs: number;
+  private readonly backoffMaxMs: number;
+  private readonly maxEntries: number;
   private readonly now: () => number;
+  private readonly onError: (key: string, error: Error) => void;
 
   constructor(o: CacheOptions = {}) {
-    this.max = o.maxInFlight ?? 4;
-    this.base = o.backoffBaseMs ?? 15_000;
-    this.cap = o.backoffMaxMs ?? 5 * 60_000;
-    this.size = o.maxEntries ?? 2_000;
+    this.maxInFlight = o.maxInFlight ?? 4;
+    this.backoffBaseMs = o.backoffBaseMs ?? 15_000;
+    this.backoffMaxMs = o.backoffMaxMs ?? 5 * 60_000;
+    this.maxEntries = o.maxEntries ?? 2_000;
     this.now = o.now ?? Date.now;
+    this.onError = o.onError ?? (() => undefined);
   }
 
   /** Whether any fetch is running or queued. */
@@ -85,9 +92,9 @@ export class Cache<T> {
   private entry(key: string): Entry<T> {
     let e = this.entries.get(key);
     if (e) return e;
-    e = { lastStart: -Infinity, failures: 0, retryAt: 0 };
+    e = { failures: 0, retryAtMs: 0 };
     this.entries.set(key, e);
-    if (this.entries.size > this.size) {
+    if (this.entries.size > this.maxEntries) {
       for (const [k, v] of this.entries) {
         if (k !== key && !v.flight) {
           this.entries.delete(k);
@@ -99,19 +106,22 @@ export class Cache<T> {
   }
 
   private staleOrThrow(e: Entry<T>, err: unknown): Got<T> {
-    if (e.value === undefined) throw err instanceof Error ? err : new Error(errorText(err));
+    if (e.value === undefined) throw asError(err);
     return { value: e.value, served: "stale", error: errorText(err) };
   }
 
   async get(key: string, fetch: () => Promise<T>, o: GetOptions): Promise<Got<T>> {
     const e = this.entry(key);
     const now = this.now();
-    const age = e.at === undefined ? Infinity : now - e.at;
-    const usable = e.value !== undefined && age < o.staleMs;
+    const cached = e.value;
+    const age = e.atMs === undefined ? Infinity : now - e.atMs;
+    const usable = cached !== undefined && age < o.staleMs;
+
+    if (o.force) return this.forced(e, key, fetch);
 
     if (e.flight) {
       this.counters.shared++;
-      if (o.swr && usable) return { value: e.value as T, served: "stale" };
+      if (o.swr && usable) return { value: cached, served: "stale" };
       try {
         return { value: await e.flight, served: "shared" };
       } catch (err) {
@@ -119,21 +129,20 @@ export class Cache<T> {
       }
     }
 
-    const force = o.force === true && now - e.lastStart >= (o.minForceGapMs ?? 5_000);
-    if (e.value !== undefined && age < o.ttlMs && !force) {
+    if (cached !== undefined && age < o.ttlMs && !o.expired) {
       this.counters.hits++;
-      return { value: e.value, served: "hit" };
+      return { value: cached, served: "hit" };
     }
-    if (now < e.retryAt && !force) {
+    if (now < e.retryAtMs) {
       this.counters.hits++;
       return this.staleOrThrow(e, new Error(e.error ?? "backing off"));
     }
 
     this.counters.misses++;
-    const flight = this.start(e, fetch);
+    const flight = this.start(key, e, fetch);
     if (o.swr && usable) {
       flight.catch(() => undefined);
-      return { value: e.value as T, served: "stale" };
+      return { value: cached, served: "stale" };
     }
     try {
       return { value: await flight, served: "fresh" };
@@ -142,36 +151,46 @@ export class Cache<T> {
     }
   }
 
-  /** Forget a key, or every key starting with `prefix`. */
-  invalidate(keyOrPrefix: string, prefix = false) {
-    for (const k of [...this.entries.keys()]) {
-      if (k === keyOrPrefix || (prefix && k.startsWith(keyOrPrefix))) {
-        const e = this.entries.get(k)!;
-        // a running fetch keeps its entry; only the value is dropped
-        if (e.flight) e.at = undefined;
-        else this.entries.delete(k);
-      }
+  /**
+   * A fetch that starts after this call: the caller changed something (merged a PR) and must not be handed a fetch that
+   * began before it. Waits for a running fetch, then runs one more that every forced caller meanwhile shares.
+   */
+  private async forced(e: Entry<T>, key: string, fetch: () => Promise<T>): Promise<Got<T>> {
+    let next = e.forced;
+    if (next) this.counters.shared++;
+    else {
+      const running = e.flight;
+      this.counters.misses++;
+      next = (running ? running.then(undefined, () => undefined) : Promise.resolve()).then(() => {
+        e.forced = undefined;
+        return this.start(key, e, fetch);
+      });
+      if (running) e.forced = next;
+    }
+    try {
+      return { value: await next, served: "fresh" };
+    } catch (err) {
+      return this.staleOrThrow(e, err);
     }
   }
 
   stats(): CacheStats {
     const keys: CacheStats["keys"] = {};
     for (const [k, e] of this.entries) {
-      keys[k] = { ...(e.at === undefined ? {} : { at: e.at }), failures: e.failures, ...(e.error ? { error: e.error } : {}), ...(e.retryAt > this.now() ? { retryAt: e.retryAt } : {}) };
+      keys[k] = { ...(e.atMs === undefined ? {} : { atMs: e.atMs }), failures: e.failures, ...(e.error ? { error: e.error } : {}), ...(e.retryAtMs > this.now() ? { retryAtMs: e.retryAtMs } : {}) };
     }
     return { ...this.counters, inFlight: this.active, queued: this.waiting.length, keys };
   }
 
-  private start(e: Entry<T>, fetch: () => Promise<T>): Promise<T> {
-    const startedAt = this.now();
-    e.lastStart = startedAt;
+  private start(key: string, e: Entry<T>, fetch: () => Promise<T>): Promise<T> {
+    const startedAtMs = this.now();
     this.counters.fetches++;
     const flight = this.limited(fetch).then(
       (value) => {
         e.value = value;
-        e.at = startedAt;
+        e.atMs = startedAtMs;
         e.failures = 0;
-        e.retryAt = 0;
+        e.retryAtMs = 0;
         e.error = undefined;
         e.flight = undefined;
         return value;
@@ -179,8 +198,9 @@ export class Cache<T> {
       (err: unknown) => {
         e.failures++;
         e.error = errorText(err);
-        e.retryAt = this.now() + Math.min(this.base * 2 ** (e.failures - 1), this.cap);
+        e.retryAtMs = this.now() + Math.min(this.backoffBaseMs * 2 ** (e.failures - 1), this.backoffMaxMs);
         e.flight = undefined;
+        this.onError(key, asError(err));
         throw err;
       },
     );
@@ -190,7 +210,7 @@ export class Cache<T> {
 
   /** Run `fn` once a slot is free. A finishing run hands its slot straight to the next waiter. */
   private async limited<R>(fn: () => Promise<R>): Promise<R> {
-    if (this.active >= this.max) await new Promise<void>((resolve) => this.waiting.push(resolve));
+    if (this.active >= this.maxInFlight) await new Promise<void>((resolve) => this.waiting.push(resolve));
     else this.active++;
     try {
       return await fn();

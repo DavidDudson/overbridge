@@ -19,7 +19,8 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - `src/server.ts` is `overbridge serve`: one Bun process per root (`<meta>/server.sock`, `server.pid` doubles as the single-instance lock),
   HTTP over the unix socket. `POST /refresh/top/<ws>` (`?force=1`, `?async=1`) runs `refreshTop` in a worker (`src/server-worker.ts`)
   through `src/server-cache.ts` (pure, fake-clock tested: single flight, TTL from fetch start, stale-while-revalidate, error backoff,
-  in-flight cap); `GET /status` shows its counters. A client of another version gets 409 and the server exits once idle.
+  in-flight cap); `GET /status` shows its counters. A client of another version gets 409; the server also exits (once idle) only when that client started after it.
+  `OVERBRIDGE_NO_SERVER` disables every client. A forced get (`force`) is always a fetch that starts after the call.
   `src/server-net.ts` is the node-only client (the hook imports it: `call`, `notifyRefresh`, `startServer` throttled by `server.start`);
   `src/server-client.ts` is `serverRefresh` for the panel and sweep. A caller that gets `undefined` runs its old path, so keep every
   new caller falling back, and keep panes reading cache files. Tests that call a client pass `start: false` so none starts a real server.

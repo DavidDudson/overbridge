@@ -130,20 +130,72 @@ describe("errors", () => {
       .catch(() => undefined);
     tick(200);
     expect((await cache.get("k", async () => 3, opts)).value).toBe(3);
-    expect(cache.stats().keys.k).toEqual({ at: 2_200, failures: 0 });
+    expect(cache.stats().keys.k).toEqual({ atMs: 2_200, failures: 0 });
   });
 });
 
 describe("force", () => {
-  test("skips the ttl but not more often than the gap", async () => {
+  test("skips the ttl and always fetches", async () => {
     const { cache, tick } = setup();
     let n = 0;
     const fetch = async () => ++n;
     await cache.get("k", fetch, opts);
     tick(10);
-    expect((await cache.get("k", fetch, { ...opts, force: true, minForceGapMs: 5_000 })).served).toBe("hit");
-    tick(5_000);
-    expect(await cache.get("k", fetch, { ...opts, force: true, minForceGapMs: 5_000 })).toMatchObject({ value: 2, served: "fresh" });
+    expect(await cache.get("k", fetch, { ...opts, force: true })).toMatchObject({ value: 2, served: "fresh" });
+  });
+
+  test("never hands back a fetch that began before the call: it waits for the running one, then fetches again", async () => {
+    const { cache } = setup();
+    const g = gate();
+    const early = cache.get("k", g.fetch, opts);
+    const forced = cache.get("k", g.fetch, { ...opts, force: true });
+    await Bun.sleep(0);
+    expect(g.calls).toBe(1);
+    g.settle(0, 1);
+    await Bun.sleep(0);
+    expect(g.calls).toBe(2);
+    g.settle(1, 2);
+    expect((await early).value).toBe(1);
+    expect(await forced).toMatchObject({ value: 2, served: "fresh" });
+  });
+
+  test("forced callers meanwhile share the one follow-up fetch", async () => {
+    const { cache } = setup();
+    const g = gate();
+    void cache.get("k", g.fetch, opts);
+    const a = cache.get("k", g.fetch, { ...opts, force: true });
+    const b = cache.get("k", g.fetch, { ...opts, force: true });
+    g.settle(0, 1);
+    await Bun.sleep(0);
+    g.settle(1, 2);
+    expect([(await a).value, (await b).value]).toEqual([2, 2]);
+    expect(g.calls).toBe(2);
+  });
+});
+
+describe("expired", () => {
+  test("refetches a young value but still shares a running fetch", async () => {
+    const { cache } = setup();
+    const g = gate();
+    const first = cache.get("k", g.fetch, opts);
+    g.settle(0, 1);
+    await first;
+    const a = cache.get("k", g.fetch, { ...opts, expired: true });
+    const b = cache.get("k", g.fetch, { ...opts, expired: true });
+    expect(g.calls).toBe(2);
+    g.settle(1, 2);
+    expect([(await a).value, (await b).value]).toEqual([2, 2]);
+  });
+});
+
+describe("failures are reported", () => {
+  test("onError hears every failed fetch, even one whose caller gets a stale value", async () => {
+    const heard: string[] = [];
+    const { cache, tick } = setup({ onError: (key, e) => heard.push(`${key}: ${e.message}`) });
+    await cache.get("k", async () => 1, opts);
+    tick(2_000);
+    await cache.get("k", async () => Promise.reject(new Error("offline")), opts);
+    expect(heard).toEqual(["k: offline"]);
   });
 });
 
@@ -171,13 +223,5 @@ describe("limits", () => {
     const { cache } = setup({ maxEntries: 2 });
     for (const k of ["a", "b", "c"]) await cache.get(k, async () => 1, opts);
     expect(Object.keys(cache.stats().keys)).toEqual(["b", "c"]);
-  });
-
-  test("invalidate drops a key or a prefix", async () => {
-    const { cache } = setup();
-    for (const k of ["top:a", "top:b", "gh:x"]) await cache.get(k, async () => 1, opts);
-    cache.invalidate("top:a");
-    cache.invalidate("top:", true);
-    expect(Object.keys(cache.stats().keys)).toEqual(["gh:x"]);
   });
 });

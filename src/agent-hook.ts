@@ -104,8 +104,7 @@ export const cacheStale = (metaDir: string, ws: string, now = Date.now()): boole
 
 /**
  * True when the top-panel cache for `ws` is stale and nobody started a refresh recently.
- * Claims the refresh by touching a lock file, so concurrent hooks start one. Only the fallback when the server is
- * down: the server single-flights and rate-limits refreshes itself.
+ * Claims the refresh by touching a lock file, so concurrent hooks start one. The fallback for when no server answers.
  */
 export function claimRefresh(metaDir: string, ws: string, now = Date.now()): boolean {
   const dir = join(metaDir, "top");
@@ -144,7 +143,7 @@ export async function hookMain(): Promise<number> {
     }
     const state = nextState(event, input.source, event === "Notification" ? readAgentState(ws) : undefined, input.reason);
     if (state) recordState(meta, ws, state, Date.now(), state === "done" ? backgroundShells() : [], state === "end" ? input.reason : undefined);
-    // the server decides whether a refresh is due; with none running the hook refreshes on its own, as before
+    // the server decides whether a refresh is due; with none answering the hook refreshes on its own
     if (workspace && cacheStale(meta, workspace) && !(await notifyRefresh(workspace)) && claimRefresh(meta, workspace)) startRefresh(workspace);
   } catch {
     // a status hook must never get in the way of the agent
