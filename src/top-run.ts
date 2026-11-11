@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { AppStatus, logPath, openBrowser, startApp, stopApp, waitReady } from "./apps";
 import { requireWs } from "./commands";
 import { selfCommand } from "./paths";
+import { serverRefresh } from "./server-client";
 import { beginRemoval } from "./remove";
 import { togglePane } from "./panes";
 import { mergePr, setReady } from "./pr-actions";
@@ -120,16 +121,19 @@ export async function topPanel(wsOpt?: string) {
   };
 
   /** Rebuild the cache and redraw; `keep` is a message (an action's result) to leave on the message row afterwards. */
-  const refresh = (keep?: string) => {
+  const refresh = (keep?: string, force = false) => {
     lastRefreshAtMs = Date.now();
     note = keep ?? "refreshing…";
     draw();
-    const self = selfCommand();
-    const child = Bun.spawn({ cmd: [...self, "top", "refresh", "--ws", ws], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
-    void child.exited.then(async () => {
+    void (async () => {
+      // through the server when it is up; otherwise a child process rebuilds the cache, as it always did
+      if (!(await serverRefresh(ws, { force }))) {
+        const child = Bun.spawn({ cmd: [...selfCommand(), "top", "refresh", "--ws", ws], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+        await child.exited;
+      }
       note = keep;
       await reload();
-    });
+    })();
   };
 
   const current = (): Button | undefined => frame.placed[cursor]?.button;
@@ -137,7 +141,7 @@ export async function topPanel(wsOpt?: string) {
     if (!button) return;
     ranPrAction = false;
     note = activate(button, deps) ?? note;
-    if (ranPrAction) return refresh(note);
+    if (ranPrAction) return refresh(note, true);
     await Bun.sleep(150);
     await reload();
   };
@@ -177,7 +181,7 @@ export async function topPanel(wsOpt?: string) {
       if (key === `${ESC}[C` || key === "l" || key === "\t") cursor = n ? (cursor + 1) % n : 0;
       else if (key === `${ESC}[D` || key === "h" || key === `${ESC}[Z`) cursor = n ? (cursor + n - 1) % n : 0;
       else if (key === "\r" || key === " ") return void act(current());
-      else if (key === "r") return refresh();
+      else if (key === "r") return refresh(undefined, true);
       else if (key === "o") {
         const url = current() && openTarget(current()!);
         if (url) openBrowser(url);

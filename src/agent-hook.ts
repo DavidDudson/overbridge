@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { type AgentState, agentStatePath, CONTINUING_END_REASONS, readAgentState } from "./agent-state";
 import { backgroundShells } from "./bg-tasks";
 import { envVar, ORCHESTRATION_ENV, root, selfCommand, silenceLegacyWarnings } from "./paths";
+import { notifyRefresh } from "./server-net";
 
 /**
  * Claude Code hook that records what a workspace's agent is doing, for the sidebar glyphs.
@@ -98,13 +99,17 @@ export function recordState(metaDir: string, ws: string, state: AgentState, now 
   renameSync(tmp, file);
 }
 
+/** Whether the top-panel cache file for `ws` is old enough to refresh. */
+export const cacheStale = (metaDir: string, ws: string, now = Date.now()): boolean => ageMs(join(metaDir, "top", `${ws}.json`), now) >= REFRESH_AFTER_MS;
+
 /**
  * True when the top-panel cache for `ws` is stale and nobody started a refresh recently.
- * Claims the refresh by touching a lock file, so concurrent hooks start one.
+ * Claims the refresh by touching a lock file, so concurrent hooks start one. Only the fallback when the server is
+ * down: the server single-flights and rate-limits refreshes itself.
  */
 export function claimRefresh(metaDir: string, ws: string, now = Date.now()): boolean {
   const dir = join(metaDir, "top");
-  if (ageMs(join(dir, `${ws}.json`), now) < REFRESH_AFTER_MS) return false;
+  if (!cacheStale(metaDir, ws, now)) return false;
   const lock = join(dir, `${ws}.refresh`);
   if (ageMs(lock, now) < REFRESH_LOCK_MS) return false;
   mkdirSync(dir, { recursive: true });
@@ -139,7 +144,8 @@ export async function hookMain(): Promise<number> {
     }
     const state = nextState(event, input.source, event === "Notification" ? readAgentState(ws) : undefined, input.reason);
     if (state) recordState(meta, ws, state, Date.now(), state === "done" ? backgroundShells() : [], state === "end" ? input.reason : undefined);
-    if (workspace && claimRefresh(meta, workspace)) startRefresh(workspace);
+    // the server decides whether a refresh is due; with none running the hook refreshes on its own, as before
+    if (workspace && cacheStale(meta, workspace) && !(await notifyRefresh(workspace)) && claimRefresh(meta, workspace)) startRefresh(workspace);
   } catch {
     // a status hook must never get in the way of the agent
   }

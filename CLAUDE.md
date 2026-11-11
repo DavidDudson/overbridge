@@ -4,7 +4,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 
 - `src/cli.ts` is a thin entry with no static imports; `src/main.ts` holds arg dispatch → `src/commands.ts`.
   `overbridge hook` (`src/agent-hook.ts`) runs on every tool call, so it is dispatched before `main.ts`
-  loads; keep its imports to `paths.ts`, `agent-state.ts`, `bg-tasks.ts`, `proc.ts` and node builtins.
+  loads; keep its imports to `paths.ts`, `agent-state.ts`, `bg-tasks.ts`, `proc.ts`, `server-net.ts`, `version.ts` and node builtins.
   Process lookups go through `src/proc.ts` (`/proc` on Linux, `ps` on macOS); never read `/proc` directly.
 - Per-repo config: `src/project-config.ts` parses and validates `overbridge.yml` (`overbridge.schema.json` and
   `overbridge.example.yml` must track its keys). The root `config.yml` layers over it (`loadRootLayers`, `resolveConfig`:
@@ -16,6 +16,13 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   Global config is `repos.toml` (`src/config.ts`, e.g. `[sidebar] width`).
   Keep code generic: no repo names, ports, URLs or branch conventions outside that config.
   This repo dogfoods its own `overbridge.yml` (checked by `test/config-errors.test.ts`).
+- `src/server.ts` is `overbridge serve`: one Bun process per root (`<meta>/server.sock`, `server.pid` doubles as the single-instance lock),
+  HTTP over the unix socket. `POST /refresh/top/<ws>` (`?force=1`, `?async=1`) runs `refreshTop` in a worker (`src/server-worker.ts`)
+  through `src/server-cache.ts` (pure, fake-clock tested: single flight, TTL from fetch start, stale-while-revalidate, error backoff,
+  in-flight cap); `GET /status` shows its counters. A client of another version gets 409 and the server exits once idle.
+  `src/server-net.ts` is the node-only client (the hook imports it: `call`, `notifyRefresh`, `startServer` throttled by `server.start`);
+  `src/server-client.ts` is `serverRefresh` for the panel and sweep. A caller that gets `undefined` runs its old path, so keep every
+  new caller falling back, and keep panes reading cache files. Tests that call a client pass `start: false` so none starts a real server.
 - Work items: `src/pm/` (`Provider` interface, `github.ts`, `jira.ts`, title cache); `src/item.ts` is `overbridge item`.
   Providers and apps take injectable runners so tests never need `gh`, `jira` or real processes.
 - Apps: `src/apps.ts` (launch, teardown, port pool, status) and `src/app-command.ts` (`overbridge app`).

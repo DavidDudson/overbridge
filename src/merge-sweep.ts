@@ -46,6 +46,15 @@ export const everyClaimHasPr = (w: WorkspaceState): boolean => {
   return claims.length > 0 && claims.every((c) => c.pr !== undefined);
 };
 
+/** The workspaces a sweep checks: every claim has a PR and none is being removed. */
+export const sweepCandidates = (): string[] =>
+  Object.entries(readState().workspaces)
+    .filter(([ws, w]) => !isOrchestrationTab(ws) && !isRemoving(w) && everyClaimHasPr(w))
+    .map(([ws]) => ws);
+
+/** Candidates whose cache is old enough for the sweep to refresh. */
+export const staleCandidates = (now: number = Date.now()): string[] => sweepCandidates().filter((ws) => now - readTopCache(ws).at >= MERGE_SWEEP_MS);
+
 export interface SweepDeps {
   refresh: (ws: string) => void;
   /** Start removing `ws`; returns a refusal message, or undefined once under way. */
@@ -66,9 +75,7 @@ const defaultSweepDeps = (): SweepDeps => ({
  * at rest, and mark the ones held back by unsaved work. Returns each checked workspace's verdict.
  */
 export function sweepMerged(deps: SweepDeps = defaultSweepDeps()): Record<string, Verdict> {
-  const candidates = Object.entries(readState().workspaces)
-    .filter(([ws, w]) => !isOrchestrationTab(ws) && !isRemoving(w) && everyClaimHasPr(w))
-    .map(([ws]) => ws);
+  const candidates = sweepCandidates();
   const verdicts = Object.fromEntries(candidates.map((ws) => [ws, checkOne(ws, deps)] as const));
   recordBlocks(verdicts);
   Object.entries(verdicts)
