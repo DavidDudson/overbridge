@@ -15,7 +15,7 @@ import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-h
 import { isIceboxed, isRemoving, isWorkspaceState, RemovalBlock, readState, type Removing, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
 import { claimSweep, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
-import { readTopCache, readTopCacheChecked, sidebarLabel } from "./top";
+import { readTopCache, readTopCacheChecked, sidebarLabel, type TopCache } from "./top";
 import { currentTab, tabOrder } from "./tab";
 import { createPainter, readView, shouldPoll } from "./zellij-view";
 import { errorMessage, naturalSort, run, spawnCwd } from "./util";
@@ -60,6 +60,8 @@ export interface Entry {
   blocked?: RemovalBlock;
   /** The session ended, but uncommitted or unpushed work keeps the workspace. */
   unsaved?: boolean;
+  /** Stacked PRs of this workspace, bottom first, with the claimed one's number; one compact line each. */
+  stacks?: { prs: number[]; current: number }[];
   /** This entry could not be read: a bad cache or state record, or a reader that threw. Replaces the status line. */
   fault?: string;
 }
@@ -85,6 +87,13 @@ function guardedEntry(tab: string, section: Section, build: () => Entry, label =
   }
 }
 
+/** The stacks in `cache`: each claimed stacked PR's layers, bottom first. */
+const stacksOf = (cache: Pick<TopCache, "links">): NonNullable<Entry["stacks"]> =>
+  cache.links.flatMap((l) => (l.pr && l.pr.stack.length > 1 && l.pr.claimed !== false ? [{ prs: l.pr.stack, current: l.pr.number }] : []));
+
+/** `stack 12·[13]·14`: the claimed layer in brackets, layers in order bottom to top. */
+const stackText = (s: { prs: number[]; current: number }) => `stack ${s.prs.map((n) => (n === s.current ? `[${n}]` : String(n))).join("·")}`;
+
 /** The card for workspace `ws` whose state record is `w`: a fault card when the record or its top cache is malformed. */
 function workspaceEntry(ws: string, w: unknown): Entry {
   const recordFault = workspaceFault(w);
@@ -94,7 +103,8 @@ function workspaceEntry(ws: string, w: unknown): Entry {
   const { removeError: error, removalBlocked: blocked } = w as WorkspaceState;
   const { cache, fault } = readTopCacheChecked(ws);
   const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
-  return { ...entry, ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}) };
+  const stacks = stacksOf(cache);
+  return { ...entry, ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}) };
 }
 
 /** `w` as the record of a workspace being removed right now, else undefined; a malformed record is never one. */
@@ -236,7 +246,7 @@ function titleRows(e: Entry, index: number, inner: number): string[] {
 }
 
 /** Screen rows one entry takes: its wrapped title and a status line. */
-export const entryHeight = (e: Entry, index: number, inner: number) => titleRows(e, index, inner).length + 1;
+export const entryHeight = (e: Entry, index: number, inner: number) => titleRows(e, index, inner).length + 1 + (e.stacks?.length ?? 0);
 
 /** Row heights for the whole list in a pane `width` columns wide. */
 export const entryHeights = (list: Entry[], width: number) => list.map((e, i) => entryHeight(e, i, Math.max(1, width - 4)));
@@ -247,8 +257,9 @@ export function entryLines(e: Entry, index: number, selected: boolean, inner: nu
   const status = statusFor(e);
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
   const sub = fit(`${indent}${status?.text ?? ""}`, inner);
-  if (selected) return [...titles, sub].map(inverse);
-  return [...titles, status ? colorize(sub, status.color) : sub];
+  const stacks = (e.stacks ?? []).map((st) => fit(`${indent}${stackText(st)}`, inner));
+  if (selected) return [...titles, sub, ...stacks].map(inverse);
+  return [...titles, status ? colorize(sub, status.color) : sub, ...stacks.map(dim)];
 }
 
 const elapsed = (sinceMs: number, now: number) => {
