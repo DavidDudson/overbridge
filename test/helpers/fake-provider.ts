@@ -1,5 +1,5 @@
 import type { NewItem, Provider, WorkItem } from "../../src/pm/provider";
-import { slug } from "../../src/pm/provider";
+import { ItemStatus, slug } from "../../src/pm/provider";
 
 export type FakeCreated = NewItem & { id: string };
 
@@ -7,6 +7,7 @@ export type FakeCreated = NewItem & { id: string };
 export function fakeProvider(
   items: WorkItem[] = [],
   name: "github" | "jira" = "github",
+  done: readonly string[] = [],
 ): Provider & { calls: number; created: FakeCreated[]; bodies: Map<string, string> } {
   const byId = new Map(items.map((i) => [i.id, i]));
   const bodies = new Map<string, string>();
@@ -23,6 +24,7 @@ export function fakeProvider(
       this.calls++;
       return byId.get(id)?.title;
     },
+    status: (id) => (done.includes(id) ? ItemStatus.Done : byId.has(id) ? ItemStatus.Open : undefined),
     assigned: () => items,
     itemTypes: () => [],
     branchName: (item) => `feat/${item.id}-${slug(item.title)}`,

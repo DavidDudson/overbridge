@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import * as cmd from "./commands";
 import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
+import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
@@ -72,7 +73,11 @@ Workspaces
                                         dev shell, queued across workspaces, several at once while the load allows;
                                         killed on timeout or when it stops using CPU (check-queue in overbridge.yml)
   overbridge rm <name> [--force]              remove a workspace and its worktrees (the top panel's
-                                        Cleanup button does this once the PR is open and nothing is unpushed)
+                                        Cleanup button does this once the PR is open and nothing is unpushed);
+                                        also removes an orphan: a workspace folder that status does not list
+  overbridge cleanup [--json] [--no-fetch]      report what each workspace and orphan folder is fit for: remove,
+                                        review (unsaved work), rebind, ask or keep. Removes nothing; --dry-run
+                                        is accepted and changes nothing (the cleanup skill acts on the report)
   overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty state
   overbridge whoami                             workspace for the current dir/session
 
@@ -194,6 +199,12 @@ async function main(argv: string[]): Promise<number> {
       } else {
         cmd.removeWorkspace(positionals[0]!, !!values.force);
       }
+      break;
+    }
+    case "cleanup": {
+      const { values, positionals } = opts(rest, { json: { type: "boolean" }, "no-fetch": { type: "boolean" }, "dry-run": { type: "boolean" } });
+      if (positionals.length) throw new OverbridgeError("usage: overbridge cleanup [--json] [--no-fetch]");
+      cleanup(values.json ? Format.Json : Format.Table, values["no-fetch"] ? Fetch.No : Fetch.Yes);
       break;
     }
     case "status":

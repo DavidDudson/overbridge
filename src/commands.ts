@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
 import { configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, rootConfigPath } from "./project-config";
 import { agentDirOf, chooseLayout, userLayoutPath } from "./layout";
 import { isOrchestrationTab, orchestrationRemoveMessage, type OrchestrationTab } from "./orchestration";
+import { isOrphan, strayFiles, worktreesIn } from "./orphan";
 import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
 import { barePath, currentWorkspace, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, sessionName, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
@@ -114,7 +115,11 @@ export function removeWorkspace(ws: string, force: boolean) {
   if (isOrchestrationTab(ws)) {
     fail(orchestrationRemoveMessage(ws));
   }
-  const w = getWorkspace(readState(), ws);
+  const state = readState();
+  if (isOrphan(ws, state)) {
+    return removeOrphan(ws, force);
+  }
+  const w = getWorkspace(state, ws);
   if (!force) {
     const dirty = Object.keys(w.repos).filter((r) => git.isDirty(worktreePath(ws, r)));
     if (dirty.length) fail(`${ws} has uncommitted changes in: ${dirty.join(", ")} (use --force to discard)`);
@@ -134,15 +139,45 @@ export function removeWorkspace(ws: string, force: boolean) {
     removed.push(r);
   }
   for (const repo of Object.keys(w.repos)) untrustFolder(worktreePath(ws, repo)); // the agent may have started in one
-  untrustFolder(wsDir(ws));
-  rmSync(wsDir(ws), { recursive: true, force: true });
-  // per-workspace files outside the workspace dir: top cache, agent state, sidebar pane, tab layout
-  for (const f of [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`)])
-    rmSync(join(metaDir(), f), { force: true });
+  removeFolder(ws);
   withState((s) => {
     delete s.workspaces[ws];
   });
   log(`removed ${ws}`);
+}
+
+/** Delete `ws`'s folder and its per-workspace files outside it: top cache, agent state, sidebar pane, tab layout. */
+function removeFolder(ws: string) {
+  untrustFolder(wsDir(ws));
+  rmSync(wsDir(ws), { recursive: true, force: true });
+  [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`)].forEach((f) =>
+    rmSync(join(metaDir(), f), { force: true }),
+  );
+}
+
+/**
+ * Remove an orphan: a workspace folder state does not list (`isOrphan`). Its registered worktrees are removed from
+ * their bare repos and pruned, then the folder goes. Without `force` it refuses when a worktree holds uncommitted
+ * changes or commits on no remote branch, or the folder holds files that are neither a worktree nor generated.
+ */
+export function removeOrphan(name: string, force: boolean) {
+  const worktrees = worktreesIn(name);
+  if (!force) {
+    const unsaved = worktrees.filter((w) => git.isDirty(w.path) || git.hasUnpushed(w.path)).map((w) => w.repo);
+    if (unsaved.length) {
+      fail(`orphan ${name} has uncommitted changes or unpushed commits in: ${unsaved.join(", ")}; nothing was removed (use --force to discard)`);
+    }
+    const stray = strayFiles(wsDir(name), worktrees.map((w) => basename(w.path)));
+    if (stray.length) {
+      fail(`orphan ${name} holds files outside its worktrees: ${stray.join(", ")}; nothing was removed (move them, or use --force to discard)`);
+    }
+  }
+  worktrees.forEach((w) => {
+    git.removeWorktree(getRepo(w.repo), w.path, force);
+    untrustFolder(w.path);
+  });
+  removeFolder(name);
+  log(`removed orphan ${name}${worktrees.length ? ` (worktrees: ${worktrees.map((w) => w.repo).join(", ")})` : ""}`);
 }
 
 /**
@@ -444,7 +479,7 @@ export function whoami() {
   console.log(currentWorkspace() ?? fail("not inside a workspace"));
 }
 
-function table(header: string[], rows: string[][]) {
+export function table(header: string[], rows: string[][]) {
   const all = [header, ...rows];
   const widths = header.map((_, i) => Math.max(...all.map((r) => (r[i] ?? "").length)));
   for (const r of all) console.log(r.map((c, i) => (c ?? "").padEnd(widths[i]!)).join("  ").trimEnd());
