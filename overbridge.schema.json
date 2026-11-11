@@ -116,6 +116,18 @@
         }
       ]
     },
+    "icebox": {
+      "description": "What `overbridge icebox --prune` may delete. Every key is optional.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prune": {
+          "description": "Repo-relative paths removed by `icebox --prune`, such as node_modules or target. Only paths git ignores and does not track are deleted; no `..`, absolute paths, globs, `.git` or `.claude`.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!\\.git(/|$))(?!\\.claude(/|$))(?!.*(^|/)\\.\\.(/|$))[^*?\\[\\\\:]+$" }
+        }
+      }
+    },
     "check-queue": {
       "description": "How `overbridge check` queues a command. Every key is optional.",
       "type": "object",

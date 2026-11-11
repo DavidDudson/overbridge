@@ -82,10 +82,13 @@ Workspaces
   overbridge cleanup [--json] [--no-fetch]      report what each workspace and orphan folder is fit for: remove,
                                         review (unsaved work), rebind, ask or keep. Removes nothing; --dry-run
                                         is accepted and changes nothing (the cleanup skill acts on the report)
-  overbridge icebox <name>                      pause a workspace: stop its apps and checks, write a handoff, close
-                                        its tab; keeps claims and worktrees; refuses with unsaved work
+  overbridge icebox <name> [--prune] [--drop-worktree]
+                                        pause a workspace: stop its apps and checks, write a handoff, close
+                                        its tab; keeps claims; refuses with unsaved work. --prune deletes the
+                                        repo's icebox.prune paths (never tracked files); --drop-worktree removes
+                                        the worktrees, keeping the branches. Nothing is reclaimed without a flag
   overbridge thaw <name>                        reopen an iceboxed workspace's tab, its agent resuming and
-                                        reading the handoff
+                                        reading the handoff; recreates dropped worktrees on their branches
   overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty and iceboxed state
   overbridge whoami                             workspace for the current dir/session
 
@@ -278,9 +281,9 @@ async function main(argv: string[]): Promise<number> {
       break;
     }
     case "icebox": {
-      const { positionals } = opts(rest, {});
-      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge icebox <name>");
-      const handoff = await icebox(cmd.requireWs(positionals[0]!));
+      const { values, positionals } = opts(rest, { prune: { type: "boolean" }, "drop-worktree": { type: "boolean" } });
+      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge icebox <name> [--prune] [--drop-worktree]");
+      const handoff = await icebox(cmd.requireWs(positionals[0]!), { prune: values.prune, dropWorktree: values["drop-worktree"] });
       console.log(`iceboxed ${positionals[0]}; handoff at ${handoff}`);
       break;
     }

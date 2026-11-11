@@ -87,6 +87,14 @@ iceboxed. Claims and worktrees stay, so nothing else can take its branch or PR. 
 reopens the tab, the agent continuing its conversation and reading the handoff. If every PR of an iceboxed
 workspace merges, the merged-PR check removes it like any other.
 
+Nothing is reclaimed unless you ask. `icebox <name> --prune` deletes the paths listed in the repo's
+`icebox.prune` (`node_modules`, `target`) once the workspace is marked iceboxed, skipping anything git does not ignore,
+anything it tracks, and anything that leaves the repo through a symlink. `.git` and `.claude` are never valid paths. `icebox <name> --drop-worktree` removes the worktrees, keeping every claimed branch, so the
+workspace folder is empty (the name stays reserved by its claims) and the sidebar row reads `❄ <name> iceboxed · dropped`. `thaw` recreates each worktree
+on its claimed branch under the same workspace name; it refuses, leaving the workspace iceboxed, when a folder is in
+the way or git cannot check the branch out. It refuses up front when a worktree holds ignored files (a `.env`) that
+`--prune` would not delete, since git does not count them as unsaved work. Both flags can be combined.
+
 **Seeing what was removed.** The bottom of the sidebar shows `🧹 next check 42s`, a countdown to the next merged-PR check.
 Below it, a yellow `🧹 removing <title>` row shows a removal in progress and a grey `🧹 removed <title>` row one that finished;
 a failed one shows red as `✗ failed <title>`. Finished rows stay until the next check, then drop off. The sidebar shows at most
@@ -369,6 +377,7 @@ it has run, and who is waiting.
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
 | `check-queue.wait-seconds` | `900` | give up (exit 75) when a run cannot start for this long, because of the queue ahead, `max-parallel`, or the load |
+| `icebox.prune` | `[]` | repo-relative paths `overbridge icebox --prune` deletes, such as `node_modules` or `target`; only paths git ignores and does not track. No `..`, absolute paths, globs, `.git` or `.claude` |
 | `shell` | none | the repo's dev shell: a command prefix (`nix develop --command`, `direnv exec .`), or a mapping `enter` (the prefix), `env` (a command printing the env NUL-separated, as `env -0` does) and `key` (repo-relative files whose contents invalidate the cached env; needs `env`). See [Dev shells](#dev-shells) |
 | `review.personas` | auto | reviewer personas to run; unset selects by diff signals |
 | `review.exclude` | `[]` | personas to skip, applied after selection |

@@ -14,8 +14,10 @@ export type Removing = { since: string; cause?: CleanupCause; pid?: number };
 /** Why a workspace that would be removed by itself is kept; shown on its sidebar card. */
 export const RemovalBlock = { MergedUnsaved: "merged-unsaved" } as const;
 export type RemovalBlock = (typeof RemovalBlock)[keyof typeof RemovalBlock];
-/** A paused workspace: no tab, no processes, claims and worktrees kept. */
-export type Iceboxed = { since: string; handoff?: string };
+/** A repo whose worktree `icebox --drop-worktree` removed, and the branch it was on; `thaw` recreates it there. */
+export type DroppedRepo = { repo: string; branch?: string };
+/** A paused workspace: no tab, no processes, claims kept. */
+export type Iceboxed = { since: string; handoff?: string; dropped?: DroppedRepo[] };
 export type WorkspaceState = {
   created: string;
   repos: Record<string, Claim>;
