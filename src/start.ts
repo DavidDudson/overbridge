@@ -1,6 +1,7 @@
 import { checkout, createWorkspace, holdings, removeWorkspace } from "./commands";
 import { getRepo, type RepoSpec } from "./config";
 import * as git from "./git";
+import { thaw } from "./icebox";
 import { barePath, currentWorkspace, NAME_RE, worktreePath } from "./paths";
 import { type PluginProblems, pluginProblems } from "./plugins";
 import { providerFor } from "./pm";
@@ -10,7 +11,7 @@ import { scaffold } from "./scaffold";
 import { switchTab } from "./sidebar";
 import { openTab, TabFocus, tabOrder, type ZellijExec } from "./tab";
 import { cover, hasGhStack, localStacks } from "./stack";
-import { type Claim, claimOwner, isRemoving, readState, type State } from "./state";
+import { type Claim, claimOwner, isIceboxed, isRemoving, readState, type State } from "./state";
 import { fail, log, must, run } from "./util";
 
 /**
@@ -34,9 +35,14 @@ type TabPrompt = { prompt?: string; defaultPrompt?: string };
 
 /**
  * Bring `ws`'s tab to the front, since you asked for it, opening one with `prompt` (else `defaultPrompt`) when
- * it has none. An open tab already has its agent, so only an explicit `prompt` is reported as not sent.
+ * it has none (an iceboxed workspace is thawed instead). An open tab already has its agent, so only an explicit `prompt` is reported as not sent.
  */
 export function showTab(ws: string, prompts: TabPrompt = {}, exec: ZellijExec = run) {
+  if (isIceboxed(readState().workspaces[ws])) {
+    // an iceboxed workspace has no tab and its agent has a handoff to read, so asking for it thaws it
+    thaw(ws, { open: (name, prompt) => openTab(name, prompt, TabFocus.Foreground, exec, true) });
+    return;
+  }
   if (process.env.ZELLIJ && tabOrder(exec).includes(ws)) {
     switchTab(ws, exec);
     if (prompts.prompt) {

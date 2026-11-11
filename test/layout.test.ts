@@ -125,11 +125,10 @@ describe("newTabKdl", () => {
     expect(kdl).not.toContain("status-bar");
   });
 
-  test("a prompt reaches the agent after `--`; resuming wins over it", () => {
+  test("a prompt reaches the agent after `--`; resuming continues the conversation first", () => {
     expect(newTabKdl("ENG-1", self, { prompt: "/start-item ENG-1" })).toContain('args "claude" "ENG-1" "--" "/start-item ENG-1"');
     const resumed = newTabKdl("ENG-1", self, { prompt: "/start-item ENG-1", resume: true });
-    expect(resumed).toContain('"--continue"');
-    expect(resumed).not.toContain("/start-item");
+    expect(resumed).toContain('args "claude" "ENG-1" "--continue" "--" "/start-item ENG-1"');
   });
 });
 

@@ -28,7 +28,7 @@ export interface RemovalDeps {
   inZellij: boolean;
 }
 
-const defaultDeps = (): RemovalDeps => ({
+export const defaultDeps = (): RemovalDeps => ({
   exec: (cmd) => run(cmd),
   spawnWorker: spawnFinishWorker,
   inZellij: !!process.env.ZELLIJ,
@@ -120,7 +120,7 @@ export function beginRemoval(ws: string, opts: { previous?: string; landing?: La
 }
 
 /** Switch to `landing` first, then close `ws`'s tab by id, so the close never depends on which tab has focus. */
-function leaveTab(ws: string, landing: string | undefined, exec: RemovalDeps["exec"]) {
+export function leaveTab(ws: string, landing: string | undefined, exec: RemovalDeps["exec"]) {
   if (landing !== undefined) {
     switchTab(landing, exec);
   }
@@ -153,10 +153,7 @@ export async function finishRemoval(ws: string): Promise<void> {
     if (!cleanable(ws)) {
       fail(`${ws} is no longer clean (no open or merged PRs, or uncommitted or unpushed work); not removed`);
     }
-    const { apps } = await snapshotTop(ws);
-    apps
-      .filter((app) => app.status === AppStatus.Running || app.status === AppStatus.Starting)
-      .forEach((app) => stopApp(ws, app.repo, app.spec, app.repoDir));
+    await stopApps(ws);
     removeWorkspace(ws, false);
     recordCleanup({ ws, label, atMs: Date.now(), outcome: CleanupOutcome.Removed, cause });
   } catch (e) {
@@ -164,6 +161,14 @@ export async function finishRemoval(ws: string): Promise<void> {
     recordCleanup({ ws, label, atMs: Date.now(), outcome: CleanupOutcome.Failed, cause });
     throw e;
   }
+}
+
+/** Stop every app of `ws` that is running or starting. */
+export async function stopApps(ws: string): Promise<void> {
+  const { apps } = await snapshotTop(ws);
+  apps
+    .filter((app) => app.status === AppStatus.Running || app.status === AppStatus.Starting)
+    .forEach((app) => stopApp(ws, app.repo, app.spec, app.repoDir));
 }
 
 function restore(ws: string, error: string) {

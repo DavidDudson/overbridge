@@ -12,7 +12,7 @@ import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
 import { ensureOrchestrationTabs } from "./orchestration-keep";
 import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-history";
-import { isRemoving, isWorkspaceState, RemovalBlock, readState, type Removing, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
+import { isIceboxed, isRemoving, isWorkspaceState, RemovalBlock, readState, type Removing, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
 import { claimSweep, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache, readTopCacheChecked, sidebarLabel } from "./top";
@@ -101,6 +101,16 @@ function workspaceEntry(ws: string, w: unknown): Entry {
 const removingRecord = (w: unknown, now = Date.now()): (WorkspaceState & { removing: Removing }) | undefined =>
   isWorkspaceState(w) && w.removing && isRemoving(w, now) ? (w as WorkspaceState & { removing: Removing }) : undefined;
 
+/** Whether `w` is iceboxed: it has no tab, so it gets no card and no digit. A malformed record is never one. */
+const isIced = (workspaces: Record<string, unknown>, ws: string): boolean => {
+  try {
+    const w = workspaces[ws];
+    return isWorkspaceState(w) && isIceboxed(w);
+  } catch {
+    return false; // a record that throws is a card to show, never one to hide
+  }
+};
+
 /**
  * Whether `workspaces[ws]` hides its workspace as being removed. Reading the record and checking its worker's pid
  * both happen inside the guard: a record that throws is a card to show, never one to hide.
@@ -120,7 +130,7 @@ const hiddenByRemoval = (workspaces: Record<string, unknown>, ws: string): boole
  */
 export function entries(order: string[] = tabOrder(), state: State = readState()): Entry[] {
   const workspaces: Record<string, unknown> = state.workspaces;
-  const names = Object.keys(workspaces).filter((ws) => !hiddenByRemoval(workspaces, ws)).sort(naturalSort);
+  const names = Object.keys(workspaces).filter((ws) => !hiddenByRemoval(workspaces, ws) && !isIced(workspaces, ws)).sort(naturalSort);
   const rank = (ws: string) => { const i = order.indexOf(ws); return i < 0 ? order.length : i; };
   return [
     ...ORCHESTRATION_TABS.map((t) => guardedEntry(t.tab, Section.Orchestration, () => entryFor(t.tab, Section.Orchestration, t.label), t.label)),
@@ -251,6 +261,15 @@ export function queueRows(queue: { running: Ticket[]; waiting: Ticket[] }, inner
   const running = queue.running.map((t) => colorize(fit(`▶ ${t.ws} ${elapsed(t.runningSinceMs ?? now, now)} ${t.command}`, inner), "blue"));
   const waiting = queue.waiting.length ? [dim(fit(`⧗ ${queue.waiting.length} waiting: ${queue.waiting.map((t) => t.ws).join(" ")}`, inner))] : [];
   return [...running, ...waiting];
+}
+
+/** Iceboxed workspaces, one dim row each under the divider; they have no tab, so no card and no digit. */
+export function icedRows(state: State, inner: number): string[] {
+  const workspaces = state.workspaces as Record<string, unknown>;
+  return Object.keys(workspaces)
+    .filter((ws) => isIced(workspaces, ws))
+    .sort(naturalSort)
+    .map((ws) => dim(fit(`❄ ${ws} iceboxed`, inner)));
 }
 
 /** Workspaces being removed in the background right now, labelled as their cards were; a malformed record is skipped (its card reports it). */
@@ -653,7 +672,7 @@ export async function sidebar(wsOpt?: string) {
     readState: tryReadState,
     entries,
     reap: createReaper(),
-    status: (state, inner) => [...cleanupRows(inFlightCleanups(state), cleanupRecords(state.cleanups), inner, Date.now(), state.mergeSweepAt), ...queueRows(readQueue(), inner)],
+    status: (state, inner) => [...icedRows(state, inner), ...cleanupRows(inFlightCleanups(state), cleanupRecords(state.cleanups), inner, Date.now(), state.mergeSweepAt), ...queueRows(readQueue(), inner)],
     limits: readLimits,
   };
   let last: Model = EMPTY_MODEL;

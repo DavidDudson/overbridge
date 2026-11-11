@@ -121,6 +121,8 @@ const OVERBRIDGE_ALLOWED: Record<string, readonly string[]> = {
   next: [],
   start: [],
   rm: [],
+  icebox: [],
+  thaw: [],
   cleanup: [],
   release: [],
   up: [],

@@ -46,14 +46,14 @@ export function currentTab(exec: ZellijExec = zellijQuery): string | undefined {
  * Open `ws` as a new tab of the running zellij session, its agent starting with `prompt`. In the background
  * (the default) focus returns to the tab you were on. Outside zellij there is no session to add to, so say how to get one.
  */
-export function openTab(ws: string, prompt?: string, focus: TabFocus = TabFocus.Background, exec: ZellijExec = run) {
+export function openTab(ws: string, prompt?: string, focus: TabFocus = TabFocus.Background, exec: ZellijExec = run, resume = false) {
   if (!process.env.ZELLIJ) {
     return log(`${ws} has no tab outside zellij; run \`overbridge up\` to open it`);
   }
   const dir = join(metaDir(), "tabs");
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${ws}.kdl`);
-  writeFileSync(file, newTabKdl(ws, selfCommand(), { sidebarWidth: sidebarWidth(), focus: true, agentCwd: agentDirOf(ws), ...(prompt ? { prompt } : {}) }));
+  writeFileSync(file, newTabKdl(ws, selfCommand(), { sidebarWidth: sidebarWidth(), focus: true, agentCwd: agentDirOf(ws), ...(prompt ? { prompt } : {}), ...(resume ? { resume } : {}) }));
   const back = focus === TabFocus.Background ? currentTab(exec) : undefined;
   const r = exec(["zellij", "action", "new-tab", "--layout", file, "--name", ws]);
   if (!r.ok) {

@@ -15,7 +15,7 @@ import { runCheck } from "./check-queue";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
-import { type Claim, claimOwner, getWorkspace, readState, withState } from "./state";
+import { type Claim, claimOwner, getWorkspace, isIceboxed, readState, withState } from "./state";
 import { exec, fail, log, must, naturalSort, run, shellQuote } from "./util";
 
 /** What a workspace really holds in `repo`: its claim, its worktree head, and the stacks of either. */
@@ -291,14 +291,15 @@ export function status(all: boolean, json: boolean) {
   const names = (all || !cur ? Object.keys(s.workspaces) : [cur]).sort(naturalSort);
   const rows = names.flatMap((ws) => {
     const repos = Object.entries(getWorkspace(s, ws).repos);
+    const iceboxed = isIceboxed(getWorkspace(s, ws));
     if (!repos.length)
-      return [{ ws, repo: "", branch: "", pr: undefined as number | undefined, head: "", dirty: false, stack: undefined as Stack | undefined }];
+      return [{ ws, repo: "", branch: "", pr: undefined as number | undefined, head: "", dirty: false, iceboxed, stack: undefined as Stack | undefined }];
     return repos.map(([repo, c]) => {
       const wt = worktreePath(ws, repo);
       const head = git.head(wt);
       const stacks = localStacks(repo);
       const stack = stackOf(stacks, head) ?? stackOf(stacks, c.branch);
-      return { ws, repo, branch: c.branch ?? "", pr: c.pr, head, dirty: git.isDirty(wt), stack };
+      return { ws, repo, branch: c.branch ?? "", pr: c.pr, head, dirty: git.isDirty(wt), iceboxed, stack };
     });
   });
   if (json) return console.log(JSON.stringify(rows, null, 2));
@@ -316,15 +317,17 @@ export function status(all: boolean, json: boolean) {
       r.pr ? `#${r.pr}` : "",
       r.head === r.branch ? "" : r.head,
       stackCell(r),
-      r.dirty ? "dirty" : "",
+      [r.iceboxed ? "iceboxed" : "", r.dirty ? "dirty" : ""].filter(Boolean).join(" "),
     ]),
   );
 }
 
+/** The workspaces that get a tab: every one but the iceboxed (`thaw` reopens those). */
 function workspaceNames(): string[] {
-  const names = Object.keys(readState().workspaces).sort(naturalSort);
+  const all = readState().workspaces;
+  const names = Object.keys(all).sort(naturalSort);
   if (!names.length) fail("no workspaces yet; create one with `overbridge new`");
-  return names;
+  return names.filter((ws) => !isIceboxed(all[ws]));
 }
 
 /** Print the layout `up` would use; stderr says whether it is the user's file or the generated one. */

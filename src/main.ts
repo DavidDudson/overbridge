@@ -4,6 +4,7 @@ import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
 import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
+import { icebox, thaw } from "./icebox";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
 import { next } from "./next";
@@ -79,7 +80,11 @@ Workspaces
   overbridge cleanup [--json] [--no-fetch]      report what each workspace and orphan folder is fit for: remove,
                                         review (unsaved work), rebind, ask or keep. Removes nothing; --dry-run
                                         is accepted and changes nothing (the cleanup skill acts on the report)
-  overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty state
+  overbridge icebox <name>                      pause a workspace: stop its apps and checks, write a handoff, close
+                                        its tab; keeps claims and worktrees; refuses with unsaved work
+  overbridge thaw <name>                        reopen an iceboxed workspace's tab, its agent resuming and
+                                        reading the handoff
+  overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty and iceboxed state
   overbridge whoami                             workspace for the current dir/session
 
 Branches & PRs (workspace inferred from $OVERBRIDGE_NAME or cwd)
@@ -255,6 +260,19 @@ async function main(argv: string[]): Promise<number> {
       const { values, positionals } = opts(rest, { prompt: { type: "string" } });
       if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge tab <name> [--prompt text]");
       showTab(cmd.requireWs(positionals[0]!), { prompt: values.prompt });
+      break;
+    }
+    case "icebox": {
+      const { positionals } = opts(rest, {});
+      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge icebox <name>");
+      const handoff = await icebox(cmd.requireWs(positionals[0]!));
+      console.log(`iceboxed ${positionals[0]}; handoff at ${handoff}`);
+      break;
+    }
+    case "thaw": {
+      const { positionals } = opts(rest, {});
+      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge thaw <name>");
+      thaw(cmd.requireWs(positionals[0]!));
       break;
     }
     case "start": {

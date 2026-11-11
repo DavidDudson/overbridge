@@ -181,6 +181,26 @@ function reap(ticket: Ticket, dir: string) {
   rmSync(join(dir, ticketName(ticket)), { force: true });
 }
 
+/**
+ * Stop every check `ws` has queued or running: TERM the command's group, TERM the owning `overbridge check`, and
+ * drop the ticket so the queue moves on. Returns how many tickets it stopped.
+ */
+export function stopChecksFor(ws: string, dir = queueDir()): number {
+  const mine = readTickets(dir).filter((t) => t.ws === ws);
+  for (const t of mine) {
+    if (t.runPid !== undefined && groupAlive(t.runPid)) {
+      signalGroup(t.runPid, "SIGTERM");
+    }
+    try {
+      process.kill(t.pid, "SIGTERM");
+    } catch {
+      // the owner is already gone
+    }
+    rmSync(join(dir, ticketName(t)), { force: true });
+  }
+  return mine.length;
+}
+
 const label = (t: Ticket) => `${t.ws}/${t.repo}: ${t.command}`;
 
 /** Wait until `me` may start (see `gateFor`); false when `deadlineMs` passes first. */

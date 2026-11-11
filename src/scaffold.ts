@@ -125,7 +125,7 @@ The new workspace opens in its own tab and its Claude does the work. Tell the us
 opened. If \`overbridge start\` refuses, say why and stop.
 
 You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge item view\`, read-only
-\`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`release\`, \`up\`, \`repo add\`). You may also message
+\`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`icebox\`, \`thaw\`, \`release\`, \`up\`, \`repo add\`). You may also message
 workspace Claudes with \`ListAgents\` and \`SendMessage\`, for example to tell every tab to resume its work; the
 \`whip\` skill does that for every workspace whose work is still outstanding. The \`cleanup\` skill finds finished
 and orphaned workspaces with \`overbridge cleanup --json\` and removes the safe ones once the user confirms.`;
@@ -174,6 +174,8 @@ access to other workspaces and direct branch switching. Do not try to work aroun
 - After \`gh pr create\`, run \`overbridge pr <repo>\` to record the PR against this workspace.
 - \`overbridge status\` shows this workspace's claims; \`overbridge status --all\` shows every workspace.
 - \`overbridge release <repo>\` frees a branch when you are done with it.
+- \`overbridge icebox <workspace>\` pauses a workspace you will not touch for a while (no process, no tab; claims stay);
+  commit and push first. \`overbridge thaw <workspace>\` brings it back.
 - One workspace per work item. To start a different item, run \`overbridge start <repo> <id>\` (it opens the
   item's own workspace and tab) rather than switching this one.
 - Stacked PRs (\`gh stack\`): a claim covers every layer of its stack. \`gh stack init/add/up/down/top/bottom\`,
