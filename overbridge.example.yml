@@ -12,6 +12,9 @@ project-management:
   # workspace: "{id}"                    # {id} {number} {repo}; default: github gh-{repo}-{number}, jira {id}
   # branch-types: { Bug: fix, default: feat }   # item type or label -> {type}; default: feat
   # issue-type: Task                     # Jira only: issue type for new items; default: Task
+  # worklist-jql: "sprint in openSprints()"   # Jira only: narrows the @work list; default: open sprint or in progress; "" lists all
+  # worklist-project: DavidDudson/2      # GitHub only: list this Projects v2 board (owner/number) in @work, not just issues assigned to you
+  # worklist-statuses: [Backlog, Ready]  # with worklist-project: Status values to list; default: all but Done
 
 # Apps `overbridge app` and the top panel can start and stop. Default: none.
 apps:
@@ -49,11 +52,21 @@ shell: direnv exec .
 #   key: [.envrc, flake.lock]      # files whose contents invalidate the cache; needs env
 
 # `overbridge check [repo] -- <cmd>` runs heavy commands (the skills send lint, typecheck, test, and build through
-# it) one at a time across all workspaces, in the dev shell above. These are the defaults.
+# it) in queue order across all workspaces, several at once while the load allows, in the dev shell above. These
+# are the defaults; `max-parallel` has none.
 check-queue:
   max-load-percent: 70       # start only while the 1-minute load average is under this share of the cores
+  # max-parallel: 4          # at most this many runs at once; unset leaves the load as the only limit
   timeout-seconds: 180       # kill the run after this long; `--timeout-seconds n` overrides it for one run
   stall-seconds: 300         # kill the run once its processes have used no CPU for this long
   wait-seconds: 900          # give up (exit 75) when there is still no turn after this long
+
+# What `overbridge icebox <ws> --prune` deletes: repo-relative paths git ignores and does not track.
+# Default: none, so --prune reclaims nothing.
+# `idle-days` makes the sidebar suggest `overbridge icebox` for a workspace whose PRs are all drafts and idle that
+# long (last commit, PR update and agent activity); it never iceboxes by itself. Default: off.
+icebox:
+  prune: [node_modules, target]
+  # idle-days: 14
 
 ide: vscode                  # vscode | zed | webstorm; default: $OVERBRIDGE_IDE, then $EDITOR (personal; usually leave unset)

@@ -97,7 +97,7 @@ overbridge config get commands.typecheck
 overbridge config get commands.test
 ```
 
-Run each through the check queue: `overbridge check <repo> -- <command>`. It runs one at a time across workspaces, in the repo's dev shell. Exit 124 means it went over its time limit, 137 that it stopped using CPU, and 75 that no turn came: report it rather than retrying in a loop.
+Run each through the check queue: `overbridge check <repo> -- <command>`. It queues them across workspaces and runs several at once while the load allows, in the repo's dev shell. Exit 124 means it went over its time limit, 137 that it stopped using CPU, and 75 that no turn came: report it rather than retrying in a loop.
 
 An unset command means the repo has none. Run the smallest scope that covers the change.
 

@@ -1,9 +1,12 @@
 ---
 name: start-item
 description: Start work on a work item (GitHub issue or Jira ticket). Reads the item, runs the scope check, claims a branch named for it in this workspace, then enters plan mode to design the change and waits for the user to approve the plan and its scope. When `loop-item` calls it, it writes the plan and carries on. Use when the user says "start 123", "pick up ENG-123", "work on issue 123", "begin this item", or passes an item id and wants to start.
+requires: gh-stack
 ---
 
 # Start an item
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 ```
 orient → read the item → scope-item → [scope gate] → claim branch → plan mode
@@ -61,7 +64,22 @@ Each item gets its own workspace, named for it (`ENG-123`, `gh-app-12`). Look at
 
 - **This workspace is already on this item** (a claimed branch whose `overbridge item from-branch` is `<id>`):
   `overbridge start` opened it for you. Go to step 5.
+- **This workspace holds a stack** (`overbridge start <repo> --stack <id>...` built it; `overbridge status` shows a `stack`
+  column and the prompt lists the layers): the item's branch is a layer already. If it is layer 1, go to step 5. For a
+  later layer, run `gh stack up` until HEAD is on its branch, then `overbridge pr <repo>` to move the claim, and go to step 5.
+  Never `overbridge checkout` or `gh stack init/add` a layer that exists.
+- **The item builds on this workspace's open PR** (the user says "on top of this", or the item depends on the current branch): it is the next layer of a stack here. Run `gh stack add <branch>` (the item's branch, `overbridge item branch <id>`) after `gh stack init` on the current branch if it is not in a stack yet, then `overbridge pr <repo>` and go to step 5. Never a new workspace for a layer.
 - **This workspace holds no claims** (a fresh `scratch` or by-hand workspace): claim in place.
+- **Its claim is a `task/` branch with no PR** (it filed this ticket, or spiked it): the work continues here. Run
+
+  ```sh
+  overbridge start <repo> <id>
+  ```
+
+  Inside a `task/` workspace it re-binds this workspace to the item: the item's branch is claimed in place
+  from the task branch's HEAD, so its commits and uncommitted changes carry over, and the task branch is
+  deleted (kept, with a log line, if the item branch already existed without its commits). No new workspace
+  or tab. Go to step 5 here. If it refuses (the item is claimed elsewhere), stop and say which workspace holds it.
 - **It holds a claim for a different item**: hand off. Run
 
   ```sh

@@ -15,7 +15,7 @@ PreToolUse hook enforces this; treat a guard block as a hard rule, never work ar
 
 ```sh
 overbridge whoami          # workspace name
-overbridge status          # repos in this workspace: claimed branch, PR, actual head, dirty
+overbridge status          # repos in this workspace: claimed branch, PR, actual head, dirty, `from <branch>` after a re-bind
 overbridge status --all    # every workspace (read-only view of other claims)
 ```
 
@@ -29,7 +29,7 @@ registers a new one (ask the user before registering).
 Each repo can carry an `overbridge.yml` (work-item provider, apps, check commands, review, ide).
 Read it with `overbridge config show [dir]` or one value with `overbridge config get <key> [dir]`.
 A repo with a `shell` key has a dev shell: run its tools as `overbridge shell <repo> -- <cmd>` (it runs the command as it is when the repo has none).
-Run `commands.lint`, `typecheck`, `test`, and `build` as `overbridge check <repo> -- <cmd>`. It queues them so only one runs at a time across workspaces, in the same dev shell. The `check-queue` key sets its load limit and timeouts.
+Run `commands.lint`, `typecheck`, `test`, and `build` as `overbridge check <repo> -- <cmd>`. It queues them across workspaces and runs several at once while the load allows, in the same dev shell. The `check-queue` key sets its load limit, `max-parallel`, and timeouts.
 Apps it declares run with `overbridge app` (list), `overbridge app <id> start|stop|restart|status|log`.
 `overbridge item from-branch` names the work item the current branch belongs to.
 The top panel and sidebar show this state; do not edit `.overbridge/` under the workspaces root by hand.
@@ -76,7 +76,21 @@ everything else (non-interactive flags, rebase/conflict flow, merge).
 
 Workspaces are named for the work item they exist for (`ENG-123`, `gh-app-12`). To start a different
 item, do not switch this workspace: `overbridge start <repo> <id>` makes the item's own workspace and tab
-(see `start-item`). Once a workspace's PRs are open and nothing is uncommitted or unpushed, the top panel
+(see `start-item`). Related work stays here: when this workspace is on a `task/` branch with no PR (it filed
+a ticket, or spiked), `overbridge start <repo> <id>` re-binds it to the item instead, carrying the task
+branch's commits and uncommitted work onto the item's branch; `--here` does the same from any clean claim.
+
+Skills follow one rule when related work comes up (`loop-item`, `loop-tech-debt`, `update-library`, `ship-pr`):
+
+| Situation | Where it runs |
+| --- | --- |
+| Another layer of this stack (a split slice, work that builds on this PR) | Here: `gh stack add` / `gh stack up`. Never suggest a new workspace for a layer. |
+| This workspace is on a `task/` branch with no PR (it filed the item or spiked it) | Here: `overbridge start <repo> <id>` re-binds it. No question asked. |
+| A follow-up item the user picks up straight away, and this branch has no open PR yet | Here: `overbridge start <repo> <id> --here` once the tree is clean and pushed. |
+| A follow-up item, but this branch's PR is open | Ask once. The PR keeps this workspace for review fixes, so the default is the item's own workspace (`overbridge start <repo> <id>`); `--here` only when the user says to carry on here. |
+| An unrelated item, or one another workspace already claims | Its own workspace (`overbridge start`), or the claiming workspace's tab. |
+
+Once a workspace's PRs are open and nothing is uncommitted or unpushed, the top panel
 shows a Cleanup button; wiping a workspace is the user's call, so never run `overbridge rm` yourself. A workspace
 also removes itself when the user exits its Claude with every repo clean and pushed.
 Once every PR has merged and nothing is unsaved, overbridge removes the workspace after your turn ends.

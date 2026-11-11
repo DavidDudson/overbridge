@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoOf, root, worktreePath } from "./paths";
-import { fail } from "./util";
+import { fail, isRecord } from "./util";
 
 /** Per-repo rules live in `overbridge.yml` at the repo (worktree) root. */
 export const CONFIG_FILE = "overbridge.yml";
@@ -31,6 +31,12 @@ export interface ProjectManagement {
   branchTypes?: Record<string, string>;
   /** Issue type for new items (Jira). Unset means `Task`. */
   issueType?: string;
+  /** JQL that narrows the work list's Jira query. Unset means `DEFAULT_WORKLIST_JQL`; empty means no narrowing. */
+  worklistJql?: string;
+  /** GitHub only: a Projects v2 board, `<owner>/<number>` or a bare number (the repo's owner), whose items replace "assigned to me". */
+  worklistProject?: string;
+  /** With `worklistProject`: the Status values to list. Unset means every status except Done. */
+  worklistStatuses?: string[];
 }
 
 export const BRANCH_PLACEHOLDERS = ["id", "number", "slug", "type"] as const;
@@ -98,6 +104,8 @@ export interface ShellSpec {
 export interface CheckQueue {
   /** Start only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. */
   maxLoadPercent: number;
+  /** At most this many runs at once; unset leaves the load as the only limit. */
+  maxParallel?: number;
   /** Kill the run after this long, busy or not. */
   timeoutSeconds: number;
   /** Kill the run once its process group has used no CPU for this long. */
@@ -119,6 +127,13 @@ export interface ReviewConfig {
   localDir: string;
 }
 
+/** What `overbridge icebox` may delete with `--prune` (repo-relative paths git ignores, such as `node_modules`), and when the sidebar suggests it. */
+export interface IceboxConfig {
+  prune: string[];
+  /** Suggest iceboxing a workspace whose PRs are all drafts and idle this many days; unset turns the suggestion off. */
+  idleDays?: number;
+}
+
 export interface ProjectConfig {
   version: typeof CONFIG_VERSION;
   projectManagement?: ProjectManagement;
@@ -129,6 +144,7 @@ export interface ProjectConfig {
   /** The repo's dev shell, if it declares one. */
   shell?: ShellSpec;
   checkQueue: CheckQueue;
+  icebox: IceboxConfig;
   /** Lifecycle hooks, from the root `config.yml` only. Present only when there are any. */
   hooks?: Hooks;
   /** Top panel buttons, from the root `config.yml` only. */
@@ -143,17 +159,17 @@ export const defaultConfig = (): ProjectConfig => ({
   commands: {},
   review: { exclude: [], localDir: DEFAULT_PERSONA_DIR },
   checkQueue: defaultCheckQueue(),
+  icebox: { prune: [] },
   buttons: [],
 });
 
-const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "shell", "check-queue", "hooks", "buttons"];
+const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons"];
 const SHELL_KEYS = ["enter", "env", "key"];
-const CHECK_QUEUE_KEYS = ["max-load-percent", "timeout-seconds", "stall-seconds", "wait-seconds"];
+const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
+const ICEBOX_KEYS = ["prune", "idle-days"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
-const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type"];
+const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql", "worklist-project", "worklist-statuses"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
-
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function distance(a: string, b: string): number {
   const row = Array.from({ length: b.length + 1 }, (_, i) => i);
@@ -274,7 +290,7 @@ function validateApp(entry: Record<string, unknown>, path: string, p: Problems):
   let ready: Ready | undefined;
   if (entry.ready !== undefined && entry.ready !== null) {
     const r = entry.ready;
-    if (!isObject(r)) p.add(`${path}.ready`, "expected a mapping with http or tcp");
+    if (!isRecord(r)) p.add(`${path}.ready`, "expected a mapping with http or tcp");
     else {
       p.unknownKeys(r, ["http", "tcp"], `${path}.ready`);
       if ((r.http === undefined) === (r.tcp === undefined)) p.add(`${path}.ready`, "set exactly one of http or tcp");
@@ -330,6 +346,15 @@ export interface ButtonSpec {
 }
 const BUTTON_KEYS = ["id", "label", "status", "run", "url", "side"];
 
+/** `path` without a leading `./` or trailing `/`, so a configured prune path compares equal to what git lists. */
+export const normalizePrunePath = (path: string): string => path.replace(/^(\.\/)+/, "").replace(/\/+$/, "");
+
+/** A path below the repo root: no `..`, no absolute path, no glob or pathspec magic, and never git's or the workspace's own files. */
+export function isPrunablePath(path: string): boolean {
+  const parts = normalizePrunePath(path).split("/");
+  return !path.startsWith("/") && !parts.includes("") && !parts.includes("..") && !parts.includes(".") && ![".git", ".claude"].includes(parts[0]!) && !/[*?[\\:]/.test(path);
+}
+
 /**
  * Validate parsed YAML. Throws one error naming `file` and every offending key. With `partial`, `raw` is
  * one layer of a merged config, so a missing required key is not an error. With `root`, the root-only keys
@@ -339,7 +364,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
   if (raw === null || raw === undefined) return defaultConfig();
   const p = new Problems(partial);
   const config = defaultConfig();
-  if (!isObject(raw)) fail(`${file}: expected a mapping at the top level`);
+  if (!isRecord(raw)) fail(`${file}: expected a mapping at the top level`);
 
   p.unknownKeys(raw, TOP_KEYS, "", true);
   const extensions = Object.entries(raw).filter(([key]) => isExtensionKey(key));
@@ -351,7 +376,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
 
   const pm = raw["project-management"];
   if (pm !== undefined && pm !== null) {
-    if (!isObject(pm)) p.add("project-management", "expected a mapping with name and project");
+    if (!isRecord(pm)) p.add("project-management", "expected a mapping with name and project");
     else {
       p.unknownKeys(pm, PM_KEYS, "project-management");
       const name = p.oneOf(p.string(pm, "name", "project-management", true), PM_NAMES, "project-management.name");
@@ -363,10 +388,14 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       const workspace = p.string(pm, "workspace", "project-management", false);
       if (workspace) for (const problem of templateProblems(workspace, WORKSPACE_PLACEHOLDERS, true)) p.add("project-management.workspace", problem);
       const issueType = p.string(pm, "issue-type", "project-management", false);
+      const worklistJql = pm["worklist-jql"] === "" ? "" : p.string(pm, "worklist-jql", "project-management", false);
+      const worklistProject = p.string(pm, "worklist-project", "project-management", false);
+      if (worklistProject && !/^(?:[\w.-]+\/)?\d+$/.test(worklistProject)) p.add("project-management.worklist-project", "expected <owner>/<number> or a project number, e.g. DavidDudson/2");
+      const worklistStatuses = p.stringList(pm, "worklist-statuses", "project-management");
       let branchTypes: Record<string, string> | undefined;
       const types = pm["branch-types"];
       if (types !== undefined && types !== null) {
-        if (!isObject(types)) p.add("project-management.branch-types", "expected a mapping of item type to branch type");
+        if (!isRecord(types)) p.add("project-management.branch-types", "expected a mapping of item type to branch type");
         else {
           branchTypes = {};
           for (const type of Object.keys(types)) {
@@ -385,6 +414,9 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
           ...(workspace ? { workspace } : {}),
           ...(branchTypes ? { branchTypes } : {}),
           ...(issueType ? { issueType } : {}),
+          ...(worklistJql !== undefined ? { worklistJql } : {}),
+          ...(worklistProject ? { worklistProject } : {}),
+          ...(worklistStatuses ? { worklistStatuses } : {}),
         };
       }
     }
@@ -397,7 +429,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       const seen = new Set<string>();
       apps.forEach((entry, i) => {
         const path = `apps[${i}]`;
-        if (!isObject(entry)) return p.add(path, "expected a mapping");
+        if (!isRecord(entry)) return p.add(path, "expected a mapping");
         const before = p.list.length;
         const app = validateApp(entry, path, p);
         if (app && seen.has(app.id)) p.add(`${path}.id`, `duplicate app id '${app.id}'`);
@@ -410,7 +442,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
   const hooks = raw.hooks;
   if (hooks !== undefined && hooks !== null) {
     if (!root) p.add("hooks", ROOT_ONLY);
-    else if (!isObject(hooks)) p.add("hooks", "expected a mapping of hook name to a command or a list of commands");
+    else if (!isRecord(hooks)) p.add("hooks", "expected a mapping of hook name to a command or a list of commands");
     else {
       p.unknownKeys(hooks, HOOK_NAMES, "hooks");
       const out: Hooks = {};
@@ -433,7 +465,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       const seen = new Set<string>();
       buttons.forEach((entry, i) => {
         const at = `buttons[${i}]`;
-        if (!isObject(entry)) return p.add(at, "expected a mapping");
+        if (!isRecord(entry)) return p.add(at, "expected a mapping");
         p.unknownKeys(entry, BUTTON_KEYS, at);
         const id = p.string(entry, "id", at, true);
         if (id !== undefined && !APP_ID_RE.test(id)) p.add(`${at}.id`, `'${id}' must start with a letter or digit and use only letters, digits, '.', '_' and '-'`);
@@ -454,7 +486,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
 
   const commands = raw.commands;
   if (commands !== undefined && commands !== null) {
-    if (!isObject(commands)) p.add("commands", "expected a mapping of command name to shell command");
+    if (!isRecord(commands)) p.add("commands", "expected a mapping of command name to shell command");
     else {
       p.unknownKeys(commands, COMMAND_NAMES, "commands");
       for (const name of COMMAND_NAMES) {
@@ -466,13 +498,28 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
 
   const review = raw.review;
   if (review !== undefined && review !== null) {
-    if (!isObject(review)) p.add("review", "expected a mapping");
+    if (!isRecord(review)) p.add("review", "expected a mapping");
     else {
       p.unknownKeys(review, REVIEW_KEYS, "review");
       const personas = p.stringList(review, "personas", "review");
       if (personas) config.review.personas = personas;
       config.review.exclude = p.stringList(review, "exclude", "review") ?? [];
       config.review.localDir = p.string(review, "local-dir", "review", false) ?? DEFAULT_PERSONA_DIR;
+    }
+  }
+
+  const icebox = raw.icebox;
+  if (icebox !== undefined && icebox !== null) {
+    if (!isRecord(icebox)) p.add("icebox", "expected a mapping with prune, idle-days");
+    else {
+      p.unknownKeys(icebox, ICEBOX_KEYS, "icebox");
+      const prune = p.stringList(icebox, "prune", "icebox") ?? [];
+      for (const path of prune) {
+        if (!isPrunablePath(path)) p.add("icebox.prune", `'${path}' must be a path inside the repo, such as node_modules or target`);
+      }
+      config.icebox.prune = prune;
+      const idleDays = p.positiveInt(icebox, "idle-days", "icebox");
+      if (idleDays !== undefined) config.icebox.idleDays = idleDays;
     }
   }
 
@@ -484,7 +531,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
     if (typeof shell === "string") {
       if (shell === "") p.add("shell", "expected a non-empty string or a mapping");
       else config.shell = { enter: shell, key: [] };
-    } else if (!isObject(shell)) p.add("shell", "expected a command prefix or a mapping with enter, env, key");
+    } else if (!isRecord(shell)) p.add("shell", "expected a command prefix or a mapping with enter, env, key");
     else {
       p.unknownKeys(shell, SHELL_KEYS, "shell");
       const enter = p.string(shell, "enter", "shell", true);
@@ -497,13 +544,14 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
 
   const checkQueue = raw["check-queue"];
   if (checkQueue !== undefined && checkQueue !== null) {
-    if (!isObject(checkQueue)) p.add("check-queue", `expected a mapping with ${CHECK_QUEUE_KEYS.join(", ")}`);
+    if (!isRecord(checkQueue)) p.add("check-queue", `expected a mapping with ${CHECK_QUEUE_KEYS.join(", ")}`);
     else {
       p.unknownKeys(checkQueue, CHECK_QUEUE_KEYS, "check-queue");
       const set = (value: number | undefined, field: keyof CheckQueue) => {
         if (value !== undefined) config.checkQueue = { ...config.checkQueue, [field]: value };
       };
       set(p.positiveInt(checkQueue, "max-load-percent", "check-queue"), "maxLoadPercent");
+      set(p.positiveInt(checkQueue, "max-parallel", "check-queue"), "maxParallel");
       set(p.positiveInt(checkQueue, "timeout-seconds", "check-queue"), "timeoutSeconds");
       set(p.positiveInt(checkQueue, "stall-seconds", "check-queue"), "stallSeconds");
       set(p.positiveInt(checkQueue, "wait-seconds", "check-queue"), "waitSeconds");
@@ -533,7 +581,7 @@ export const configPath = (repoDir: string) => join(repoDir, CONFIG_FILE);
 /** The root config, `<root>/config.yml`: settings that live outside the repos. */
 export const ROOT_CONFIG_FILE = "config.yml";
 export const rootConfigPath = () => join(root(), ROOT_CONFIG_FILE);
-const ROOT_KEYS = ["version", "defaults", "repos", "skill-extensions", "guard"];
+const ROOT_KEYS = ["version", "defaults", "repos", "skill-extensions", "guard", "github-orgs"];
 const GUARD_KEYS = ["read-paths", "deny"];
 
 /**
@@ -558,15 +606,17 @@ export interface RootLayers {
   /** Directories of skill extension files (`<dir>/<skill>/<phase>.md`), as written: absolute, `~/` or root-relative. */
   skillExtensions: string[];
   guard: GuardConfig;
+  /** GitHub owners the `@prs` and `@reviews` tabs search. Empty means every owner. */
+  githubOrgs: string[];
 }
 
 /** Read and check `<root>/config.yml`. A missing or empty file has no layers. */
 export function loadRootLayers(file = rootConfigPath()): RootLayers {
-  const layers: RootLayers = { file, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] } };
+  const layers: RootLayers = { file, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] };
   if (!existsSync(file)) return layers;
   const raw = parseYaml(readFileSync(file, "utf8"), file);
   if (raw === null || raw === undefined) return layers;
-  if (!isObject(raw)) fail(`${file}: expected a mapping at the top level`);
+  if (!isRecord(raw)) fail(`${file}: expected a mapping at the top level`);
 
   const p = new Problems();
   p.unknownKeys(raw, ROOT_KEYS, "");
@@ -574,20 +624,21 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
     p.add("version", `unsupported version ${JSON.stringify(raw.version)} (this overbridge reads version ${CONFIG_VERSION})`);
   }
   if (raw.defaults !== undefined && raw.defaults !== null) {
-    if (isObject(raw.defaults)) layers.defaults = raw.defaults;
+    if (isRecord(raw.defaults)) layers.defaults = raw.defaults;
     else p.add("defaults", "expected a mapping in overbridge.yml's format");
   }
   if (raw.repos !== undefined && raw.repos !== null) {
-    if (!isObject(raw.repos)) p.add("repos", "expected a mapping of repo name to settings");
+    if (!isRecord(raw.repos)) p.add("repos", "expected a mapping of repo name to settings");
     else
       for (const [name, layer] of Object.entries(raw.repos)) {
-        if (isObject(layer)) layers.repos[name] = layer;
+        if (isRecord(layer)) layers.repos[name] = layer;
         else if (layer !== null) p.add(`repos.${name}`, "expected a mapping in overbridge.yml's format");
       }
   }
   layers.skillExtensions = p.stringList(raw, "skill-extensions", "") ?? [];
+  layers.githubOrgs = p.stringList(raw, "github-orgs", "") ?? [];
   if (raw.guard !== undefined && raw.guard !== null) {
-    if (!isObject(raw.guard)) p.add("guard", "expected a mapping with read-paths and deny");
+    if (!isRecord(raw.guard)) p.add("guard", "expected a mapping with read-paths and deny");
     else {
       p.unknownKeys(raw.guard, GUARD_KEYS, "guard");
       layers.guard.readPaths = p.stringList(raw.guard, "read-paths", "guard") ?? [];
@@ -597,7 +648,7 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
         else
           deny.forEach((rule, i) => {
             const at = `guard.deny[${i}]`;
-            if (!isObject(rule)) return p.add(at, "expected a mapping with pattern and reason");
+            if (!isRecord(rule)) return p.add(at, "expected a mapping with pattern and reason");
             p.unknownKeys(rule, ["pattern", "reason"], at);
             const source = p.string(rule, "pattern", at, true);
             const reason = p.string(rule, "reason", at, true);
@@ -624,7 +675,7 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
  */
 export function overlay(base: unknown, over: unknown): unknown {
   if (over === undefined || over === null) return base;
-  if (!isObject(base) || !isObject(over)) return over;
+  if (!isRecord(base) || !isRecord(over)) return over;
   const out: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(over)) {
     if (value === null) delete out[key];
@@ -680,7 +731,7 @@ export function getConfigValue(config: ProjectConfig, key: string): unknown {
   const extension = isExtensionKey(first);
   let node: unknown = extension ? config.extensions?.[first] : config[camel(first) as keyof ProjectConfig];
   for (const segment of rest) {
-    if (!isObject(node)) return;
+    if (!isRecord(node)) return;
     node = node[extension ? segment : camel(segment)];
   }
   return node;

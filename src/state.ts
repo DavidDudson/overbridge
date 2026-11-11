@@ -4,14 +4,20 @@ import type { CleanupCause, CleanupRecord } from "./cleanup-log";
 import { metaDir } from "./paths";
 import { pidAlive } from "./proc";
 import { type Cover, overlaps } from "./stack";
-import { fail } from "./util";
+import { describeValue, errorMessage, fail, isRecord } from "./util";
 
-export type Claim = { branch?: string; pr?: number };
+/** What a claim was moved from by a re-bind (`overbridge start` inside a task workspace, or `--here`). */
+export type ReboundFrom = { branch: string; pr?: number };
+export type Claim = { branch?: string; pr?: number; reboundFrom?: ReboundFrom };
 /** A background removal in flight: when it started, what started it and, once spawned, the worker's pid. */
 export type Removing = { since: string; cause?: CleanupCause; pid?: number };
 /** Why a workspace that would be removed by itself is kept; shown on its sidebar card. */
 export const RemovalBlock = { MergedUnsaved: "merged-unsaved" } as const;
 export type RemovalBlock = (typeof RemovalBlock)[keyof typeof RemovalBlock];
+/** A repo whose worktree `icebox --drop-worktree` removed, and the branch it was on; `thaw` recreates it there. */
+export type DroppedRepo = { repo: string; branch?: string };
+/** A paused workspace: no tab, no processes, claims kept. */
+export type Iceboxed = { since: string; handoff?: string; dropped?: DroppedRepo[] };
 export type WorkspaceState = {
   created: string;
   repos: Record<string, Claim>;
@@ -21,6 +27,8 @@ export type WorkspaceState = {
   removeError?: string;
   /** Set by the merged-PR sweep when the workspace would be removed but holds unsaved work. */
   removalBlocked?: RemovalBlock;
+  /** Set by `overbridge icebox`; cleared by `thaw`. The workspace has no tab while it is set. */
+  iceboxed?: Iceboxed;
 };
 export type State = {
   version: 1;
@@ -46,6 +54,37 @@ export function readState(): State {
     throw e;
   }
 }
+
+/** `readState` for a pane that must keep running: `fallback` plus why when the file is unreadable; writers keep `readState` so `withState` never overwrites a file it cannot parse. */
+export function tryReadState(fallback: State = { version: 1, workspaces: {} }): { state: State; fault?: string } {
+  let state: unknown;
+  try {
+    state = readState();
+  } catch (e) {
+    return { state: fallback, fault: `${STATE_FILE}: ${errorMessage(e)}` };
+  }
+  if (!isRecord(state)) return { state: fallback, fault: `${STATE_FILE}: expected a mapping, got ${describeValue(state)}` };
+  if (!isRecord(state.workspaces)) return { state: fallback, fault: `${STATE_FILE}: workspaces is ${describeValue(state.workspaces)}, not a mapping` };
+  return { state: state as State };
+}
+
+/** Why one workspace record in state cannot be trusted (a hand edit, a half-written file), or undefined when its shape is right. */
+export function workspaceFault(w: unknown): string | undefined {
+  if (!isRecord(w)) return `state record is ${describeValue(w)}, not a mapping`;
+  if (!isRecord(w.repos)) return `state record has ${w.repos === undefined ? "no repos" : `repos as ${describeValue(w.repos)}`}`;
+  if (w.removing !== undefined) {
+    if (!isRecord(w.removing)) return `state record has removing as ${describeValue(w.removing)}`;
+    if (typeof w.removing.since !== "string" || Number.isNaN(Date.parse(w.removing.since))) return "state record's removing has no valid since";
+  }
+  if (w.removeError !== undefined && typeof w.removeError !== "string") return `state record has removeError as ${describeValue(w.removeError)}`;
+  if (w.removalBlocked !== undefined && !Object.values<unknown>(RemovalBlock).includes(w.removalBlocked)) {
+    return `state record has removalBlocked as ${JSON.stringify(w.removalBlocked)}`;
+  }
+  return undefined;
+}
+
+/** `workspaceFault` as a type guard, for callers that need no message. */
+export const isWorkspaceState = (w: unknown): w is WorkspaceState => workspaceFault(w) === undefined;
 
 function writeState(s: State) {
   const tmp = `${statePath()}.${process.pid}.tmp`;
@@ -123,6 +162,9 @@ export function isRemoving(w: WorkspaceState, now = Date.now(), alive: (pid: num
   }
   return now - Date.parse(w.removing.since) < REMOVING_GRACE_MS;
 }
+
+/** Whether `w` is paused by `overbridge icebox`. */
+export const isIceboxed = (w: WorkspaceState | undefined): boolean => w?.iceboxed !== undefined;
 
 export function getWorkspace(s: State, ws: string): WorkspaceState {
   return s.workspaces[ws] ?? fail(`no workspace '${ws}'`);

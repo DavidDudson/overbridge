@@ -81,7 +81,7 @@ overbridge config get commands.test
 
 An unset key means the repo has no such command: say so rather than guessing. Run a single file or project before the whole suite, and ask before an expensive full run. Follow the repo's `CLAUDE.md` for how to scope a run.
 
-Run each through the check queue: `overbridge check <repo> -- <command>`. It runs one at a time across workspaces, in the repo's dev shell. Exit 124 means it went over its time limit, 137 that it stopped using CPU, and 75 that no turn came: report it rather than retrying in a loop.
+Run each through the check queue: `overbridge check <repo> -- <command>`. It queues them across workspaces and runs several at once while the load allows, in the repo's dev shell. Exit 124 means it went over its time limit, 137 that it stopped using CPU, and 75 that no turn came: report it rather than retrying in a loop.
 
 ## 4. Commit
 
@@ -225,7 +225,9 @@ If it is missing, tell the user to run `gh extension install github/gh-stack` (i
 
 Use the `gh-stack` skill for the exact non-interactive flags, the rebase and conflict flow, and merging. This section adds what overbridge needs on top.
 
-**A claim covers the whole stack.** `overbridge checkout <repo> '#<pr>'` pulls an existing stack and claims every layer. Never `gh stack checkout` or `gh stack trunk`: both are blocked. Run `overbridge pr <repo>` after submitting and after moving between layers. A branch or PR claimed by another workspace cannot be taken: if `overbridge checkout` refuses, stop and tell the user.
+**A claim covers the whole stack.** `overbridge checkout <repo> '#<pr>'` pulls an existing stack and claims every layer. Never `gh stack checkout` or `gh stack trunk`: both are blocked. Run `overbridge pr <repo>` after submitting and after moving between layers. A branch or PR claimed by another workspace cannot be taken: if `overbridge checkout` refuses, stop and tell the user. A workspace opened with `overbridge start <repo> --stack <id>...` already holds a local stack with one empty-diff layer per item (bottom first): fill each layer in order and `gh stack up` to the next, rather than `gh stack add`.
+
+**Every layer of a stack lives in this workspace.** Never suggest a new workspace, tab or `overbridge start` for another layer, however many there are: add it with `gh stack add` (or `gh stack up` when it exists) and carry on here. When a stack's base branch is claimed by another workspace, that workspace owns the lower layers: stop and tell the user which one, rather than starting a third.
 
 "Base" below means the branch the PR targets, **not the default branch**. Resolve a PR number or URL to a branch first:
 

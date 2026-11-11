@@ -1,10 +1,10 @@
-import { type AgentState, readAgentState } from "./agent-state";
+import { type AgentState, AT_REST, readAgentState } from "./agent-state";
 import { isOrchestrationTab } from "./orchestration";
 import { CleanupCause } from "./cleanup-log";
 import { beginRemoval, Landing } from "./remove";
 import { isRemoving, RemovalBlock, readState, withState, type WorkspaceState } from "./state";
 import { MERGE_SWEEP_MS } from "./sweep-trigger";
-import { noUnsavedWork, readTopCache, refreshTop, type TopCache } from "./top";
+import { claimedCache, noUnsavedWork, readTopCache, refreshTop, type TopCache } from "./top";
 import { log } from "./util";
 
 /** What the merged-PR sweep does with one workspace. */
@@ -18,9 +18,6 @@ export const Verdict = {
   Remove: "remove",
 } as const;
 export type Verdict = (typeof Verdict)[keyof typeof Verdict];
-
-/** Agent states with no turn in progress: removing the workspace cannot cut off work. */
-const AT_REST: ReadonlySet<AgentState | undefined> = new Set<AgentState | undefined>([undefined, "empty", "idle", "done", "end"]);
 
 export interface VerdictInput {
   ws: string;
@@ -92,7 +89,7 @@ function checkOne(ws: string, deps: SweepDeps): Verdict {
     if (!workspace) {
       return Verdict.Keep;
     }
-    const cache = readTopCache(ws);
+    const cache = claimedCache(ws);
     return verdictFor({ ws, workspace, cache, agent: readAgentState(ws), clean: () => noUnsavedWork(ws, cache) });
   } catch (e) {
     log(`${ws}: merged-PR check failed: ${(e as Error).message}`);

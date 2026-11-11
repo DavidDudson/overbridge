@@ -1,8 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sidebarWidth } from "./config";
-import { newTabKdl } from "./layout";
-import { metaDir, selfCommand } from "./paths";
+import { agentDirOf, newTabKdl } from "./layout";
+import { metaDir, selfCommand, sessionName } from "./paths";
 import { log, run } from "./util";
 
 /** Runs a zellij command; tests pass a fake to see the calls without a session. */
@@ -21,6 +21,15 @@ export const zellijQuery: ZellijExec = (cmd) => {
   }
 };
 
+/**
+ * `zellijQuery`, reaching the session by name when run outside it (a window-manager keybind has no `$ZELLIJ`):
+ * `zellij action ...` becomes `zellij --session <name> action ...`. Inside zellij the calls pass through unchanged.
+ */
+export function sessionExec(inside = process.env.ZELLIJ !== undefined, session = sessionName(), exec: ZellijExec = zellijQuery): ZellijExec {
+  if (inside) return exec;
+  return (cmd) => exec(cmd[0] === "zellij" && cmd[1] === "action" ? ["zellij", "--session", session, ...cmd.slice(1)] : cmd);
+}
+
 /** Workspace names in zellij's tab order; empty outside zellij. */
 export function tabOrder(exec: ZellijExec = zellijQuery): string[] {
   const r = exec(["zellij", "action", "query-tab-names"]);
@@ -37,14 +46,14 @@ export function currentTab(exec: ZellijExec = zellijQuery): string | undefined {
  * Open `ws` as a new tab of the running zellij session, its agent starting with `prompt`. In the background
  * (the default) focus returns to the tab you were on. Outside zellij there is no session to add to, so say how to get one.
  */
-export function openTab(ws: string, prompt?: string, focus: TabFocus = TabFocus.Background, exec: ZellijExec = run) {
+export function openTab(ws: string, prompt?: string, focus: TabFocus = TabFocus.Background, exec: ZellijExec = run, resume = false) {
   if (!process.env.ZELLIJ) {
     return log(`${ws} has no tab outside zellij; run \`overbridge up\` to open it`);
   }
   const dir = join(metaDir(), "tabs");
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${ws}.kdl`);
-  writeFileSync(file, newTabKdl(ws, selfCommand(), { sidebarWidth: sidebarWidth(), focus: true, ...(prompt ? { prompt } : {}) }));
+  writeFileSync(file, newTabKdl(ws, selfCommand(), { sidebarWidth: sidebarWidth(), focus: true, agentCwd: agentDirOf(ws), ...(prompt ? { prompt } : {}), ...(resume ? { resume } : {}) }));
   const back = focus === TabFocus.Background ? currentTab(exec) : undefined;
   const r = exec(["zellij", "action", "new-tab", "--layout", file, "--name", ws]);
   if (!r.ok) {

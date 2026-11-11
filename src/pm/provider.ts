@@ -7,6 +7,10 @@ export interface WorkItem {
   url: string;
 }
 
+/** Whether an item still needs work. */
+export const ItemStatus = { Open: "open", Done: "done" } as const;
+export type ItemStatus = (typeof ItemStatus)[keyof typeof ItemStatus];
+
 /** What `createItem` needs to file a new item. */
 export interface NewItem {
   title: string;
@@ -29,6 +33,8 @@ export interface Provider {
   link(id: string): string;
   /** Fetch an item's title from the backend. */
   title(id: string): string | undefined;
+  /** Whether the item is finished (a closed issue, a ticket in a Done status); undefined when it can't be read. Hits the network. */
+  status(id: string): ItemStatus | undefined;
   /** Open items assigned to me. */
   assigned(): WorkItem[];
   /**

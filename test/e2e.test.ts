@@ -2,14 +2,18 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { HELD_ENV } from "../src/check-queue";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 let tmp: string;
 let root: string;
 let remote: string;
 
+/** Without the held marker, so the suite's own checks queue when it runs inside `overbridge check`. */
+const inherited = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== HELD_ENV));
+
 const env = () => ({
-  ...process.env,
+  ...inherited(),
   OVERBRIDGE_ROOT: root,
   ZELLIJ_CONFIG_DIR: join(root, "zellij-config"), // keep a real user layout out of the tests
   OVERBRIDGE_NAME: "",
@@ -73,6 +77,11 @@ describe("workflow", () => {
     expect(settings.env.OVERBRIDGE_NAME).toBe("ws1");
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain("guard");
     expect(settings.plansDirectory).toBe("plans");
+    // the copy a Claude started in a repo folder loads with --settings: same hooks, plans kept in the workspace
+    const copy = JSON.parse(readFileSync(join(root, ".overbridge", "workspaces", "ws1.settings.json"), "utf8"));
+    expect(copy.hooks).toEqual(settings.hooks);
+    expect(copy.env).toEqual(settings.env);
+    expect(copy.plansDirectory).toBe(join(root, "ws1", "plans"));
     expect(settings.permissions.allow).toContain("Bash(gh pr ready:*)");
     expect(settings.permissions.allow).toContain("Bash(gh stack push:*)");
     expect(settings.permissions.allow).not.toContain("Bash(gh pr merge:*)");
@@ -128,12 +137,13 @@ describe("workflow", () => {
     }
   });
 
-  test("layout opens the root orchestration tab, then one tab per workspace, each with sidebar and top panel", () => {
+  test("layout opens the orchestration tabs (root, work list, PRs, reviews), then one tab per workspace, each with sidebar and top panel", () => {
     for (const n of ["ws3", "ws4", "ws5"]) ws(["new", n]);
     const kdl = ws(["layout"]).out;
-    expect(kdl.match(/\btab name=/g)?.length).toBe(6);
+    expect(kdl.match(/\btab name=/g)?.length).toBe(9);
     expect(kdl.indexOf('tab name="@root"')).toBeLessThan(kdl.indexOf('tab name="ws'));
     expect(kdl).toContain('"claude" "@root"');
+    expect(kdl).toMatch(/args .*"worklist"/);
     expect(kdl).toContain('"claude" "ws5"');
     expect(kdl).toContain('"sidebar" "--ws" "ws5"');
     expect(kdl).toContain('"top" "--ws" "ws5"');
@@ -143,6 +153,14 @@ describe("workflow", () => {
     expect(ws(["rm", "ws1"]).code).toBe(0);
     expect(existsSync(join(root, "ws1"))).toBe(false);
     expect(sh(["git", "worktree", "list"], join(root, ".bare", "app.git"))).not.toContain("/ws1/");
+  });
+
+  test("go takes exactly one target, and help lists it", () => {
+    const r = ws(["go"]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("usage: overbridge go <n>|<name>|next|prev");
+    expect(ws(["go", "1", "2"]).err).toContain("usage: overbridge go");
+    expect(ws(["help"]).out).toContain("overbridge go <n>|<name>|next|prev");
   });
 
   test("new needs a name: workspaces are named for their work, not numbered", () => {
@@ -254,11 +272,11 @@ describe("dev shells", () => {
     expect(ws(["shell", "nope", "--", "true"], dsa).err).toContain("nope is not in dsa");
   });
 
-  test("with one repo the agent starts inside its shell, cwd the workspace root", () => {
+  test("with one repo the agent starts inside its shell, cwd the repo folder", () => {
     const dsa = join(root, "dsa");
     const run = launch();
     expect(run.exitCode).toBe(0);
-    expect(run.stdout.toString().trim().split("\n")).toEqual(["FOO=bar", dsa]);
+    expect(run.stdout.toString().trim().split("\n")).toEqual(["FOO=bar", join(dsa, "app")]);
     expect(readFileSync(join(root, ".overbridge", "agent", "dsa.shell"), "utf8")).toBe("app");
     expect(readFileSync(join(dsa, "CLAUDE.md"), "utf8")).not.toContain("## Dev shells");
   });
@@ -322,7 +340,21 @@ describe("check queue", () => {
     expect(check(["--timeout-seconds", "x", "--", "true"]).err).toContain("--timeout-seconds expects a whole number");
   }, CHECK_TEST_MS);
 
-  test("two runs take turns instead of overlapping", async () => {
+  test("two runs overlap while the load allows", async () => {
+    config();
+    const log = join(tmp, "overlap.log");
+    const step = (name: string) => ["--", "sh", "-c", `echo start ${name} >> ${log}; sleep 2; echo end ${name} >> ${log}`];
+    const first = spawnCheck(step("a"));
+    await waitFor(() => existsSync(log));
+    const second = spawnCheck(step("b"));
+    expect(await first.exited).toBe(0);
+    expect(await second.exited).toBe(0);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "start b", "end a", "end b"]);
+    expect(tickets()).toEqual([]);
+  }, CHECK_TEST_MS);
+
+  test("with max-parallel 1, two runs take turns instead of overlapping", async () => {
+    config("  max-parallel: 1\n");
     const log = join(tmp, "turns.log");
     const step = (name: string) => ["--", "sh", "-c", `echo start ${name} >> ${log}; sleep 1; echo end ${name} >> ${log}`];
     const first = spawnCheck(step("a"));
@@ -330,11 +362,12 @@ describe("check queue", () => {
     const second = spawnCheck(step("b"));
     expect(await first.exited).toBe(0);
     expect(await second.exited).toBe(0);
-    expect(await new Response(second.stderr).text()).toContain("waiting behind 1 in the queue");
+    expect(await new Response(second.stderr).text()).toContain("waiting behind 1 in the queue (max-parallel 1)");
     expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "end a", "start b", "end b"]);
   }, CHECK_TEST_MS);
 
   test("a nested check inside a held run runs at once", () => {
+    config();
     const r = check(["--", "sh", "-c", `${process.execPath} ${CLI} check -- echo nested`]);
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe("nested");
@@ -356,7 +389,7 @@ describe("check queue", () => {
   }, CHECK_TEST_MS);
 
   test("a waiter gives up with 75 after wait-seconds", async () => {
-    config("  wait-seconds: 1\n");
+    config("  wait-seconds: 1\n  max-parallel: 1\n");
     const holder = spawnCheck(["--", "sleep", "3"]);
     await waitFor(() => tickets().length === 1);
     const r = check(["--", "true"]);

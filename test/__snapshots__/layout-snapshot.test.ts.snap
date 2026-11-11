@@ -2,12 +2,6 @@
 
 exports[`generated layout two workspaces, one resuming 1`] = `
 "layout {
-  default_tab_template {
-    children
-    pane size=1 borderless=true {
-      plugin location="zellij:status-bar"
-    }
-  }
   tab name="@root" focus=true {
     pane split_direction="vertical" {
       pane name="sidebar" command="overbridge" cwd="/ws-root" size=60 borderless=true focus=true {
@@ -15,6 +9,36 @@ exports[`generated layout two workspaces, one resuming 1`] = `
       }
       pane name="@root · claude" command="overbridge" cwd="/ws-root" {
         args "claude" "@root"
+      }
+    }
+  }
+  tab name="@work" {
+    pane split_direction="vertical" {
+      pane name="sidebar" command="overbridge" cwd="/ws-root" size=60 borderless=true focus=true {
+        args "sidebar" "--ws" "@work"
+      }
+      pane name="@work · worklist" command="overbridge" cwd="/ws-root" {
+        args "worklist"
+      }
+    }
+  }
+  tab name="@prs" {
+    pane split_direction="vertical" {
+      pane name="sidebar" command="overbridge" cwd="/ws-root" size=60 borderless=true focus=true {
+        args "sidebar" "--ws" "@prs"
+      }
+      pane name="@prs · prs" command="overbridge" cwd="/ws-root" {
+        args "prs"
+      }
+    }
+  }
+  tab name="@reviews" {
+    pane split_direction="vertical" {
+      pane name="sidebar" command="overbridge" cwd="/ws-root" size=60 borderless=true focus=true {
+        args "sidebar" "--ws" "@reviews"
+      }
+      pane name="@reviews · reviews" command="overbridge" cwd="/ws-root" {
+        args "reviews"
       }
     }
   }
@@ -54,12 +78,6 @@ exports[`generated layout two workspaces, one resuming 1`] = `
 
 exports[`generated layout a wide sidebar and a self command with arguments 1`] = `
 "layout {
-  default_tab_template {
-    children
-    pane size=1 borderless=true {
-      plugin location="zellij:status-bar"
-    }
-  }
   tab name="@root" focus=true {
     pane split_direction="vertical" {
       pane name="sidebar" command="/usr/bin/bun" cwd="/ws-root" size=40 borderless=true focus=true {
@@ -67,6 +85,36 @@ exports[`generated layout a wide sidebar and a self command with arguments 1`] =
       }
       pane name="@root · claude" command="/usr/bin/bun" cwd="/ws-root" {
         args "/opt/overbridge/src/cli.ts" "claude" "@root"
+      }
+    }
+  }
+  tab name="@work" {
+    pane split_direction="vertical" {
+      pane name="sidebar" command="/usr/bin/bun" cwd="/ws-root" size=40 borderless=true focus=true {
+        args "/opt/overbridge/src/cli.ts" "sidebar" "--ws" "@work"
+      }
+      pane name="@work · worklist" command="/usr/bin/bun" cwd="/ws-root" {
+        args "/opt/overbridge/src/cli.ts" "worklist"
+      }
+    }
+  }
+  tab name="@prs" {
+    pane split_direction="vertical" {
+      pane name="sidebar" command="/usr/bin/bun" cwd="/ws-root" size=40 borderless=true focus=true {
+        args "/opt/overbridge/src/cli.ts" "sidebar" "--ws" "@prs"
+      }
+      pane name="@prs · prs" command="/usr/bin/bun" cwd="/ws-root" {
+        args "/opt/overbridge/src/cli.ts" "prs"
+      }
+    }
+  }
+  tab name="@reviews" {
+    pane split_direction="vertical" {
+      pane name="sidebar" command="/usr/bin/bun" cwd="/ws-root" size=40 borderless=true focus=true {
+        args "/opt/overbridge/src/cli.ts" "sidebar" "--ws" "@reviews"
+      }
+      pane name="@reviews · reviews" command="/usr/bin/bun" cwd="/ws-root" {
+        args "/opt/overbridge/src/cli.ts" "reviews"
       }
     }
   }

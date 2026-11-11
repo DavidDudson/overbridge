@@ -12,7 +12,7 @@ import { getWorkspace, readState } from "./state";
 import { boxBottom, boxRow, boxTop, type Color, COLORS, colorize, fit, inverse, textWidth } from "./term";
 import { parseUnresolved, REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses, threadsCommand } from "./reviewers";
 import { stackOf, localStacks } from "./stack";
-import { run } from "./util";
+import { describeValue, errorMessage, isRecord, run } from "./util";
 
 const safeStacks = (repo: string) => {
   try {
@@ -60,6 +60,7 @@ export interface PrView extends ReviewerView {
   url?: string;
   title?: string;
   isDraft?: boolean;
+  updatedAt?: string;
   state?: string;
   headRefOid?: string;
   mergeable?: string;
@@ -102,8 +103,14 @@ export interface TopCache {
   links: TopLink[];
   /** Every claimed repo's PR is open (and there is at least one claim). Half of what makes a workspace cleanable. */
   prsOpen?: boolean;
+  /** Every claimed branch has an open draft PR: the first condition for suggesting `overbridge icebox`. */
+  draftOnly?: boolean;
+  /** When the claimed PRs last changed (the latest `updatedAt`, ms); part of the idle check. */
+  prActiveAt?: number;
   /** Set when every claimed branch's PR has merged: each repo's PR head commit, keyed by repo. */
   merged?: Record<string, string>;
+  /** The branch each claimed repo was on when this was built, so `merged` and `prsOpen` are not trusted once a claim moves. */
+  branches?: Record<string, string>;
   /** What each configured button's `status` printed, keyed `<repo>/<id>`. A missing entry hides the button. */
   buttons?: Record<string, ButtonState>;
   message?: string;
@@ -205,12 +212,59 @@ export const IDE_COMMANDS: Record<Ide, string> = { vscode: "code", zed: "zed", w
 
 const cacheFile = (ws: string) => join(metaDir(), "top", `${ws}.json`);
 
-export function readTopCache(ws: string): TopCache {
+const EMPTY_CACHE: TopCache = { links: [], at: 0 };
+
+/**
+ * Why a parsed cache file is not a `TopCache`, or undefined when every field the panes read has the right type:
+ * the optional fields when present, and `links` and `at` always (the sweep's age check needs a real `at`).
+ */
+export function topCacheFault(raw: unknown): string | undefined {
+  if (!isRecord(raw)) return `expected a mapping, got ${describeValue(raw)}`;
+  const wrong = (field: string, ok: boolean) => (ok ? undefined : `${field} is ${describeValue(raw[field])}`);
+  const optional = (field: string, ok: boolean) => (raw[field] === undefined ? undefined : wrong(field, ok));
+  return (
+    optional("headline", typeof raw.headline === "string") ??
+    optional("title", typeof raw.title === "string") ??
+    optional("message", typeof raw.message === "string") ??
+    optional("prsOpen", typeof raw.prsOpen === "boolean") ??
+    optional("draftOnly", typeof raw.draftOnly === "boolean") ??
+    optional("prActiveAt", typeof raw.prActiveAt === "number" && Number.isFinite(raw.prActiveAt)) ??
+    optional("merged", isRecord(raw.merged)) ??
+    optional("branches", isRecord(raw.branches)) ??
+    optional("buttons", isRecord(raw.buttons)) ??
+    wrong("links", Array.isArray(raw.links)) ??
+    wrong("at", typeof raw.at === "number" && Number.isFinite(raw.at))
+  );
+}
+
+/** The cache file, checked: a missing file is the empty cache; an unreadable or misshapen one is the empty cache plus why, for that workspace's card. */
+export function readTopCacheChecked(ws: string): { cache: TopCache; fault?: string } {
+  let raw: unknown;
   try {
-    return JSON.parse(readFileSync(cacheFile(ws), "utf8"));
-  } catch {
-    return { links: [], at: 0 };
+    raw = JSON.parse(readFileSync(cacheFile(ws), "utf8"));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { cache: EMPTY_CACHE };
+    return { cache: EMPTY_CACHE, fault: `top cache: ${errorMessage(e)}` };
   }
+  const fault = topCacheFault(raw);
+  return fault ? { cache: EMPTY_CACHE, fault: `top cache: ${fault}` } : { cache: raw as TopCache };
+}
+
+/** The cache file as a `TopCache`; the empty cache when it is missing, unreadable or misshapen. */
+export const readTopCache = (ws: string): TopCache => readTopCacheChecked(ws).cache;
+
+/**
+ * `readTopCache` without what a moved claim invalidates. `merged` and `prsOpen` describe the branches the cache was
+ * built for; once a claim moves (a re-bind onto a follow-up item, a layer change) they say nothing about the new
+ * branch, so the workspace must not be removed or offered Cleanup on the strength of the old PR. A cache from before
+ * `branches` was recorded is trusted until the next refresh.
+ */
+export function claimedCache(ws: string, cache: TopCache = readTopCache(ws)): TopCache {
+  if (!cache.branches || (!cache.merged && !cache.prsOpen)) return cache;
+  const moved = Object.entries(getWorkspace(readState(), ws).repos).some(([repo, c]) => c.branch !== undefined && cache.branches?.[repo] !== c.branch);
+  if (!moved) return cache;
+  const { merged: _m, prsOpen: _p, ...rest } = cache;
+  return rest;
 }
 
 function writeTopCache(ws: string, cache: TopCache) {
@@ -254,6 +308,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   const claimed = claims.filter(([, c]) => c.branch).length;
   let openPrs = 0;
   let mergedPrs = 0;
+  let draftPrs = 0;
+  let prActiveAt: number | undefined;
   const mergedHeads: Record<string, string> = {};
   let headline: string | undefined;
   let itemTitle: string | undefined;
@@ -291,7 +347,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       if (out !== undefined) buttonStates[`${repo}/${spec.id}`] = parseButtonStatus(out);
     }
     if (claim.pr !== undefined) {
-      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,title,isDraft,state,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments"], dir));
+      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,title,isDraft,updatedAt,state,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments"], dir));
       if (view?.url) {
         const threads = threadsCommand(view.url);
         if (threads) view.unresolved = parseUnresolved(exec(threads, dir));
@@ -305,8 +361,13 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
         });
       }
       else problems.push(`${repo}: no URL for PR #${claim.pr}`);
-      if (view?.state === "OPEN") openPrs++;
+      if (view?.state === "OPEN") {
+        openPrs++;
+        if (view.isDraft === true) draftPrs++;
+      }
       else if (view?.state === "MERGED") mergedPrs++;
+      const updated = Date.parse(view?.updatedAt ?? "");
+      if (Number.isFinite(updated)) prActiveAt = Math.max(prActiveAt ?? 0, updated);
       if (claim.branch && view?.state === "MERGED" && view.headRefOid) {
         mergedHeads[repo] = view.headRefOid;
       }
@@ -321,8 +382,11 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     // released repos hold no branch, so only claimed branches need an open PR
     // an open PR somewhere, and every other claim already merged: a merged branch is finished, not a reason to keep the workspace
     prsOpen: claimed > 0 && openPrs > 0 && openPrs + mergedPrs === claimed,
+    ...(claimed > 0 && openPrs === claimed && draftPrs === claimed ? { draftOnly: true } : {}),
+    ...(prActiveAt !== undefined ? { prActiveAt } : {}),
     // a claim with no PR, a closed PR or an unreadable one leaves this unset, so the workspace stays
     ...(claimed > 0 && Object.keys(mergedHeads).length === claimed ? { merged: mergedHeads } : {}),
+    branches: Object.fromEntries(claims.flatMap(([repo, c]) => (c.branch ? [[repo, c.branch] as const] : []))),
     ...(Object.keys(buttonStates).length ? { buttons: buttonStates } : {}),
     ...(problems.length ? { message: problems.join("; ") } : {}),
     at: Date.now(),
@@ -340,7 +404,7 @@ export function cleanable(ws: string): boolean {
   if (isOrchestrationTab(ws)) {
     return false;
   }
-  const cache = readTopCache(ws);
+  const cache = claimedCache(ws);
   const finished = cache.merged !== undefined || cache.prsOpen || readAgentState(ws) === "empty" || sessionEndedForGood(ws);
   if (!finished) {
     return false;
@@ -349,7 +413,7 @@ export function cleanable(ws: string): boolean {
 }
 
 /** `mergedClean` once every PR has merged, else `gitClean`. */
-export function noUnsavedWork(ws: string, cache: Pick<TopCache, "merged"> = readTopCache(ws)): boolean {
+export function noUnsavedWork(ws: string, cache: Pick<TopCache, "merged"> = claimedCache(ws)): boolean {
   return cache.merged ? mergedClean(ws, cache.merged) : gitClean(ws);
 }
 

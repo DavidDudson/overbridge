@@ -1,9 +1,12 @@
 ---
 name: update-library
 description: Upgrade a dependency (or a batch of non-breaking dependency bumps) to a target version under a tracked tech-debt item, driven end to end to a PR. Resolve from/to versions, compile the changelog and a breaking-change table with "affects us" analysis, gather blog and migration links, carry out the mandatory breaking-change migrations, and make a judgment call on deprecations (apply the small ones, spin off follow-up tech-debt items for the large ones). Both the item body and the PR body follow the library-update template. Use when the user wants to bump or upgrade a library ("update X to vN", "upgrade the Y dependency", "bump Z", "update library", "bump X, Y and Z together"). Also run by audit-vulns for each item it plans.
+requires: gh-stack
 ---
 
 # Update library
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 Upgrade one dependency, or a batch of them (see *Batch mode*), to a target version, as a tracked and shipped tech-debt change:
 
@@ -58,7 +61,7 @@ Everything below says "the manifest", "the lockfile" and "the package manager". 
 
 A monorepo can hold several. Say which one the library lives in. Use `overbridge config get commands.<x>` for the repo's own install, typecheck, lint, test and build commands (`commands.build`, `commands.test`, …). A key that is unset means the repo has none: say so rather than guessing.
 
-Run every typecheck, lint, test, and build command through `overbridge check <repo> -- <command>`: the check queue runs one at a time across workspaces, in the repo's dev shell. Run install and package-manager commands through `overbridge shell <repo> -- <command>`, which uses the same dev shell without queueing. Both run the command as it is when the repo declares no `shell`.
+Run every typecheck, lint, test, and build command through `overbridge check <repo> -- <command>`: the check queue runs them in order across workspaces, several at once while the load allows, in the repo's dev shell. Run install and package-manager commands through `overbridge shell <repo> -- <command>`, which uses the same dev shell without queueing. Both run the command as it is when the repo declares no `shell`.
 
 ## Batch mode: several libraries, one item, one PR
 
@@ -123,6 +126,8 @@ Otherwise invoke **`loop-tech-debt`** with the filled template as the problem de
 
 `loop-item` runs without a plan-approval stop: write the migration plan (Phase 5) as its plan and go on. Stop only for its scope gate (`SPLIT` or `CLARIFY`).
 
+Stay in this workspace for related work (the `workspace` skill's affinity table). An upgrade that must land on top of another open upgrade (a bump that needs the previous major first) is a layer: `gh stack add` here, never a new workspace. Independent upgrades each get their own item and workspace.
+
 ## Phase 5: Implement (bump, migrate, judge deprecations)
 
 During the implement phase:
@@ -136,7 +141,7 @@ During the implement phase:
 3. **Carry out every breaking-change migration that affects us**: these are mandatory. This is the minimum shippable change: after it, the project builds, typechecks and tests pass on the new version.
 4. **Deprecations are a judgment call (optional):**
    - **Small, mechanical, localised** (few callsites, no behaviour change, no design decision): apply it now, in this PR.
-   - **Large** (many callsites, behaviour change, or needs a design decision): **do not** balloon this PR. Recommend a **separate tech-debt item** per deprecation cluster, and record the recommendation in the template's Deprecations and Migration plan sections. Optionally file those items (`overbridge item create --tech-debt`) and link them. Leave a `// TODO(<item link>): migrate off <deprecated API>` at the callsites, naming the follow-up item.
+   - **Large** (many callsites, behaviour change, or needs a design decision): **do not** balloon this PR. Recommend a **separate tech-debt item** per deprecation cluster, and record the recommendation in the template's Deprecations and Migration plan sections. Optionally file those items (`overbridge item create --tech-debt`) and link them. Do not start them from here while this PR is open unless the user asks: a follow-up that builds on this PR is a stacked layer in this workspace, anything else is its own workspace (`overbridge start <repo> <id>`). Leave a `// TODO(<item link>): migrate off <deprecated API>` at the callsites, naming the follow-up item.
    - State the reasoning for each apply-vs-defer decision in the template.
 5. Verify with the **smallest** scope that proves it: the repo's `commands.typecheck`, then `commands.test` on the touched files or project only. Run the full suite once at the end.
 

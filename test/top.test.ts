@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
-import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type TopApp, type TopLink, type TopSnapshot } from "../src/top";
+import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, claimedCache, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type TopApp, type TopLink, type TopSnapshot } from "../src/top";
 import { textWidth } from "../src/term";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -226,6 +226,15 @@ describe("refreshTop", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
+  test("records whether every claimed PR is an open draft, and when the PRs last changed", () => {
+    const draft = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", { isDraft: true, updatedAt: "2026-06-01T00:00:00Z" }) });
+    expect(draft.draftOnly).toBe(true);
+    expect(draft.prActiveAt).toBe(Date.parse("2026-06-01T00:00:00Z"));
+    const ready = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", { isDraft: false }) });
+    expect(ready.draftOnly).toBeUndefined();
+    expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("MERGED", { isDraft: true }) }).draftOnly).toBeUndefined();
+  });
+
   test("caches the headline, the item link and the PR link", () => {
     const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", { title: "" }) });
     expect(cache.headline).toBe("12 Add dark mode");
@@ -341,6 +350,24 @@ describe("cleanable", () => {
       s.workspaces.w1!.repos.r2 = { branch: "feat/13-other" };
     });
     expect(open("OPEN", "OPEN")).toBe(false);
+  });
+
+  test("a claim that moved after the cache was built is not finished on the old PR's say", () => {
+    expect(cachePr("MERGED", { headRefOid: headSha() }).merged).toBeDefined();
+    expect(claimedCache("w1").merged).toBeDefined();
+    withState((s) => {
+      s.workspaces.w1!.repos.r = { branch: "feat/13-follow-up", reboundFrom: { branch: "feat/12-dark-mode", pr: 3 } };
+    });
+    expect(claimedCache("w1").merged).toBeUndefined();
+    expect(claimedCache("w1").prsOpen).toBeUndefined();
+    expect(cleanable("w1")).toBe(false);
+    expect(cachePr("OPEN").branches).toEqual({ r: "feat/13-follow-up" });
+  });
+
+  test("a cache from before branches were recorded is trusted", () => {
+    const old = cachePr("MERGED", { headRefOid: headSha() });
+    const { branches: _b, ...legacy } = old;
+    expect(claimedCache("w1", legacy as typeof old).merged).toBeDefined();
   });
 
   test("a just-cleared agent makes it a candidate even without an open PR, but dirty trees still block", () => {

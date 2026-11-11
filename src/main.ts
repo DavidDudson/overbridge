@@ -3,21 +3,27 @@ import * as cmd from "./commands";
 import { REQUIRED_SKILLS, requiredSkillProblems } from "./plugins";
 import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
+import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
+import { icebox, thaw } from "./icebox";
 import { item } from "./item";
+import { go, GO_USAGE } from "./go";
 import { next } from "./next";
 import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
 import { FINISH_FLAG, finishRemoval } from "./remove";
 import { sweepMerged } from "./merge-sweep";
-import { showTab, start, startTask } from "./start";
+import { showTab, start, startStack, startTask } from "./start";
 import { topPanel, topRefresh } from "./top-run";
+import { prListPane, refreshPrList, type PrListKind } from "./prlist-run";
+import { refreshWorklist, worklistPane } from "./worklist-run";
 import { silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
-import { exec, OverbridgeError } from "./util";
+import { exec, log, OverbridgeError } from "./util";
 
-const START_USAGE = "usage: overbridge start <repo> <id> [--prompt text] | overbridge start <repo> --task <slug> --prompt <text>";
+const START_USAGE =
+  "usage: overbridge start <repo> <id> [--prompt text] [--here] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] | overbridge start <repo> --task <slug> --prompt <text>";
 
 const HELP = `overbridge (alias: ws) — multi-repo workspaces with bound Claude sessions in zellij
 
@@ -30,11 +36,15 @@ Setup
   overbridge app [id [action]]                  list or start|stop|restart|status|log repo apps
   overbridge next                               go to the next tab needing you: waiting for input, then finished,
                                         then finished with background tasks (zellij binds it to a key)
+  overbridge go <n>|<name>|next|prev            switch tab by sidebar number, name, or neighbour (wrapping);
+                                        works outside zellij too, so a window-manager key can call it
   overbridge diff [--ws name]                   changes since the default branch, whitespace ignored, via delta
   overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
+  overbridge worklist [refresh]                 work list pane (the @work tab); refresh reads every board into its cache
+  overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
 
 Work items (the repo's project-management provider)
   overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
@@ -47,10 +57,17 @@ Skill extensions
 Workspaces
   overbridge start <repo> <id> [--prompt text]  workspace named for a work item (ENG-123, gh-app-12), on its
                                         branch, in a new tab running /start-item; focuses an existing one's
-                                        tab, or opens it when it has none
+                                        tab, or opens it when it has none. Inside a workspace on a task/
+                                        branch with no PR, re-binds that workspace to the item instead
+                                        (the item's branch is claimed in place, carrying the task's work)
+  overbridge start <repo> <id> --here           re-bind the current workspace to the item from any clean claim
   overbridge start <repo> --task <slug> --prompt <text>
                                         work with no item yet (a ticket to file, a spike): workspace <slug>
                                         on branch task/<slug>, in a new tab whose Claude starts with <text>
+  overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text]
+                                        items in dependency order, bottom first: one workspace (<slug>, else
+                                        the first item's name plus -stack) holding a gh stack with one layer
+                                        (branch + claim) per item, on layer 1, in a new tab running /start-item
   overbridge new <name> [-r repo]...            create a workspace and open its tab
   overbridge tab <name> [--prompt text]         open a workspace's tab when it has none, else focus it
   overbridge add <repo> [--ws name]             add a repo worktree to a workspace
@@ -58,11 +75,22 @@ Workspaces
                                         overbridge.yml); as it is when the repo has none
   overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>
                                         run a heavy command (lint, typecheck, test, build) in the repo's
-                                        dev shell, one at a time across workspaces, once the load allows;
+                                        dev shell, queued across workspaces, several at once while the load allows;
                                         killed on timeout or when it stops using CPU (check-queue in overbridge.yml)
   overbridge rm <name> [--force]              remove a workspace and its worktrees (the top panel's
-                                        Cleanup button does this once the PR is open and nothing is unpushed)
-  overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty state
+                                        Cleanup button does this once the PR is open and nothing is unpushed);
+                                        also removes an orphan: a workspace folder that status does not list
+  overbridge cleanup [--json] [--no-fetch]      report what each workspace and orphan folder is fit for: remove,
+                                        review (unsaved work), rebind, ask or keep. Removes nothing; --dry-run
+                                        is accepted and changes nothing (the cleanup skill acts on the report)
+  overbridge icebox <name> [--prune] [--drop-worktree]
+                                        pause a workspace: stop its apps and checks, write a handoff, close
+                                        its tab; keeps claims; refuses with unsaved work. --prune deletes the
+                                        repo's icebox.prune paths (never tracked files); --drop-worktree removes
+                                        the worktrees, keeping the branches. Nothing is reclaimed without a flag
+  overbridge thaw <name>                        reopen an iceboxed workspace's tab, its agent resuming and
+                                        reading the handoff; recreates dropped worktrees on their branches
+  overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty and iceboxed state
   overbridge whoami                             workspace for the current dir/session
   overbridge prereqs                            exit 1 unless the skills overbridge's skills depend on (gh-stack)
                                         are installed
@@ -141,9 +169,40 @@ async function main(argv: string[]): Promise<number> {
     case "next":
       console.log(next(currentTab()));
       break;
+    case "go": {
+      const { positionals } = opts(rest, {});
+      if (positionals.length !== 1) throw new OverbridgeError(GO_USAGE);
+      console.log(go(positionals[0]!));
+      break;
+    }
     case "diff": {
       const { values } = opts(rest, ws);
       diff(cmd.requireWs(values.ws));
+      break;
+    }
+    case "worklist": {
+      const sub = rest[0];
+      if (sub === "refresh") {
+        const cache = refreshWorklist();
+        log(`worklist: ${cache.rows.length} open item(s)${cache.notes.length ? `; ${cache.notes.join("; ")}` : ""}`);
+      } else if (sub !== undefined) {
+        throw new OverbridgeError("usage: overbridge worklist [refresh]");
+      } else {
+        await worklistPane();
+      }
+      break;
+    }
+    case "prs":
+    case "reviews": {
+      const kind: PrListKind = sub;
+      if (rest[0] === "refresh") {
+        const cache = refreshPrList(kind);
+        log(`${kind}: ${cache.rows.length} open PR(s)${cache.error ? `; ${cache.error}` : ""}`);
+      } else if (rest[0] !== undefined) {
+        throw new OverbridgeError(`usage: overbridge ${kind} [refresh]`);
+      } else {
+        await prListPane(kind);
+      }
       break;
     }
     case "top": {
@@ -176,6 +235,12 @@ async function main(argv: string[]): Promise<number> {
       } else {
         cmd.removeWorkspace(positionals[0]!, !!values.force);
       }
+      break;
+    }
+    case "cleanup": {
+      const { values, positionals } = opts(rest, { json: { type: "boolean" }, "no-fetch": { type: "boolean" }, "dry-run": { type: "boolean" } });
+      if (positionals.length) throw new OverbridgeError("usage: overbridge cleanup [--json] [--no-fetch]");
+      cleanup(values.json ? Format.Json : Format.Table, values["no-fetch"] ? Fetch.No : Fetch.Yes);
       break;
     }
     case "status":
@@ -224,17 +289,42 @@ async function main(argv: string[]): Promise<number> {
       showTab(cmd.requireWs(positionals[0]!), { prompt: values.prompt });
       break;
     }
+    case "icebox": {
+      const { values, positionals } = opts(rest, { prune: { type: "boolean" }, "drop-worktree": { type: "boolean" } });
+      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge icebox <name> [--prune] [--drop-worktree]");
+      const handoff = await icebox(cmd.requireWs(positionals[0]!), { prune: values.prune, dropWorktree: values["drop-worktree"] });
+      console.log(`iceboxed ${positionals[0]}; handoff at ${handoff}`);
+      break;
+    }
+    case "thaw": {
+      const { positionals } = opts(rest, {});
+      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge thaw <name>");
+      thaw(cmd.requireWs(positionals[0]!));
+      break;
+    }
     case "start": {
-      const { values, positionals } = opts(rest, { prompt: { type: "string" }, task: { type: "string" } });
+      const { values, positionals } = opts(rest, {
+        prompt: { type: "string" },
+        task: { type: "string" },
+        stack: { type: "boolean" },
+        name: { type: "string" },
+        here: { type: "boolean" },
+      });
+      if (values.stack) {
+        if (values.task !== undefined || values.here || positionals.length < 3) throw new OverbridgeError(START_USAGE);
+        startStack(positionals[0]!, positionals.slice(1), { name: values.name, prompt: values.prompt });
+        break;
+      }
+      if (values.name !== undefined) throw new OverbridgeError("--name only goes with --stack");
       if (values.task !== undefined) {
-        if (positionals.length !== 1 || values.prompt === undefined) {
+        if (positionals.length !== 1 || values.prompt === undefined || values.here) {
           throw new OverbridgeError("usage: overbridge start <repo> --task <slug> --prompt <text>");
         }
         startTask(positionals[0]!, values.task, values.prompt);
         break;
       }
       if (positionals.length !== 2) throw new OverbridgeError(START_USAGE);
-      start(positionals[0]!, positionals[1]!, values.prompt);
+      start(positionals[0]!, positionals[1]!, values.prompt, { here: values.here });
       break;
     }
     case "layout":

@@ -29,6 +29,9 @@ export const CONTINUING_END_REASONS: readonly string[] = [EndReason.Clear, EndRe
  */
 export const endedForGood = (reason: string | undefined): boolean => reason === EndReason.PromptInputExit;
 
+/** Agent states with no turn in progress: removing the workspace cannot cut off work. */
+export const AT_REST: ReadonlySet<AgentState | undefined> = new Set<AgentState | undefined>([undefined, "empty", "idle", "done", "end"]);
+
 /** Shown when no state has been recorded, or it has gone stale. */
 export const UNKNOWN_GLYPH = "·";
 
@@ -105,3 +108,13 @@ export function sessionEndedForGood(ws: string, now = Date.now()): boolean {
 }
 
 export const glyphFor = (state: AgentState | undefined): string => (state ? GLYPHS[state] : UNKNOWN_GLYPH);
+
+/** When the agent hook last recorded anything for `ws` (ms), however old; undefined when there is no record. */
+export function readAgentAt(ws: string): number | undefined {
+  try {
+    const { at } = JSON.parse(readFileSync(agentStateFile(ws), "utf8")) as { at?: unknown };
+    return typeof at === "number" && Number.isFinite(at) ? at : undefined;
+  } catch {
+    return undefined;
+  }
+}

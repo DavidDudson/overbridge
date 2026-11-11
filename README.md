@@ -6,6 +6,10 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   `~/workspaces/.bare/<repo>.git`; every workspace gets a `git worktree` of it.
 - **One workspace per work item.** Named for the item (`ENG-123` for Jira, `gh-app-12` for GitHub issue 12 of
   `app`), created by `overbridge start`, wiped when its PR is open and nothing is left locally.
+  Related work stays in one workspace: a `task/` workspace (a ticket writer, a spike) continues into the item
+  it filed or explored when `overbridge start` runs inside it, and `--here` re-binds any clean workspace.
+  Every layer of a stack stays in one workspace, and the skills (`loop-item`, `loop-tech-debt`, `update-library`,
+  `ship-pr`) follow the table in the `workspace` skill instead of opening a workspace per related item.
 - **Workspaces hold several repos.** `~/workspaces/ENG-123/{app,infra}` etc.
 - **Claims.** Each workspace tracks the branch/PR it is on per repo. A branch or PR
   claimed by one workspace cannot be checked out by another. A `<type>/<n>-<slug>` branch
@@ -41,6 +45,10 @@ overbridge spinup                       # fresh zellij session over the existing
 overbridge start app 12                 # workspace gh-app-12 on the issue's branch, in a new tab running /start-item
 overbridge start app ENG-123            # a Jira item: workspace ENG-123
 overbridge start app --task file-x --prompt 'file a ticket for X'   # no item yet: workspace file-x on branch task/file-x
+overbridge start app --stack 12 13 14   # items in dependency order, bottom first: workspace gh-app-12-stack (or --name <slug>)
+                                        # holding a gh stack with one layer per item, claim and HEAD on layer 1
+overbridge start app 12                 # inside file-x once it filed #12: re-binds file-x to the item, no new workspace
+overbridge start app 12 --here          # re-bind the current workspace from any claim, if nothing is uncommitted or unpushed
 ```
 
 `overbridge spinup` always rebuilds the session, killing running panes. Use `overbridge up` to just
@@ -71,11 +79,48 @@ branch's commits off the default branch. A workspace also stays while its agent 
 idle or has ended. A claim with no PR, or a PR closed without merging, keeps the workspace. Orchestration tabs are never
 removed this way.
 
-**Seeing what was removed.** Every removal shows at the bottom of the sidebar, so none happens unseen. A yellow
-`🧹 4s removing <title>` row shows one in progress. A finished one stays for an hour and names what removed it:
-`🧹 3m merged <title>` for the merged-PR check, `exited` for an ended session, and `cleaned` for the Cleanup button.
-A failed removal shows as a red `✗ 1m failed <title>`. The sidebar shows at most three of these rows, newest first,
-and `state.json` keeps the last 20 under `cleanups`.
+**Icebox.** `overbridge icebox <name>` pauses a workspace you will not touch for a while, such as one holding a
+draft PR. It refuses while any repo has uncommitted or unpushed work. Otherwise it stops the workspace's apps and
+queued checks, writes a handoff to `<ws>/.overbridge/handoffs/` (reason `icebox`), closes its tab and marks it
+iceboxed. Claims and worktrees stay, so nothing else can take its branch or PR. The sidebar lists it as a dim
+`❄ <name> iceboxed` row, `status` marks it `iceboxed`, and `up`/`layout` leave it out. `overbridge thaw <name>`
+reopens the tab, the agent continuing its conversation and reading the handoff. If every PR of an iceboxed
+workspace merges, the merged-PR check removes it like any other. With `icebox.idle-days` set, the sidebar suggests
+iceboxing a workspace whose claimed PRs are all drafts and untouched that long: its card reads
+`draft PRs idle <n>d · icebox?` unless the agent is waiting on you. It only suggests; run `overbridge icebox <name>` to act.
+
+Nothing is reclaimed unless you ask. `icebox <name> --prune` deletes the paths listed in the repo's
+`icebox.prune` (`node_modules`, `target`) once the workspace is marked iceboxed, skipping anything git does not ignore,
+anything it tracks, and anything that leaves the repo through a symlink. `.git` and `.claude` are never valid paths. `icebox <name> --drop-worktree` removes the worktrees, keeping every claimed branch, so the
+workspace folder is empty (the name stays reserved by its claims) and the sidebar row reads `❄ <name> iceboxed · dropped`. `thaw` recreates each worktree
+on its claimed branch under the same workspace name; it refuses, leaving the workspace iceboxed, when a folder is in
+the way or git cannot check the branch out. It refuses up front when a worktree holds ignored files (a `.env`) that
+`--prune` would not delete, since git does not count them as unsaved work. Both flags can be combined.
+
+**Seeing what was removed.** The bottom of the sidebar shows `🧹 next check 42s`, a countdown to the next merged-PR check.
+Below it, a yellow `🧹 removing <title>` row shows a removal in progress and a grey `🧹 removed <title>` row one that finished;
+a failed one shows red as `✗ failed <title>`. Finished rows stay until the next check, then drop off. The sidebar shows at most
+three removal rows, and `state.json` keeps the last 20 under `cleanups`.
+
+**What the merged-PR check leaves behind.** `overbridge cleanup` reports on every workspace the check does not remove, and
+on orphans: workspace folders under the root that `overbridge status` does not list. It removes nothing. Each one gets a
+verdict:
+
+- **`remove`**: every claimed PR has merged. Or a PR that names the item merged from another branch, so none was
+  recorded. Or the item is done and no PR is open. Or it is a `task/` branch with no PR and no commits whose session is
+  at rest. Or it is an orphan.
+- **`review`**: one of the above, but something would be lost. A repo has uncommitted changes, commits that are on no
+  remote branch and in no merged PR, or a stash made on its branch. Or the folder holds files that are neither worktrees
+  nor generated. Or the session is in the middle of a turn.
+- **`rebind`**: the workspace is named for a done item and holds an open PR for a different item.
+- **`ask`**: no PR, no commits, and nothing unsaved, and the item is not done. It was never started.
+- **`keep`**: work in progress, or a read failed.
+
+`overbridge cleanup --json` prints the facts behind each verdict, and `--no-fetch` skips fetching the repos first.
+`overbridge rm <name>` also removes an orphan: it removes the folder's registered worktrees from their bare repos,
+prunes them, and deletes the folder. Without `--force` it refuses when a worktree has uncommitted changes or
+unpushed commits, or the folder holds other files. The `cleanup` skill runs the scan from the orchestration tab,
+asks which `remove` workspaces to delete, and runs `overbridge rm` for those.
 
 Inside a workspace (shell pane or its Claude):
 
@@ -83,7 +128,7 @@ Inside a workspace (shell pane or its Claude):
 overbridge checkout app feat/login        # adds repo if missing, claims + switches
 overbridge checkout infra '#42'           # pick up a PR
 overbridge pr                              # record PRs for claimed branches
-overbridge status --all
+overbridge status --all                    # claims, PRs, stacks; `from <branch>` marks a workspace re-bound from another claim
 overbridge release app
 overbridge shell app -- just test         # run a command in the repo's dev shell
 overbridge check app -- just test         # the same, queued: one heavy command at a time across workspaces
@@ -110,7 +155,12 @@ Run `overbridge help` for every command.
 
 `plugin/` ships skills: `workspace`, `ship-pr` (commit, PR, stacked PRs and splitting a branch into a stack,
 green build, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
-`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`) and `read-handoff` (continue from a handoff file after `/clear`). They read the
+`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`), `read-handoff` (continue from a handoff file after `/clear`) and `whip` (from the
+orchestration tab: find every workspace with work still outstanding, such as a draft PR, a conflict with main,
+review feedback, a red build, uncommitted or unpushed work or an item not yet shipped, and message its Claude a
+plain "continue" naming what is left; done workspaces are skipped; it ends with a sent/skipped table and takes
+`--dry-run`) and `cleanup` (from the orchestration tab: report the finished, orphaned, and never-started
+workspaces that `overbridge cleanup` finds, and remove the safe ones once you confirm; it also takes `--dry-run`). They read the
 repo's `overbridge.yml` (`project-management`, `commands`) and work with work items through `overbridge item`.
 `loop-tech-debt` files items with `overbridge item create --tech-debt`, so set `project-management.tech-debt`.
 `audit-vulns` reads Dependabot alerts, so it needs a GitHub repo.
@@ -286,21 +336,24 @@ Where it applies:
 ### Check queue
 
 `overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>` runs a heavy command, such as lint, typecheck,
-test or build, so that only one runs at a time across every workspace. The skills send the repo's `commands.lint`,
+test or build, in queue order across every workspace. Several run at once while the machine's load leaves room. The skills send the repo's `commands.lint`,
 `typecheck`, `test`, and `build` through it. The repo defaults to the one the current directory is in, then to the
 workspace's only repo.
 
-1. **Queue.** Each call writes a ticket to `.overbridge/check-queue/`. The oldest ticket whose process is still alive
-   holds the turn, and the others wait in order. Waiters remove tickets whose process has died. If a dead holder left
-   its command running, they kill that command too.
-2. **Load.** Once it holds the turn, the run waits until the 1-minute load average is under `max-load-percent` of the cores.
+1. **Queue.** Each call writes a ticket to `.overbridge/check-queue/`. Tickets start in the order they were queued:
+   a ticket waits until every ticket ahead of it, whose process is still alive, has started. Waiters remove tickets
+   whose process has died. If a dead ticket left its command running, they kill that command too.
+2. **Load.** The next ticket in line starts once the 1-minute load average is under `max-load-percent` of the cores,
+   whether or not other runs are still going. The average takes about a minute to show a new run, so each run that
+   started in the last minute counts as up to one extra core of load. Set `max-parallel` to cap how many run at once;
+   `max-parallel: 1` runs them one at a time.
 3. **Run.** The command runs in the repo's dev shell, as with `overbridge shell`, in a process group of its own. A
    command started inside a held run, such as a git hook, runs straight away instead of queueing behind its parent.
 4. **Stop.** The command is killed (TERM, then KILL after 10 seconds) when it runs past `timeout-seconds` (exit 124),
-   or when its process group uses no CPU for `stall-seconds` (exit 137). If no turn comes within `wait-seconds`, the
-   call gives up with exit 75. Otherwise it exits with the command's own code.
+   or when its process group uses no CPU for `stall-seconds` (exit 137). If a call cannot start within `wait-seconds`, it
+   gives up with exit 75. Otherwise it exits with the command's own code.
 
-`--timeout-seconds` raises or lowers the time limit for one run. The tab sidebar shows the running command, how long
+`--timeout-seconds` raises or lowers the time limit for one run. The tab sidebar shows each running command, how long
 it has run, and who is waiting.
 
 ### Keys and defaults
@@ -316,12 +369,18 @@ it has run, and who is waiting.
 | `project-management.workspace` | GitHub `gh-{repo}-{number}`, Jira `{id}` | workspace name template. Placeholders: `{id}`, `{number}`, and `{repo}`. It must use `{id}` or `{number}` |
 | `project-management.branch-types` | none | the `{type}` for each item type: a Jira issue type, or a GitHub label. The first of the item's types with an entry wins, ignoring case, then `default`, then `feat`. Looking up the type needs the network, so it happens only when `branch` uses `{type}` |
 | `project-management.issue-type` | `Task` | Jira issue type for new items |
+| `project-management.worklist-project` | none | GitHub only: a Projects v2 board, `<owner>/<number>` (or a bare number for the repo's owner), such as `DavidDudson/2`. The `@work` tab then lists that board's issues for the repo, assigned to you or not, instead of only your assigned issues. Needs `gh auth refresh -s project` |
+| `project-management.worklist-statuses` | every Status but Done | With `worklist-project`: the board Status values to list, such as `[Backlog, Ready]` |
+| `project-management.worklist-jql` | `(sprint in openSprints() OR statusCategory = "In Progress")` | Jira only: JQL that narrows the `@work` tab to some of your open tickets. Set it to `""` to list every open ticket. Repos on the same project and filter share one read, so each ticket appears once and `s` asks which repo to start it in |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
 | `check-queue.max-load-percent` | `70` | start a queued run only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. See [Check queue](#check-queue) |
+| `check-queue.max-parallel` | none | run at most this many commands at once; unset leaves the load as the only limit |
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
-| `check-queue.wait-seconds` | `900` | give up (exit 75) when a run gets no turn, or the load stays high, for this long |
+| `check-queue.wait-seconds` | `900` | give up (exit 75) when a run cannot start for this long, because of the queue ahead, `max-parallel`, or the load |
+| `icebox.idle-days` | none | suggest iceboxing a workspace whose claimed PRs are all drafts and idle this many days (last commit, PR update and agent activity, whichever is latest). The sidebar card shows `draft PRs idle <n>d · icebox?`; nothing is iceboxed automatically. Unset turns it off. Set it for every repo in the root `config.yml` under `defaults.icebox` |
+| `icebox.prune` | `[]` | repo-relative paths `overbridge icebox --prune` deletes, such as `node_modules` or `target`; only paths git ignores and does not track. No `..`, absolute paths, globs, `.git` or `.claude` |
 | `shell` | none | the repo's dev shell: a command prefix (`nix develop --command`, `direnv exec .`), or a mapping `enter` (the prefix), `env` (a command printing the env NUL-separated, as `env -0` does) and `key` (repo-relative files whose contents invalidate the cached env; needs `env`). See [Dev shells](#dev-shells) |
 | `review.personas` | auto | reviewer personas to run; unset selects by diff signals |
 | `review.exclude` | `[]` | personas to skip, applied after selection |
@@ -551,7 +610,7 @@ The legend shows the range the digits reach, such as `1-14`.
 Left/Right or `h`/`l` go back and forward through the tabs visited from the sidebar, like a browser.
 Every tab's sidebar shares one history per zellij session (`<meta>/sidebar-history/<session>.json`),
 tabs closed since are skipped, and a failed switch leaves it as it was. Switches made outside the sidebar
-(zellij keys, the tab bar, `overbridge next`) are not recorded.
+(zellij keys, the tab bar, `overbridge next`, `overbridge go`) are not recorded.
 The new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. Long titles wrap under their text (up to three rows).
 
@@ -563,7 +622,13 @@ a brief through `--append-system-prompt`. The guard lets it read anything, run r
 commands, check status, and start or remove workspaces. It blocks file edits, branch changes, commits,
 pushes, and changes to PRs and issues, and its message tells Claude to start a workspace instead. When you
 ask it for a task, it runs `overbridge start` with your request as `--prompt`, and the new workspace's
-Claude does the work. The Workspaces frame is below it. Keys,
+Claude does the work. When you ask it to pick up, fix or resolve a PR (`pickup #127`, "there's a conflict
+on PR 127"), it first checks `overbridge status --all` for a workspace that already claims the PR's head
+branch. If one exists, it sends that workspace's Claude `/pickup #<pr> <the rest of your request>` with
+`SendMessage` (asking to be told when it goes idle) rather than opening a duplicate workspace; only when no
+workspace holds the branch does it run `overbridge start ... --prompt '/pickup #<pr> ...'`. `/whip` there
+messages every workspace whose work is still outstanding to continue, and `/cleanup` finds the workspaces
+that can go (see [Claude Code plugin](#claude-code-plugin)). The Workspaces frame is below it. Keys,
 clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
 and sidebar files never share a name with a workspace's.
@@ -575,9 +640,18 @@ opens it again at the front and returns focus to the tab you were on. A lock in
 `<meta>/orchestration/@root.reopen.lock` makes sure only one sidebar reopens it. A user layout
 (`layouts/overbridge.kdl`) decides its own tabs, so nothing is reopened when one exists.
 
+Two more orchestration tabs list GitHub PRs through `gh search`: `@prs` (open PRs you opened) and `@reviews` (open PRs
+waiting for your review). `j`/`k` move, `o` opens the PR in a browser, `r` refreshes (every minute otherwise).
+`github-orgs` in the root `config.yml` limits both to some owners, so each machine can differ:
+
+```yaml
+# <root>/config.yml
+github-orgs: [DavidDudson]   # a work machine: [megaport]; leave out for every owner
+```
+
 Under the list, up to three rows show workspaces being removed or removed in the last hour (see **Seeing what was
-removed** above). Below them, while the [check queue](#check-queue) is busy, a `▶` row shows the running command, its
-workspace, and how long it has run, and a `⧗` row lists the workspaces waiting.
+removed** above). Below them, while the [check queue](#check-queue) is busy, a `▶` row for each running command shows its
+workspace and how long it has run, and a `⧗` row lists the workspaces waiting.
 
 The width (default 60) comes from the global config:
 
@@ -600,6 +674,11 @@ seconds); unknown or over six hours old shows `–`.
 
 `overbridge next` (the `n` key in the sidebar, and a zellij binding) goes to the next tab that needs you:
 waiting for input first, then finished, then finished with background tasks running, cycling from the current tab.
+
+`overbridge go <n>|<name>|next|prev` switches tab by its sidebar number (`go 1` is the root tab, like `⌥1`), by name,
+or to the neighbouring tab (wrapping), and lands on that tab's Claude pane. It works from outside the session too,
+so a window-manager key (say Hyprland `SUPER+ALT+<n>`) can be bound to it: without `$ZELLIJ` it targets the session by
+name, `$OVERBRIDGE_SESSION` or `workspaces`.
 #### Agent state
 
 Each workspace's `.claude/settings.json` registers `overbridge hook` for `SessionStart`,

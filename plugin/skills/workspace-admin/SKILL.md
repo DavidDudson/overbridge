@@ -31,11 +31,21 @@ overbridge start <repo> <id>                      # workspace named for the item
                                           # branch, in a new tab running /start-item; focuses an existing
                                           # one's tab, or opens it when it has none
 overbridge start <repo> --task <slug> --prompt <text>  # no item yet (a ticket to file, a spike): workspace <slug>
-                                          # on branch task/<slug>, its Claude starting with <text>
+                                          # on branch task/<slug>, its Claude starting with <text>.
+                                          # `overbridge start <repo> <id>` inside that workspace later
+                                          # re-binds it to the item (claim moves, task branch deleted)
+overbridge start <repo> <id> --here               # re-bind the current workspace from any claim, when nothing
+                                          # is uncommitted or unpushed
 overbridge new <name> -r <repo> [-r <repo>...]    # by hand; name it for its work item; opens its tab
 overbridge tab <name> [--prompt text]             # reopen a workspace's closed tab (focuses it when open)
 overbridge add <repo> --ws <name>                 # add another repo to an existing workspace
-overbridge rm <name> [--force]                    # refuses with uncommitted changes unless --force
+overbridge rm <name> [--force]                    # refuses with uncommitted changes unless --force; also removes
+                                          # an orphan (a workspace folder that status does not list)
+overbridge cleanup [--json] [--no-fetch]          # report which workspaces and orphans can go (remove, review,
+                                          # rebind, ask, keep); removes nothing. The cleanup skill acts on it
+overbridge icebox <name> [--prune] [--drop-worktree]  # pause: stop apps and checks, write a handoff, close the tab; claims stay; refuses with unsaved work
+                                                  # --prune deletes the repo's icebox.prune paths (untracked only); --drop-worktree removes worktrees, keeps branches
+overbridge thaw <name>                            # reopen an iceboxed workspace; its agent resumes and reads the handoff; recreates dropped worktrees
 overbridge status --all
 
 overbridge spinup                                 # rebuild the zellij session over existing workspaces

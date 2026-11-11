@@ -35,21 +35,29 @@ export const AUTO_MODE_ALLOW = [
 export function scaffold(ws: string) {
   const dir = wsDir(ws);
   mkdirSync(join(dir, ".claude"), { recursive: true });
-  const settings = {
-    env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
-    ...pluginSettings(),
-    // plan-mode plans live in the workspace folder, not ~/.claude/plans
-    plansDirectory: PLANS_DIR,
-    permissions: { allow: ALLOWED_COMMANDS },
-    autoMode: { allow: ["$defaults", ...AUTO_MODE_ALLOW] },
-    hooks: {
-      PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }],
-      ...agentStateHooks(),
-    },
-  };
-  writeFileSync(join(dir, ".claude", "settings.json"), JSON.stringify(settings, null, 2) + "\n");
+  writeFileSync(join(dir, ".claude", "settings.json"), JSON.stringify(workspaceSettings(ws, PLANS_DIR), null, 2) + "\n");
+  // a Claude started in a repo folder does not read the workspace's .claude, so it loads this copy with `--settings`;
+  // plans stay in the workspace folder, not that repo's worktree
+  mkdirSync(dirname(workspaceSettingsPath(ws)), { recursive: true });
+  writeFileSync(workspaceSettingsPath(ws), JSON.stringify(workspaceSettings(ws, join(dir, PLANS_DIR)), null, 2) + "\n");
   writeFileSync(join(dir, "CLAUDE.md"), claudeMd(ws, dir, devShellSection(ws)));
 }
+
+/** The copy of workspace `ws`'s settings kept in the meta dir, for a Claude whose cwd is a repo folder. */
+export const workspaceSettingsPath = (ws: string) => join(metaDir(), "workspaces", `${ws}.settings.json`);
+
+const workspaceSettings = (ws: string, plansDirectory: string) => ({
+  env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
+  ...pluginSettings(),
+  // plan-mode plans live in the workspace folder, not ~/.claude/plans
+  plansDirectory,
+  permissions: { allow: ALLOWED_COMMANDS },
+  autoMode: { allow: ["$defaults", ...AUTO_MODE_ALLOW] },
+  hooks: {
+    PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }],
+    ...agentStateHooks(),
+  },
+});
 
 const hook = (sub: string) => ({ type: "command", command: [...selfCommand(), sub].map(shellQuote).join(" ") });
 
@@ -108,17 +116,27 @@ When the user asks for any task (fixing something, filing a ticket, planning a s
 a PR), start a workspace for it first, passing their request on, then stop:
 
 - For a work item: \`overbridge start <repo> <id> --prompt "<the request, in the user's words>"\`
-- For a PR: find its item with \`overbridge item from-branch <its head branch>\`, then
+- For a PR (pick up, fix, resolve a conflict or review feedback, rebase): first look for the workspace that
+  already has it. Run \`overbridge status --all\` and find the row whose \`pr\` is that PR or whose \`claim\` (or
+  \`head\`) is the PR's head branch (\`gh pr view <pr> --json headRefName\`). If one exists, do not start a
+  duplicate: find that workspace's Claude with \`ListAgents\` (its session is named after the workspace, with
+  an optional short suffix such as \`ws5-37\`) and send it \`/pickup #<pr> <anything else they asked>\` with
+  \`SendMessage\`, passing \`notify_when_idle: true\` so you hear when it finishes. Tell the user which
+  workspace took it. Only when no workspace claims the branch, find the PR's item with
+  \`overbridge item from-branch <its head branch>\` and run
   \`overbridge start <repo> <that id> --prompt "/pickup #<pr> <anything else they asked>"\`. A PR with no item
   uses \`--task pr-<number>\` instead of an id.
 - With no item yet: \`overbridge start <repo> --task <short-slug> --prompt "<the request, in the user's words>"\`
 
 The new workspace opens in its own tab and its Claude does the work. Tell the user which workspace and tab
-opened. If \`overbridge start\` refuses, say why and stop.
+opened. If \`overbridge start\` refuses, say why and stop. A refusal that names another workspace means that
+workspace already holds the branch: message its Claude as above instead of retrying.
 
 You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge item view\`, read-only
-\`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`release\`, \`up\`, \`repo add\`). You may also message
-workspace Claudes with \`ListAgents\` and \`SendMessage\`, for example to tell every tab to resume its work.`;
+\`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`icebox\`, \`thaw\`, \`release\`, \`up\`, \`repo add\`). You may also message
+workspace Claudes with \`ListAgents\` and \`SendMessage\`, for example to tell every tab to resume its work; the
+\`whip\` skill does that for every workspace whose work is still outstanding. The \`cleanup\` skill finds finished
+and orphaned workspaces with \`overbridge cleanup --json\` and removes the safe ones once the user confirms.`;
 
 /**
  * Tells the agent to run repo commands through `overbridge shell` when the workspace holds several repos and
@@ -164,14 +182,16 @@ access to other workspaces and direct branch switching. Do not try to work aroun
 - After \`gh pr create\`, run \`overbridge pr <repo>\` to record the PR against this workspace.
 - \`overbridge status\` shows this workspace's claims; \`overbridge status --all\` shows every workspace.
 - \`overbridge release <repo>\` frees a branch when you are done with it.
+- \`overbridge icebox <workspace>\` pauses a workspace you will not touch for a while (no process, no tab; claims stay);
+  commit and push first. \`overbridge thaw <workspace>\` brings it back.
 - One workspace per work item. To start a different item, run \`overbridge start <repo> <id>\` (it opens the
   item's own workspace and tab) rather than switching this one.
 - Stacked PRs (\`gh stack\`): a claim covers every layer of its stack. \`gh stack init/add/up/down/top/bottom\`,
   \`push\`, \`submit\`, \`rebase\` and \`sync\` work as normal; pull an existing stack with \`overbridge checkout <repo> #<pr>\`
   (never \`gh stack checkout\` or \`gh stack trunk\`). Run \`overbridge pr <repo>\` after moving between layers or submitting.
-- Run lint, typecheck, test, and build commands through \`overbridge check <repo> -- <cmd>\`. Only one runs at a time
-  across all workspaces. It runs in the repo's dev shell once the machine's load allows. overbridge kills a run that
-  goes over its time limit (exit 124) or stops using CPU (exit 137). If no turn comes in time, it gives up with exit 75.
+- Run lint, typecheck, test, and build commands through \`overbridge check <repo> -- <cmd>\`. It queues them
+  across all workspaces and runs several at once, in the repo's dev shell, while the machine's load allows. overbridge kills a run that
+  goes over its time limit (exit 124) or stops using CPU (exit 137). If it cannot start in time, it gives up with exit 75.
 ${devShells}
 ## GitHub repos
 
