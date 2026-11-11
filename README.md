@@ -568,7 +568,12 @@ a brief through `--append-system-prompt`. The guard lets it read anything, run r
 commands, check status, and start or remove workspaces. It blocks file edits, branch changes, commits,
 pushes, and changes to PRs and issues, and its message tells Claude to start a workspace instead. When you
 ask it for a task, it runs `overbridge start` with your request as `--prompt`, and the new workspace's
-Claude does the work. The Workspaces frame is below it. Keys,
+Claude does the work. When you ask it to pick up, fix or resolve a PR (`pickup #127`, "there's a conflict
+on PR 127"), it first checks `overbridge status --all` for a workspace that already claims the PR's head
+branch. If one exists, it sends that workspace's Claude `/pickup #<pr> <the rest of your request>` with
+`SendMessage` (asking to be told when it goes idle) rather than opening a duplicate workspace; only when no
+workspace holds the branch does it run `overbridge start ... --prompt '/pickup #<pr> ...'`. The Workspaces
+frame is below it. Keys,
 clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
 and sidebar files never share a name with a workspace's.

@@ -40,6 +40,15 @@ describe("orchestration tab scaffolding", () => {
     expect(brief).toContain("/pickup #<pr>");
   });
 
+  test("its brief routes a PR to the workspace that already claims its branch before starting a new one", () => {
+    const brief = orchestratorPrompt();
+    expect(brief).toContain("overbridge status --all");
+    expect(brief).toMatch(/do not start a\s+duplicate/);
+    expect(brief).toContain("notify_when_idle: true");
+    expect(brief).toContain("Only when no workspace claims the branch");
+    expect(brief.indexOf("SendMessage")).toBeLessThan(brief.indexOf("overbridge item from-branch"));
+  });
+
   test("claude starts with the settings and the brief appended to the system prompt", () => {
     const args = orchestrationArgs("/s.json", ["--resume"]);
     expect(args).toEqual(["claude", "--settings", "/s.json", "--append-system-prompt", orchestratorPrompt(), "--resume"]);
