@@ -38,6 +38,16 @@
         "worklist-jql": {
           "type": "string",
           "description": "Jira only: JQL that narrows the work list to some of your open tickets. Default: (sprint in openSprints() OR statusCategory = \"In Progress\"). Empty lists every open ticket."
+        },
+        "worklist-project": {
+          "type": "string",
+          "pattern": "^([\\w.-]+/)?\\d+$",
+          "description": "GitHub only: a Projects v2 board as <owner>/<number>, or a bare number for the repo's owner. The work list then shows that board's items, not just the issues assigned to you."
+        },
+        "worklist-statuses": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "With worklist-project: the board Status values to list, e.g. [Backlog, Ready]. Default: every status except Done."
         }
       }
     },

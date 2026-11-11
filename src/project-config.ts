@@ -33,6 +33,10 @@ export interface ProjectManagement {
   issueType?: string;
   /** JQL that narrows the work list's Jira query. Unset means `DEFAULT_WORKLIST_JQL`; empty means no narrowing. */
   worklistJql?: string;
+  /** GitHub only: a Projects v2 board, `<owner>/<number>` or a bare number (the repo's owner), whose items replace "assigned to me". */
+  worklistProject?: string;
+  /** With `worklistProject`: the Status values to list. Unset means every status except Done. */
+  worklistStatuses?: string[];
 }
 
 export const BRANCH_PLACEHOLDERS = ["id", "number", "slug", "type"] as const;
@@ -154,7 +158,7 @@ const TOP_KEYS = ["version", "project-management", "apps", "commands", "review",
 const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
-const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql"];
+const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql", "worklist-project", "worklist-statuses"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
 
 function distance(a: string, b: string): number {
@@ -366,6 +370,9 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       if (workspace) for (const problem of templateProblems(workspace, WORKSPACE_PLACEHOLDERS, true)) p.add("project-management.workspace", problem);
       const issueType = p.string(pm, "issue-type", "project-management", false);
       const worklistJql = pm["worklist-jql"] === "" ? "" : p.string(pm, "worklist-jql", "project-management", false);
+      const worklistProject = p.string(pm, "worklist-project", "project-management", false);
+      if (worklistProject && !/^(?:[\w.-]+\/)?\d+$/.test(worklistProject)) p.add("project-management.worklist-project", "expected <owner>/<number> or a project number, e.g. DavidDudson/2");
+      const worklistStatuses = p.stringList(pm, "worklist-statuses", "project-management");
       let branchTypes: Record<string, string> | undefined;
       const types = pm["branch-types"];
       if (types !== undefined && types !== null) {
@@ -389,6 +396,8 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
           ...(branchTypes ? { branchTypes } : {}),
           ...(issueType ? { issueType } : {}),
           ...(worklistJql !== undefined ? { worklistJql } : {}),
+          ...(worklistProject ? { worklistProject } : {}),
+          ...(worklistStatuses ? { worklistStatuses } : {}),
         };
       }
     }
@@ -538,7 +547,7 @@ export const configPath = (repoDir: string) => join(repoDir, CONFIG_FILE);
 /** The root config, `<root>/config.yml`: settings that live outside the repos. */
 export const ROOT_CONFIG_FILE = "config.yml";
 export const rootConfigPath = () => join(root(), ROOT_CONFIG_FILE);
-const ROOT_KEYS = ["version", "defaults", "repos", "skill-extensions", "guard"];
+const ROOT_KEYS = ["version", "defaults", "repos", "skill-extensions", "guard", "github-orgs"];
 const GUARD_KEYS = ["read-paths", "deny"];
 
 /**
@@ -563,11 +572,13 @@ export interface RootLayers {
   /** Directories of skill extension files (`<dir>/<skill>/<phase>.md`), as written: absolute, `~/` or root-relative. */
   skillExtensions: string[];
   guard: GuardConfig;
+  /** GitHub owners the `@prs` and `@reviews` tabs search. Empty means every owner. */
+  githubOrgs: string[];
 }
 
 /** Read and check `<root>/config.yml`. A missing or empty file has no layers. */
 export function loadRootLayers(file = rootConfigPath()): RootLayers {
-  const layers: RootLayers = { file, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] } };
+  const layers: RootLayers = { file, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] };
   if (!existsSync(file)) return layers;
   const raw = parseYaml(readFileSync(file, "utf8"), file);
   if (raw === null || raw === undefined) return layers;
@@ -591,6 +602,7 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
       }
   }
   layers.skillExtensions = p.stringList(raw, "skill-extensions", "") ?? [];
+  layers.githubOrgs = p.stringList(raw, "github-orgs", "") ?? [];
   if (raw.guard !== undefined && raw.guard !== null) {
     if (!isRecord(raw.guard)) p.add("guard", "expected a mapping with read-paths and deny");
     else {
