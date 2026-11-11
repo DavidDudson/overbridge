@@ -1,9 +1,12 @@
 ---
 name: resolve-feedback
 description: Action PR review feedback. Fetches review comments from GitHub, applies the clear fixes, asks about the ambiguous ones, replies to and resolves threads only for automated reviewers (Copilot, CodeRabbit and other bots) and never for humans, syncs with the default branch, checks CI is green and prints a summary table. Use when the user says "resolve feedback", "address review comments", "check PR comments", "handle the Copilot review", "handle the CodeRabbit review", or passes a PR with reviews on it.
+requires: gh-stack
 ---
 
 # Resolve review feedback
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 ## Extensions
 

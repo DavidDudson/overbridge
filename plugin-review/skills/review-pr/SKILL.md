@@ -1,9 +1,12 @@
 ---
 name: review-pr
 description: Check out an existing PR from any handle (a PR URL, PR number, work-item id such as an issue number or Jira key, or branch name) into this overbridge workspace, then run the full mob-review panel over its branch. Use when the user says "review-pr <thing>", "checkout and review this PR", "review ENG-123's PR", "/review-pr", or hands you a PR link/number/item/branch and wants it checked out and mob-reviewed.
+requires: gh-stack
 ---
 
 # Review PR: checkout + mob-review
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 Resolve any handle that points at an open PR (**PR URL, PR number, work-item id, or branch name**), claim and check out its branch through `overbridge`, then delegate to the `mob-review` skill for the full review panel.
 

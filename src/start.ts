@@ -2,7 +2,7 @@ import { checkout, createWorkspace, removeWorkspace } from "./commands";
 import { getRepo, type RepoSpec } from "./config";
 import * as git from "./git";
 import { barePath, NAME_RE } from "./paths";
-import { type PluginProblems, pluginProblems } from "./plugins";
+import { type PluginProblems, pluginProblems, requiredSkillProblems } from "./plugins";
 import { providerFor } from "./pm";
 import type { Provider } from "./pm/provider";
 import { CONFIG_FILE, type ProjectConfig, parseYaml, ROOT_CONFIG_FILE, resolveConfig } from "./project-config";
@@ -79,8 +79,14 @@ export function startTask(repo: string, slug: string, prompt: string, deps: { ex
   openWorkspace(slug, repo, `${TASK_BRANCH_PREFIX}${slug}`, { prompt }, deps.exec);
 }
 
+/** Plugin problems plus any required skill (gh-stack) the new tab's Claude would lack. */
+function pluginAndSkillProblems(): PluginProblems {
+  const p = pluginProblems();
+  return { errors: [...p.errors, ...requiredSkillProblems()], warnings: p.warnings };
+}
+
 /** Stop before any workspace exists when its Claude could not load the overbridge skills; print the warnings. */
-function requirePlugins(check: () => PluginProblems = pluginProblems) {
+function requirePlugins(check: () => PluginProblems = pluginAndSkillProblems) {
   const { errors, warnings } = check();
   if (errors.length) {
     fail(`the new tab's Claude would not have the overbridge skills, so a command such as /start-item would be unknown:\n${errors.join("\n")}`);

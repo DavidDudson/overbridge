@@ -1,9 +1,12 @@
 ---
 name: ship-pr
 description: Commit, push and open (or update) a GitHub PR from an overbridge workspace, then record the PR against the workspace, wait for a green build, request Copilot and CodeRabbit reviews (CodeRabbit also on drafts) and resolve their feedback. Fills the PR body from the shared template (visible change summary and gaps, a benchmark table on performance PRs, screenshots; everything else collapsed). Handles a single PR on the default branch, a stacked PR on top of another branch or PR (always a real gh stack), and splitting one oversized branch into a stack. Use when the user says "ship it", "open a PR", "raise a PR", "push this up", "update the PR", "stack this on X", "on top of #123", "restack this onto X", "split this into a stack", "break this PR up", or "stacked PR". Pass `--with-review` (or say "review and open a PR") to run mob-review first.
+requires: gh-stack
 ---
 
 # Ship a PR from a workspace
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 Commit the work, push the branch, open a PR with the shared body template, get the build green and the review feedback resolved. Everything runs from the repo directory inside the workspace, on the branch the workspace has claimed.
 
