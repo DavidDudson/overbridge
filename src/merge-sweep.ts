@@ -5,7 +5,7 @@ import { beginRemoval, Landing } from "./remove";
 import { isRemoving, RemovalBlock, readState, withState, type WorkspaceState } from "./state";
 import { MERGE_SWEEP_MS } from "./sweep-trigger";
 import { serverRefreshAll } from "./server-client";
-import { noUnsavedWork, readTopCache, refreshTop, type TopCache } from "./top";
+import { claimedCache, noUnsavedWork, readTopCache, refreshTop, type TopCache } from "./top";
 import { log } from "./util";
 
 /** What the merged-PR sweep does with one workspace. */
@@ -109,7 +109,7 @@ function checkOne(ws: string, deps: SweepDeps): Verdict {
     if (!workspace) {
       return Verdict.Keep;
     }
-    const cache = readTopCache(ws);
+    const cache = claimedCache(ws);
     return verdictFor({ ws, workspace, cache, agent: readAgentState(ws), clean: () => noUnsavedWork(ws, cache) });
   } catch (e) {
     log(`${ws}: merged-PR check failed: ${(e as Error).message}`);

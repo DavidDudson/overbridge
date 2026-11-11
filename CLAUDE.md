@@ -62,6 +62,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   keeping the last good `Model` and putting the first failure in the footer. The sidebar reads state through `tryReadState`;
   writers keep `readState`, so a file `withState` cannot parse is never overwritten. A reader that can be fed a bad file must
   report, not throw.
+  A re-bind (`rebind` in `src/start.ts`) records `Claim.reboundFrom` (the old branch and PR; `overbridge status` shows it). `TopCache.branches`
+  records the branches `merged` and `prsOpen` were built for, and `claimedCache` drops both once a claim has moved, so the sweep and Cleanup
+  never act on the PR a workspace was re-bound away from.
   Once every claimed PR has merged (`TopCache.merged`, the PR head commits), `src/merge-sweep.ts` (`overbridge top sweep`) removes the workspace
   through `beginRemoval` with `Landing.IfFocused`, after `mergedClean` checks that each HEAD is its PR head. A squash merge
   leaves no remote branch holding those commits, so `hasUnpushed` cannot do that check. Unsaved work sets `removalBlocked`, which the sidebar card shows.

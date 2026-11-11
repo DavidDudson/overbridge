@@ -65,6 +65,7 @@ Each item gets its own workspace, named for it (`ENG-123`, `gh-app-12`). Look at
   column and the prompt lists the layers): the item's branch is a layer already. If it is layer 1, go to step 5. For a
   later layer, run `gh stack up` until HEAD is on its branch, then `overbridge pr <repo>` to move the claim, and go to step 5.
   Never `overbridge checkout` or `gh stack init/add` a layer that exists.
+- **The item builds on this workspace's open PR** (the user says "on top of this", or the item depends on the current branch): it is the next layer of a stack here. Run `gh stack add <branch>` (the item's branch, `overbridge item branch <id>`) after `gh stack init` on the current branch if it is not in a stack yet, then `overbridge pr <repo>` and go to step 5. Never a new workspace for a layer.
 - **This workspace holds no claims** (a fresh `scratch` or by-hand workspace): claim in place.
 - **Its claim is a `task/` branch with no PR** (it filed this ticket, or spiked it): the work continues here. Run
 

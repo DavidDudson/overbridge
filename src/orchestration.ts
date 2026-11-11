@@ -18,6 +18,8 @@ export interface OrchestrationTab {
 export const ORCHESTRATION_TABS: readonly OrchestrationTab[] = [
   { tab: "@root", label: "overbridge root", dir: root },
   { tab: "@work", label: "work list", dir: root, pane: "worklist" },
+  { tab: "@prs", label: "my PRs", dir: root, pane: "prs" },
+  { tab: "@reviews", label: "reviews", dir: root, pane: "reviews" },
 ];
 
 export const orchestrationTab = (tab: string): OrchestrationTab | undefined => ORCHESTRATION_TABS.find((t) => t.tab === tab);

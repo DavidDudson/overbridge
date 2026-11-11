@@ -48,7 +48,10 @@ Keep it tight: this is framing, not the implementation. The detailed plan happen
 
 File it without asking. The one exception is an item the investigation could not bound: run `scope-item` first, and on `SPLIT` or `CLARIFY` stop and wait.
 
-If this workspace already holds a branch with local work or an open PR for this repo, say so before filing. `overbridge checkout` will move this workspace, and the item would be left filed with nowhere to work. Resolve that with the user first (finish or release the branch with `overbridge release <repo>`, or use another workspace).
+Check what this workspace holds before filing (`overbridge status`), per the `workspace` skill's affinity table:
+
+- A `task/` claim with no PR, or no claim: file the item and run it here. `loop-item` re-binds a `task/` workspace to the item, so nothing is left filed with nowhere to work.
+- A claim with an open PR, or local work: the item runs in its own workspace. File it, then give `overbridge start <repo> <id>` instead of running `loop-item` here. If the item stacks on this PR (it builds on it), run it here as a new layer with `gh stack add` instead. Ask once only when it could go either way.
 
 ## Phase 2: File the item
 

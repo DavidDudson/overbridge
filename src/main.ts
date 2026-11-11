@@ -15,6 +15,7 @@ import { FINISH_FLAG, finishRemoval } from "./remove";
 import { sweepWithServer } from "./merge-sweep";
 import { showTab, start, startStack, startTask } from "./start";
 import { topPanel, topRefresh } from "./top-run";
+import { prListPane, refreshPrList, type PrListKind } from "./prlist-run";
 import { refreshWorklist, worklistPane } from "./worklist-run";
 import { silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
@@ -45,6 +46,7 @@ Setup
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
   overbridge worklist [refresh]                 work list pane (the @work tab); refresh reads every board into its cache
+  overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
 
 Work items (the repo's project-management provider)
   overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
@@ -83,10 +85,13 @@ Workspaces
   overbridge cleanup [--json] [--no-fetch]      report what each workspace and orphan folder is fit for: remove,
                                         review (unsaved work), rebind, ask or keep. Removes nothing; --dry-run
                                         is accepted and changes nothing (the cleanup skill acts on the report)
-  overbridge icebox <name>                      pause a workspace: stop its apps and checks, write a handoff, close
-                                        its tab; keeps claims and worktrees; refuses with unsaved work
+  overbridge icebox <name> [--prune] [--drop-worktree]
+                                        pause a workspace: stop its apps and checks, write a handoff, close
+                                        its tab; keeps claims; refuses with unsaved work. --prune deletes the
+                                        repo's icebox.prune paths (never tracked files); --drop-worktree removes
+                                        the worktrees, keeping the branches. Nothing is reclaimed without a flag
   overbridge thaw <name>                        reopen an iceboxed workspace's tab, its agent resuming and
-                                        reading the handoff
+                                        reading the handoff; recreates dropped worktrees on their branches
   overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty and iceboxed state
   overbridge whoami                             workspace for the current dir/session
 
@@ -187,6 +192,19 @@ async function main(argv: string[]): Promise<number> {
       }
       break;
     }
+    case "prs":
+    case "reviews": {
+      const kind: PrListKind = sub;
+      if (rest[0] === "refresh") {
+        const cache = refreshPrList(kind);
+        log(`${kind}: ${cache.rows.length} open PR(s)${cache.error ? `; ${cache.error}` : ""}`);
+      } else if (rest[0] !== undefined) {
+        throw new OverbridgeError(`usage: overbridge ${kind} [refresh]`);
+      } else {
+        await prListPane(kind);
+      }
+      break;
+    }
     case "top": {
       const { values, positionals } = opts(rest, ws);
       if (positionals[0] === "refresh") topRefresh(values.ws);
@@ -272,9 +290,9 @@ async function main(argv: string[]): Promise<number> {
       break;
     }
     case "icebox": {
-      const { positionals } = opts(rest, {});
-      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge icebox <name>");
-      const handoff = await icebox(cmd.requireWs(positionals[0]!));
+      const { values, positionals } = opts(rest, { prune: { type: "boolean" }, "drop-worktree": { type: "boolean" } });
+      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge icebox <name> [--prune] [--drop-worktree]");
+      const handoff = await icebox(cmd.requireWs(positionals[0]!), { prune: values.prune, dropWorktree: values["drop-worktree"] });
       console.log(`iceboxed ${positionals[0]}; handoff at ${handoff}`);
       break;
     }
