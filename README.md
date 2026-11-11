@@ -8,6 +8,8 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   `app`), created by `overbridge start`, wiped when its PR is open and nothing is left locally.
   Related work stays in one workspace: a `task/` workspace (a ticket writer, a spike) continues into the item
   it filed or explored when `overbridge start` runs inside it, and `--here` re-binds any clean workspace.
+  Every layer of a stack stays in one workspace, and the skills (`loop-item`, `loop-tech-debt`, `update-library`,
+  `ship-pr`) follow the table in the `workspace` skill instead of opening a workspace per related item.
 - **Workspaces hold several repos.** `~/workspaces/ENG-123/{app,infra}` etc.
 - **Claims.** Each workspace tracks the branch/PR it is on per repo. A branch or PR
   claimed by one workspace cannot be checked out by another. A `<type>/<n>-<slug>` branch
