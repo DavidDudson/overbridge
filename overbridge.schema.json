@@ -42,6 +42,16 @@
         "worklist-jql": {
           "type": "string",
           "description": "Jira only: JQL that narrows the work list to some of your open tickets. Default: (sprint in openSprints() OR statusCategory = \"In Progress\"). Empty lists every open ticket."
+        },
+        "worklist-project": {
+          "type": "string",
+          "pattern": "^([\\w.-]+/)?\\d+$",
+          "description": "GitHub only: a Projects v2 board as <owner>/<number>, or a bare number for the repo's owner. The work list then shows that board's items, not just the issues assigned to you."
+        },
+        "worklist-statuses": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "With worklist-project: the board Status values to list, e.g. [Backlog, Ready]. Default: every status except Done."
         }
       }
     },
@@ -120,6 +130,23 @@
           "dependentRequired": { "key": ["env"] }
         }
       ]
+    },
+    "icebox": {
+      "description": "Settings for `overbridge icebox`. Every key is optional.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prune": {
+          "description": "Repo-relative paths removed by `icebox --prune`, such as node_modules or target. Only paths git ignores and does not track are deleted; no `..`, absolute paths, globs, `.git` or `.claude`.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!\\.git(/|$))(?!\\.claude(/|$))(?!.*(^|/)\\.\\.(/|$))[^*?\\[\\\\:]+$" }
+        },
+        "idle-days": {
+          "description": "Suggest iceboxing a workspace whose claimed PRs are all drafts and whose last activity (commit, PR update or agent state) is older than this many days. The sidebar card shows a hint; nothing is iceboxed automatically. Unset turns the suggestion off.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
     },
     "check-queue": {
       "description": "How `overbridge check` queues a command. Every key is optional.",

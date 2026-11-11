@@ -355,6 +355,8 @@ describe("start inside a task workspace", () => {
       { id: "72", title: "Other", url: "" },
       { id: "73", title: "Fresh", url: "" },
       { id: "74", title: "Dirty", url: "" },
+      { id: "75", title: "Lineage", url: "" },
+      { id: "76", title: "Chained", url: "" },
     ]);
   /** Run `fn` as the workspace's own Claude would: with `OVERBRIDGE_NAME` set. */
   const inside = (ws: string, fn: () => void) => {
@@ -395,6 +397,28 @@ describe("start inside a task workspace", () => {
     expect(hasBranch("spike-a", "task/spike-a")).toBe(false);
     expect(errors.some((e) => e.includes("deleted task/spike-a"))).toBe(true);
     expect(errors.some((e) => e.includes("spike-a/app now on 70"))).toBe(true);
+  });
+
+  test("records what a re-bind moved from; a plain checkout leaves no lineage", () => {
+    startTask("app", "spike-c", "spike it", { plugins: noProblems });
+    inside("spike-c", () => start("app", "75", undefined, { provider: items(), plugins: noProblems }));
+    expect(readState().workspaces["spike-c"]!.repos.app?.reboundFrom).toEqual({ branch: "task/spike-c" });
+
+    createWorkspace("plain", ["app"]);
+    checkout(["app", "feat/plain-work"], "plain");
+    expect(readState().workspaces["plain"]!.repos.app?.reboundFrom).toBeUndefined();
+  });
+
+  test("--here records the old branch and its PR as lineage", () => {
+    createWorkspace("lineage", ["app"]);
+    checkout(["app", "feat/old-work"], "lineage");
+    withState((s) => {
+      s.workspaces["lineage"]!.repos.app = { branch: "feat/old-work", pr: 9 };
+    });
+
+    inside("lineage", () => start("app", "76", undefined, { provider: items(), plugins: noProblems, here: true }));
+
+    expect(readState().workspaces["lineage"]!.repos.app?.reboundFrom).toEqual({ branch: "feat/old-work", pr: 9 });
   });
 
   test("keeps the task branch when the item branch already exists without its commits", () => {

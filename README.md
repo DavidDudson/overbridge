@@ -8,6 +8,8 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   `app`), created by `overbridge start`, wiped when its PR is open and nothing is left locally.
   Related work stays in one workspace: a `task/` workspace (a ticket writer, a spike) continues into the item
   it filed or explored when `overbridge start` runs inside it, and `--here` re-binds any clean workspace.
+  Every layer of a stack stays in one workspace, and the skills (`loop-item`, `loop-tech-debt`, `update-library`,
+  `ship-pr`) follow the table in the `workspace` skill instead of opening a workspace per related item.
 - **Workspaces hold several repos.** `~/workspaces/ENG-123/{app,infra}` etc.
 - **Claims.** Each workspace tracks the branch/PR it is on per repo. A branch or PR
   claimed by one workspace cannot be checked out by another. A `<type>/<n>-<slug>` branch
@@ -83,7 +85,17 @@ queued checks, writes a handoff to `<ws>/.overbridge/handoffs/` (reason `icebox`
 iceboxed. Claims and worktrees stay, so nothing else can take its branch or PR. The sidebar lists it as a dim
 `❄ <name> iceboxed` row, `status` marks it `iceboxed`, and `up`/`layout` leave it out. `overbridge thaw <name>`
 reopens the tab, the agent continuing its conversation and reading the handoff. If every PR of an iceboxed
-workspace merges, the merged-PR check removes it like any other.
+workspace merges, the merged-PR check removes it like any other. With `icebox.idle-days` set, the sidebar suggests
+iceboxing a workspace whose claimed PRs are all drafts and untouched that long: its card reads
+`draft PRs idle <n>d · icebox?` unless the agent is waiting on you. It only suggests; run `overbridge icebox <name>` to act.
+
+Nothing is reclaimed unless you ask. `icebox <name> --prune` deletes the paths listed in the repo's
+`icebox.prune` (`node_modules`, `target`) once the workspace is marked iceboxed, skipping anything git does not ignore,
+anything it tracks, and anything that leaves the repo through a symlink. `.git` and `.claude` are never valid paths. `icebox <name> --drop-worktree` removes the worktrees, keeping every claimed branch, so the
+workspace folder is empty (the name stays reserved by its claims) and the sidebar row reads `❄ <name> iceboxed · dropped`. `thaw` recreates each worktree
+on its claimed branch under the same workspace name; it refuses, leaving the workspace iceboxed, when a folder is in
+the way or git cannot check the branch out. It refuses up front when a worktree holds ignored files (a `.env`) that
+`--prune` would not delete, since git does not count them as unsaved work. Both flags can be combined.
 
 **Seeing what was removed.** The bottom of the sidebar shows `🧹 next check 42s`, a countdown to the next merged-PR check.
 Below it, a yellow `🧹 removing <title>` row shows a removal in progress and a grey `🧹 removed <title>` row one that finished;
@@ -116,7 +128,7 @@ Inside a workspace (shell pane or its Claude):
 overbridge checkout app feat/login        # adds repo if missing, claims + switches
 overbridge checkout infra '#42'           # pick up a PR
 overbridge pr                              # record PRs for claimed branches
-overbridge status --all
+overbridge status --all                    # claims, PRs, stacks; `from <branch>` marks a workspace re-bound from another claim
 overbridge release app
 overbridge shell app -- just test         # run a command in the repo's dev shell
 overbridge check app -- just test         # the same, queued: one heavy command at a time across workspaces
@@ -357,6 +369,8 @@ it has run, and who is waiting.
 | `project-management.workspace` | GitHub `gh-{repo}-{number}`, Jira `{id}` | workspace name template. Placeholders: `{id}`, `{number}`, and `{repo}`. It must use `{id}` or `{number}` |
 | `project-management.branch-types` | none | the `{type}` for each item type: a Jira issue type, or a GitHub label. The first of the item's types with an entry wins, ignoring case, then `default`, then `feat`. Looking up the type needs the network, so it happens only when `branch` uses `{type}` |
 | `project-management.issue-type` | `Task` | Jira issue type for new items |
+| `project-management.worklist-project` | none | GitHub only: a Projects v2 board, `<owner>/<number>` (or a bare number for the repo's owner), such as `DavidDudson/2`. The `@work` tab then lists that board's issues for the repo, assigned to you or not, instead of only your assigned issues. Needs `gh auth refresh -s project` |
+| `project-management.worklist-statuses` | every Status but Done | With `worklist-project`: the board Status values to list, such as `[Backlog, Ready]` |
 | `project-management.worklist-jql` | `(sprint in openSprints() OR statusCategory = "In Progress")` | Jira only: JQL that narrows the `@work` tab to some of your open tickets. Set it to `""` to list every open ticket. Repos on the same project and filter share one read, so each ticket appears once and `s` asks which repo to start it in |
 | `project-management.worklist-scope` | `assigned` | GitHub only: whose open issues `@work` lists. `assigned` is yours; `unassigned` is nobody's issues that sit on a Projects v2 board; `all` is both |
 | `board.columns` | none | GitHub Projects v2 only: maps a `Status` column name (any case) to `todo`, `in-progress`, `blocked` or `done`. Unlisted names fall back to common ones (done, in progress, blocked), then to labels. Needs `gh auth refresh -s read:project` |
@@ -367,6 +381,8 @@ it has run, and who is waiting.
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
 | `check-queue.wait-seconds` | `900` | give up (exit 75) when a run cannot start for this long, because of the queue ahead, `max-parallel`, or the load |
+| `icebox.idle-days` | none | suggest iceboxing a workspace whose claimed PRs are all drafts and idle this many days (last commit, PR update and agent activity, whichever is latest). The sidebar card shows `draft PRs idle <n>d · icebox?`; nothing is iceboxed automatically. Unset turns it off. Set it for every repo in the root `config.yml` under `defaults.icebox` |
+| `icebox.prune` | `[]` | repo-relative paths `overbridge icebox --prune` deletes, such as `node_modules` or `target`; only paths git ignores and does not track. No `..`, absolute paths, globs, `.git` or `.claude` |
 | `shell` | none | the repo's dev shell: a command prefix (`nix develop --command`, `direnv exec .`), or a mapping `enter` (the prefix), `env` (a command printing the env NUL-separated, as `env -0` does) and `key` (repo-relative files whose contents invalidate the cached env; needs `env`). See [Dev shells](#dev-shells) |
 | `review.personas` | auto | reviewer personas to run; unset selects by diff signals |
 | `review.exclude` | `[]` | personas to skip, applied after selection |
@@ -625,6 +641,15 @@ a few seconds waits a little longer each time (up to 30s). When the tab is close
 opens it again at the front and returns focus to the tab you were on. A lock in
 `<meta>/orchestration/@root.reopen.lock` makes sure only one sidebar reopens it. A user layout
 (`layouts/overbridge.kdl`) decides its own tabs, so nothing is reopened when one exists.
+
+Two more orchestration tabs list GitHub PRs through `gh search`: `@prs` (open PRs you opened) and `@reviews` (open PRs
+waiting for your review). `j`/`k` move, `o` opens the PR in a browser, `r` refreshes (every minute otherwise).
+`github-orgs` in the root `config.yml` limits both to some owners, so each machine can differ:
+
+```yaml
+# <root>/config.yml
+github-orgs: [DavidDudson]   # a work machine: [megaport]; leave out for every owner
+```
 
 Under the list, up to three rows show workspaces being removed or removed in the last hour (see **Seeing what was
 removed** above). Below them, while the [check queue](#check-queue) is busy, a `▶` row for each running command shows its
