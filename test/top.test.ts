@@ -109,6 +109,16 @@ describe("PR rows", () => {
     expect(buttons(withPr("pending", info())).map((x) => x.label)).not.toContain("🟣 Merge");
   });
 
+  test("a three-layer stack lists every PR bottom to top, numbered; actions only on the claimed layer", () => {
+    const stack = [11, 12, 13];
+    const layer = (n: number) => ({ number: n, stack, layer: { n: stack.indexOf(n) + 1, of: 3 }, claimed: n === 12 });
+    const links = stack.map((n) => ({ label: `PR #${n}`, url: `u${n}`, status: "mergeable" as const, pr: info(layer(n)) }));
+    const b = buttons(snap({ links }));
+    expect(b.filter((x) => x.action.kind === "link").map((x) => x.label)).toEqual(["🟢 api #11 1/3 feat: add x", "🟢 api #12 2/3 feat: add x", "🟢 api #13 3/3 feat: add x"]);
+    expect(b.filter((x) => x.prRow === 0 || x.prRow === 2).map((x) => x.label)).toEqual(["🟢 api #11 1/3 feat: add x", "🟢 api #13 3/3 feat: add x"]);
+    expect(b.filter((x) => x.prRow === 1).map((x) => x.label)).toEqual(["🟢 api #12 2/3 feat: add x", "📝 Draft", "🟣 Merge stack"]);
+  });
+
   test("merged and closed PRs have no actions; a stack merges as a stack", () => {
     expect(buttons(withPr("merged", info())).filter((x) => x.prRow === 0)).toHaveLength(1);
     expect(buttons(withPr("closed", info())).filter((x) => x.prRow === 0)).toHaveLength(1);
@@ -243,6 +253,29 @@ describe("refreshTop", () => {
       { label: "PR #3", url: "https://host/o/r/pull/3", status: "mergeable", pr: { repo: "r", number: 3, title: "", draft: false, dir: join(tmp, "w1", "r"), stack: [], reviewers: [{ name: "Copilot", state: "none", url: "https://host/o/r/pull/3" }] } },
     ]);
     expect(readTopCache("w1")).toEqual(cache);
+  });
+
+  test("a stacked claim caches every layer, bottom first, and counts only the claimed PR", () => {
+    const layer = (branch: string, pr: number) => ({ branch, pullRequest: { number: pr } });
+    mkdirSync(join(tmp, ".bare", "r.git"), { recursive: true });
+    writeFileSync(
+      join(tmp, ".bare", "r.git", "gh-stack"),
+      JSON.stringify({ schemaVersion: 1, stacks: [{ trunk: { branch: "main" }, branches: [layer("feat/11-a", 2), layer("feat/12-dark-mode", 3), layer("feat/13-c", 4)] }] }),
+    );
+    const viewed: string[] = [];
+    const exec = (cmd: string[]) => {
+      if (cmd[1] !== "pr") return undefined;
+      viewed.push(cmd[3]!);
+      return JSON.stringify({ url: `https://host/o/r/pull/${cmd[3]}`, title: `t${cmd[3]}`, state: cmd[3] === "3" ? "OPEN" : "MERGED", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", statusCheckRollup: [] });
+    };
+    const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec });
+    const prs = cache.links.flatMap((l) => (l.pr ? [l.pr] : []));
+    expect(prs.map((p) => p.number)).toEqual([2, 3, 4]);
+    expect(prs.map((p) => p.layer)).toEqual([{ n: 1, of: 3 }, { n: 2, of: 3 }, { n: 3, of: 3 }]);
+    expect(prs.map((p) => p.claimed)).toEqual([false, true, false]);
+    expect(prs.every((p) => p.stack.join() === "2,3,4")).toBe(true);
+    expect(cache.prsOpen).toBe(true);
+    expect(cache.merged).toBeUndefined();
   });
 
   test("snapshotTop prefers $OVERBRIDGE_IDE over $EDITOR, and a configured ide over both", async () => {
