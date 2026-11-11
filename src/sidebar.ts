@@ -17,6 +17,7 @@ import { claimSweep, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache, readTopCacheChecked, sidebarLabel } from "./top";
 import { currentTab, tabOrder } from "./tab";
+import { createPainter, readView, shouldPoll } from "./zellij-view";
 import { errorMessage, naturalSort, run, spawnCwd } from "./util";
 import { overbridgeVersion } from "./version";
 
@@ -647,7 +648,7 @@ export async function sidebar(wsOpt?: string) {
   const version = overbridgeVersion();
   const userLayout = existsSync(userLayoutPath());
   const readers: SidebarReaders = {
-    tabOrder,
+    tabOrder: () => readView().order,
     // a user layout decides its own tabs, so only the generated one gets its orchestration tabs back
     keepOrchestration: (order) => { if (!userLayout) ensureOrchestrationTabs(order); },
     sweep: () => { if (claimSweep()) startSweep(); },
@@ -690,10 +691,13 @@ export async function sidebar(wsOpt?: string) {
     draw();
   };
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
+  const painter = createPainter((text) => process.stdout.write(text));
+  let lastGatherAtMs = 0;
   /** Gather, then paint; neither may end the pane, so a failure is named in the footer and the next poll tries again. */
   const draw = () => {
     const { height, width } = size();
     const inner = Math.max(0, width - 4);
+    lastGatherAtMs = Date.now();
     try {
       last = gather(readers, inner, last);
     } catch (e) {
@@ -709,9 +713,9 @@ export async function sidebar(wsOpt?: string) {
       const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount);
       const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;
       offset = clampScroll(scrolled, workspaceHeights, rows);
-      process.stdout.write(frame(renderSidebar(list, current, offset, height, width, last.limits, Date.now(), version, status, footerToDraw(footer, inputFault, last.fault), pending), height, width));
+      painter.paint(frame(renderSidebar(list, current, offset, height, width, last.limits, Date.now(), version, status, footerToDraw(footer, inputFault, last.fault), pending), height, width));
     } catch (e) {
-      process.stdout.write(frame([colorize(fit(`sidebar: ${errorMessage(e)}`, width), FAULT_COLOR)], height, width));
+      painter.paint(frame([colorize(fit(`sidebar: ${errorMessage(e)}`, width), FAULT_COLOR)], height, width));
     }
   };
   const show = (next: Footer) => {
@@ -766,6 +770,7 @@ export async function sidebar(wsOpt?: string) {
       resolve();
     };
     process.stdout.write(ENTER_SCREEN);
+    painter.invalidate();
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.on("data", (buf) => {
@@ -805,9 +810,18 @@ export async function sidebar(wsOpt?: string) {
       }
       draw();
     });
-    process.stdout.on("resize", draw);
-    const timer = setInterval(draw, POLL_MS);
-    const stopWatch = watchState(draw);
+    process.stdout.on("resize", () => {
+      painter.invalidate();
+      draw();
+    });
+    // a hidden tab's sidebar gathers only every HIDDEN_POLL_MS, and catches up on the first tick after its tab is focused
+    const tick = () => {
+      if (shouldPoll(self, readView(), lastGatherAtMs, Date.now())) {
+        draw();
+      }
+    };
+    const timer = setInterval(tick, POLL_MS);
+    const stopWatch = watchState(tick);
     draw();
   });
 }
