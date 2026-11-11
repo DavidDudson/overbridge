@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, constants, loadavg } from "node:os";
 import { join } from "node:path";
+import { classifyCommand, type HistoryStore, historyStore } from "./history";
 import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
@@ -201,6 +202,24 @@ export function stopChecksFor(ws: string, dir = queueDir()): number {
   return mine.length;
 }
 
+/** Append the run to the workspace's history. Never throws: a check's exit code does not depend on it. */
+function recordCheck(me: Ticket, startedMs: number, endedMs: number | undefined, exit: number, store: HistoryStore = historyStore()) {
+  try {
+    store.append(me.ws, {
+      kind: "check",
+      at: endedMs ?? startedMs,
+      repo: me.repo,
+      command: me.command.slice(0, 200),
+      cls: classifyCommand(me.command),
+      queuedMs: startedMs - me.queuedAtMs,
+      runMs: endedMs === undefined ? 0 : endedMs - startedMs,
+      exit,
+    });
+  } catch {
+    // history is best effort
+  }
+}
+
 const label = (t: Ticket) => `${t.ws}/${t.repo}: ${t.command}`;
 
 /** Wait until `me` may start (see `gateFor`); false when `deadlineMs` passes first. */
@@ -319,11 +338,15 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
   try {
     const deadlineMs = me.queuedAtMs + settings.waitSeconds * 1_000;
     if (!(await waitForStart(me, dir, settings, deadlineMs))) {
+      recordCheck(me, Date.now(), undefined, CheckExit.GaveUp);
       return CheckExit.GaveUp;
     }
-    return await runHeld(inv, me, file, settings, (pid) => {
+    const startedMs = Date.now();
+    const code = await runHeld(inv, me, file, settings, (pid) => {
       held.runPid = pid;
     });
+    recordCheck(me, startedMs, Date.now(), code);
+    return code;
   } finally {
     signals.forEach((s) => process.off(s, onSignal));
     process.off("exit", leave);

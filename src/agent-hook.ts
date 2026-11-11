@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { type AgentState, agentStatePath, CONTINUING_END_REASONS, readAgentState } from "./agent-state";
 import { backgroundShells } from "./bg-tasks";
+import { claudeRecord, type HistoryStore, historyStore } from "./history";
 import { envVar, ORCHESTRATION_ENV, root, selfCommand, silenceLegacyWarnings } from "./paths";
 import { notifyRefresh } from "./server-net";
 
@@ -122,6 +123,16 @@ function startRefresh(ws: string) {
   Bun.spawn({ cmd: [cmd!, ...args, "top", "refresh", "--ws", ws], cwd: homedir(), stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
 }
 
+/** Append the event to `ws`'s history. A history fault never reaches the agent or the state recording. */
+export function recordHistory(ws: string, input: Parameters<typeof claudeRecord>[0], store: HistoryStore = historyStore(), now = Date.now()) {
+  try {
+    const record = claudeRecord(input, now);
+    if (record) store.append(ws, record);
+  } catch {
+    // history is best effort
+  }
+}
+
 /** Entry point for `overbridge hook`: the hook payload is JSON on stdin. Always exits 0. */
 export async function hookMain(): Promise<number> {
   try {
@@ -130,7 +141,17 @@ export async function hookMain(): Promise<number> {
     // an orchestration tab has no top panel, so it records state but never refreshes a top cache
     const ws = workspace || process.env[ORCHESTRATION_ENV];
     if (!ws) return 0;
-    const input = JSON.parse(await Bun.stdin.text()) as { hook_event_name?: string; source?: string; reason?: string; trigger?: string; stop_hook_active?: boolean };
+    const input = JSON.parse(await Bun.stdin.text()) as {
+      hook_event_name?: string;
+      source?: string;
+      reason?: string;
+      trigger?: string;
+      stop_hook_active?: boolean;
+      tool_name?: string;
+      tool_use_id?: string;
+      tool_input?: { command?: unknown };
+    };
+    recordHistory(ws, input);
     const meta = join(root(), ".overbridge");
     const event = input.hook_event_name ?? "";
     if (event === "PreCompact" && input.trigger === "auto") markCompact(meta, ws);

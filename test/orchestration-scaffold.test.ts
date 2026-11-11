@@ -29,7 +29,7 @@ describe("orchestration tab scaffolding", () => {
     const preToolUse = settings.hooks.PreToolUse;
     expect(preToolUse).toHaveLength(1);
     expect(preToolUse[0].matcher).toBe("*");
-    expect(preToolUse[0].hooks.map((h: { command: string }) => h.command).join(" ")).toMatch(/ guard$/);
+    expect(preToolUse[0].hooks.map((h: { command: string }) => h.command).join(" ")).toMatch(/ guard .* hook$/);
   });
 
   test("its brief tells it to start a workspace with the user's request for every task", () => {

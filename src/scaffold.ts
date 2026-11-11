@@ -53,18 +53,19 @@ const workspaceSettings = (ws: string, plansDirectory: string) => ({
   plansDirectory,
   permissions: { allow: ALLOWED_COMMANDS },
   autoMode: { allow: ["$defaults", ...AUTO_MODE_ALLOW] },
-  hooks: {
-    PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }],
-    ...agentStateHooks(),
-  },
+  hooks: agentStateHooks(),
 });
 
 const hook = (sub: string) => ({ type: "command", command: [...selfCommand(), sub].map(shellQuote).join(" ") });
 
-/** The hooks that record what an agent is doing, for the sidebar glyphs: see agent-hook.ts. */
+/**
+ * The hooks every Claude gets: the guard, and the recorder of what the agent is doing (the sidebar glyphs, and
+ * the history of where its time goes): see agent-hook.ts and history.ts.
+ */
 function agentStateHooks() {
   const state = [{ hooks: [hook("hook")] }];
   return {
+    PreToolUse: [{ matcher: "*", hooks: [hook("guard"), hook("hook")] }],
     ...Object.fromEntries(["SessionStart", "UserPromptSubmit", "Notification", "PreCompact", "Stop", "SessionEnd"].map((event) => [event, state])),
     PostToolUse: [{ matcher: "*", hooks: [hook("hook")] }],
   };
@@ -82,7 +83,7 @@ export function scaffoldOrchestration(tab: string): string {
   mkdirSync(dirname(file), { recursive: true });
   const settings = {
     env: { [ORCHESTRATION_ENV]: tab, OVERBRIDGE_ROOT: root(), OVERBRIDGE_NAME: "" },
-    hooks: { PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }], ...agentStateHooks() },
+    hooks: agentStateHooks(),
     ...pluginSettings(),
   };
   writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
