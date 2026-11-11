@@ -1,9 +1,12 @@
 ---
 name: loop-item
 description: Run a work item (GitHub issue or Jira ticket) end to end: start it, plan, implement, self-review, open the PR and get it to a green build. Runs without stopping, except when the scope gate says the item is too big or unclear. Use when the user wants the whole lifecycle driven in one go ("loop 123", "run ENG-123 end to end", "take this issue through to a PR", "do the full process on this item").
+requires: gh-stack
 ---
 
 # Loop an item
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 ```
 start-item (incl. scope gate) → plan → implement → commit → self-review → ship-pr → green build

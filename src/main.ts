@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import * as cmd from "./commands";
+import { REQUIRED_SKILLS, requiredSkillProblems } from "./plugins";
 import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
 import { cleanup, Fetch, Format } from "./cleanup-gather";
@@ -94,6 +95,8 @@ Workspaces
                                         reading the handoff; recreates dropped worktrees on their branches
   overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty and iceboxed state
   overbridge whoami                             workspace for the current dir/session
+  overbridge prereqs                            exit 1 unless the skills overbridge's skills depend on (gh-stack)
+                                        are installed
 
 Branches & PRs (workspace inferred from $OVERBRIDGE_NAME or cwd)
   overbridge checkout [repo] <branch|#pr|url>   claim + switch (adds repo if missing);
@@ -260,6 +263,12 @@ async function main(argv: string[]): Promise<number> {
     case "whoami":
       cmd.whoami();
       break;
+    case "prereqs": {
+      const problems = requiredSkillProblems();
+      if (problems.length) throw new OverbridgeError(problems.join("\n"));
+      console.log(`ok: ${REQUIRED_SKILLS.join(", ")} installed`);
+      break;
+    }
     case "checkout":
     case "co": {
       const { values, positionals } = opts(rest, ws);
