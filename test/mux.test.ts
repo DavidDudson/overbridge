@@ -235,24 +235,27 @@ describe.skipIf(!Bun.which("tmux"))("tmuxMux against a real tmux", () => {
 
   test("a generated layout builds, and every operation works on @-named tabs", () => {
     const script = join(tmp, "layout.tmux");
-    Bun.write(script, layoutScript("t", layoutSpecs(["a", "b"], sleeper, { sidebarWidth: 30 })));
+    const specs = layoutSpecs(["a", "b"], sleeper, { sidebarWidth: 30 });
+    const names = specs.map((t) => t.name);
+    const [root, work, ...rest] = names as [string, string, ...string[]];
+    Bun.write(script, layoutScript("t", specs));
     const mux = tmuxMux(safeExec, { session: "t", env: {} });
     expect(safeExec(["tmux", "-f", "/dev/null", "start-server", ";", "source-file", script]).ok).toBe(true);
     expect(mux.sessionExists("t")).toBe(true);
-    expect(mux.tabs()).toEqual(["@root", "@work", "a", "b"]);
+    expect(mux.tabs()).toEqual(names);
 
     expect(mux.openTab(workspaceTabSpec("c", sleeper, { sidebarWidth: 30 }), TabFocus.Background).ok).toBe(true);
     expect(mux.tabs().at(-1)).toBe("c");
-    expect(mux.currentTab()).toBe("@root");
+    expect(mux.currentTab()).toBe(root);
 
-    expect(mux.goToTab("@work").ok).toBe(true);
-    expect(mux.currentTab()).toBe("@work");
+    expect(mux.goToTab(work).ok).toBe(true);
+    expect(mux.currentTab()).toBe(work);
 
     const titles = mux.listPanes().filter((p) => p.tab === "c").map((p) => p.title).sort();
     expect(titles).toEqual(["c · claude", "sidebar", "top"]);
 
     mux.moveTab("c", 1);
-    expect(mux.tabs()).toEqual(["@root", "c", "@work", "a", "b"]);
+    expect(mux.tabs()).toEqual([root, "c", work, ...rest]);
 
     const claude = mux.listPanes().find((p) => p.title === "a · claude")!;
     expect(mux.focusPane(claude.id)).toBe(true);
@@ -263,7 +266,7 @@ describe.skipIf(!Bun.which("tmux"))("tmuxMux against a real tmux", () => {
     expect(mux.listPanes().some((p) => p.title === "a · terminal")).toBe(false);
 
     expect(mux.closeTab("c")).toBe(true);
-    expect(mux.tabs()).toEqual(["@root", "@work", "a", "b"]);
+    expect(mux.tabs()).toEqual(names);
     mux.killSession("t");
     expect(mux.sessionExists("t")).toBe(false);
   });
