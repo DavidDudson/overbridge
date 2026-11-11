@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { queueDir, stopChecksFor, ticketName, type Ticket } from "../src/check-queue";
 import { handoffStamp, HandoffReason, renderHandoff } from "../src/handoff";
-import { icebox, type IceboxDeps, THAW_PROMPT, thaw } from "../src/icebox";
+import { icebox, type IceboxDeps, prunable, THAW_PROMPT, thaw } from "../src/icebox";
 import { entries, icedRows } from "../src/sidebar";
 import { isIceboxed, readState, withState } from "../src/state";
 import { newTabKdl } from "../src/layout";
@@ -95,21 +95,21 @@ describe("icebox and thaw", () => {
     ob(["new", "dirty", "-r", "app"]);
     writeFileSync(join(root, "dirty", "app", "scratch.txt"), "wip");
     const { deps, calls, stopped } = fakeDeps("");
-    await expect(icebox("dirty", deps)).rejects.toThrow("uncommitted");
+    await expect(icebox("dirty", {}, deps)).rejects.toThrow("uncommitted");
     expect(isIceboxed(readState().workspaces.dirty)).toBe(false);
     expect(calls).toEqual([]);
     expect(stopped.apps).toEqual([]);
   });
 
   test("refuses an orchestration tab", async () => {
-    await expect(icebox("@root", fakeDeps("").deps)).rejects.toThrow("orchestration");
+    await expect(icebox("@root", {}, fakeDeps("").deps)).rejects.toThrow("orchestration");
   });
 
   test("pauses a clean workspace: stops work, writes a handoff, keeps claims, closes the tab", async () => {
     ob(["new", "calm", "-r", "app"]);
     const before = readState().workspaces.calm!.repos;
     const { deps, calls, stopped } = fakeDeps("TAB_ID  POSITION  NAME\n5  1  calm\n");
-    const handoff = await icebox("calm", deps);
+    const handoff = await icebox("calm", {}, deps);
     expect(stopped).toEqual({ apps: ["calm"], checks: ["calm"] });
     expect(existsSync(handoff)).toBe(true);
     expect(readFileSync(handoff, "utf8")).toContain("Reason: icebox");
@@ -117,7 +117,7 @@ describe("icebox and thaw", () => {
     expect(w.iceboxed?.handoff).toBe(handoff);
     expect(w.repos).toEqual(before);
     expect(calls.some((c) => c[2] === "close-tab-by-id" && c[3] === "5")).toBe(true);
-    await expect(icebox("calm", fakeDeps("").deps)).rejects.toThrow("already iceboxed");
+    await expect(icebox("calm", {}, fakeDeps("").deps)).rejects.toThrow("already iceboxed");
   });
 
   test("an iceboxed workspace has no sidebar card, only a row, and shows in status --json", () => {
@@ -142,6 +142,84 @@ describe("icebox and thaw", () => {
 
   test("a thawed tab continues the conversation and reads the handoff", () => {
     expect(newTabKdl("calm", ["ob"], { resume: true, prompt: THAW_PROMPT })).toContain('"--continue" "--" "/read-handoff"');
+  });
+});
+
+describe("opt-in reclaim", () => {
+  /** A workspace with a committed `keep/tracked.txt`, an ignored `node_modules` and an `overbridge.yml` listing both. */
+  function seeded(ws: string, branch: string): string {
+    ob(["new", ws, "-r", "app"]);
+    ob(["checkout", "app", branch, "--ws", ws]);
+    const wt = join(root, ws, "app");
+    mkdirSync(join(wt, "keep"), { recursive: true });
+    writeFileSync(join(wt, "keep", "tracked.txt"), "t");
+    writeFileSync(join(wt, ".gitignore"), "node_modules/\n");
+    writeFileSync(join(wt, "overbridge.yml"), "version: 1\nicebox:\n  prune: [node_modules, keep, missing]\n");
+    sh(["git", "add", "-A"], wt);
+    sh(["git", "commit", "-q", "-m", "seed"], wt);
+    sh(["git", "push", "-q", "origin", branch], wt);
+    mkdirSync(join(wt, "node_modules", "dep"), { recursive: true });
+    writeFileSync(join(wt, "node_modules", "dep", "i.js"), "x");
+    return wt;
+  }
+
+  test("prune is off unless the flag is passed", async () => {
+    const wt = seeded("lazy", "feat/lazy");
+    await icebox("lazy", {}, fakeDeps("").deps);
+    expect(existsSync(join(wt, "node_modules"))).toBe(true);
+    expect(existsSync(join(root, "lazy", "app"))).toBe(true);
+    expect(readState().workspaces.lazy!.iceboxed?.dropped).toBeUndefined();
+  });
+
+  test("--prune deletes configured untracked paths and keeps tracked files", async () => {
+    const wt = seeded("tidy", "feat/tidy");
+    await icebox("tidy", { prune: true }, fakeDeps("").deps);
+    expect(existsSync(join(wt, "node_modules"))).toBe(false);
+    expect(readFileSync(join(wt, "keep", "tracked.txt"), "utf8")).toBe("t");
+  });
+
+  test("prunable refuses tracked paths and symlinks out of the repo", () => {
+    const wt = join(root, "tidy", "app");
+    expect(prunable(wt, "keep")).toEqual({ ok: false, why: "tracked by git" });
+    expect(prunable(wt, "missing")).toEqual({ ok: false, why: "not there" });
+    mkdirSync(join(tmp, "sub"), { recursive: true });
+    symlinkSync(tmp, join(wt, "out"));
+    expect(prunable(wt, "out/sub")).toEqual({ ok: false, why: "outside the repo" });
+  });
+
+  test("--drop-worktree removes the worktree, keeps the claim and branch, and thaw recreates it", async () => {
+    const wt = seeded("drop", "feat/drop");
+    rmSync(join(wt, "node_modules"), { recursive: true });
+    await icebox("drop", { dropWorktree: true }, fakeDeps("").deps);
+    expect(existsSync(wt)).toBe(false);
+    const w = readState().workspaces.drop!;
+    expect(w.iceboxed?.dropped).toEqual(["app"]);
+    expect(w.repos.app?.branch).toBe("feat/drop");
+    expect(icedRows(readState(), 40).join("\n")).toContain("drop iceboxed · dropped");
+    const opened: string[] = [];
+    thaw("drop", { open: (ws) => void opened.push(ws) });
+    expect(sh(["git", "branch", "--show-current"], wt)).toBe("feat/drop");
+    expect(readFileSync(join(wt, "keep", "tracked.txt"), "utf8")).toBe("t");
+    expect(isIceboxed(readState().workspaces.drop)).toBe(false);
+    expect(opened).toEqual(["drop"]);
+  });
+
+  test("--drop-worktree refuses unpushed work and removes nothing", async () => {
+    const wt = seeded("risky", "feat/risky");
+    rmSync(join(wt, "node_modules"), { recursive: true });
+    sh(["git", "commit", "-q", "--allow-empty", "-m", "local only"], wt);
+    await expect(icebox("risky", { dropWorktree: true }, fakeDeps("").deps)).rejects.toThrow("unpushed");
+    expect(existsSync(wt)).toBe(true);
+    expect(isIceboxed(readState().workspaces.risky)).toBe(false);
+  });
+
+  test("thaw refuses, staying iceboxed, when a dropped worktree's folder is taken", async () => {
+    const wt = seeded("taken", "feat/taken");
+    rmSync(join(wt, "node_modules"), { recursive: true });
+    await icebox("taken", { dropWorktree: true }, fakeDeps("").deps);
+    mkdirSync(wt, { recursive: true });
+    expect(() => thaw("taken", { open: () => {} })).toThrow("already exists");
+    expect(isIceboxed(readState().workspaces.taken)).toBe(true);
   });
 });
 

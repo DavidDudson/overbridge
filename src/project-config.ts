@@ -123,6 +123,11 @@ export interface ReviewConfig {
   localDir: string;
 }
 
+/** What `overbridge icebox --prune` may delete: repo-relative paths that git does not track, such as `node_modules`. */
+export interface IceboxConfig {
+  prune: string[];
+}
+
 export interface ProjectConfig {
   version: typeof CONFIG_VERSION;
   projectManagement?: ProjectManagement;
@@ -133,6 +138,7 @@ export interface ProjectConfig {
   /** The repo's dev shell, if it declares one. */
   shell?: ShellSpec;
   checkQueue: CheckQueue;
+  icebox: IceboxConfig;
   /** Lifecycle hooks, from the root `config.yml` only. Present only when there are any. */
   hooks?: Hooks;
   /** Top panel buttons, from the root `config.yml` only. */
@@ -147,12 +153,20 @@ export const defaultConfig = (): ProjectConfig => ({
   commands: {},
   review: { exclude: [], localDir: DEFAULT_PERSONA_DIR },
   checkQueue: defaultCheckQueue(),
+  icebox: { prune: [] },
   buttons: [],
 });
 
-const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "shell", "check-queue", "hooks", "buttons"];
+const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons"];
 const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
+/** A relative path that stays inside the repo and names something below its root (no `..`, no leading `/`, not `.`). */
+export function isPrunablePath(path: string): boolean {
+  const parts = path.split("/").filter((part) => part !== "" && part !== ".");
+  return !path.startsWith("/") && parts.length > 0 && !parts.includes("..") && !/[*?[\\]/.test(path);
+}
+
+const ICEBOX_KEYS = ["prune"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
 const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
@@ -477,6 +491,19 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       if (personas) config.review.personas = personas;
       config.review.exclude = p.stringList(review, "exclude", "review") ?? [];
       config.review.localDir = p.string(review, "local-dir", "review", false) ?? DEFAULT_PERSONA_DIR;
+    }
+  }
+
+  const icebox = raw.icebox;
+  if (icebox !== undefined && icebox !== null) {
+    if (!isRecord(icebox)) p.add("icebox", "expected a mapping with prune");
+    else {
+      p.unknownKeys(icebox, ICEBOX_KEYS, "icebox");
+      const prune = p.stringList(icebox, "prune", "icebox") ?? [];
+      for (const path of prune) {
+        if (!isPrunablePath(path)) p.add("icebox.prune", `'${path}' must be a path inside the repo, such as node_modules or target`);
+      }
+      config.icebox.prune = prune;
     }
   }
 

@@ -93,6 +93,18 @@ review:
     expect(c.review).toEqual({ personas: ["security", "naming"], exclude: ["pr-size"], localDir: ".review" });
   });
 
+  test("icebox.prune lists repo-relative paths and defaults to none", () => {
+    expect(parseConfig("icebox: { prune: [node_modules, target/debug] }").icebox.prune).toEqual(["node_modules", "target/debug"]);
+    expect(parseConfig("version: 1").icebox.prune).toEqual([]);
+  });
+
+  test("icebox.prune refuses paths that leave the repo or glob", () => {
+    for (const bad of ["/etc", "../x", "a/../../x", ".", "*.o", "a[b]"]) {
+      expect(err(`icebox: { prune: ["${bad}"] }`)).toContain("icebox.prune");
+    }
+    expect(err("icebox: { zap: 1 }")).toContain("icebox");
+  });
+
   test("review defaults: auto-select personas, no excludes, standard local dir", () => {
     expect(parseConfig("review: {}").review).toEqual({ exclude: [], localDir: ".overbridge/personas" });
   });
