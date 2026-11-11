@@ -690,8 +690,9 @@ The root tab's Claude records its state the same way, under its tab name (`<meta
 The hook
 never blocks or fails the agent and loads none of the rest of the CLI. A `busy` state with no
 update for 10 minutes (the agent died mid-turn) and any state older than a day show as unknown.
-When the top panel's cache is over a minute old, the hook starts one `overbridge top refresh`
-in the background, at most once per 30 seconds.
+When the top panel's cache is over a minute old, the hook asks the server (below) to refresh it, without
+waiting. With no server running it starts one `overbridge top refresh` in the background, at most once per 30 seconds,
+as it did before the server.
 
 An agent that stops right after an *automatic* compaction (`PreCompact` with trigger `auto`, then `Stop` with no
 tool call or prompt between) is restarted: the `Stop` hook blocks the stop once with a "continue where you left off"
@@ -712,7 +713,27 @@ from your git config) in a column to the agent's right, and a second press close
 activate, arrows or Tab to move, `o` open a running app, `L` show its log, `r` refresh,
 `q` quit. Every button shows its key and the key presses it: `i` the work item, `p` the PR (`u`, `y`, `w`, `z` for more),
 `1`-`9` the apps, `e` the editor, `c` `t` `d` claude, terminal and diff, `x` Cleanup. It reads caches and local app records only; `overbridge top refresh` rebuilds
-the cache and the panel runs it every minute.
+the cache and the panel refreshes it every minute (`r` forces one).
+
+### The server
+
+`overbridge serve` is one long-running Bun process per workspaces root. It owns the top-panel refresh: the panel,
+the agent hook and the merged-PR sweep all ask it, so three triggers on one workspace inside a minute cause one
+`refreshTop`, and no `bun` child is started per refresh. Refreshes run in worker threads, at most four at once. Panes
+still read `top/<ws>.json`, so the server is a faster writer, not a dependency for drawing.
+
+- Clients start it on demand (at most once per 30 s) and it exits after 10 minutes with no request. It listens on
+  `<meta>/server.sock` (mode 0600; under `$XDG_RUNTIME_DIR` when that path is too long), pid in `<meta>/server.pid`
+  (a second `serve` finds a live pid and exits; a dead pid and a leftover socket are replaced).
+- Every call carries the client's version and start time. A client of another version gets a 409 and falls back for that
+  call; when it started after the server, the server also finishes what runs and exits, so the next call starts the new
+  version. A pane that outlived an upgrade never replaces a newer server.
+- Down, refused or on another version, every caller falls back to what it did before: the panel spawns `top refresh`, the
+  hook spawns it under its 30 s lock, the sweep refreshes in-process. A refresh that failed on the server (a 502, with
+  the cache's error backoff) is not retried by the caller; the panel shows the error.
+- `r` and the panel's PR actions force a refresh: it is always fetched after the request, behind any fetch already
+  running. `OVERBRIDGE_NO_SERVER=1` keeps every caller on its own path and starts nothing.
+- `curl --unix-socket <meta>/server.sock http://x/status` shows hits, misses, fetches, in-flight and errors per key.
 
 ## Extending
 
