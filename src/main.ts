@@ -8,8 +8,8 @@ import { extCommand } from "./ext";
 import { icebox, thaw } from "./icebox";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
-import { historyStore, summarizeRepos } from "./history";
-import { repoLines, summaries, summaryLines } from "./history-report";
+import { historyStore } from "./history";
+import { repoLines, repoSummaries, summaries, summaryLines } from "./history-report";
 import { next } from "./next";
 import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
@@ -196,15 +196,15 @@ async function main(argv: string[]): Promise<number> {
       if (values.by !== undefined && values.by !== "repo") throw new OverbridgeError(usage);
       if (values.ws && !historyStore().workspaces().includes(values.ws)) throw new OverbridgeError(`no history for ${values.ws}`);
       const windowMs = hours === undefined ? undefined : hours * 3600_000;
-      const rows = summaries(undefined, windowMs, values.ws);
       if (values.by === "repo") {
-        const store = historyStore();
-        const since = windowMs === undefined ? 0 : Date.now() - windowMs;
-        const repos = summarizeRepos(store.workspaces().filter((w) => !values.ws || w === values.ws).flatMap((w) => store.read(w, since))).sort((a, b) => b.ms - a.ms);
+        const repos = repoSummaries(undefined, windowMs, values.ws);
         if (values.json) console.log(JSON.stringify(repos, null, 2));
         else if (!repos.length) log("no check runs yet");
         else for (const r of repos) console.log(repoLines(r).join("\n"));
-      } else if (values.json) console.log(JSON.stringify(rows, null, 2));
+        break;
+      }
+      const rows = summaries(undefined, windowMs, values.ws);
+      if (values.json) console.log(JSON.stringify(rows, null, 2));
       else if (!rows.length) log("no history yet");
       else for (const row of rows) console.log(summaryLines(row).join("\n"));
       break;

@@ -15,7 +15,7 @@ import { metaDir } from "./paths";
 export const CLAUDE_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Notification", "Stop", "SessionEnd"] as const;
 export type ClaudeEvent = (typeof CLAUDE_EVENTS)[number];
 
-/** A coarse class for a command, so history never needs to keep a Bash command's text. */
+/** A coarse class for a command, so history never needs to keep a Claude Bash call's text. */
 export const COMMAND_CLASSES = ["test", "lint", "build", "typecheck", "format", "git", "other"] as const;
 export type CommandClass = (typeof COMMAND_CLASSES)[number];
 
@@ -49,37 +49,52 @@ export function commandLabel(command: string): string {
 }
 
 /** Words that name a secret: the value after one is never kept. */
-const SECRET_WORD = /token|secret|passw|key|auth|cred/i;
+const SECRET_FLAG = String.raw`--?[\w-]*(?:token|secret|passw|key|auth|cred)[\w-]*`;
+const VALUE = String.raw`"[^"]*"|'[^']*'|[^\s'"]+`;
+const REDACTIONS: readonly [RegExp, string][] = [
+  // https://user:pw@host
+  [/(\w+:\/\/)[^/\s@'"]+@/g, "$1***@"],
+  // Authorization: Bearer x, Bearer x, Basic x
+  [/(authorization:?\s*)(?:(?:bearer|basic|token)\s+)?[^\s'"]+/gi, "$1***"],
+  [/\b(bearer|basic)\s+[^\s'"]+/gi, "$1 ***"],
+  // NAME=value anywhere, quoted values included (`bash -c "API_TOKEN=x just check"`)
+  [new RegExp(String.raw`(^|[\s'"])([A-Za-z_]\w*)=(?:${VALUE})?`, "g"), "$1$2=***"],
+  // a secret-looking flag's value, `--token x` or `--api-key=x`
+  [new RegExp(String.raw`(${SECRET_FLAG})(=|\s+)(?!-)(?:${VALUE})`, "gi"), "$1$2***"],
+  // header and basic-auth arguments
+  [new RegExp(String.raw`(-H|--header|--user)(=|\s+)(?:${VALUE})`, "g"), "$1$2***"],
+  [/(\s-u\s+)[^\s'"]*:[^\s'"]*/g, "$1***"],
+];
 
 /**
- * A command line for history: the whole line, with what could be a secret blanked. Every `NAME=value` becomes
- * `NAME=***`, as does the value of a flag whose name looks secret (`--token x`, `--api-key=x`). At most 500 characters.
+ * A command line for history: the whole line with what looks like a secret blanked. Best effort, by pattern: it blanks
+ * every `NAME=value`, URL credentials, `Authorization`/`Bearer`/`Basic` values, the value of a flag whose name looks
+ * secret (`--token x`) and the arguments of `-H`, `--header`, `--user` and `-u user:pass`. A secret passed as a bare
+ * positional argument cannot be told apart from any other word and is kept. At most 500 characters.
  */
 export function redactCommand(command: string): string {
-  const out: string[] = [];
-  let hide = false;
-  for (const w of command.trim().split(/\s+/)) {
-    if (hide) {
-      out.push("***");
-      hide = false;
-      continue;
-    }
-    const env = /^(\w+)=/.exec(w);
-    const flag = /^(--?[\w-]+)=/.exec(w);
-    if (env) out.push(`${env[1]}=***`);
-    else if (flag) out.push(SECRET_WORD.test(flag[1]!) ? `${flag[1]}=***` : w);
-    else {
-      out.push(w);
-      hide = /^--?[\w-]+$/.test(w) && SECRET_WORD.test(w);
-    }
-  }
-  return out.join(" ").slice(0, 500);
+  return REDACTIONS.reduce((text, [re, to]) => text.replace(re, to), command.trim().replace(/\s+/g, " ")).slice(0, 500);
 }
 
 /** Programs whose next word is the task they run: `just check`, `make lint`. */
 const TASK_RUNNERS = new Set(["just", "make", "task", "nx", "turbo", "mise"]);
 /** Package managers: `bun run lint`, `npm test`, `pnpm lint`. */
 const PACKAGE_MANAGERS = new Set(["bun", "npm", "pnpm", "yarn"]);
+/** Flags that take the next word as their value, so it is not the task: `just --justfile ci.just check`. */
+const VALUE_FLAGS = new Set(["-C", "-f", "-d", "-w", "--justfile", "--working-directory", "--directory", "--file", "--filter", "--cwd", "--prefix", "--workspace", "--set"]);
+/** Words after a package manager that run another program: `bun x vitest`. */
+const EXEC_WORDS = new Set(["run", "x", "exec", "dlx"]);
+
+/** The words after a runner that are not flags (nor flag values). */
+function runnerArgs(words: readonly string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
+    if (VALUE_FLAGS.has(w)) i++;
+    else if (!w.startsWith("-")) out.push(w);
+  }
+  return out;
+}
 
 /**
  * The group a check command belongs to, for display: the task it runs, so `nix develop --command just check` and
@@ -89,9 +104,9 @@ export function commandGroup(command: string): string {
   const words = command.trim().split(/\s+/).filter((w) => !/^\w+=/.test(w));
   const at = words.findIndex((w) => TASK_RUNNERS.has(w) || PACKAGE_MANAGERS.has(w));
   if (at >= 0) {
-    const rest = words.slice(at + 1).filter((w) => !w.startsWith("-"));
-    const task = PACKAGE_MANAGERS.has(words[at]!) && rest[0] === "run" ? rest[1] : rest[0];
-    if (task && !/[=:'"$]/.test(task)) return task;
+    const rest = runnerArgs(words.slice(at + 1));
+    const task = PACKAGE_MANAGERS.has(words[at]!) && rest[0] && EXEC_WORDS.has(rest[0]) ? rest[1] : rest[0];
+    if (task && !/[='"$]/.test(task)) return task;
   }
   return commandLabel(words.join(" ")) || command.trim().split(/\s+/)[0] || "?";
 }

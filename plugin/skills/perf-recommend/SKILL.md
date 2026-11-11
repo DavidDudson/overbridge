@@ -13,13 +13,13 @@ Use a window long enough to be typical (a week), and say which one you used.
 
 ```sh
 overbridge history --by repo --hours 168 --json     # check runs per repo, with groups and full commands
-overbridge history --hours 168 --json               # per workspace: Claude time split, tools, check groups
+overbridge history --hours 168 --json               # rows of {ws, summary}: Claude time split, tools, check groups
 overbridge history --by repo --hours 24             # the same, for today only
 ```
 
 `--by repo` is the lens that matters: repo tools (`check`, `lint`, `test`, `typecheck`, `build`) are what can be
 optimised. Each group is the task a command ran (`just check` is `check`), and `fulls` holds the full command lines
-behind it. Claude's own time (model, tools) comes from the per-workspace output; it cannot be attributed to a repo.
+behind it. Claude's own time (model, tools) comes from the per-workspace output, where each field sits under `summary` (`summary.permissionMs`); it cannot be attributed to a repo.
 
 If there is no history, say so and stop: it fills as Claude and `overbridge check` run.
 
@@ -34,8 +34,8 @@ Work out, per repo and per group, from the JSON (percentages are the share of th
 | Queue wait | `queuedMs` against `ms` | Runs wait for a slot. Queue time near or over run time says the machine, `check-queue.max-parallel` or `max-load-percent` is the limit, not the tool. |
 | Failures | `failed` against `count` | A failed run that was fixed and rerun doubled its cost. Many failures on one group: run the cheaper check first. |
 | Overlapping groups | `fulls` of two groups | `check` that already runs `lint` and `test` makes separate `lint` and `test` runs duplicate work. |
-| Permission prompts | per-workspace `permissionMs` | Time waiting on an approval. Recommend an allow rule for the repeated command. |
-| User wait | per-workspace `userMs` | Claude idle while the user is away. Not a tool problem: name it, do not "fix" it. |
+| Permission prompts | per-workspace `summary.permissionMs` | Time waiting on an approval. Recommend an allow rule for the repeated command. |
+| User wait | per-workspace `summary.userMs` | Claude idle while the user is away. Not a tool problem: name it, do not "fix" it. |
 
 Look at the full command, not just the group: it tells you what to change (a missing cache, a whole-repo run where
 an affected-only one exists, a serial run that could be parallel).

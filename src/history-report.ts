@@ -23,6 +23,17 @@ export function summaries(store: HistoryStore = historyStore(), windowMs?: numbe
   return (only ? [only] : store.workspaces()).map((ws) => ({ ws, summary: summarize(store.read(ws, since)) }));
 }
 
+/** Repos with the most check time first, then by name. */
+export function rankedRepos(list: readonly RepoSummary[]): RepoSummary[] {
+  return [...list].sort((a, b) => b.ms - a.ms || a.repo.localeCompare(b.repo));
+}
+
+/** Check runs per repo over the last `windowMs` (default: all time), from `only` (default: every workspace), busiest first. */
+export function repoSummaries(store: HistoryStore = historyStore(), windowMs?: number, only?: string, now = Date.now()): RepoSummary[] {
+  const since = windowMs === undefined ? 0 : now - windowMs;
+  return rankedRepos(summarizeRepos((only ? [only] : store.workspaces()).flatMap((ws) => store.read(ws, since))));
+}
+
 /** Time the user could be watching: Claude's own, plus waiting on the user. */
 export const activeMs = (s: Summary) => s.modelMs + s.toolMs + s.permissionMs + s.userMs;
 

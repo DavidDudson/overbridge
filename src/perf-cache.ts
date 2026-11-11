@@ -30,19 +30,25 @@ export function computePerf(store: HistoryStore = historyStore(), now = Date.now
 export function writePerfCache(views: PerfViews, file = perfCacheFile()): void {
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(views));
+  // it holds command lines, like the history files it comes from
+  writeFileSync(tmp, JSON.stringify(views), { mode: 0o600 });
   renameSync(tmp, file);
+}
+
+function isPerfViews(v: unknown): v is PerfViews {
+  const o = v as { at?: unknown; windows?: unknown } | null;
+  return typeof o === "object" && o !== null && typeof o.at === "number" && typeof o.windows === "object" && o.windows !== null;
 }
 
 /** The cache file, or undefined when it is missing or not a valid one. */
 export function readPerfCache(file = perfCacheFile()): PerfViews | undefined {
   try {
     const v: unknown = JSON.parse(readFileSync(file, "utf8"));
-    if (v && typeof v === "object" && typeof (v as PerfViews).at === "number" && typeof (v as PerfViews).windows === "object") return v as PerfViews;
+    return isPerfViews(v) ? v : undefined;
   } catch {
     // missing or half written: compute instead
+    return undefined;
   }
-  return undefined;
 }
 
 /** The views a pane shows: the cache file while it is young, else computed here. */

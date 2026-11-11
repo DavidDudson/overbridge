@@ -1,7 +1,6 @@
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { NAME_RE, metaDir } from "./paths";
 import { pidAlive } from "./proc";
-import { refreshPerf as refreshPerfViews } from "./perf-cache";
 import { Cache, errorText } from "./server-cache";
 import { CLIENT_START_HEADER, pidFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
 import { readState } from "./state";
@@ -143,6 +142,31 @@ export function refreshInWorker(ws: string, timeoutMs = 120_000): Promise<TopCac
   });
 }
 
+/** Build the perf views in a worker thread: it reads and folds every workspace's history, which must not stall the server. Resolves with when they were built. */
+export function refreshPerfInWorker(timeoutMs = 30_000): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL("./server-perf-worker.ts", import.meta.url).href);
+    const timer = setTimeout(() => {
+      worker.terminate();
+      reject(new Error("perf refresh timed out"));
+    }, timeoutMs);
+    const finish = () => {
+      clearTimeout(timer);
+      worker.terminate();
+    };
+    worker.onmessage = (e: MessageEvent<{ ok: boolean; at?: number; error?: string }>) => {
+      finish();
+      if (e.data.ok && e.data.at !== undefined) resolve(e.data.at);
+      else reject(new Error(e.data.error ?? "perf refresh failed"));
+    };
+    worker.onerror = (e) => {
+      finish();
+      reject(new Error(e.message));
+    };
+    worker.postMessage({});
+  });
+}
+
 /** `overbridge serve`: runs until idle, killed or a client of another version calls. */
 export async function serve(): Promise<void> {
   mkdirSync(metaDir(), { recursive: true });
@@ -156,7 +180,7 @@ export async function serve(): Promise<void> {
   let exiting = false;
   const handler = createHandler({
     refreshTop: refreshInWorker,
-    refreshPerf: async () => refreshPerfViews().at,
+    refreshPerf: refreshPerfInWorker,
     workspaceExists: (ws) => ws in readState().workspaces,
     cacheFileAt: (ws) => readTopCache(ws).at,
     log,

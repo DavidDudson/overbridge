@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { commandGroup, fileStore, type CheckRecord, redactCommand, summarize, summarizeRepos } from "../src/history";
@@ -7,6 +7,7 @@ import { computeViews, pct, percent, repoLines, summaryLines, WINDOWS } from "..
 import { loadPerf, PERF_CACHE_MAX_AGE_MS, readPerfCache, refreshPerf, type PerfViews } from "../src/perf-cache";
 import { rankedRepos, renderPerf, renderRepos } from "../src/perf-run";
 import { createHandler } from "../src/server";
+import { serverRefreshPerf } from "../src/server-client";
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
 const run = (over: Partial<CheckRecord>): CheckRecord => ({ kind: "check", at: 10, repo: "app", command: "just check", full: "nix develop --command just check", group: "check", cls: "other", queuedMs: 1000, runMs: 60_000, exit: 0, ...over });
@@ -21,6 +22,13 @@ describe("commandGroup", () => {
     ["pnpm typecheck", "typecheck"],
     ["cargo clippy --all", "cargo clippy"],
     ["tsc --noEmit", "tsc"],
+    ["just --justfile ci.just check", "check"],
+    ["make -C sub lint", "lint"],
+    ["bun x vitest", "vitest"],
+    ["bun run --filter web lint", "lint"],
+    ["bun run test:unit", "test:unit"],
+    ["just", "just"],
+    ["bun run", "bun run"],
   ])("%s -> %s", (command, group) => expect(commandGroup(command)).toBe(group));
 });
 
@@ -28,6 +36,16 @@ describe("redactCommand", () => {
   test("keeps the line, blanks env values and secret flags", () => {
     expect(redactCommand("API_TOKEN=abc just check --token xyz --api-key=k --retries=3")).toBe("API_TOKEN=*** just check --token *** --api-key=*** --retries=3");
   });
+  test.each([
+    ['curl -H "Authorization: Bearer abc123" https://x', 'curl -H *** https://x'],
+    ["curl --url=https://user:pw@host/x", "curl --url=https://***@host/x"],
+    ['bash -c "API_TOKEN=abc just check"', 'bash -c "API_TOKEN=*** just check"'],
+    ["tool --token 'a b' --keep=1", "tool --token *** --keep=1"],
+    ["tool -u me:pw run", "tool -u *** run"],
+    ["tool --header=X-Key:abc go", "tool --header=*** go"],
+    ["tool --password --verbose", "tool --password --verbose"],
+    ["call Bearer abc.def", "call Bearer ***"],
+  ])("%s", (input, out) => expect(redactCommand(input)).toBe(out));
   test("caps the length", () => {
     expect(redactCommand("x ".repeat(400)).length).toBe(500);
   });
@@ -53,6 +71,10 @@ describe("repo summaries", () => {
     const old: CheckRecord = { kind: "check", at: 1, repo: "r", command: "bun test", cls: "test", queuedMs: 0, runMs: 5, exit: 0 };
     expect(summarize([old]).groups["bun test"]).toMatchObject({ count: 1, fulls: ["bun test"] });
   });
+  test("a group keeps its three newest distinct full commands", () => {
+    const fulls = ["a", "b", "a", "c", "d"].map((full, i) => run({ at: i, full }));
+    expect(summarizeRepos(fulls)[0]!.groups.check!.fulls).toEqual(["d", "c", "a"]);
+  });
   test("lines give each group's exact share and its full command", () => {
     const text = repoLines(rankedRepos(summarizeRepos(records))[0]!).join("\n");
     expect(text).toContain("check");
@@ -65,7 +87,7 @@ describe("repo summaries", () => {
     expect(rows[0]).toContain("Performance by repo · 7d");
     expect(rows.some((r) => r.includes("app") && r.includes("1m40s"))).toBe(true);
     expect(rows.some((r) => r.includes("check 2× 1m30s 90.0%"))).toBe(true);
-    expect(rows.some((r) => r.includes("command nix develop --command just check"))).toBe(true);
+    expect(rows.some((r) => r.includes("command check: nix develop --command just check") && r.includes("lint: just lint"))).toBe(true);
     expect(rows.length).toBe(20);
     expect(renderRepos([], 0, 0, 12, 80, "1h").map(strip).join("\n")).toContain("no check runs yet");
   });
@@ -96,6 +118,41 @@ describe("windows and the cache", () => {
     expect(v["7d"]!.repos.map((r) => [r.repo, r.count])).toEqual([["app", 2]]);
     expect(v.all!.repos.map((r) => r.repo).sort()).toEqual(["app", "old"]);
     expect(v["7d"]!.workspaces.map((w) => w.ws)).toEqual(["a", "b"]);
+  });
+
+  test("perf.json is private, and a file whose windows is null is not a cache", () => {
+    const file = join(dir, "perf.json");
+    refreshPerf(fileStore(dir), 1, file);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    writeFileSync(file, JSON.stringify({ at: 1, windows: null }));
+    expect(readPerfCache(file)).toBeUndefined();
+  });
+
+  test("with no server, serverRefreshPerf says so and the pane computes itself", async () => {
+    expect(await serverRefreshPerf({ sock: join(dir, "none.sock"), start: false })).toBe(false);
+  });
+
+  test("a failed rebuild is a 502, not a crash", async () => {
+    const h = createHandler({ refreshTop: async () => { throw new Error("unused"); }, refreshPerf: async () => { throw new Error("disk full"); }, workspaceExists: () => false, cacheFileAt: () => 0, version: "v1", onVersionMismatch: () => undefined });
+    const res = await h.handle(new Request("http://x/refresh/perf", { method: "POST" }));
+    expect(res.status).toBe(502);
+    expect(await res.text()).toContain("disk full");
+  });
+
+  test("history --by repo lists only the asked workspace, rejects other groupings and sorts by time", () => {
+    const meta = join(dir, ".overbridge", "history");
+    mkdirSync(meta, { recursive: true });
+    const line = (r: CheckRecord) => JSON.stringify(r) + "\n";
+    writeFileSync(join(meta, "a.jsonl"), line(run({ repo: "small", runMs: 1 })) + line(run({ repo: "big", runMs: 9 })));
+    writeFileSync(join(meta, "b.jsonl"), line(run({ repo: "other", runMs: 99 })));
+    const cli = (...args: string[]) => Bun.spawnSync([process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "history", ...args], { env: { ...process.env, OVERBRIDGE_ROOT: dir, OVERBRIDGE_NAME: "", OVERBRIDGE_NO_SERVER: "1" } });
+    const all = JSON.parse(cli("--by", "repo", "--json").stdout.toString()) as { repo: string }[];
+    expect(all.map((r) => r.repo)).toEqual(["other", "big", "small"]);
+    const onlyA = JSON.parse(cli("--by", "repo", "--json", "--ws", "a").stdout.toString()) as { repo: string }[];
+    expect(onlyA.map((r) => r.repo)).toEqual(["big", "small"]);
+    const bad = cli("--by", "nope");
+    expect(bad.exitCode).not.toBe(0);
+    expect(bad.stderr.toString()).toContain("usage: overbridge history");
   });
 
   test("refreshPerf writes the file readPerfCache reads; loadPerf prefers it while young, else computes", () => {

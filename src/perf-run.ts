@@ -1,6 +1,6 @@
 import type { RepoSummary } from "./history";
-import { activeMs, checkTotals, duration, pct, topGroups, WINDOWS, type WorkspaceSummary } from "./history-report";
-import { loadPerf, type PerfViews } from "./perf-cache";
+import { activeMs, checkTotals, duration, pct, rankedRepos, topGroups, WINDOWS, type WorkspaceSummary } from "./history-report";
+import { computePerf, loadPerf, type PerfViews, readPerfCache } from "./perf-cache";
 import { serverRefreshPerf } from "./server-client";
 import { PERF_TAB } from "./sidebar";
 import { createPainter, readView, shouldPoll } from "./zellij-view";
@@ -9,7 +9,7 @@ import { bold, boxBottom, boxRow, boxTop, colorize, decodeInput, dim, ENTER_SCRE
 /** Rows the frame uses besides the workspace rows: top border, header, detail (3), legend, bottom border. */
 export const PERF_CHROME = 7;
 
-export { WINDOWS };
+export { rankedRepos, WINDOWS };
 
 /** What a row is: one workspace, or one repo (its check runs from every workspace). */
 export type Grouping = "workspace" | "repo";
@@ -20,11 +20,6 @@ export const PERF_REFRESH_MS = 5_000;
 export function ranked(list: readonly WorkspaceSummary[]): WorkspaceSummary[] {
   const total = ({ summary: s }: WorkspaceSummary) => s.turnMs + s.userMs + checkTotals(s).ms;
   return [...list].sort((a, b) => total(b) - total(a) || a.ws.localeCompare(b.ws));
-}
-
-/** Repos with the most check time first. */
-export function rankedRepos(list: readonly RepoSummary[]): RepoSummary[] {
-  return [...list].sort((a, b) => b.ms - a.ms || a.repo.localeCompare(b.repo));
 }
 
 /** `34.2%` cells for the Claude split, so the columns line up. */
@@ -62,7 +57,7 @@ export function renderPerf(list: readonly WorkspaceSummary[], selected: number, 
 
 /**
  * The repo view as screen rows: one row per repo with its check runs (count, run time, queue wait, failures), and for
- * the selected repo each group's exact share of its check time, then the full command of its slowest group. Pure.
+ * the selected repo each group's exact share of its check time, then the full command of each of its slowest groups. Pure.
  */
 export function renderRepos(list: readonly RepoSummary[], selected: number, offset: number, height: number, width: number, windowLabel: string, message = ""): string[] {
   const inner = width - 4;
@@ -79,13 +74,17 @@ export function renderRepos(list: readonly RepoSummary[], selected: number, offs
   for (let i = visible.length; i < body; i++) rows.push(boxRow(list.length === 0 && i === 0 ? dim(fit("no check runs yet: they fill as `overbridge check` runs", inner)) : fit("", inner)));
   const chosen = list[selected];
   const groups = chosen ? topGroups(chosen.groups) : [];
-  rows.push(boxRow(fit(groups.length ? `groups  ${groups.slice(0, 5).map(([n, g]) => `${n} ${g.count}× ${duration(g.ms)} ${pct(g.ms, chosen!.ms)}${g.failed ? colorize(` (${g.failed} failed)`, "red") : ""}`).join("   ")}` : "", inner)));
-  rows.push(boxRow(fit(groups[0] ? `command ${groups[0][1].fulls[0] ?? groups[0][0]}` : "", inner)));
+  const total = chosen?.ms ?? 0;
+  rows.push(boxRow(fit(groups.length ? `groups  ${groups.slice(0, 5).map(([n, g]) => `${n} ${g.count}× ${duration(g.ms)} ${pct(g.ms, total)}${g.failed ? colorize(` (${g.failed} failed)`, "red") : ""}`).join("   ")}` : "", inner)));
+  rows.push(boxRow(fit(groups.length ? `command ${groups.slice(0, 3).map(([n, g]) => `${n}: ${g.fulls[0] ?? n}`).join("   ")}` : "", inner)));
   rows.push(boxRow(fit(groups.length ? `queued  ${groups.slice(0, 5).map(([n, g]) => `${n} ${duration(g.queuedMs)}`).join("   ")}` : "", inner)));
   rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit("j/k move   w window   g by workspace   r reload   q quit", inner))));
   rows.push(boxBottom(width, `${list.length} repo${list.length === 1 ? "" : "s"}`));
   return rows;
 }
+
+/** The rows on screen, tagged with what they are, so the renderer needs no cast. */
+export type PerfList = { grouping: "repo"; rows: readonly RepoSummary[] } | { grouping: "workspace"; rows: readonly WorkspaceSummary[] };
 
 /** `overbridge perf`: the @perf tab's pane. */
 export async function perfPane() {
@@ -95,28 +94,36 @@ export async function perfPane() {
   let grouping: Grouping = "workspace";
   let views: PerfViews = loadPerf();
   const window = () => views.windows[WINDOWS[windowAt]!.label] ?? { workspaces: [], repos: [] };
-  const rows = () => (grouping === "repo" ? rankedRepos(window().repos) : ranked(window().workspaces));
-  let list: readonly unknown[] = rows();
+  const rows = (): PerfList => (grouping === "repo" ? { grouping, rows: rankedRepos(window().repos) } : { grouping, rows: ranked(window().workspaces) });
+  let list = rows();
 
   let reloadedAtMs = Date.now();
+  let reloading = false;
   const painter = createPainter((text) => process.stdout.write(text));
-  const reload = () => {
-    reloadedAtMs = Date.now();
-    // the server keeps the cache file current; the next reload reads what it wrote
-    void serverRefreshPerf();
-    views = loadPerf();
-    list = rows();
-  };
   const draw = () => {
     const height = process.stdout.rows ?? 24;
     const width = process.stdout.columns ?? 80;
-    selected = Math.min(selected, Math.max(0, list.length - 1));
+    selected = Math.min(selected, Math.max(0, list.rows.length - 1));
     const body = Math.max(1, height - PERF_CHROME);
     if (selected < offset) offset = selected;
     if (selected >= offset + body) offset = selected - body + 1;
     const label = WINDOWS[windowAt]!.label;
-    const screen = grouping === "repo" ? renderRepos(list as RepoSummary[], selected, offset, height, width, label) : renderPerf(list as WorkspaceSummary[], selected, offset, height, width, label);
+    const screen = list.grouping === "repo" ? renderRepos(list.rows, selected, offset, height, width, label) : renderPerf(list.rows, selected, offset, height, width, label);
     painter.paint(frame(screen, height, width));
+  };
+  /** Ask the server for fresh views (`force`: a rebuild that starts now, for the user's `r`), else compute them here. */
+  const reload = async (force: boolean) => {
+    if (reloading) return;
+    reloading = true;
+    reloadedAtMs = Date.now();
+    try {
+      const built = await serverRefreshPerf(force ? { force } : {});
+      views = (built ? readPerfCache() : undefined) ?? computePerf();
+      list = rows();
+    } finally {
+      reloading = false;
+    }
+    draw();
   };
   const quit = () => {
     process.stdout.write(LEAVE_SCREEN);
@@ -131,16 +138,17 @@ export async function perfPane() {
     for (const input of decodeInput(data)) {
       if (input.kind !== "key") continue;
       if (input.key === "q" || input.key === "ctrl-c") quit();
-      else if (input.key === "j" || input.key === "down") selected = Math.max(0, Math.min(list.length - 1, selected + 1));
+      else if (input.key === "j" || input.key === "down") selected = Math.max(0, Math.min(list.rows.length - 1, selected + 1));
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
       else if (input.key === "g") {
         grouping = grouping === "repo" ? "workspace" : "repo";
         selected = offset = 0;
         list = rows();
       } else if (input.key === "w") {
+        // every window is in the views already
         windowAt = (windowAt + 1) % WINDOWS.length;
-        reload();
-      } else if (input.key === "r") reload();
+        list = rows();
+      } else if (input.key === "r") void reload(true);
     }
     draw();
   });
@@ -150,9 +158,7 @@ export async function perfPane() {
   });
   // a hidden tab reloads only now and then (shouldPoll), and an unchanged frame is not written
   setInterval(() => {
-    if (!shouldPoll(PERF_TAB, readView(), reloadedAtMs, Date.now())) return;
-    reload();
-    draw();
+    if (shouldPoll(PERF_TAB, readView(), reloadedAtMs, Date.now())) void reload(false);
   }, PERF_REFRESH_MS);
   draw();
   await new Promise(() => {});
