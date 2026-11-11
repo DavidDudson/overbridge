@@ -17,6 +17,7 @@ import { currentTab, sidebar } from "./sidebar";
 import { FINISH_FLAG, finishRemoval } from "./remove";
 import { sweepWithServer } from "./merge-sweep";
 import { showTab, start, startStack, startTask } from "./start";
+import { perfPane } from "./perf-run";
 import { topPanel, topRefresh } from "./top-run";
 import { prListPane, refreshPrList, type PrListKind } from "./prlist-run";
 import { readWorklist, refreshWorklist, showWorklist, worklistPane } from "./worklist-run";
@@ -50,6 +51,7 @@ Setup
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
   overbridge worklist [refresh|show]            work list pane (the @work tab); refresh reads every board into its cache; show prints it
   overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
+  overbridge perf                               performance pane (the @perf tab): the history per workspace
   overbridge history [--ws name] [--hours n] [--json]   where time went: Claude turns, tools, waiting, checks
 
 Work items (the repo's project-management provider)
@@ -197,6 +199,9 @@ async function main(argv: string[]): Promise<number> {
       else for (const row of rows) console.log(summaryLines(row).join("\n"));
       break;
     }
+    case "perf":
+      await perfPane();
+      break;
     case "worklist": {
       const sub = rest[0];
       if (sub === "refresh") {

@@ -610,7 +610,10 @@ then cut to the newest half). Two things write it:
 
 `overbridge history` (flags: `--ws`, `--hours`, `--json`) folds that into time totals: turn time split into model,
 tool and permission-prompt time, time waiting on the user (a gap over 30 minutes counts as away), and the checks by
-class. The store sits behind the `HistoryStore` interface in `src/history.ts`, so a long-running server can take it over.
+class. The `@perf` orchestration tab (`overbridge perf`) shows the same per workspace, busiest first: turns, time in
+turns, the model, tool, permission and user shares, and the check count and time, with the selected workspace's
+slowest tools and checks below. `j`/`k` move, `w` cycles the window (1h, 24h, 7d, all), `r` reloads; it reloads
+itself every 5 seconds. The store sits behind the `HistoryStore` interface in `src/history.ts`, so a long-running server can take it over.
 
 ### Tab sidebar
 
@@ -625,6 +628,7 @@ Left/Right or `h`/`l` go back and forward through the tabs visited from the side
 Every tab's sidebar shares one history per zellij session (`<meta>/sidebar-history/<session>.json`),
 tabs closed since are skipped, and a failed switch leaves it as it was. Switches made outside the sidebar
 (zellij keys, the tab bar, `overbridge next`, `overbridge go`) are not recorded.
+`p` jumps to the `@perf` tab (also `overbridge go perf`, or its number), where the legend lists it.
 The new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. Long titles wrap under their text (up to three rows).
 
