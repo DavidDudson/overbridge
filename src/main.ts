@@ -12,7 +12,7 @@ import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
 import { FINISH_FLAG, finishRemoval } from "./remove";
-import { sweepMerged } from "./merge-sweep";
+import { sweepWithServer } from "./merge-sweep";
 import { showTab, start, startStack, startTask } from "./start";
 import { topPanel, topRefresh } from "./top-run";
 import { prListPane, refreshPrList, type PrListKind } from "./prlist-run";
@@ -40,6 +40,9 @@ Setup
   overbridge diff [--ws name]                   changes since the default branch, whitespace ignored, via delta
   overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
+  overbridge serve                              the one long-running process that owns network refreshes and the shared
+                                        cache; panels and hooks start it on demand, it exits when idle, and each
+                                        refresh falls back to a child process when it is down
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
   overbridge worklist [refresh]                 work list pane (the @work tab); refresh reads every board into its cache
@@ -205,9 +208,15 @@ async function main(argv: string[]): Promise<number> {
     case "top": {
       const { values, positionals } = opts(rest, ws);
       if (positionals[0] === "refresh") topRefresh(values.ws);
-      else if (positionals[0] === "sweep") sweepMerged();
+      else if (positionals[0] === "sweep") await sweepWithServer();
       else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh|sweep] [--ws name]");
       else await topPanel(values.ws);
+      break;
+    }
+    case "serve": {
+      opts(rest, {});
+      const { serve } = await import("./server");
+      await serve();
       break;
     }
     case "sync":

@@ -4,6 +4,7 @@ import { CleanupCause } from "./cleanup-log";
 import { beginRemoval, Landing } from "./remove";
 import { isRemoving, RemovalBlock, readState, withState, type WorkspaceState } from "./state";
 import { MERGE_SWEEP_MS } from "./sweep-trigger";
+import { serverRefreshAll } from "./server-client";
 import { claimedCache, noUnsavedWork, readTopCache, refreshTop, type TopCache } from "./top";
 import { log } from "./util";
 
@@ -46,6 +47,15 @@ export const everyClaimHasPr = (w: WorkspaceState): boolean => {
   return claims.length > 0 && claims.every((c) => c.pr !== undefined);
 };
 
+/** The workspaces a sweep checks: every claim has a PR and none is being removed. */
+export const sweepCandidates = (): string[] =>
+  Object.entries(readState().workspaces)
+    .filter(([ws, w]) => !isOrchestrationTab(ws) && !isRemoving(w) && everyClaimHasPr(w))
+    .map(([ws]) => ws);
+
+/** Candidates whose cache is old enough for the sweep to refresh. */
+export const staleCandidates = (now: number = Date.now()): string[] => sweepCandidates().filter((ws) => now - readTopCache(ws).at >= MERGE_SWEEP_MS);
+
 export interface SweepDeps {
   refresh: (ws: string) => void;
   /** Start removing `ws`; returns a refusal message, or undefined once under way. */
@@ -62,13 +72,23 @@ const defaultSweepDeps = (): SweepDeps => ({
 });
 
 /**
+ * `overbridge top sweep` with the server: stale caches refresh through it first, and the sweep refreshes in-process only
+ * the ones the server could not take (it was down, or on another version).
+ */
+export async function sweepWithServer(): Promise<Record<string, Verdict>> {
+  const stale = staleCandidates();
+  const unserved = new Set(await serverRefreshAll(stale));
+  const local = defaultSweepDeps();
+  const served = new Set(stale.filter((ws) => !unserved.has(ws)));
+  return sweepMerged({ ...local, refresh: (ws) => (served.has(ws) ? undefined : local.refresh(ws)) });
+}
+
+/**
  * `overbridge top sweep`: refresh every workspace whose claims all have PRs, remove the ones whose PRs have all merged with nothing unsaved and the agent
  * at rest, and mark the ones held back by unsaved work. Returns each checked workspace's verdict.
  */
 export function sweepMerged(deps: SweepDeps = defaultSweepDeps()): Record<string, Verdict> {
-  const candidates = Object.entries(readState().workspaces)
-    .filter(([ws, w]) => !isOrchestrationTab(ws) && !isRemoving(w) && everyClaimHasPr(w))
-    .map(([ws]) => ws);
+  const candidates = sweepCandidates();
   const verdicts = Object.fromEntries(candidates.map((ws) => [ws, checkOne(ws, deps)] as const));
   recordBlocks(verdicts);
   Object.entries(verdicts)
