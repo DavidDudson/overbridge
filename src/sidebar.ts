@@ -246,11 +246,9 @@ const elapsed = (sinceMs: number, now: number) => {
   return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${String(secs % 60).padStart(2, "0")}s`;
 };
 
-/** The check queue under the divider: the running command and how many wait behind it; none when it is empty. */
-export function queueRows(queue: { running?: Ticket; waiting: Ticket[] }, inner: number, now = Date.now()): string[] {
-  const running = queue.running
-    ? [colorize(fit(`▶ ${queue.running.ws} ${elapsed(queue.running.runningSinceMs ?? now, now)} ${queue.running.command}`, inner), "blue")]
-    : [];
+/** The check queue under the divider: a row per running command, then how many wait; none when it is empty. */
+export function queueRows(queue: { running: Ticket[]; waiting: Ticket[] }, inner: number, now = Date.now()): string[] {
+  const running = queue.running.map((t) => colorize(fit(`▶ ${t.ws} ${elapsed(t.runningSinceMs ?? now, now)} ${t.command}`, inner), "blue"));
   const waiting = queue.waiting.length ? [dim(fit(`⧗ ${queue.waiting.length} waiting: ${queue.waiting.map((t) => t.ws).join(" ")}`, inner))] : [];
   return [...running, ...waiting];
 }

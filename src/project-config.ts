@@ -98,6 +98,8 @@ export interface ShellSpec {
 export interface CheckQueue {
   /** Start only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. */
   maxLoadPercent: number;
+  /** At most this many runs at once; unset leaves the load as the only limit. */
+  maxParallel?: number;
   /** Kill the run after this long, busy or not. */
   timeoutSeconds: number;
   /** Kill the run once its process group has used no CPU for this long. */
@@ -148,7 +150,7 @@ export const defaultConfig = (): ProjectConfig => ({
 
 const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "shell", "check-queue", "hooks", "buttons"];
 const SHELL_KEYS = ["enter", "env", "key"];
-const CHECK_QUEUE_KEYS = ["max-load-percent", "timeout-seconds", "stall-seconds", "wait-seconds"];
+const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
 const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
@@ -502,6 +504,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
         if (value !== undefined) config.checkQueue = { ...config.checkQueue, [field]: value };
       };
       set(p.positiveInt(checkQueue, "max-load-percent", "check-queue"), "maxLoadPercent");
+      set(p.positiveInt(checkQueue, "max-parallel", "check-queue"), "maxParallel");
       set(p.positiveInt(checkQueue, "timeout-seconds", "check-queue"), "timeoutSeconds");
       set(p.positiveInt(checkQueue, "stall-seconds", "check-queue"), "stallSeconds");
       set(p.positiveInt(checkQueue, "wait-seconds", "check-queue"), "waitSeconds");

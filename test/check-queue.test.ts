@@ -6,6 +6,8 @@ import {
   byQueueOrder,
   CheckExit,
   exitFor,
+  Gate,
+  gateFor,
   isStalled,
   loadAllows,
   nextSample,
@@ -16,6 +18,7 @@ import {
   StopReason,
   type Ticket,
   ticketName,
+  unsettledLoad,
 } from "../src/check-queue";
 
 const ticket = (pid: number, queuedAtMs: number, extra: Partial<Ticket> = {}): Ticket => ({
@@ -35,7 +38,7 @@ describe("queue order", () => {
     expect(byName.map((t) => t.pid)).toEqual([10, 2, 9, 1]);
   });
 
-  test("dead owners leave the live queue; the first live ticket holds the turn", () => {
+  test("dead owners leave the live queue; the rest keep their order", () => {
     const tickets = [ticket(1, 1), ticket(2, 2), ticket(3, 3)];
     const { live, dead } = splitQueue(tickets, (pid) => pid !== 1);
     expect(live.map((t) => t.pid)).toEqual([2, 3]);
@@ -97,17 +100,57 @@ describe("stall tracking", () => {
   });
 });
 
-describe("queueView", () => {
-  test("empty", () => {
-    expect(queueView([])).toEqual({ waiting: [] });
+describe("start gate", () => {
+  const settings = { maxLoadPercent: 70, timeoutSeconds: 180, stallSeconds: 300, waitSeconds: 900 };
+  const idle = { load1: 0, cores: 8 };
+  const NOW_MS = 10_000_000;
+  /** Started long enough ago that the load average shows it. */
+  const settled = (pid: number) => ticket(pid, pid, { runPid: pid * 10, runningSinceMs: 0 });
+  const me = ticket(5, 5);
+
+  test("an empty queue starts while the load allows", () => {
+    expect(gateFor(me, [me], settings, idle, NOW_MS)).toBe(Gate.Start);
+    expect(gateFor(me, [me], settings, { load1: 5.6, cores: 8 }, NOW_MS)).toBe(Gate.Load);
   });
 
-  test("a head that has started is running; the rest wait", () => {
-    const head = ticket(1, 1, { runPid: 11, runningSinceMs: 5 });
-    expect(queueView([head, ticket(2, 2)])).toEqual({ running: head, waiting: [ticket(2, 2)] });
+  test("starts beside running tickets, and ignores the tickets behind it", () => {
+    expect(gateFor(me, [settled(1), settled(2), me, ticket(6, 6)], settings, idle, NOW_MS)).toBe(Gate.Start);
+  });
+
+  test("keeps queue order: waits while a ticket ahead has not started", () => {
+    expect(gateFor(me, [settled(1), ticket(2, 2), me], settings, idle, NOW_MS)).toBe(Gate.Queue);
+  });
+
+  test("max-parallel caps the runs; 1 is one at a time", () => {
+    const live = [settled(1), settled(2), me];
+    expect(gateFor(me, live, { ...settings, maxParallel: 2 }, idle, NOW_MS)).toBe(Gate.Parallel);
+    expect(gateFor(me, live, { ...settings, maxParallel: 3 }, idle, NOW_MS)).toBe(Gate.Start);
+    expect(gateFor(me, [settled(1), me], { ...settings, maxParallel: 1 }, idle, NOW_MS)).toBe(Gate.Parallel);
+  });
+
+  test("a run that just started counts as a core the load average does not show yet", () => {
+    const fresh = ticket(1, 1, { runPid: 10, runningSinceMs: NOW_MS });
+    expect(unsettledLoad([fresh], NOW_MS)).toBe(1);
+    expect(unsettledLoad([fresh], NOW_MS + 60_000)).toBeCloseTo(Math.exp(-1));
+    expect(unsettledLoad([settled(1)], NOW_MS)).toBeLessThan(0.001);
+    const nearLimit = { load1: 5, cores: 8 };
+    expect(gateFor(me, [fresh, me], settings, nearLimit, NOW_MS)).toBe(Gate.Load);
+    expect(gateFor(me, [settled(1), me], settings, nearLimit, NOW_MS)).toBe(Gate.Start);
+  });
+});
+
+describe("queueView", () => {
+  test("empty", () => {
+    expect(queueView([])).toEqual({ running: [], waiting: [] });
+  });
+
+  test("every started ticket is running; the rest wait", () => {
+    const first = ticket(1, 1, { runPid: 11, runningSinceMs: 5 });
+    const second = ticket(2, 2, { runPid: 22, runningSinceMs: 6 });
+    expect(queueView([first, second, ticket(3, 3)])).toEqual({ running: [first, second], waiting: [ticket(3, 3)] });
   });
 
   test("a head still waiting for the load counts as waiting", () => {
-    expect(queueView([ticket(1, 1), ticket(2, 2)])).toEqual({ waiting: [ticket(1, 1), ticket(2, 2)] });
+    expect(queueView([ticket(1, 1), ticket(2, 2)])).toEqual({ running: [], waiting: [ticket(1, 1), ticket(2, 2)] });
   });
 });
