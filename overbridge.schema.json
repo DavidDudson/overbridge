@@ -117,7 +117,7 @@
       ]
     },
     "icebox": {
-      "description": "What `overbridge icebox --prune` may delete. Every key is optional.",
+      "description": "Settings for `overbridge icebox`. Every key is optional.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -125,6 +125,11 @@
           "description": "Repo-relative paths removed by `icebox --prune`, such as node_modules or target. Only paths git ignores and does not track are deleted; no `..`, absolute paths, globs, `.git` or `.claude`.",
           "type": "array",
           "items": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!\\.git(/|$))(?!\\.claude(/|$))(?!.*(^|/)\\.\\.(/|$))[^*?\\[\\\\:]+$" }
+        },
+        "idle-days": {
+          "description": "Suggest iceboxing a workspace whose claimed PRs are all drafts and whose last activity (commit, PR update or agent state) is older than this many days. The sidebar card shows a hint; nothing is iceboxed automatically. Unset turns the suggestion off.",
+          "type": "integer",
+          "minimum": 1
         }
       }
     },

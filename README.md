@@ -85,7 +85,9 @@ queued checks, writes a handoff to `<ws>/.overbridge/handoffs/` (reason `icebox`
 iceboxed. Claims and worktrees stay, so nothing else can take its branch or PR. The sidebar lists it as a dim
 `❄ <name> iceboxed` row, `status` marks it `iceboxed`, and `up`/`layout` leave it out. `overbridge thaw <name>`
 reopens the tab, the agent continuing its conversation and reading the handoff. If every PR of an iceboxed
-workspace merges, the merged-PR check removes it like any other.
+workspace merges, the merged-PR check removes it like any other. With `icebox.idle-days` set, the sidebar suggests
+iceboxing a workspace whose claimed PRs are all drafts and untouched that long: its card reads
+`draft PRs idle <n>d · icebox?` unless the agent is waiting on you. It only suggests; run `overbridge icebox <name>` to act.
 
 Nothing is reclaimed unless you ask. `icebox <name> --prune` deletes the paths listed in the repo's
 `icebox.prune` (`node_modules`, `target`) once the workspace is marked iceboxed, skipping anything git does not ignore,
@@ -377,6 +379,7 @@ it has run, and who is waiting.
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
 | `check-queue.wait-seconds` | `900` | give up (exit 75) when a run cannot start for this long, because of the queue ahead, `max-parallel`, or the load |
+| `icebox.idle-days` | none | suggest iceboxing a workspace whose claimed PRs are all drafts and idle this many days (last commit, PR update and agent activity, whichever is latest). The sidebar card shows `draft PRs idle <n>d · icebox?`; nothing is iceboxed automatically. Unset turns it off. Set it for every repo in the root `config.yml` under `defaults.icebox` |
 | `icebox.prune` | `[]` | repo-relative paths `overbridge icebox --prune` deletes, such as `node_modules` or `target`; only paths git ignores and does not track. No `..`, absolute paths, globs, `.git` or `.claude` |
 | `shell` | none | the repo's dev shell: a command prefix (`nix develop --command`, `direnv exec .`), or a mapping `enter` (the prefix), `env` (a command printing the env NUL-separated, as `env -0` does) and `key` (repo-relative files whose contents invalidate the cached env; needs `env`). See [Dev shells](#dev-shells) |
 | `review.personas` | auto | reviewer personas to run; unset selects by diff signals |

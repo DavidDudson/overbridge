@@ -127,9 +127,11 @@ export interface ReviewConfig {
   localDir: string;
 }
 
-/** What `overbridge icebox --prune` may delete: repo-relative paths that git does not track, such as `node_modules`. */
+/** What `overbridge icebox` may delete with `--prune` (repo-relative paths git ignores, such as `node_modules`), and when the sidebar suggests it. */
 export interface IceboxConfig {
   prune: string[];
+  /** Suggest iceboxing a workspace whose PRs are all drafts and idle this many days; unset turns the suggestion off. */
+  idleDays?: number;
 }
 
 export interface ProjectConfig {
@@ -164,7 +166,7 @@ export const defaultConfig = (): ProjectConfig => ({
 const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons"];
 const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
-const ICEBOX_KEYS = ["prune"];
+const ICEBOX_KEYS = ["prune", "idle-days"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
 const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql", "worklist-project", "worklist-statuses"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
@@ -508,7 +510,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
 
   const icebox = raw.icebox;
   if (icebox !== undefined && icebox !== null) {
-    if (!isRecord(icebox)) p.add("icebox", "expected a mapping with prune");
+    if (!isRecord(icebox)) p.add("icebox", "expected a mapping with prune, idle-days");
     else {
       p.unknownKeys(icebox, ICEBOX_KEYS, "icebox");
       const prune = p.stringList(icebox, "prune", "icebox") ?? [];
@@ -516,6 +518,8 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
         if (!isPrunablePath(path)) p.add("icebox.prune", `'${path}' must be a path inside the repo, such as node_modules or target`);
       }
       config.icebox.prune = prune;
+      const idleDays = p.positiveInt(icebox, "idle-days", "icebox");
+      if (idleDays !== undefined) config.icebox.idleDays = idleDays;
     }
   }
 

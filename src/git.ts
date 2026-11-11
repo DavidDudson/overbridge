@@ -78,6 +78,14 @@ export function headSha(wt: string): string | undefined {
   return r.ok && r.stdout ? r.stdout : undefined;
 }
 
+/** When HEAD was committed, in ms; undefined when the worktree is missing or has no commits. */
+export function headTimeMs(wt: string): number | undefined {
+  if (!existsSync(wt)) return undefined;
+  const r = run(["git", "-C", wt, "log", "-1", "--format=%ct"]);
+  const secs = Number(r.stdout);
+  return r.ok && r.stdout !== "" && Number.isFinite(secs) ? secs * 1000 : undefined;
+}
+
 export function isDirty(wt: string): boolean {
   return existsSync(wt) && run(["git", "-C", wt, "status", "--porcelain"]).stdout !== "";
 }

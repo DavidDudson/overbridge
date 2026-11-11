@@ -98,6 +98,13 @@ review:
     expect(parseConfig("version: 1").icebox.prune).toEqual([]);
   });
 
+  test("icebox.idle-days is a positive whole number and unset by default", () => {
+    expect(parseConfig("icebox: { idle-days: 14 }").icebox.idleDays).toBe(14);
+    expect(parseConfig("version: 1").icebox.idleDays).toBeUndefined();
+    expect(err("icebox: { idle-days: 0 }")).toContain("icebox.idle-days");
+    expect(err("icebox: { idle-days: soon }")).toContain("icebox.idle-days");
+  });
+
   test("icebox.prune refuses paths that leave the repo or glob", () => {
     for (const bad of ["/etc", "../x", "a/../../x", ".", "*.o", "a[b]", ".git", "./.git/", ".claude", ":(exclude)x", "a//b"]) {
       expect(err(`icebox: { prune: ["${bad}"] }`)).toContain("icebox.prune");

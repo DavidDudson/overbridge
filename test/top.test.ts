@@ -226,6 +226,15 @@ describe("refreshTop", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
+  test("records whether every claimed PR is an open draft, and when the PRs last changed", () => {
+    const draft = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", { isDraft: true, updatedAt: "2026-06-01T00:00:00Z" }) });
+    expect(draft.draftOnly).toBe(true);
+    expect(draft.prActiveAt).toBe(Date.parse("2026-06-01T00:00:00Z"));
+    const ready = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", { isDraft: false }) });
+    expect(ready.draftOnly).toBeUndefined();
+    expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("MERGED", { isDraft: true }) }).draftOnly).toBeUndefined();
+  });
+
   test("caches the headline, the item link and the PR link", () => {
     const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", { title: "" }) });
     expect(cache.headline).toBe("12 Add dark mode");
