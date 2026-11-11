@@ -108,3 +108,13 @@ export function sessionEndedForGood(ws: string, now = Date.now()): boolean {
 }
 
 export const glyphFor = (state: AgentState | undefined): string => (state ? GLYPHS[state] : UNKNOWN_GLYPH);
+
+/** When the agent hook last recorded anything for `ws` (ms), however old; undefined when there is no record. */
+export function readAgentAt(ws: string): number | undefined {
+  try {
+    const { at } = JSON.parse(readFileSync(agentStateFile(ws), "utf8")) as { at?: unknown };
+    return typeof at === "number" && Number.isFinite(at) ? at : undefined;
+  } catch {
+    return undefined;
+  }
+}
