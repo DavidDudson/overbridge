@@ -34,6 +34,8 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   match `NAME_RE`. The sidebar pins them in its Orchestration frame; their Claude gets the agent-state hooks, the orchestrator guard
   (`src/guard-orchestrator.ts`: an allow list, fail closed) and a brief (`orchestratorPrompt`) through `claude --settings`
   (`scaffoldOrchestration`); `OVERBRIDGE_TAB` with no `OVERBRIDGE_NAME` selects that guard.
+  The brief routes a PR request to the workspace already claiming its head branch (`overbridge status --all`, then
+  `SendMessage` `/pickup #<pr> ...` with `notify_when_idle`) and starts a workspace only when none holds it.
   They never go away: every removal path checks `isOrchestrationTab` (`removeWorkspace`, `cleanable`, `beginRemoval`, `verdictFor`; add it to any
   new one), `claudeOrchestration` restarts Claude when it exits (`restartAfter`), and the sidebar poll reopens a closed tab
   (`ensureOrchestrationTabs` in `src/orchestration-keep.ts`, one owner per tab through a reopen lock).
