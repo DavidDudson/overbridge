@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userLayoutPath } from "./layout";
 import { join } from "node:path";
-import { type AgentState, glyphFor, readAgentState, UNKNOWN_GLYPH } from "./agent-state";
+import { ATTENTION, type AgentState, glyphFor, readAgentState, UNKNOWN_GLYPH } from "./agent-state";
+import { iceboxHint } from "./icebox-suggest";
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
@@ -15,7 +16,7 @@ import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-h
 import { isIceboxed, isRemoving, isWorkspaceState, RemovalBlock, readState, type Removing, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
 import { claimSweep, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
-import { readTopCache, readTopCacheChecked, sidebarLabel } from "./top";
+import { readTopCache, readTopCacheChecked, sidebarLabel, type TopCache } from "./top";
 import { defaultMux, type Mux } from "./mux";
 import { currentTab, tabOrder } from "./tab";
 import { createPainter, readView, shouldPoll } from "./zellij-view";
@@ -61,8 +62,12 @@ export interface Entry {
   blocked?: RemovalBlock;
   /** The session ended, but uncommitted or unpushed work keeps the workspace. */
   unsaved?: boolean;
+  /** Stacked PRs of this workspace, bottom first, with the claimed one's number; one compact line each. */
+  stacks?: { prs: number[]; current: number }[];
   /** This entry could not be read: a bad cache or state record, or a reader that threw. Replaces the status line. */
   fault?: string;
+  /** Its draft PRs have sat idle past `icebox.idle-days`: a suggestion to icebox it, never done automatically. */
+  idleHint?: string;
 }
 
 export { sidebarLabel, stripConventional } from "./top";
@@ -86,6 +91,13 @@ function guardedEntry(tab: string, section: Section, build: () => Entry, label =
   }
 }
 
+/** The stacks in `cache`: each claimed stacked PR's layers, bottom first. */
+const stacksOf = (cache: Pick<TopCache, "links">): NonNullable<Entry["stacks"]> =>
+  cache.links.flatMap((l) => (l.pr && l.pr.stack.length > 1 && l.pr.claimed !== false ? [{ prs: l.pr.stack, current: l.pr.number }] : []));
+
+/** `stack 12·[13]·14`: the claimed layer in brackets, layers in order bottom to top. */
+const stackText = (s: { prs: number[]; current: number }) => `stack ${s.prs.map((n) => (n === s.current ? `[${n}]` : String(n))).join("·")}`;
+
 /** The card for workspace `ws` whose state record is `w`: a fault card when the record or its top cache is malformed. */
 function workspaceEntry(ws: string, w: unknown): Entry {
   const recordFault = workspaceFault(w);
@@ -95,7 +107,9 @@ function workspaceEntry(ws: string, w: unknown): Entry {
   const { removeError: error, removalBlocked: blocked } = w as WorkspaceState;
   const { cache, fault } = readTopCacheChecked(ws);
   const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
-  return { ...entry, ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}) };
+  const stacks = stacksOf(cache);
+  const idleHint = fault ? undefined : iceboxHint(ws, cache);
+  return { ...entry, ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}), ...(idleHint ? { idleHint } : {}) };
 }
 
 /** `w` as the record of a workspace being removed right now, else undefined; a malformed record is never one. */
@@ -191,12 +205,13 @@ const BLOCK_TEXT: Record<RemovalBlock, { text: string; color: Color }> = {
 const UNSAVED_TEXT: { text: string; color: Color } = { text: "ended · unsaved work", color: "red" };
 const FAULT_COLOR: Color = "red";
 
-/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, then the agent state. */
+/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, an icebox suggestion (unless the agent wants you), then the agent state. */
 function statusFor(e: Entry): { text: string; color: Color } | undefined {
   if (e.fault) return { text: `error: ${e.fault}`, color: FAULT_COLOR };
   if (e.error) return { text: `cleanup failed: ${e.error}`, color: FAULT_COLOR };
   if (e.blocked) return BLOCK_TEXT[e.blocked];
   if (e.unsaved) return UNSAVED_TEXT;
+  if (e.idleHint && !(e.state && ATTENTION.includes(e.state))) return { text: e.idleHint, color: "cyan" };
   return e.state ? STATE_TEXT[e.state] : undefined;
 }
 
@@ -237,7 +252,7 @@ function titleRows(e: Entry, index: number, inner: number): string[] {
 }
 
 /** Screen rows one entry takes: its wrapped title and a status line. */
-export const entryHeight = (e: Entry, index: number, inner: number) => titleRows(e, index, inner).length + 1;
+export const entryHeight = (e: Entry, index: number, inner: number) => titleRows(e, index, inner).length + 1 + (e.stacks?.length ?? 0);
 
 /** Row heights for the whole list in a pane `width` columns wide. */
 export const entryHeights = (list: Entry[], width: number) => list.map((e, i) => entryHeight(e, i, Math.max(1, width - 4)));
@@ -248,8 +263,9 @@ export function entryLines(e: Entry, index: number, selected: boolean, inner: nu
   const status = statusFor(e);
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
   const sub = fit(`${indent}${status?.text ?? ""}`, inner);
-  if (selected) return [...titles, sub].map(inverse);
-  return [...titles, status ? colorize(sub, status.color) : sub];
+  const stacks = (e.stacks ?? []).map((st) => fit(`${indent}${stackText(st)}`, inner));
+  if (selected) return [...titles, sub, ...stacks].map(inverse);
+  return [...titles, status ? colorize(sub, status.color) : sub, ...stacks.map(dim)];
 }
 
 const elapsed = (sinceMs: number, now: number) => {
@@ -264,13 +280,16 @@ export function queueRows(queue: { running: Ticket[]; waiting: Ticket[] }, inner
   return [...running, ...waiting];
 }
 
+/** ` · dropped` when an iceboxed workspace gave back its worktrees. */
+const droppedLabel = (w: WorkspaceState): string => (w.iceboxed?.dropped?.length ? " · dropped" : "");
+
 /** Iceboxed workspaces, one dim row each under the divider; they have no tab, so no card and no digit. */
 export function icedRows(state: State, inner: number): string[] {
   const workspaces = state.workspaces as Record<string, unknown>;
   return Object.keys(workspaces)
     .filter((ws) => isIced(workspaces, ws))
     .sort(naturalSort)
-    .map((ws) => dim(fit(`❄ ${ws} iceboxed`, inner)));
+    .map((ws) => dim(fit(`❄ ${ws} iceboxed${isWorkspaceState(workspaces[ws]) ? droppedLabel(workspaces[ws]) : ""}`, inner)));
 }
 
 /** Workspaces being removed in the background right now, labelled as their cards were; a malformed record is skipped (its card reports it). */

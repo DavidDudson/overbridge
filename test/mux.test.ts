@@ -178,7 +178,7 @@ describe("tmux layout script", () => {
 
   test("creates the session with @root, adds the other tabs, and selects the first by index", () => {
     expect(lines[0]).toStartWith('"new-session" "-d" "-s" "workspaces" "-n" "@root"');
-    expect(lines.filter((l) => l.startsWith('"new-window"')).map((l) => l.split('" "')[5])).toEqual(["@work", "w1"]);
+    expect(lines.filter((l) => l.startsWith('"new-window"')).map((l) => l.split('" "')[5])).toEqual(["@work", "@prs", "@reviews", "w1"]);
     expect(lines.at(-1)).toBe('"select-window" "-t" "workspaces:0"');
   });
 
@@ -188,7 +188,7 @@ describe("tmux layout script", () => {
   });
 
   test("each tab gets the sidebar full-height at the left, the top panel above the agent, and titled panes", () => {
-    const w1 = lines.filter((l) => l.includes("workspaces:2"));
+    const w1 = lines.filter((l) => l.includes("workspaces:4"));
     expect(w1.map((l) => l.split(" ")[0])).toEqual(['"select-pane"', '"split-window"', '"select-pane"', '"split-window"', '"select-pane"']);
     expect(w1[1]).toContain('"-b" "-v" "-l" "5"');
     expect(w1[3]).toContain('"-f" "-b" "-h" "-l" "40"');

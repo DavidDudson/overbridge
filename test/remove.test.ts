@@ -6,7 +6,7 @@ import { agentStateFile, EndReason, sessionEndedForGood } from "../src/agent-sta
 import { createReaper } from "../src/auto-remove";
 import { CleanupCause, CleanupOutcome } from "../src/cleanup-log";
 import { zellijMux } from "../src/mux";
-import { beginRemoval, FINISH_FLAG, Landing, type RemovalDeps } from "../src/remove";
+import { beginRemoval, finishRemoval, FINISH_FLAG, Landing, type RemovalDeps } from "../src/remove";
 import { cleanable, gitClean } from "../src/top";
 import { entries, entryLines } from "../src/sidebar";
 import { isRemoving, readState, REMOVING_GRACE_MS, watchState, withState, type WorkspaceState } from "../src/state";
@@ -160,6 +160,15 @@ describe("beginRemoval", () => {
     const { deps } = fakeDeps("");
     expect(beginRemoval("m1", { deps, cause: CleanupCause.Merged })).toBeUndefined();
     expect(readState().workspaces.m1!.removing?.cause).toBe(CleanupCause.Merged);
+  });
+
+  test("refuses every orchestration tab, the work list included", async () => {
+    const { deps, calls, spawned } = fakeDeps("");
+    expect(beginRemoval("@work", { deps })).toContain("orchestration tab");
+    await expect(finishRemoval("@work")).rejects.toThrow("orchestration tab");
+    expect(spawned).toEqual([]);
+    expect(calls).toEqual([]);
+    expect(readState().cleanups ?? []).toEqual([]);
   });
 
   test("refuses an orchestration tab without touching zellij", () => {

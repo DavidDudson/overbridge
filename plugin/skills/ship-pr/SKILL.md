@@ -1,9 +1,12 @@
 ---
 name: ship-pr
 description: Commit, push and open (or update) a GitHub PR from an overbridge workspace, then record the PR against the workspace, wait for a green build, request Copilot and CodeRabbit reviews (CodeRabbit also on drafts) and resolve their feedback. Fills the PR body from the shared template (visible change summary and gaps, a benchmark table on performance PRs, screenshots; everything else collapsed). Handles a single PR on the default branch, a stacked PR on top of another branch or PR (always a real gh stack), and splitting one oversized branch into a stack. Use when the user says "ship it", "open a PR", "raise a PR", "push this up", "update the PR", "stack this on X", "on top of #123", "restack this onto X", "split this into a stack", "break this PR up", or "stacked PR". Pass `--with-review` (or say "review and open a PR") to run mob-review first.
+requires: gh-stack
 ---
 
 # Ship a PR from a workspace
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 Commit the work, push the branch, open a PR with the shared body template, get the build green and the review feedback resolved. Everything runs from the repo directory inside the workspace, on the branch the workspace has claimed.
 
@@ -223,6 +226,8 @@ If it is missing, tell the user to run `gh extension install github/gh-stack` (i
 Use the `gh-stack` skill for the exact non-interactive flags, the rebase and conflict flow, and merging. This section adds what overbridge needs on top.
 
 **A claim covers the whole stack.** `overbridge checkout <repo> '#<pr>'` pulls an existing stack and claims every layer. Never `gh stack checkout` or `gh stack trunk`: both are blocked. Run `overbridge pr <repo>` after submitting and after moving between layers. A branch or PR claimed by another workspace cannot be taken: if `overbridge checkout` refuses, stop and tell the user. A workspace opened with `overbridge start <repo> --stack <id>...` already holds a local stack with one empty-diff layer per item (bottom first): fill each layer in order and `gh stack up` to the next, rather than `gh stack add`.
+
+**Every layer of a stack lives in this workspace.** Never suggest a new workspace, tab or `overbridge start` for another layer, however many there are: add it with `gh stack add` (or `gh stack up` when it exists) and carry on here. When a stack's base branch is claimed by another workspace, that workspace owns the lower layers: stop and tell the user which one, rather than starting a third.
 
 "Base" below means the branch the PR targets, **not the default branch**. Resolve a PR number or URL to a branch first:
 

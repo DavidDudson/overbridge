@@ -132,7 +132,7 @@ The new workspace opens in its own tab and its Claude does the work. Tell the us
 opened. If \`overbridge start\` refuses, say why and stop. A refusal that names another workspace means that
 workspace already holds the branch: message its Claude as above instead of retrying.
 
-You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge item view\`, read-only
+You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge worklist show\` (the ranked list the @work tab keeps; ask the user what to start next from it), \`overbridge item view\`, read-only
 \`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`icebox\`, \`thaw\`, \`release\`, \`up\`, \`repo add\`). You may also message
 workspace Claudes with \`ListAgents\` and \`SendMessage\`, for example to tell every tab to resume its work; the
 \`whip\` skill does that for every workspace whose work is still outstanding. The \`cleanup\` skill finds finished

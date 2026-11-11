@@ -43,8 +43,9 @@ overbridge rm <name> [--force]                    # refuses with uncommitted cha
                                           # an orphan (a workspace folder that status does not list)
 overbridge cleanup [--json] [--no-fetch]          # report which workspaces and orphans can go (remove, review,
                                           # rebind, ask, keep); removes nothing. The cleanup skill acts on it
-overbridge icebox <name>                          # pause: stop apps and checks, write a handoff, close the tab; claims stay; refuses with unsaved work
-overbridge thaw <name>                            # reopen an iceboxed workspace; its agent resumes and reads the handoff
+overbridge icebox <name> [--prune] [--drop-worktree]  # pause: stop apps and checks, write a handoff, close the tab; claims stay; refuses with unsaved work
+                                                  # --prune deletes the repo's icebox.prune paths (untracked only); --drop-worktree removes worktrees, keeps branches
+overbridge thaw <name>                            # reopen an iceboxed workspace; its agent resumes and reads the handoff; recreates dropped worktrees
 overbridge status --all
 
 overbridge spinup                                 # rebuild the zellij session over existing workspaces

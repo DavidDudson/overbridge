@@ -7,7 +7,7 @@ import { agentStateFile, glyphFor, readAgentState, UNKNOWN_GLYPH } from "../src/
 import { sidebarWidth } from "../src/config";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { bodyRowsFor, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryLines, type Finished, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
+import { bodyRowsFor, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Finished, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
 import { readHistory, Travel, writeHistory } from "../src/sidebar-history";
 import { type Input, textWidth } from "../src/term";
 
@@ -347,6 +347,23 @@ describe("sidebarLabel", () => {
     expect(sidebarLabel("w1", {})).toBe("w1");
     expect(sidebarLabel("w1", { headline: "12" })).toBe("w1");
     expect(stripConventional("fix:")).toBe("fix:");
+  });
+});
+
+describe("stacked PRs on a card", () => {
+  const stacked: Entry = { ...entry("a", "●", "12 Add dark mode"), state: "busy", stacks: [{ prs: [11, 12, 13], current: 12 }] };
+
+  test("a three-layer stack is one line, bottom to top, the claimed layer in brackets", () => {
+    const rows = entryLines(stacked, 0, false, 30);
+    expect(rows).toHaveLength(entryHeight(stacked, 0, 30));
+    expect(rows.at(-1)).toContain("stack 11·[12]·13");
+    expect(entryLines(entry("a"), 0, false, 30)).toHaveLength(entryHeight(entry("a"), 0, 30));
+    expect(entryHeight(stacked, 0, 30)).toBe(entryHeight(entry("a", "●", "12 Add dark mode"), 0, 30) + 1);
+  });
+
+  test("the selected card keeps the stack line inside its inverse block", () => {
+    const rows = entryLines(stacked, 0, true, 30);
+    expect(rows.every((r) => r.startsWith("\x1b[7m"))).toBe(true);
   });
 });
 
