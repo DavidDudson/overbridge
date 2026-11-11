@@ -151,10 +151,10 @@ describe("workflow", () => {
     expect(r.out).toContain("nothing assigned to you");
   });
 
-  test("layout opens the orchestration tabs (root, work list, PRs, reviews), then one tab per workspace, each with sidebar and top panel", () => {
+  test("layout opens the orchestration tabs (root, work list, PRs, reviews, performance), then one tab per workspace, each with sidebar and top panel", () => {
     for (const n of ["ws3", "ws4", "ws5"]) ws(["new", n]);
     const kdl = ws(["layout"]).out;
-    expect(kdl.match(/\btab name=/g)?.length).toBe(9);
+    expect(kdl.match(/\btab name=/g)?.length).toBe(10);
     expect(kdl.indexOf('tab name="@root"')).toBeLessThan(kdl.indexOf('tab name="ws'));
     expect(kdl).toContain('"claude" "@root"');
     expect(kdl).toMatch(/args .*"worklist"/);

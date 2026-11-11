@@ -109,26 +109,28 @@ describe("go", () => {
   });
 
   test("switches tab and lands on its claude pane", () => {
-    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "b", "a"], "a", [claudePane("b", 9)]);
-    expect(go("5", z.exec)).toBe("→ b");
+    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "b", "a"], "a", [claudePane("b", 9)]);
+    expect(go("6", z.exec)).toBe("→ b");
     expect(z.actions()).toEqual(["query-tab-names", "current-tab-info", "go-to-tab-name b", "list-panes --json", "focus-pane-id terminal_9"]);
   });
   test("numbers follow the sidebar: orchestration tabs first, then workspaces in tab order", () => {
-    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "b", "a"], "a");
+    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "b", "a"], "a");
     expect(go("1", z.exec)).toBe("→ @root");
     expect(go("2", z.exec)).toBe("→ @work");
-    expect(go("6", z.exec)).toBe("→ a");
+    expect(go("5", z.exec)).toBe("→ @perf");
+    expect(go("perf", z.exec)).toBe("→ @perf");
+    expect(go("7", z.exec)).toBe("→ a");
     expect(go("next", z.exec)).toBe("→ @root");
     expect(go("prev", z.exec)).toBe("→ b");
   });
   test("the switch stands when the tab has no claude pane", () => {
-    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "a", "b"], "a");
+    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "a", "b"], "a");
     expect(go("b", z.exec)).toBe("→ b");
     expect(z.actions()).toEqual(["query-tab-names", "current-tab-info", "go-to-tab-name b", "list-panes --json"]);
   });
   test("a bad target or a failed switch is an error", () => {
-    expect(() => go("9", fakeZellij(["@root", "@work", "@prs", "@reviews", "a", "b"], "a").exec)).toThrow("no tab 9: 6 tabs");
-    expect(() => go("next", fakeZellij(["@root", "@work", "@prs", "@reviews", "a", "b"], undefined).exec)).toThrow("not on a tab");
-    expect(() => go("b", fakeZellij(["@root", "@work", "@prs", "@reviews", "a", "b"], "a", [], false).exec)).toThrow("could not switch to b: no such tab");
+    expect(() => go("9", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "a", "b"], "a").exec)).toThrow("no tab 9: 7 tabs");
+    expect(() => go("next", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "a", "b"], undefined).exec)).toThrow("not on a tab");
+    expect(() => go("b", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "a", "b"], "a", [], false).exec)).toThrow("could not switch to b: no such tab");
   });
 });

@@ -81,6 +81,11 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   `src/cleanup-gather.ts` reads the facts through injectable `GatherDeps` (git, `gh`, `Provider.status`), and `src/orphan.ts`
   finds orphans (a folder state does not list that holds a registered worktree or `.claude`). `removeWorkspace` passes an
   orphan to `removeOrphan`. The `cleanup` skill keeps the judgement; keep its verdict table in sync with `CleanupReason`.
+- `src/history.ts` is where each workspace's time goes: the agent hook (`recordHistory`) appends Claude events and `overbridge check` appends
+  each run, to `<meta>/history/<ws>.jsonl` behind `HistoryStore` (the seam for the bun server the refresh spike proposes; `historyStore()` picks
+  the implementation). It stores tool names and a command class, never prompt or Bash text. `summarize` is the pure fold into turn/model/tool/
+  permission/user time; `src/history-report.ts` formats it (`overbridge history`) and `src/perf-run.ts` is the `@perf` tab (`p` in the sidebar).
+  Like the hook, `history.ts` imports node builtins and `paths.ts` only.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors. The root `config.yml`'s `guard` block (`GuardConfig`) adds
   `read-paths` (reads only) and `deny` rules; it is never read from a repo file, so a branch can't loosen the guard.
