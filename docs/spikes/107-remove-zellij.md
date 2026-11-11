@@ -159,8 +159,8 @@ Caveats:
 - One run per variant on a busy machine (the live 28-tab session was running alongside), 30 s per phase.
 - Latencies are CLI round trips, not time-to-pixels.
 - In C the `@root` window's sidebar split failed, because tmux reads a target starting with `@` as a window id
-  (`-t workspaces:@root`); it needs the exact-name form `-t 'workspaces:=@root'`. So C ran 82 panes, one idle pane
-  short of A and B, which does not change the picture. The adapter must use `=`-prefixed targets for every
+  (`-t workspaces:@root`); the `=` form `-t 'workspaces:=@root'` does not fix it either (see the [PoC gate](119-tmux-poc-gate.md)). So C ran 82 panes, one idle pane
+  short of A and B, which does not change the picture. The adapter must address windows by id or index for every
   orchestration tab.
 
 ## Alternatives
@@ -188,7 +188,7 @@ Trade-offs:
 - Apps may rename panes with OSC titles (Claude Code does); `set -g allow-set-title off` keeps the titles
   `panes.ts` finds panes by.
 - A target that starts with `@` is a window id to tmux, so orchestration tabs (`@root`) must always be addressed
-  by exact name: `-t 'workspaces:=@root'`. The adapter should `=`-prefix every name it passes.
+  by window id or index: `=@root` does not resolve either ([PoC gate](119-tmux-poc-gate.md)). The adapter resolves names to ids.
 - No floating panes; `overbridge next` runs with `run-shell -b` instead.
 - No layout file. `overbridge layout` prints the tmux command script instead of KDL; the user override file goes.
 - Scrollback/copy: tmux copy-mode with `mouse on`; `copy_command wl-copy` becomes `copy-command 'wl-copy'`.
