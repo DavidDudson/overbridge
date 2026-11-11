@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, constants, loadavg } from "node:os";
 import { join } from "node:path";
-import { classifyCommand, commandLabel, type HistoryStore, historyStore } from "./history";
+import { classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
 import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
@@ -210,6 +210,8 @@ export function recordCheck(me: Ticket, startedMs: number, endedMs: number | und
       at: endedMs ?? startedMs,
       repo: me.repo,
       command: commandLabel(me.command),
+      full: redactCommand(me.command),
+      group: commandGroup(me.command),
       cls: classifyCommand(me.command),
       queuedMs: startedMs - me.queuedAtMs,
       runMs: endedMs === undefined ? 0 : endedMs - startedMs,

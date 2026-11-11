@@ -15,7 +15,7 @@ import { metaDir } from "./paths";
 export const CLAUDE_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Notification", "Stop", "SessionEnd"] as const;
 export type ClaudeEvent = (typeof CLAUDE_EVENTS)[number];
 
-/** A coarse class for a command, so history never needs to keep a Bash command's text. */
+/** A coarse class for a command, so history never needs to keep a Claude Bash call's text. */
 export const COMMAND_CLASSES = ["test", "lint", "build", "typecheck", "format", "git", "other"] as const;
 export type CommandClass = (typeof COMMAND_CLASSES)[number];
 
@@ -48,6 +48,72 @@ export function commandLabel(command: string): string {
   return label.join(" ");
 }
 
+/** Words that name a secret: the value after one is never kept. */
+const SECRET_FLAG = String.raw`--?[\w-]*(?:token|secret|passw|key|auth|cred)[\w-]*`;
+const VALUE = String.raw`"[^"]*"|'[^']*'|[^\s'"]+`;
+const REDACTIONS: readonly [RegExp, string][] = [
+  // https://user:pw@host
+  [/(\b[a-z][a-z0-9+.-]{0,15}:\/\/)[^/\s@'"]+@/gi, "$1***@"],
+  // ?token=x, &api_key=x, X-Amz-Signature=x in a URL
+  [/([?&;][\w-]*(?:token|secret|passw|key|auth|cred|sig)[\w-]*=)[^&\s'"]*/gi, "$1***"],
+  // Authorization: Bearer x, Bearer x, Basic x
+  [/(authorization:?\s*)(?:(?:bearer|basic|token)\s+)?[^\s'"]+/gi, "$1***"],
+  [/\b(bearer|basic)\s+[^\s'"]+/gi, "$1 ***"],
+  // NAME=value anywhere, quoted values included (`bash -c "API_TOKEN=x just check"`)
+  [new RegExp(String.raw`(^|[\s'"])([A-Za-z_]\w*)=(?:${VALUE})?`, "g"), "$1$2=***"],
+  // a secret-looking flag's value, `--token x` or `--api-key=x`
+  [new RegExp(String.raw`(${SECRET_FLAG})(=|\s+)(?!-)(?:${VALUE})`, "gi"), "$1$2***"],
+  // header and basic-auth arguments
+  [new RegExp(String.raw`(-H|--header|--user)(=|\s*)(?:${VALUE})`, "g"), "$1$2***"],
+  [/(\s-u\s*)[^\s'"]*:[^\s'"]*/g, "$1***"],
+];
+
+/**
+ * A command line for history: the whole line with what looks like a secret blanked. Best effort, by pattern: it blanks
+ * every `NAME=value`, URL credentials, `Authorization`/`Bearer`/`Basic` values, the value of a flag whose name looks
+ * secret (`--token x`), secret-looking URL query parameters and the arguments of `-H`, `--header`, `--user` and `-u user:pass`.
+ * A secret passed as a bare positional argument or after a flag like `-p` (a port, a package or a password), or one
+ * inside an escaped quote, cannot be told apart from any other word and is kept. At most 500 characters.
+ */
+export function redactCommand(command: string): string {
+  return REDACTIONS.reduce((text, [re, to]) => text.replace(re, to), command.trim().slice(0, 2000).replace(/\s+/g, " ")).slice(0, 500);
+}
+
+/** Programs whose next word is the task they run: `just check`, `make lint`. */
+const TASK_RUNNERS = new Set(["just", "make", "task", "nx", "turbo", "mise"]);
+/** Package managers: `bun run lint`, `npm test`, `pnpm lint`. */
+const PACKAGE_MANAGERS = new Set(["bun", "npm", "pnpm", "yarn"]);
+/** Flags that take the next word as their value, so it is not the task: `just --justfile ci.just check`. */
+const VALUE_FLAGS = new Set(["-C", "-f", "-d", "-w", "--justfile", "--working-directory", "--directory", "-j", "-E", "-l", "--file", "--filter", "--cwd", "--prefix", "--workspace", "--set"]);
+/** Words after a package manager that run another program: `bun x vitest`. */
+const EXEC_WORDS = new Set(["run", "x", "exec", "dlx"]);
+
+/** The words after a runner that are not flags (nor flag values). */
+function runnerArgs(words: readonly string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
+    if (VALUE_FLAGS.has(w)) i++;
+    else if (!w.startsWith("-")) out.push(w);
+  }
+  return out;
+}
+
+/**
+ * The group a check command belongs to, for display: the task it runs, so `nix develop --command just check` and
+ * `just check` are both `check`. Other commands group under their label (`cargo clippy`).
+ */
+export function commandGroup(command: string): string {
+  const words = command.trim().split(/\s+/).filter((w) => !/^\w+=/.test(w));
+  const at = words.findIndex((w) => TASK_RUNNERS.has(w) || PACKAGE_MANAGERS.has(w));
+  if (at >= 0) {
+    const rest = runnerArgs(words.slice(at + 1));
+    const task = PACKAGE_MANAGERS.has(words[at]!) && rest[0] && EXEC_WORDS.has(rest[0]) ? rest[1] : rest[0];
+    if (task && !/[='"$]/.test(task)) return task;
+  }
+  return commandLabel(words.join(" ")) || command.trim().split(/\s+/)[0] || "?";
+}
+
 export interface ClaudeRecord {
   kind: "claude";
   /** Epoch ms. */
@@ -66,8 +132,12 @@ export interface CheckRecord {
   /** Epoch ms when the run ended. */
   at: number;
   repo: string;
-  /** `commandLabel` of the command, never its arguments. */
+  /** `commandLabel` of the command: its leading words. */
   command: string;
+  /** The whole command line, secrets blanked (`redactCommand`). Absent on records from before it was kept. */
+  full?: string;
+  /** `commandGroup` of the command. Absent on older records: `command` stands in. */
+  group?: string;
   cls: CommandClass;
   /** Time waiting in the check queue. */
   queuedMs: number;
@@ -167,6 +237,56 @@ export interface Tally {
   ms: number;
 }
 
+/** Check runs of one group: what `just check` costs, however it was invoked. */
+export interface GroupTally extends Tally {
+  failed: number;
+  queuedMs: number;
+  cls: CommandClass;
+  /** The distinct full command lines, newest first, at most three. */
+  fulls: string[];
+}
+
+/** Add a check run to `groups`. */
+export function addCheck(groups: Record<string, GroupTally>, r: CheckRecord): void {
+  const key = r.group ?? r.command;
+  const prev = groups[key];
+  const full = r.full ?? r.command;
+  groups[key] = {
+    count: (prev?.count ?? 0) + 1,
+    ms: (prev?.ms ?? 0) + r.runMs,
+    failed: (prev?.failed ?? 0) + (r.exit === 0 ? 0 : 1),
+    queuedMs: (prev?.queuedMs ?? 0) + r.queuedMs,
+    cls: r.cls,
+    fulls: [full, ...(prev?.fulls ?? []).filter((f) => f !== full)].slice(0, 3),
+  };
+}
+
+/** One repo's check runs, whichever workspace ran them. */
+export interface RepoSummary {
+  repo: string;
+  count: number;
+  ms: number;
+  queuedMs: number;
+  failed: number;
+  groups: Record<string, GroupTally>;
+}
+
+/** Fold check records from every workspace into one summary per repo. Records need not be sorted. */
+export function summarizeRepos(records: readonly HistoryRecord[]): RepoSummary[] {
+  const repos = new Map<string, RepoSummary>();
+  for (const r of [...records].sort((a, b) => a.at - b.at)) {
+    if (r.kind !== "check") continue;
+    const t = repos.get(r.repo) ?? { repo: r.repo, count: 0, ms: 0, queuedMs: 0, failed: 0, groups: {} };
+    t.count++;
+    t.ms += r.runMs;
+    t.queuedMs += r.queuedMs;
+    if (r.exit !== 0) t.failed++;
+    addCheck(t.groups, r);
+    repos.set(r.repo, t);
+  }
+  return [...repos.values()];
+}
+
 export interface Summary {
   turns: number;
   /** Prompt to stop, summed. */
@@ -186,6 +306,8 @@ export interface Summary {
   bash: Partial<Record<CommandClass, Tally>>;
   /** `overbridge check` runs by class: count, and run time. */
   checks: Partial<Record<CommandClass, Tally & { failed: number; queuedMs: number }>>;
+  /** `overbridge check` runs by group (`check`, `lint`): what the user can optimise. */
+  groups: Record<string, GroupTally>;
 }
 
 /** A gap between turns longer than this counts as away, not waiting. */
@@ -207,7 +329,7 @@ function unionMs(spans: [number, number][]): number {
 
 /** Fold a workspace's records into time totals. Records need not be sorted. */
 export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_AFTER_MS): Summary {
-  const s: Summary = { turns: 0, turnMs: 0, modelMs: 0, toolMs: 0, permissionMs: 0, userMs: 0, awayMs: 0, tools: {}, bash: {}, checks: {} };
+  const s: Summary = { turns: 0, turnMs: 0, modelMs: 0, toolMs: 0, permissionMs: 0, userMs: 0, awayMs: 0, tools: {}, bash: {}, checks: {}, groups: {} };
   let turnStart: number | undefined;
   let lastStop: number | undefined;
   let notifiedAt: number | undefined;
@@ -218,6 +340,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
     if (r.kind === "check") {
       const prev = s.checks[r.cls];
       s.checks[r.cls] = { ...bump(prev, r.runMs), failed: (prev?.failed ?? 0) + (r.exit === 0 ? 0 : 1), queuedMs: (prev?.queuedMs ?? 0) + r.queuedMs };
+      addCheck(s.groups, r);
       continue;
     }
     switch (r.event) {

@@ -75,6 +75,7 @@ function handlerDeps(over: Partial<HandlerDeps> = {}) {
       await Bun.sleep(5);
       return cacheOf();
     },
+    refreshPerf: async () => 0,
     workspaceExists: (ws) => ws === "w1" || ws === "w2",
     cacheFileAt: () => Date.now(),
     version: "v1",

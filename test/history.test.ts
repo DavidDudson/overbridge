@@ -156,10 +156,10 @@ describe("summarize", () => {
 
 describe("recordCheck", () => {
   const queued = { pid: 1, ws: "w", repo: "r", command: "bun test --token=x", queuedAtMs: 1000 };
-  test("a run records its queue time, run time, exit and class, never its arguments", () => {
+  test("a run records its queue time, run time, exit and class, with the full command and its secrets blanked", () => {
     const store = fileStore(dir);
     recordCheck(queued, 4000, 9000, 1, store);
-    expect(store.read("w")).toEqual([{ kind: "check", at: 9000, repo: "r", command: "bun test", cls: "test", queuedMs: 3000, runMs: 5000, exit: 1 }]);
+    expect(store.read("w")).toEqual([{ kind: "check", at: 9000, repo: "r", command: "bun test", full: "bun test --token=***", group: "test", cls: "test", queuedMs: 3000, runMs: 5000, exit: 1 }]);
   });
   test("giving up records the wait and no run", () => {
     const store = fileStore(dir);
