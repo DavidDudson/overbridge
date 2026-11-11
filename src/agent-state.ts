@@ -29,6 +29,9 @@ export const CONTINUING_END_REASONS: readonly string[] = [EndReason.Clear, EndRe
  */
 export const endedForGood = (reason: string | undefined): boolean => reason === EndReason.PromptInputExit;
 
+/** Agent states with no turn in progress: removing the workspace cannot cut off work. */
+export const AT_REST: ReadonlySet<AgentState | undefined> = new Set<AgentState | undefined>([undefined, "empty", "idle", "done", "end"]);
+
 /** Shown when no state has been recorded, or it has gone stale. */
 export const UNKNOWN_GLYPH = "·";
 

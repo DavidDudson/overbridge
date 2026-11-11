@@ -82,6 +82,26 @@ Below it, a yellow `🧹 removing <title>` row shows a removal in progress and a
 a failed one shows red as `✗ failed <title>`. Finished rows stay until the next check, then drop off. The sidebar shows at most
 three removal rows, and `state.json` keeps the last 20 under `cleanups`.
 
+**What the merged-PR check leaves behind.** `overbridge cleanup` reports on every workspace the check does not remove, and
+on orphans: workspace folders under the root that `overbridge status` does not list. It removes nothing. Each one gets a
+verdict:
+
+- **`remove`**: every claimed PR has merged. Or a PR that names the item merged from another branch, so none was
+  recorded. Or the item is done and no PR is open. Or it is a `task/` branch with no PR and no commits whose session is
+  at rest. Or it is an orphan.
+- **`review`**: one of the above, but something would be lost. A repo has uncommitted changes, commits that are on no
+  remote branch and in no merged PR, or a stash made on its branch. Or the folder holds files that are neither worktrees
+  nor generated. Or the session is in the middle of a turn.
+- **`rebind`**: the workspace is named for a done item and holds an open PR for a different item.
+- **`ask`**: no PR, no commits, and nothing unsaved, and the item is not done. It was never started.
+- **`keep`**: work in progress, or a read failed.
+
+`overbridge cleanup --json` prints the facts behind each verdict, and `--no-fetch` skips fetching the repos first.
+`overbridge rm <name>` also removes an orphan: it removes the folder's registered worktrees from their bare repos,
+prunes them, and deletes the folder. Without `--force` it refuses when a worktree has uncommitted changes or
+unpushed commits, or the folder holds other files. The `cleanup` skill runs the scan from the orchestration tab,
+asks which `remove` workspaces to delete, and runs `overbridge rm` for those.
+
 Inside a workspace (shell pane or its Claude):
 
 ```nu
@@ -119,7 +139,8 @@ green build, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev lo
 orchestration tab: find every workspace with work still outstanding, such as a draft PR, a conflict with main,
 review feedback, a red build, uncommitted or unpushed work or an item not yet shipped, and message its Claude a
 plain "continue" naming what is left; done workspaces are skipped; it ends with a sent/skipped table and takes
-`--dry-run`). They read the
+`--dry-run`) and `cleanup` (from the orchestration tab: report the finished, orphaned, and never-started
+workspaces that `overbridge cleanup` finds, and remove the safe ones once you confirm; it also takes `--dry-run`). They read the
 repo's `overbridge.yml` (`project-management`, `commands`) and work with work items through `overbridge item`.
 `loop-tech-debt` files items with `overbridge item create --tech-debt`, so set `project-management.tech-debt`.
 `audit-vulns` reads Dependabot alerts, so it needs a GitHub repo.
@@ -577,8 +598,8 @@ a brief through `--append-system-prompt`. The guard lets it read anything, run r
 commands, check status, and start or remove workspaces. It blocks file edits, branch changes, commits,
 pushes, and changes to PRs and issues, and its message tells Claude to start a workspace instead. When you
 ask it for a task, it runs `overbridge start` with your request as `--prompt`, and the new workspace's
-Claude does the work. `/whip` there messages every workspace whose work is still outstanding to continue (see
-[Claude Code plugin](#claude-code-plugin)). The Workspaces frame is below it. Keys,
+Claude does the work. `/whip` there messages every workspace whose work is still outstanding to continue, and
+`/cleanup` finds the workspaces that can go (see [Claude Code plugin](#claude-code-plugin)). The Workspaces frame is below it. Keys,
 clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
 and sidebar files never share a name with a workspace's.

@@ -1,4 +1,4 @@
-import { type AgentState, readAgentState } from "./agent-state";
+import { type AgentState, AT_REST, readAgentState } from "./agent-state";
 import { isOrchestrationTab } from "./orchestration";
 import { CleanupCause } from "./cleanup-log";
 import { beginRemoval, Landing } from "./remove";
@@ -18,9 +18,6 @@ export const Verdict = {
   Remove: "remove",
 } as const;
 export type Verdict = (typeof Verdict)[keyof typeof Verdict];
-
-/** Agent states with no turn in progress: removing the workspace cannot cut off work. */
-const AT_REST: ReadonlySet<AgentState | undefined> = new Set<AgentState | undefined>([undefined, "empty", "idle", "done", "end"]);
 
 export interface VerdictInput {
   ws: string;

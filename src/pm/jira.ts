@@ -1,7 +1,7 @@
 import type { ProjectManagement } from "../project-config";
 import { fail, run } from "../util";
 import type { Runner } from "./github";
-import { namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
+import { ItemStatus, namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
 
 const KEY_RE = /^[A-Z][A-Z0-9_]*$/;
 
@@ -26,7 +26,7 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
   };
 
   /** The ticket as `jira issue view --raw` prints it, or undefined when it can't be read. */
-  type Raw = { fields?: { summary?: string; issuetype?: { name?: string } } };
+  type Raw = { fields?: { summary?: string; issuetype?: { name?: string }; status?: { statusCategory?: { key?: string } } } };
   const view = (id: string): Raw | undefined => {
     const r = jira(["issue", "view", normalize(id), "--raw"]);
     if (!r.ok) return undefined;
@@ -58,6 +58,14 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
     itemTypes(id) {
       const type = view(id)?.fields?.issuetype?.name;
       return type ? [type] : [];
+    },
+
+    status(id) {
+      const category = view(id)?.fields?.status?.statusCategory?.key;
+      if (!category) {
+        return undefined;
+      }
+      return category === "done" ? ItemStatus.Done : ItemStatus.Open;
     },
 
     assigned() {

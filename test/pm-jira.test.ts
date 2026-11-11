@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ItemStatus } from "../src/pm/provider";
 import { clearProviders } from "../src/pm/registry";
 import type { Runner } from "../src/pm/github";
 import { jiraProvider } from "../src/pm/jira";
@@ -67,6 +68,15 @@ describe("jira-cli calls", () => {
   test("title is undefined on failure or bad JSON", () => {
     expect(jiraProvider(cfg, "/w", stub({ "issue view": { ok: false } }).runner).title("7")).toBeUndefined();
     expect(jiraProvider(cfg, "/w", stub({ "issue view": { stdout: "nope" } }).runner).title("7")).toBeUndefined();
+  });
+
+  test("status reads the status category", () => {
+    const status = (reply: { ok?: boolean; stdout?: string }) => jiraProvider(cfg, "/w", stub({ "issue view": reply }).runner).status("7");
+    const raw = (key: string) => ({ stdout: JSON.stringify({ fields: { status: { statusCategory: { key } } } }) });
+    expect(status(raw("done"))).toBe(ItemStatus.Done);
+    expect(status(raw("indeterminate"))).toBe(ItemStatus.Open);
+    expect(status({ ok: false })).toBeUndefined();
+    expect(status({ stdout: "{}" })).toBeUndefined();
   });
 
   test("assigned excludes done work and epics in the JQL", () => {
