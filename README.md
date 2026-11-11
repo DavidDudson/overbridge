@@ -162,7 +162,7 @@ Run `overbridge help` for every command.
 
 `plugin/` ships skills: `workspace`, `ship-pr` (commit, PR, stacked PRs and splitting a branch into a stack,
 green build, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
-`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`), `read-handoff` (continue from a handoff file after `/clear`) and `whip` (from the
+`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`), `read-handoff` (continue from a handoff file after `/clear`), `perf-recommend` (read the performance history and rank where to get time back) and `whip` (from the
 orchestration tab: find every workspace with work still outstanding, such as a draft PR, a conflict with main,
 review feedback, a red build, uncommitted or unpushed work or an item not yet shipped, and message its Claude a
 plain "continue" naming what is left; done workspaces are skipped; it ends with a sent/skipped table and takes
@@ -616,14 +616,21 @@ then cut to the newest half). Two things write it:
 - The Claude hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `Stop`,
   `SessionEnd`) record the event, the tool name and, for Bash, a class (`test`, `lint`, `build`, `typecheck`,
   `format`, `git`, `other`). Prompts and command text are never stored.
-- `overbridge check` records each run: the command's leading words (no arguments), its class, queue time, run time and exit code (including 124, 137, 75).
+- `overbridge check` records each run: the full command line (every `NAME=value` and the value of a secret-looking flag such as
+  `--token` is blanked), its leading words, its group (the task it ran: `nix develop --command just check` is `check`), its class,
+  queue time, run time and exit code (including 124, 137, 75). The tab and reports show the group; the full command is kept.
 
-`overbridge history` (flags: `--ws`, `--hours`, `--json`) folds that into time totals: turn time split into model,
+`overbridge history` (flags: `--ws`, `--hours`, `--by repo`, `--json`) folds that into time totals: turn time split into model,
 tool and permission-prompt time, time waiting on the user (a gap over 30 minutes counts as away), and the checks by
-class. The `@perf` orchestration tab (`overbridge perf`) shows the same per workspace, busiest first: turns, time in
+group. Shares are exact, to one decimal (`12.4%`). `--by repo` totals the check runs of every workspace per repo.
+The `@perf` orchestration tab (`overbridge perf`) shows the same per workspace, busiest first: turns, time in
 turns, the model, tool, permission and user shares, and the check count and time, with the selected workspace's
-slowest tools and checks below. `j`/`k` move, `w` cycles the window (1h, 24h, 7d, all), `r` reloads; it reloads
-itself every 5 seconds. The store sits behind the `HistoryStore` interface in `src/history.ts`, so a long-running server can take it over.
+slowest tools and check groups below. `g` switches to one row per repo (check runs, run time, queue wait, failures, and
+for the selected repo each group's share of its check time and the full command of the slowest). `j`/`k` move, `w`
+cycles the window (1h, 24h, 7d, all), `r` reloads; it reloads itself every 5 seconds. `overbridge serve` builds every
+window and both groupings into `.overbridge/perf.json` (`POST /refresh/perf`, rebuilt at most every 5 seconds); the tab
+reads that file while it is under 30 seconds old and computes the views itself otherwise, so it works with no server.
+The `perf-recommend` skill reads this history and recommends where to get time back. The store sits behind the `HistoryStore` interface in `src/history.ts`, so a long-running server can take it over.
 
 ### Tab sidebar
 

@@ -8,8 +8,8 @@ import { extCommand } from "./ext";
 import { icebox, thaw } from "./icebox";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
-import { historyStore } from "./history";
-import { summaries, summaryLines } from "./history-report";
+import { historyStore, summarizeRepos } from "./history";
+import { repoLines, summaries, summaryLines } from "./history-report";
 import { next } from "./next";
 import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
@@ -52,7 +52,7 @@ Setup
   overbridge worklist [refresh|show]            work list pane (the @work tab); refresh reads every board into its cache; show prints it
   overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
   overbridge perf                               performance pane (the @perf tab): the history per workspace
-  overbridge history [--ws name] [--hours n] [--json]   where time went: Claude turns, tools, waiting, checks
+  overbridge history [--ws name] [--hours n] [--by repo] [--json]   where time went: Claude turns, tools, waiting, checks
 
 Work items (the repo's project-management provider)
   overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
@@ -189,12 +189,22 @@ async function main(argv: string[]): Promise<number> {
       break;
     }
     case "history": {
-      const { values } = opts(rest, { ...ws, hours: { type: "string" }, json: { type: "boolean" } });
+      const { values } = opts(rest, { ...ws, hours: { type: "string" }, by: { type: "string" }, json: { type: "boolean" } });
       const hours = values.hours === undefined ? undefined : Number(values.hours);
-      if (hours !== undefined && !(hours > 0)) throw new OverbridgeError("usage: overbridge history [--ws name] [--hours n] [--json]");
+      const usage = "usage: overbridge history [--ws name] [--hours n] [--by repo] [--json]";
+      if (hours !== undefined && !(hours > 0)) throw new OverbridgeError(usage);
+      if (values.by !== undefined && values.by !== "repo") throw new OverbridgeError(usage);
       if (values.ws && !historyStore().workspaces().includes(values.ws)) throw new OverbridgeError(`no history for ${values.ws}`);
-      const rows = summaries(undefined, hours === undefined ? undefined : hours * 3600_000, values.ws);
-      if (values.json) console.log(JSON.stringify(rows, null, 2));
+      const windowMs = hours === undefined ? undefined : hours * 3600_000;
+      const rows = summaries(undefined, windowMs, values.ws);
+      if (values.by === "repo") {
+        const store = historyStore();
+        const since = windowMs === undefined ? 0 : Date.now() - windowMs;
+        const repos = summarizeRepos(store.workspaces().filter((w) => !values.ws || w === values.ws).flatMap((w) => store.read(w, since))).sort((a, b) => b.ms - a.ms);
+        if (values.json) console.log(JSON.stringify(repos, null, 2));
+        else if (!repos.length) log("no check runs yet");
+        else for (const r of repos) console.log(repoLines(r).join("\n"));
+      } else if (values.json) console.log(JSON.stringify(rows, null, 2));
       else if (!rows.length) log("no history yet");
       else for (const row of rows) console.log(summaryLines(row).join("\n"));
       break;

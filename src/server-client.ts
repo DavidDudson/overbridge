@@ -35,3 +35,10 @@ export async function serverRefreshAll(workspaces: string[], o: { sock?: string;
   const results = await Promise.all(workspaces.map(async (ws) => ((await serverRefresh(ws, o)) ? undefined : ws)));
   return results.filter((ws): ws is string => ws !== undefined);
 }
+
+/** Ask the server to rebuild `perf.json` (every perf view) and wait for it; false when the server cannot be used, so the pane computes the views itself. */
+export async function serverRefreshPerf(o: { force?: boolean; sock?: string; start?: boolean } = {}): Promise<boolean> {
+  const r = await call("POST", `/refresh/perf${o.force ? "?force=1" : ""}`, { timeoutMs: 30_000, ...(o.sock ? { sock: o.sock } : {}) });
+  if (!r && o.start !== false) startServer();
+  return r?.status === 200;
+}

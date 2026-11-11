@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { NAME_RE, metaDir } from "./paths";
 import { pidAlive } from "./proc";
+import { refreshPerf as refreshPerfViews } from "./perf-cache";
 import { Cache, errorText } from "./server-cache";
 import { CLIENT_START_HEADER, pidFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
 import { readState } from "./state";
@@ -16,12 +17,17 @@ import { overbridgeVersion } from "./version";
 
 export const TOP_TTL_MS = 60_000;
 export const TOP_STALE_MS = 10 * 60_000;
+/** The perf views are cheap to build, so they are rebuilt often; a stale set is served while one builds. */
+export const PERF_TTL_MS = 5_000;
+export const PERF_STALE_MS = 60_000;
 export const IDLE_EXIT_MS = 10 * 60_000;
 /** Refreshes running at once: each runs `gh` calls of its own. */
 export const MAX_REFRESHES = 4;
 
 export interface HandlerDeps {
   refreshTop: (ws: string) => Promise<TopCache>;
+  /** Build every perf view and write `perf.json`; resolves with when it was built (a cached value cannot be undefined). */
+  refreshPerf: () => Promise<number>;
   workspaceExists: (ws: string) => boolean;
   /** When `ws`'s top cache file was last written (ms since epoch), 0 when it has none. */
   cacheFileAt: (ws: string) => number;
@@ -40,6 +46,7 @@ export function createHandler(deps: HandlerDeps) {
   const now = deps.now ?? Date.now;
   const report = deps.log ?? (() => undefined);
   const cache = new Cache<TopCache>({ maxInFlight: MAX_REFRESHES, now, onError: (key, e) => report(`${key}: ${e.message}`) });
+  const perf = new Cache<number>({ maxInFlight: 1, now, onError: (key, e) => report(`${key}: ${e.message}`) });
   const startedAt = now();
   let lastRequestAt = now();
   let draining = false;
@@ -58,7 +65,20 @@ export function createHandler(deps: HandlerDeps) {
       return json(409, { error: "version mismatch", server: deps.version, client: theirs });
     }
     if (req.method === "GET" && url.pathname === "/status") {
-      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, ...cache.stats() });
+      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, ...cache.stats(), perf: perf.stats() });
+    }
+    if (req.method === "POST" && url.pathname === "/refresh/perf") {
+      const got = perf.get("perf", () => deps.refreshPerf(), { ttlMs: PERF_TTL_MS, staleMs: PERF_STALE_MS, force: url.searchParams.get("force") === "1", swr: true });
+      if (url.searchParams.get("async") === "1") {
+        got.catch(() => undefined);
+        return json(202, { queued: "perf" });
+      }
+      try {
+        const { served, error } = await got;
+        return json(200, { served, ...(error ? { error } : {}) });
+      } catch (e) {
+        return json(502, { error: errorText(e) });
+      }
     }
     const top = /^\/refresh\/top\/([^/]+)$/.exec(url.pathname);
     if (req.method === "POST" && top) {
@@ -94,7 +114,7 @@ export function createHandler(deps: HandlerDeps) {
     handle,
     stats: () => cache.stats(),
     idleForMs: () => now() - lastRequestAt,
-    busy: () => cache.busy,
+    busy: () => cache.busy || perf.busy,
   };
 }
 
@@ -136,6 +156,7 @@ export async function serve(): Promise<void> {
   let exiting = false;
   const handler = createHandler({
     refreshTop: refreshInWorker,
+    refreshPerf: async () => refreshPerfViews().at,
     workspaceExists: (ws) => ws in readState().workspaces,
     cacheFileAt: (ws) => readTopCache(ws).at,
     log,

@@ -1,5 +1,7 @@
-import { COMMAND_CLASSES } from "./history";
-import { activeMs, checkTotals, duration, percent, summaries, type WorkspaceSummary } from "./history-report";
+import type { RepoSummary } from "./history";
+import { activeMs, checkTotals, duration, pct, topGroups, WINDOWS, type WorkspaceSummary } from "./history-report";
+import { loadPerf, type PerfViews } from "./perf-cache";
+import { serverRefreshPerf } from "./server-client";
 import { PERF_TAB } from "./sidebar";
 import { createPainter, readView, shouldPoll } from "./zellij-view";
 import { bold, boxBottom, boxRow, boxTop, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN } from "./term";
@@ -7,13 +9,10 @@ import { bold, boxBottom, boxRow, boxTop, colorize, decodeInput, dim, ENTER_SCRE
 /** Rows the frame uses besides the workspace rows: top border, header, detail (3), legend, bottom border. */
 export const PERF_CHROME = 7;
 
-/** The windows the `w` key cycles through. */
-export const WINDOWS: readonly { label: string; ms: number | undefined }[] = [
-  { label: "1h", ms: 3600_000 },
-  { label: "24h", ms: 24 * 3600_000 },
-  { label: "7d", ms: 7 * 24 * 3600_000 },
-  { label: "all", ms: undefined },
-];
+export { WINDOWS };
+
+/** What a row is: one workspace, or one repo (its check runs from every workspace). */
+export type Grouping = "workspace" | "repo";
 
 export const PERF_REFRESH_MS = 5_000;
 
@@ -23,8 +22,13 @@ export function ranked(list: readonly WorkspaceSummary[]): WorkspaceSummary[] {
   return [...list].sort((a, b) => total(b) - total(a) || a.ws.localeCompare(b.ws));
 }
 
-/** `name 34%` cells for the Claude split, so the columns line up. */
-const split = (part: number, whole: number) => `${percent(part, whole)}%`.padStart(4);
+/** Repos with the most check time first. */
+export function rankedRepos(list: readonly RepoSummary[]): RepoSummary[] {
+  return [...list].sort((a, b) => b.ms - a.ms || a.repo.localeCompare(b.repo));
+}
+
+/** `34.2%` cells for the Claude split, so the columns line up. */
+const split = (part: number, whole: number) => pct(part, whole).padStart(6);
 
 /**
  * The tab as screen rows: a table with one row per workspace (Claude time split into model, tools, permission
@@ -33,7 +37,7 @@ const split = (part: number, whole: number) => `${percent(part, whole)}%`.padSta
 export function renderPerf(list: readonly WorkspaceSummary[], selected: number, offset: number, height: number, width: number, windowLabel: string, message = ""): string[] {
   const inner = width - 4;
   const body = Math.max(1, height - PERF_CHROME);
-  const header = `${"workspace".padEnd(22)} ${"turns".padStart(5)} ${"in turns".padStart(8)}  ${"model".padStart(5)} ${"tools".padStart(5)} ${"perm".padStart(5)} ${"user".padStart(5)}  ${"checks".padStart(6)} ${"check time".padStart(10)}`;
+  const header = `${"workspace".padEnd(22)} ${"turns".padStart(5)} ${"in turns".padStart(8)}  ${"model".padStart(6)} ${"tools".padStart(6)} ${"perm".padStart(6)} ${"user".padStart(6)}  ${"checks".padStart(6)} ${"check time".padStart(10)}`;
   const rows: string[] = [boxTop(`Performance · ${windowLabel}`, width), boxRow(dim(fit(header, inner)))];
   const visible = list.slice(offset, offset + body);
   for (const [i, { ws, summary: s }] of visible.entries()) {
@@ -46,12 +50,40 @@ export function renderPerf(list: readonly WorkspaceSummary[], selected: number, 
   for (let i = visible.length; i < body; i++) rows.push(boxRow(list.length === 0 && i === 0 ? dim(fit("no history yet: it fills as Claude and checks run", inner)) : fit("", inner)));
   const chosen = list[selected]?.summary;
   const tools = chosen ? Object.entries(chosen.tools).sort(([, a], [, b]) => b.ms - a.ms).slice(0, 4) : [];
-  const byClass = chosen ? COMMAND_CLASSES.flatMap((cls) => (chosen.checks[cls] ? [[cls, chosen.checks[cls]!] as const] : [])).sort(([, a], [, b]) => b.ms - a.ms) : [];
+  const checkMs = chosen ? checkTotals(chosen).ms : 0;
+  const byGroup = chosen ? topGroups(chosen.groups) : [];
   rows.push(boxRow(fit(tools.length ? `tools   ${tools.map(([t, v]) => `${t} ${v.count}× ${duration(v.ms)}`).join("   ")}` : "", inner)));
-  rows.push(boxRow(fit(byClass.length ? `checks  ${byClass.map(([c, v]) => `${c} ${v.count}× ${duration(v.ms)}${v.failed ? colorize(` (${v.failed} failed)`, "red") : ""}`).join("   ")}` : "", inner)));
+  rows.push(boxRow(fit(byGroup.length ? `checks  ${byGroup.map(([c, v]) => `${c} ${v.count}× ${duration(v.ms)} ${pct(v.ms, checkMs)}${v.failed ? colorize(` (${v.failed} failed)`, "red") : ""}`).join("   ")}` : "", inner)));
   rows.push(boxRow(fit(chosen && chosen.awayMs > 0 ? `away    ${duration(chosen.awayMs)} (gaps over 30m, not counted as waiting)` : "", inner)));
-  rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit("j/k move   w window   r reload   q quit", inner))));
+  rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit("j/k move   w window   g by repo   r reload   q quit", inner))));
   rows.push(boxBottom(width, `${list.length} workspace${list.length === 1 ? "" : "s"}`));
+  return rows;
+}
+
+/**
+ * The repo view as screen rows: one row per repo with its check runs (count, run time, queue wait, failures), and for
+ * the selected repo each group's exact share of its check time, then the full command of its slowest group. Pure.
+ */
+export function renderRepos(list: readonly RepoSummary[], selected: number, offset: number, height: number, width: number, windowLabel: string, message = ""): string[] {
+  const inner = width - 4;
+  const body = Math.max(1, height - PERF_CHROME);
+  const header = `${"repo".padEnd(22)} ${"runs".padStart(5)} ${"run time".padStart(9)} ${"queued".padStart(9)} ${"failed".padStart(6)}  slowest group`;
+  const rows: string[] = [boxTop(`Performance by repo · ${windowLabel}`, width), boxRow(dim(fit(header, inner)))];
+  const visible = list.slice(offset, offset + body);
+  for (const [i, r] of visible.entries()) {
+    const [name, g] = topGroups(r.groups)[0] ?? ["", undefined];
+    const line = `${r.repo.slice(0, 22).padEnd(22)} ${String(r.count).padStart(5)} ${duration(r.ms).padStart(9)} ${duration(r.queuedMs).padStart(9)} ${String(r.failed).padStart(6)}  ${name} ${g ? pct(g.ms, r.ms) : ""}`;
+    const text = fit(line, inner);
+    rows.push(boxRow(offset + i === selected ? inverse(text) : text));
+  }
+  for (let i = visible.length; i < body; i++) rows.push(boxRow(list.length === 0 && i === 0 ? dim(fit("no check runs yet: they fill as `overbridge check` runs", inner)) : fit("", inner)));
+  const chosen = list[selected];
+  const groups = chosen ? topGroups(chosen.groups) : [];
+  rows.push(boxRow(fit(groups.length ? `groups  ${groups.slice(0, 5).map(([n, g]) => `${n} ${g.count}× ${duration(g.ms)} ${pct(g.ms, chosen!.ms)}${g.failed ? colorize(` (${g.failed} failed)`, "red") : ""}`).join("   ")}` : "", inner)));
+  rows.push(boxRow(fit(groups[0] ? `command ${groups[0][1].fulls[0] ?? groups[0][0]}` : "", inner)));
+  rows.push(boxRow(fit(groups.length ? `queued  ${groups.slice(0, 5).map(([n, g]) => `${n} ${duration(g.queuedMs)}`).join("   ")}` : "", inner)));
+  rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit("j/k move   w window   g by workspace   r reload   q quit", inner))));
+  rows.push(boxBottom(width, `${list.length} repo${list.length === 1 ? "" : "s"}`));
   return rows;
 }
 
@@ -60,13 +92,20 @@ export async function perfPane() {
   let windowAt = 1;
   let selected = 0;
   let offset = 0;
-  let list = ranked(summaries(undefined, WINDOWS[windowAt]!.ms));
+  let grouping: Grouping = "workspace";
+  let views: PerfViews = loadPerf();
+  const window = () => views.windows[WINDOWS[windowAt]!.label] ?? { workspaces: [], repos: [] };
+  const rows = () => (grouping === "repo" ? rankedRepos(window().repos) : ranked(window().workspaces));
+  let list: readonly unknown[] = rows();
 
   let reloadedAtMs = Date.now();
   const painter = createPainter((text) => process.stdout.write(text));
   const reload = () => {
     reloadedAtMs = Date.now();
-    list = ranked(summaries(undefined, WINDOWS[windowAt]!.ms));
+    // the server keeps the cache file current; the next reload reads what it wrote
+    void serverRefreshPerf();
+    views = loadPerf();
+    list = rows();
   };
   const draw = () => {
     const height = process.stdout.rows ?? 24;
@@ -75,7 +114,9 @@ export async function perfPane() {
     const body = Math.max(1, height - PERF_CHROME);
     if (selected < offset) offset = selected;
     if (selected >= offset + body) offset = selected - body + 1;
-    painter.paint(frame(renderPerf(list, selected, offset, height, width, WINDOWS[windowAt]!.label), height, width));
+    const label = WINDOWS[windowAt]!.label;
+    const screen = grouping === "repo" ? renderRepos(list as RepoSummary[], selected, offset, height, width, label) : renderPerf(list as WorkspaceSummary[], selected, offset, height, width, label);
+    painter.paint(frame(screen, height, width));
   };
   const quit = () => {
     process.stdout.write(LEAVE_SCREEN);
@@ -92,7 +133,11 @@ export async function perfPane() {
       if (input.key === "q" || input.key === "ctrl-c") quit();
       else if (input.key === "j" || input.key === "down") selected = Math.max(0, Math.min(list.length - 1, selected + 1));
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
-      else if (input.key === "w") {
+      else if (input.key === "g") {
+        grouping = grouping === "repo" ? "workspace" : "repo";
+        selected = offset = 0;
+        list = rows();
+      } else if (input.key === "w") {
         windowAt = (windowAt + 1) % WINDOWS.length;
         reload();
       } else if (input.key === "r") reload();
