@@ -24,6 +24,11 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
+    "github-orgs": {
+      "description": "GitHub owners (users or orgs) the @prs and @reviews tabs search. Leave out to search every owner gh can see.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
     "guard": {
       "description": "Additions to the workspace guard. Only allowed in the root config.yml.",
       "type": "object",

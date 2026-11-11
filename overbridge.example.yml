@@ -13,6 +13,8 @@ project-management:
   # branch-types: { Bug: fix, default: feat }   # item type or label -> {type}; default: feat
   # issue-type: Task                     # Jira only: issue type for new items; default: Task
   # worklist-jql: "sprint in openSprints()"   # Jira only: narrows the @work list; default: open sprint or in progress; "" lists all
+  # worklist-project: DavidDudson/2      # GitHub only: list this Projects v2 board (owner/number) in @work, not just issues assigned to you
+  # worklist-statuses: [Backlog, Ready]  # with worklist-project: Status values to list; default: all but Done
 
 # Apps `overbridge app` and the top panel can start and stop. Default: none.
 apps:

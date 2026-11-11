@@ -349,6 +349,8 @@ it has run, and who is waiting.
 | `project-management.workspace` | GitHub `gh-{repo}-{number}`, Jira `{id}` | workspace name template. Placeholders: `{id}`, `{number}`, and `{repo}`. It must use `{id}` or `{number}` |
 | `project-management.branch-types` | none | the `{type}` for each item type: a Jira issue type, or a GitHub label. The first of the item's types with an entry wins, ignoring case, then `default`, then `feat`. Looking up the type needs the network, so it happens only when `branch` uses `{type}` |
 | `project-management.issue-type` | `Task` | Jira issue type for new items |
+| `project-management.worklist-project` | none | GitHub only: a Projects v2 board, `<owner>/<number>` (or a bare number for the repo's owner), such as `DavidDudson/2`. The `@work` tab then lists that board's issues for the repo, assigned to you or not, instead of only your assigned issues. Needs `gh auth refresh -s project` |
+| `project-management.worklist-statuses` | every Status but Done | With `worklist-project`: the board Status values to list, such as `[Backlog, Ready]` |
 | `project-management.worklist-jql` | `(sprint in openSprints() OR statusCategory = "In Progress")` | Jira only: JQL that narrows the `@work` tab to some of your open tickets. Set it to `""` to list every open ticket. Repos on the same project and filter share one read, so each ticket appears once and `s` asks which repo to start it in |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
@@ -610,6 +612,15 @@ a few seconds waits a little longer each time (up to 30s). When the tab is close
 opens it again at the front and returns focus to the tab you were on. A lock in
 `<meta>/orchestration/@root.reopen.lock` makes sure only one sidebar reopens it. A user layout
 (`layouts/overbridge.kdl`) decides its own tabs, so nothing is reopened when one exists.
+
+Two more orchestration tabs list GitHub PRs through `gh search`: `@prs` (open PRs you opened) and `@reviews` (open PRs
+waiting for your review). `j`/`k` move, `o` opens the PR in a browser, `r` refreshes (every minute otherwise).
+`github-orgs` in the root `config.yml` limits both to some owners, so each machine can differ:
+
+```yaml
+# <root>/config.yml
+github-orgs: [DavidDudson]   # a work machine: [megaport]; leave out for every owner
+```
 
 Under the list, up to three rows show workspaces being removed or removed in the last hour (see **Seeing what was
 removed** above). Below them, while the [check queue](#check-queue) is busy, a `▶` row for each running command shows its

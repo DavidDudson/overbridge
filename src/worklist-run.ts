@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadRepos } from "./config";
 import { metaDir, selfCommand } from "./paths";
-import { githubRows, slugFromUrl } from "./pm/board-github";
+import { githubRows, parseProject, projectRows, slugFromUrl, type ProjectBoard } from "./pm/board-github";
 import { jiraRows } from "./pm/board-jira";
 import { rank, type Ranked, type WorkRow } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
@@ -43,7 +43,7 @@ function writeWorklist(cache: WorklistCache) {
 
 /** One board read: a GitHub repo, or a Jira project shared by every repo that names it. */
 export type BoardSource =
-  | { kind: "github"; repo: string; slug: string }
+  | { kind: "github"; repo: string; slug: string; project?: ProjectBoard }
   | { kind: "jira"; project: string; repos: string[]; filter?: string; site?: string };
 
 export interface RepoBoard {
@@ -74,17 +74,27 @@ export function boardSources(repos: readonly RepoBoard[]): { sources: BoardSourc
     };
   });
   return {
-    sources: [...github.flatMap(({ r, slug }): BoardSource[] => (slug ? [{ kind: "github", repo: r.repo, slug }] : [])), ...jira],
-    notes: github.filter((g) => !g.slug).map(({ r }) => `${r.repo}: cannot tell the GitHub repo from ${r.url}`),
+    sources: [
+      ...github.flatMap(({ r, slug }): BoardSource[] => {
+        if (!slug) return [];
+        const project = r.pm.worklistProject ? parseProject(r.pm.worklistProject, slug.split("/")[0], r.pm.worklistStatuses) : undefined;
+        return [{ kind: "github", repo: r.repo, slug, ...(project ? { project } : {}) }];
+      }),
+      ...jira,
+    ],
+    notes: [
+      ...github.filter((g) => !g.slug).map(({ r }) => `${r.repo}: cannot tell the GitHub repo from ${r.url}`),
+      ...github.filter((g) => g.slug && g.r.pm.worklistProject && !parseProject(g.r.pm.worklistProject, g.slug.split("/")[0])).map(({ r }) => `${r.repo}: bad worklist-project ${r.pm.worklistProject}`),
+    ],
   };
 }
 
 export interface BoardReaders {
-  github: (slug: string, repo: string) => WorkRow[];
+  github: (slug: string, repo: string, project?: ProjectBoard) => WorkRow[];
   jira: (project: string, repos: string[], opts: { filter?: string; site?: string }) => WorkRow[];
 }
 
-const defaultReaders: BoardReaders = { github: (slug, repo) => githubRows(slug, repo), jira: (project, repos, opts) => jiraRows(project, repos, opts) };
+const defaultReaders: BoardReaders = { github: (slug, repo, project) => (project ? projectRows(project, slug, repo) : githubRows(slug, repo)), jira: (project, repos, opts) => jiraRows(project, repos, opts) };
 
 const sourceName = (s: BoardSource) => (s.kind === "github" ? s.repo : s.project);
 
@@ -92,7 +102,7 @@ const sourceName = (s: BoardSource) => (s.kind === "github" ? s.repo : s.project
 export function readBoards(sources: readonly BoardSource[], readers: BoardReaders = defaultReaders): { rows: WorkRow[]; notes: string[] } {
   const results = sources.map((s): { rows: WorkRow[]; notes: string[] } => {
     try {
-      const rows = s.kind === "github" ? readers.github(s.slug, s.repo) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
+      const rows = s.kind === "github" ? readers.github(s.slug, s.repo, s.project) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
       return { rows, notes: [] };
     } catch (e) {
       return { rows: [], notes: [`${sourceName(s)}: ${(e as Error).message.split("\n")[0]}`] };
