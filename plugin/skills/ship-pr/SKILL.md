@@ -224,6 +224,8 @@ Use the `gh-stack` skill for the exact non-interactive flags, the rebase and con
 
 **A claim covers the whole stack.** `overbridge checkout <repo> '#<pr>'` pulls an existing stack and claims every layer. Never `gh stack checkout` or `gh stack trunk`: both are blocked. Run `overbridge pr <repo>` after submitting and after moving between layers. A branch or PR claimed by another workspace cannot be taken: if `overbridge checkout` refuses, stop and tell the user. A workspace opened with `overbridge start <repo> --stack <id>...` already holds a local stack with one empty-diff layer per item (bottom first): fill each layer in order and `gh stack up` to the next, rather than `gh stack add`.
 
+**Every layer of a stack lives in this workspace.** Never suggest a new workspace, tab or `overbridge start` for another layer, however many there are: add it with `gh stack add` (or `gh stack up` when it exists) and carry on here. When a stack's base branch is claimed by another workspace, that workspace owns the lower layers: stop and tell the user which one, rather than starting a third.
+
 "Base" below means the branch the PR targets, **not the default branch**. Resolve a PR number or URL to a branch first:
 
 ```sh
