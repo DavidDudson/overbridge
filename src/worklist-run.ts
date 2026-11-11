@@ -4,7 +4,7 @@ import { loadRepos } from "./config";
 import { metaDir, selfCommand } from "./paths";
 import { githubRows, slugFromUrl } from "./pm/board-github";
 import { jiraRows } from "./pm/board-jira";
-import { rank, type Ranked, type WorkRow } from "./pm/worklist";
+import { keyOf, rank, type Ranked, type WorkRow } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
 import type { ProjectManagement } from "./project-config";
 import { committedConfig } from "./start";
@@ -89,16 +89,26 @@ const defaultReaders: BoardReaders = { github: (slug, repo) => githubRows(slug, 
 const sourceName = (s: BoardSource) => (s.kind === "github" ? s.repo : s.project);
 
 /** Read every source. A source that fails adds a note and does not stop the rest. */
-export function readBoards(sources: readonly BoardSource[], readers: BoardReaders = defaultReaders): { rows: WorkRow[]; notes: string[] } {
-  const results = sources.map((s): { rows: WorkRow[]; notes: string[] } => {
+export function readBoards(sources: readonly BoardSource[], readers: BoardReaders = defaultReaders): { rows: WorkRow[]; notes: string[]; failedRepos: string[] } {
+  const results = sources.map((s): { rows: WorkRow[]; notes: string[]; failedRepos: string[] } => {
     try {
       const rows = s.kind === "github" ? readers.github(s.slug, s.repo) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
-      return { rows, notes: [] };
+      return { rows, notes: [], failedRepos: [] };
     } catch (e) {
-      return { rows: [], notes: [`${sourceName(s)}: ${(e as Error).message.split("\n")[0]}`] };
+      return { rows: [], notes: [`${sourceName(s)}: ${(e as Error).message.split("\n")[0]}`], failedRepos: s.kind === "github" ? [s.repo] : s.repos };
     }
   });
-  return { rows: results.flatMap((r) => r.rows), notes: results.flatMap((r) => r.notes) };
+  return { rows: results.flatMap((r) => r.rows), notes: results.flatMap((r) => r.notes), failedRepos: results.flatMap((r) => r.failedRepos) };
+}
+
+/**
+ * The rows to cache after a refresh: the fresh ones, plus the last good rows of every repo whose read failed,
+ * so a rate limit or an outage never empties the panel. Fresh rows win on a repeated key.
+ */
+export function keepLastGood(previous: readonly WorkRow[], fresh: readonly WorkRow[], failedRepos: readonly string[]): WorkRow[] {
+  const failed = new Set(failedRepos);
+  const have = new Set(fresh.map((r) => keyOf(r)));
+  return [...fresh, ...previous.filter((r) => failed.has(r.repo) && !have.has(keyOf(r)))];
 }
 
 /** Read every registered repo's board into the cache. A repo whose config cannot be read adds a note. */
@@ -113,7 +123,7 @@ export function refreshWorklist(now = Date.now()): WorklistCache {
   });
   const planned = boardSources(configs.filter((c): c is RepoBoard => typeof c !== "string"));
   const read = readBoards(planned.sources);
-  const cache = { at: now, rows: read.rows, notes: [...configs.filter((c): c is string => typeof c === "string"), ...planned.notes, ...read.notes] };
+  const cache = { at: now, rows: keepLastGood(readWorklist().rows, read.rows, read.failedRepos), notes: [...configs.filter((c): c is string => typeof c === "string"), ...planned.notes, ...read.notes] };
   writeWorklist(cache);
   return cache;
 }
@@ -168,8 +178,9 @@ export function renderWorklist(list: Ranked[], selected: number, offset: number,
   }
   for (let i = visible.length; i < body; i++) rows.push(boxRow(list.length === 0 && i === 0 ? dim(fit("nothing assigned to you", inner)) : fit("", inner)));
   const chosen = list[selected];
-  rows.push(boxRow(fit(chosen ? `why: ${chosen.reasons.join(", ")}` : (notes[0] ?? ""), inner)));
-  const status = message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit("j/k move   s start in a workspace   r refresh   q quit", inner));
+  rows.push(boxRow(fit(chosen ? `why: ${chosen.reasons.join(", ")}` : "", inner)));
+  const shown = message || (notes[0] ? `error: ${notes[0]}${notes.length > 1 ? ` (+${notes.length - 1} more)` : ""}; showing the last good list` : "");
+  const status = shown.startsWith("error: ") ? colorize(fit(shown, inner), "red") : shown ? bold(fit(shown, inner)) : dim(fit("j/k move   s start in a workspace   r refresh   q quit", inner));
   rows.push(boxRow(status));
   rows.push(boxBottom(width, `${list.length} open`));
   return rows;
