@@ -15,7 +15,7 @@ import { runCheck } from "./check-queue";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
-import { type Claim, claimOwner, getWorkspace, isIceboxed, readState, withState } from "./state";
+import { type Claim, claimOwner, type ReboundFrom, getWorkspace, isIceboxed, readState, withState } from "./state";
 import { exec, fail, log, must, naturalSort, run, shellQuote } from "./util";
 
 /** What a workspace really holds in `repo`: its claim, its worktree head, and the stacks of either. */
@@ -183,9 +183,10 @@ export function removeOrphan(name: string, force: boolean) {
 /**
  * `overbridge checkout <repo> <branch|#pr>`: claim `ref` for the workspace and switch its worktree to it.
  * A branch that exists neither locally nor on origin is created from `opts.base` (default: the remote default
- * branch); `start` passes `HEAD` to carry a task branch's work onto the item's branch.
+ * branch); `start` passes `HEAD` to carry a task branch's work onto the item's branch, and `reboundFrom` to record
+ * what the claim moved from (a plain checkout leaves no lineage).
  */
-export function checkout(args: string[], wsOpt?: string, opts: { base?: string } = {}) {
+export function checkout(args: string[], wsOpt?: string, opts: { base?: string; reboundFrom?: ReboundFrom } = {}) {
   const ws = requireWs(wsOpt);
   let [repo, ref] = args;
   const owned = Object.keys(getWorkspace(readState(), ws).repos);
@@ -236,7 +237,7 @@ export function checkout(args: string[], wsOpt?: string, opts: { base?: string }
     // A URL, because gh stack reads a bare number as a stack number first.
     if (remote) must(["gh", "stack", "checkout", prUrl!], { cwd: wt });
     else git.switchTo(wt, branch, base);
-    getWorkspace(s, ws).repos[repo] = { branch, pr: pr ?? git.prForBranch(wt, branch) };
+    getWorkspace(s, ws).repos[repo] = { branch, pr: pr ?? git.prForBranch(wt, branch), ...(opts.reboundFrom ? { reboundFrom: opts.reboundFrom } : {}) };
   });
   const stack = stackOf(localStacks(repo), branch);
   log(`${ws}/${repo} → ${branch}${pr ? ` (PR #${pr})` : ""}${stack ? `\nstack: ${chain(stack)}` : ""}`);
@@ -293,13 +294,13 @@ export function status(all: boolean, json: boolean) {
     const repos = Object.entries(getWorkspace(s, ws).repos);
     const iceboxed = isIceboxed(getWorkspace(s, ws));
     if (!repos.length)
-      return [{ ws, repo: "", branch: "", pr: undefined as number | undefined, head: "", dirty: false, iceboxed, stack: undefined as Stack | undefined }];
+      return [{ ws, repo: "", branch: "", pr: undefined as number | undefined, head: "", dirty: false, iceboxed, stack: undefined as Stack | undefined, reboundFrom: undefined as ReboundFrom | undefined }];
     return repos.map(([repo, c]) => {
       const wt = worktreePath(ws, repo);
       const head = git.head(wt);
       const stacks = localStacks(repo);
       const stack = stackOf(stacks, head) ?? stackOf(stacks, c.branch);
-      return { ws, repo, branch: c.branch ?? "", pr: c.pr, head, dirty: git.isDirty(wt), iceboxed, stack };
+      return { ws, repo, branch: c.branch ?? "", pr: c.pr, head, dirty: git.isDirty(wt), iceboxed, stack, reboundFrom: c.reboundFrom };
     });
   });
   if (json) return console.log(JSON.stringify(rows, null, 2));
@@ -317,7 +318,7 @@ export function status(all: boolean, json: boolean) {
       r.pr ? `#${r.pr}` : "",
       r.head === r.branch ? "" : r.head,
       stackCell(r),
-      [r.iceboxed ? "iceboxed" : "", r.dirty ? "dirty" : ""].filter(Boolean).join(" "),
+      [r.iceboxed ? "iceboxed" : "", r.dirty ? "dirty" : "", r.reboundFrom ? `from ${r.reboundFrom.branch}${r.reboundFrom.pr ? ` #${r.reboundFrom.pr}` : ""}` : ""].filter(Boolean).join(" "),
     ]),
   );
 }

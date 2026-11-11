@@ -12,7 +12,7 @@ PreToolUse hook enforces this; treat a guard block as a hard rule, never work ar
 
 ```sh
 overbridge whoami          # workspace name
-overbridge status          # repos in this workspace: claimed branch, PR, actual head, dirty
+overbridge status          # repos in this workspace: claimed branch, PR, actual head, dirty, `from <branch>` after a re-bind
 overbridge status --all    # every workspace (read-only view of other claims)
 ```
 

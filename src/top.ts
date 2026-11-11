@@ -104,6 +104,8 @@ export interface TopCache {
   prsOpen?: boolean;
   /** Set when every claimed branch's PR has merged: each repo's PR head commit, keyed by repo. */
   merged?: Record<string, string>;
+  /** The branch each claimed repo was on when this was built, so `merged` and `prsOpen` are not trusted once a claim moves. */
+  branches?: Record<string, string>;
   /** What each configured button's `status` printed, keyed `<repo>/<id>`. A missing entry hides the button. */
   buttons?: Record<string, ButtonState>;
   message?: string;
@@ -221,6 +223,7 @@ export function topCacheFault(raw: unknown): string | undefined {
     optional("message", typeof raw.message === "string") ??
     optional("prsOpen", typeof raw.prsOpen === "boolean") ??
     optional("merged", isRecord(raw.merged)) ??
+    optional("branches", isRecord(raw.branches)) ??
     optional("buttons", isRecord(raw.buttons)) ??
     wrong("links", Array.isArray(raw.links)) ??
     wrong("at", typeof raw.at === "number" && Number.isFinite(raw.at))
@@ -242,6 +245,20 @@ export function readTopCacheChecked(ws: string): { cache: TopCache; fault?: stri
 
 /** The cache file as a `TopCache`; the empty cache when it is missing, unreadable or misshapen. */
 export const readTopCache = (ws: string): TopCache => readTopCacheChecked(ws).cache;
+
+/**
+ * `readTopCache` without what a moved claim invalidates. `merged` and `prsOpen` describe the branches the cache was
+ * built for; once a claim moves (a re-bind onto a follow-up item, a layer change) they say nothing about the new
+ * branch, so the workspace must not be removed or offered Cleanup on the strength of the old PR. A cache from before
+ * `branches` was recorded is trusted until the next refresh.
+ */
+export function claimedCache(ws: string, cache: TopCache = readTopCache(ws)): TopCache {
+  if (!cache.branches || (!cache.merged && !cache.prsOpen)) return cache;
+  const moved = Object.entries(getWorkspace(readState(), ws).repos).some(([repo, c]) => c.branch !== undefined && cache.branches?.[repo] !== c.branch);
+  if (!moved) return cache;
+  const { merged: _m, prsOpen: _p, ...rest } = cache;
+  return rest;
+}
 
 function writeTopCache(ws: string, cache: TopCache) {
   mkdirSync(join(metaDir(), "top"), { recursive: true });
@@ -353,6 +370,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     prsOpen: claimed > 0 && openPrs > 0 && openPrs + mergedPrs === claimed,
     // a claim with no PR, a closed PR or an unreadable one leaves this unset, so the workspace stays
     ...(claimed > 0 && Object.keys(mergedHeads).length === claimed ? { merged: mergedHeads } : {}),
+    branches: Object.fromEntries(claims.flatMap(([repo, c]) => (c.branch ? [[repo, c.branch] as const] : []))),
     ...(Object.keys(buttonStates).length ? { buttons: buttonStates } : {}),
     ...(problems.length ? { message: problems.join("; ") } : {}),
     at: Date.now(),
@@ -370,7 +388,7 @@ export function cleanable(ws: string): boolean {
   if (isOrchestrationTab(ws)) {
     return false;
   }
-  const cache = readTopCache(ws);
+  const cache = claimedCache(ws);
   const finished = cache.merged !== undefined || cache.prsOpen || readAgentState(ws) === "empty" || sessionEndedForGood(ws);
   if (!finished) {
     return false;
@@ -379,7 +397,7 @@ export function cleanable(ws: string): boolean {
 }
 
 /** `mergedClean` once every PR has merged, else `gitClean`. */
-export function noUnsavedWork(ws: string, cache: Pick<TopCache, "merged"> = readTopCache(ws)): boolean {
+export function noUnsavedWork(ws: string, cache: Pick<TopCache, "merged"> = claimedCache(ws)): boolean {
   return cache.merged ? mergedClean(ws, cache.merged) : gitClean(ws);
 }
 
