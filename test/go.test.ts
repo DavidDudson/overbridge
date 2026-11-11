@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { go, pickGo } from "../src/go";
 import { focusClaude } from "../src/panes";
 import { withState } from "../src/state";
-import { sessionExec } from "../src/tab";
+import { zellijMux } from "../src/mux";
 import type { RunResult } from "../src/util";
 
 const ok = (stdout = ""): RunResult => ({ ok: true, code: 0, stdout, stderr: "" });
@@ -41,21 +41,20 @@ describe("pickGo", () => {
   });
 });
 
-describe("sessionExec", () => {
-  test("outside zellij, actions target the session by name", () => {
+describe("zellij session", () => {
+  test("outside zellij, actions target the session by name; session commands do not", () => {
     const calls: string[][] = [];
-    const exec = sessionExec(false, "s", (cmd) => (calls.push(cmd), ok()));
-    exec(["zellij", "action", "query-tab-names"]);
-    exec(["zellij", "list-sessions"]);
+    const mux = zellijMux((cmd) => (calls.push(cmd), ok()), { session: "s", env: {} });
+    mux.tabs();
+    mux.sessionExists("s");
     expect(calls).toEqual([
       ["zellij", "--session", "s", "action", "query-tab-names"],
-      ["zellij", "list-sessions"],
+      ["zellij", "list-sessions", "--short", "--no-formatting"],
     ]);
   });
   test("inside zellij, calls pass through unchanged", () => {
     const calls: string[][] = [];
-    const exec = sessionExec(true, "s", (cmd) => (calls.push(cmd), ok()));
-    exec(["zellij", "action", "query-tab-names"]);
+    zellijMux((cmd) => (calls.push(cmd), ok()), { env: { ZELLIJ: "0" } }).tabs();
     expect(calls).toEqual([["zellij", "action", "query-tab-names"]]);
   });
 });
@@ -72,7 +71,7 @@ const fakeZellij = (tabs: string[], current: string | undefined, panes: object[]
     if (action === "go-to-tab-name") return goes ? ok() : failed("no such tab");
     return ok();
   };
-  return { calls, exec, actions: () => calls.map((c) => c.slice(2).join(" ")) };
+  return { calls, exec, mux: zellijMux(exec, { env: { ZELLIJ: "0" } }), actions: () => calls.map((c) => c.slice(2).join(" ")) };
 };
 
 const claudePane = (tab: string, id: number) => ({ id, is_plugin: false, exited: false, tab_name: tab, title: `${tab} · claude` });
@@ -80,15 +79,15 @@ const claudePane = (tab: string, id: number) => ({ id, is_plugin: false, exited:
 describe("focusClaude", () => {
   test("focuses the tab's claude pane", () => {
     const z = fakeZellij([], undefined, [claudePane("a", 4), claudePane("b", 7)]);
-    expect(focusClaude("b", z.exec)).toBe(true);
+    expect(focusClaude("b", z.mux)).toBe(true);
     expect(z.actions()).toEqual(["list-panes --json", "focus-pane-id terminal_7"]);
   });
   test("false, and no focus call, when the tab has none or the list is unreadable", () => {
     const z = fakeZellij([], undefined, [claudePane("a", 4)]);
-    expect(focusClaude("b", z.exec)).toBe(false);
+    expect(focusClaude("b", z.mux)).toBe(false);
     expect(z.actions()).toEqual(["list-panes --json"]);
     const broken = (cmd: string[]) => (cmd[2] === "list-panes" ? ok("{nope") : z.exec(cmd));
-    expect(focusClaude("a", broken)).toBe(false);
+    expect(focusClaude("a", zellijMux(broken))).toBe(false);
   });
 });
 
@@ -110,27 +109,27 @@ describe("go", () => {
 
   test("switches tab and lands on its claude pane", () => {
     const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "b", "a"], "a", [claudePane("b", 9)]);
-    expect(go("6", z.exec)).toBe("→ b");
+    expect(go("6", z.mux)).toBe("→ b");
     expect(z.actions()).toEqual(["query-tab-names", "current-tab-info", "go-to-tab-name b", "list-panes --json", "focus-pane-id terminal_9"]);
   });
   test("numbers follow the sidebar: orchestration tabs first, then workspaces in tab order", () => {
     const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "b", "a"], "a");
-    expect(go("1", z.exec)).toBe("→ @root");
-    expect(go("2", z.exec)).toBe("→ @work");
-    expect(go("5", z.exec)).toBe("→ @perf");
-    expect(go("perf", z.exec)).toBe("→ @perf");
-    expect(go("7", z.exec)).toBe("→ a");
-    expect(go("next", z.exec)).toBe("→ @root");
-    expect(go("prev", z.exec)).toBe("→ b");
+    expect(go("1", z.mux)).toBe("→ @root");
+    expect(go("2", z.mux)).toBe("→ @work");
+    expect(go("5", z.mux)).toBe("→ @perf");
+    expect(go("perf", z.mux)).toBe("→ @perf");
+    expect(go("7", z.mux)).toBe("→ a");
+    expect(go("next", z.mux)).toBe("→ @root");
+    expect(go("prev", z.mux)).toBe("→ b");
   });
   test("the switch stands when the tab has no claude pane", () => {
     const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "a", "b"], "a");
-    expect(go("b", z.exec)).toBe("→ b");
+    expect(go("b", z.mux)).toBe("→ b");
     expect(z.actions()).toEqual(["query-tab-names", "current-tab-info", "go-to-tab-name b", "list-panes --json"]);
   });
   test("a bad target or a failed switch is an error", () => {
-    expect(() => go("9", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "a", "b"], "a").exec)).toThrow("no tab 9: 7 tabs");
-    expect(() => go("next", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "a", "b"], undefined).exec)).toThrow("not on a tab");
-    expect(() => go("b", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "a", "b"], "a", [], false).exec)).toThrow("could not switch to b: no such tab");
+    expect(() => go("9", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "a", "b"], "a").mux)).toThrow("no tab 9: 7 tabs");
+    expect(() => go("next", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "a", "b"], undefined).mux)).toThrow("not on a tab");
+    expect(() => go("b", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "a", "b"], "a", [], false).mux)).toThrow("could not switch to b: no such tab");
   });
 });

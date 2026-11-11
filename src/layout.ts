@@ -2,9 +2,11 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { SIDEBAR_WIDTH, sidebarWidth } from "./config";
+import type { MuxKind } from "./mux";
 import { ORCHESTRATION_TABS, type OrchestrationTab } from "./orchestration";
-import { worktreePath, wsDir } from "./paths";
+import { sessionName, worktreePath, wsDir } from "./paths";
 import { readState } from "./state";
+import { layoutScript, tmuxConf } from "./tmux-layout";
 
 export { SIDEBAR_WIDTH };
 /** Rows the top panel takes: the frame's two borders, a row per PR (one is typical) and the row of launchers. */
@@ -30,64 +32,99 @@ export interface TabOptions {
   agentCwd?: string;
 }
 
+/** One pane of a tab: a command in a folder, with the title other code finds it by. */
+export interface PaneSpec {
+  name: string;
+  cwd: string;
+  /** The program and its arguments. */
+  command: string[];
+  /** Columns (the sidebar) or rows (the top panel); the pane shares the rest equally when unset. */
+  size?: number;
+  borderless?: boolean;
+}
+
+/**
+ * A tab as data, so each multiplexer backend renders it its own way: the sidebar down the left, and beside it
+ * the optional top panel over the main pane (the agent, or an orchestration tab's own pane).
+ */
+export interface TabSpec {
+  name: string;
+  focus: boolean;
+  sidebar: PaneSpec;
+  top?: PaneSpec;
+  main: PaneSpec;
+}
+
 /**
  * One workspace's tab: the sidebar down the left; the rest holds the top panel across the
  * top, then the agent. Terminal and diff panes open to the agent's right from the top panel's buttons.
  */
-export function tabKdl(ws: string, self: string[], opts: TabOptions = {}): string {
-  const [cmd, ...baseArgs] = self;
+export function workspaceTabSpec(ws: string, self: string[], opts: TabOptions = {}): TabSpec {
   const width = opts.sidebarWidth ?? SIDEBAR_WIDTH;
-  const args = (...rest: string[]) => [...baseArgs, ...rest].map(q).join(" ");
   const extra = [...(opts.resume ? ["--continue"] : []), ...(opts.prompt ? ["--", opts.prompt] : [])];
-  const agent = args("claude", ws, ...extra);
-  return `  tab name=${q(ws)}${opts.focus ? " focus=true" : ""} {
-    pane split_direction="vertical" {
-      pane name=${q("sidebar")} command=${q(cmd!)} cwd=${q(wsDir(ws))} size=${width} borderless=true focus=true {
-        args ${args("sidebar", "--ws", ws)}
-      }
-      pane split_direction="horizontal" {
-        pane name=${q("top")} command=${q(cmd!)} cwd=${q(wsDir(ws))} size=${TOP_ROWS} borderless=true {
-          args ${args("top", "--ws", ws)}
-        }
-        pane name=${q(`${ws} · claude`)} command=${q(cmd!)} cwd=${q(opts.agentCwd ?? wsDir(ws))} {
-          args ${agent}
-        }
-      }
-    }
-  }`;
+  return {
+    name: ws,
+    focus: opts.focus ?? false,
+    sidebar: { name: "sidebar", cwd: wsDir(ws), command: [...self, "sidebar", "--ws", ws], size: width, borderless: true },
+    top: { name: "top", cwd: wsDir(ws), command: [...self, "top", "--ws", ws], size: TOP_ROWS, borderless: true },
+    main: { name: `${ws} · claude`, cwd: opts.agentCwd ?? wsDir(ws), command: [...self, "claude", ws, ...extra] },
+  };
 }
 
 /** An orchestration tab: the sidebar down the left, Claude in the tab's folder filling the rest. No top panel. */
-export function orchestrationTabKdl(t: OrchestrationTab, self: string[], opts: Omit<TabOptions, "prompt"> = {}): string {
-  const [cmd, ...baseArgs] = self;
+export function orchestrationTabSpec(t: OrchestrationTab, self: string[], opts: Omit<TabOptions, "prompt"> = {}): TabSpec {
   const width = opts.sidebarWidth ?? SIDEBAR_WIDTH;
-  const args = (...rest: string[]) => [...baseArgs, ...rest].map(q).join(" ");
   const dir = t.dir();
-  return `  tab name=${q(t.tab)}${opts.focus ? " focus=true" : ""} {
+  return {
+    name: t.tab,
+    focus: opts.focus ?? false,
+    sidebar: { name: "sidebar", cwd: dir, command: [...self, "sidebar", "--ws", t.tab], size: width, borderless: true },
+    main: {
+      name: t.pane ? `${t.tab} · ${t.pane}` : `${t.tab} · claude`,
+      cwd: dir,
+      command: [...self, ...(t.pane ? [t.pane] : ["claude", t.tab, ...(opts.resume ? ["--continue"] : [])])],
+    },
+  };
+}
+
+const kdlPane = (p: PaneSpec, indent: string, focus = false): string => {
+  const [cmd, ...args] = p.command;
+  return `${indent}pane name=${q(p.name)} command=${q(cmd!)} cwd=${q(p.cwd)}${p.size === undefined ? "" : ` size=${p.size}`}${p.borderless ? " borderless=true" : ""}${focus ? " focus=true" : ""} {
+${indent}  args ${args.map(q).join(" ")}
+${indent}}`;
+};
+
+/** A tab spec as a zellij `tab` node. */
+export function specKdl(t: TabSpec): string {
+  const main = t.top
+    ? `      pane split_direction="horizontal" {
+${kdlPane(t.top, "        ")}
+${kdlPane(t.main, "        ")}
+      }`
+    : kdlPane(t.main, "      ");
+  return `  tab name=${q(t.name)}${t.focus ? " focus=true" : ""} {
     pane split_direction="vertical" {
-      pane name=${q("sidebar")} command=${q(cmd!)} cwd=${q(dir)} size=${width} borderless=true focus=true {
-        args ${args("sidebar", "--ws", t.tab)}
-      }
-      pane name=${q(t.pane ? `${t.tab} · ${t.pane}` : `${t.tab} · claude`)} command=${q(cmd!)} cwd=${q(dir)} {
-        args ${t.pane ? args(t.pane) : args("claude", t.tab, ...(opts.resume ? ["--continue"] : []))}
-      }
+${kdlPane(t.sidebar, "      ", true)}
+${main}
     }
   }`;
 }
 
-/**
- * Zellij layout: the orchestration tabs (`orchestrationTabKdl`), then one tab per workspace (`tabKdl`).
- * The first tab has focus. A pure function of its arguments, so regenerating it is idempotent.
- */
-export function layoutKdl(workspaces: string[], self: string[], opts: LayoutOptions = {}): string {
+export const tabKdl = (ws: string, self: string[], opts: TabOptions = {}): string => specKdl(workspaceTabSpec(ws, self, opts));
+
+export const orchestrationTabKdl = (t: OrchestrationTab, self: string[], opts: Omit<TabOptions, "prompt"> = {}): string =>
+  specKdl(orchestrationTabSpec(t, self, opts));
+
+/** The tabs of a fresh session in order: the orchestration tabs, then one per workspace. The first has focus. */
+export function layoutSpecs(workspaces: string[], self: string[], opts: LayoutOptions = {}): TabSpec[] {
   const width = opts.sidebarWidth === undefined ? {} : { sidebarWidth: opts.sidebarWidth };
   const orchestration = ORCHESTRATION_TABS.map((t, i) =>
-    orchestrationTabKdl(t, self, { resume: opts.resume?.has(t.tab) ?? false, ...width, focus: i === 0 }),
+    orchestrationTabSpec(t, self, { resume: opts.resume?.has(t.tab) ?? false, ...width, focus: i === 0 }),
   );
-  const tabs = [
+  return [
     ...orchestration,
     ...workspaces.map((ws, i) =>
-      tabKdl(ws, self, {
+      workspaceTabSpec(ws, self, {
         resume: opts.resume?.has(ws) ?? false,
         ...width,
         focus: orchestration.length + i === 0,
@@ -95,8 +132,15 @@ export function layoutKdl(workspaces: string[], self: string[], opts: LayoutOpti
       }),
     ),
   ];
+}
+
+/**
+ * Zellij layout: the orchestration tabs (`orchestrationTabKdl`), then one tab per workspace (`tabKdl`).
+ * The first tab has focus. A pure function of its arguments, so regenerating it is idempotent.
+ */
+export function layoutKdl(workspaces: string[], self: string[], opts: LayoutOptions = {}): string {
   return `layout {
-${tabs.join("\n")}
+${layoutSpecs(workspaces, self, opts).map(specKdl).join("\n")}
 }
 `;
 }
@@ -160,11 +204,18 @@ export function resumable(workspaces: string[], home = homedir(), agentDirs: Rea
   ]);
 }
 
-export type LayoutChoice = { source: "user"; path: string } | { source: "generated"; kdl: string };
+/** `text` is KDL for zellij and a command script for tmux; tmux also gets the server `conf` it starts with. */
+export type LayoutChoice = { source: "user"; path: string } | { source: "generated"; text: string; conf?: string };
 
-/** The layout `up` would use: the user's file when it exists, else the generated one. */
-export function chooseLayout(workspaces: string[], self: string[], userPath = userLayoutPath()): LayoutChoice {
-  if (existsSync(userPath)) return { source: "user", path: userPath };
+/**
+ * The layout `up` would use. Zellij: the user's file when it exists, else the generated KDL. Tmux has no layout
+ * file, so it is always the generated script.
+ */
+export function chooseLayout(workspaces: string[], self: string[], kind: MuxKind = "zellij", session = sessionName(), userPath = userLayoutPath()): LayoutChoice {
+  if (kind === "zellij" && existsSync(userPath)) return { source: "user", path: userPath };
   const agentDirs = Object.fromEntries(workspaces.map((ws) => [ws, agentDirOf(ws)]));
-  return { source: "generated", kdl: layoutKdl(workspaces, self, { resume: resumable(workspaces, homedir(), agentDirs), sidebarWidth: sidebarWidth(), agentDirs }) };
+  const opts = { resume: resumable(workspaces, homedir(), agentDirs), sidebarWidth: sidebarWidth(), agentDirs };
+  return kind === "tmux"
+    ? { source: "generated", text: layoutScript(session, layoutSpecs(workspaces, self, opts)), conf: tmuxConf(self) }
+    : { source: "generated", text: layoutKdl(workspaces, self, opts) };
 }

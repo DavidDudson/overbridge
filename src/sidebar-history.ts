@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { defaultMux } from "./mux";
 import { metaDir } from "./paths";
 
 /** Which way ← and → walk through the tabs visited from the sidebar. */
@@ -40,8 +41,8 @@ export function travel(history: History, way: Travel, here: string, open: Readon
   };
 }
 
-/** The current zellij session's name, so two sessions never share a history. */
-export const sessionName = () => process.env.ZELLIJ_SESSION_NAME || "default";
+/** The current multiplexer session's name, so two sessions never share a history. */
+export const sessionName = () => defaultMux().sessionName();
 
 const historyFile = (session: string) => join(metaDir(), "sidebar-history", `${encodeURIComponent(session)}.json`);
 

@@ -105,10 +105,22 @@ describe("user layout", () => {
 
   test("a user file wins over the generated layout", () => {
     const path = join(tmp, "layouts", "overbridge.kdl");
-    expect(chooseLayout(["a"], self, path).source).toBe("generated");
+    expect(chooseLayout(["a"], self, "zellij", "workspaces", path).source).toBe("generated");
     mkdirSync(join(tmp, "layouts"));
     writeFileSync(path, "layout {}\n");
-    expect(chooseLayout(["a"], self, path)).toEqual({ source: "user", path });
+    expect(chooseLayout(["a"], self, "zellij", "workspaces", path)).toEqual({ source: "user", path });
+  });
+
+  test("tmux has no user layout file: it always gets the generated script and its config", () => {
+    const path = join(tmp, "layouts", "overbridge.kdl");
+    mkdirSync(join(tmp, "layouts"), { recursive: true });
+    writeFileSync(path, "layout {}\n");
+    const choice = chooseLayout(["a"], self, "tmux", "workspaces", path);
+    expect(choice.source).toBe("generated");
+    if (choice.source === "generated") {
+      expect(choice.text).toStartWith('"new-session"');
+      expect(choice.conf).toContain("set -g prefix None");
+    }
   });
 
   test("the user path is layouts/overbridge.kdl in the config dir", () => {

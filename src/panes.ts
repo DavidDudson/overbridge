@@ -3,8 +3,8 @@ import * as git from "./git";
 import { selfCommand, worktreePath, wsDir } from "./paths";
 import { loadRepoConfig } from "./project-config";
 import { getWorkspace, readState } from "./state";
+import { defaultMux, type Mux, type MuxPane } from "./mux";
 import type { PaneKind } from "./top";
-import type { ZellijExec } from "./tab";
 import { run, spawnCwd } from "./util";
 
 /**
@@ -13,19 +13,11 @@ import { run, spawnCwd } from "./util";
  * the title the layout and this module give them, so nothing is stored.
  */
 
-export interface ZellijPane {
-  id: number;
-  is_plugin?: boolean;
-  title?: string;
-  tab_name?: string;
-  exited?: boolean;
-}
-
 export const paneTitle = (ws: string, kind: PaneKind) => `${ws} · ${kind}`;
 
 /** The live pane of `kind` in `ws`'s tab, if any. */
-export function findPane(panes: ZellijPane[], ws: string, kind: PaneKind): ZellijPane | undefined {
-  return panes.find((p) => !p.is_plugin && !p.exited && p.tab_name === ws && p.title === paneTitle(ws, kind));
+export function findPane(panes: MuxPane[], ws: string, kind: PaneKind): MuxPane | undefined {
+  return panes.find((p) => !p.exited && p.tab === ws && p.title === paneTitle(ws, kind));
 }
 
 /** Where a terminal opens: the first claimed repo's worktree, else the workspace dir. */
@@ -36,7 +28,7 @@ export function terminalDir(ws: string): string {
 
 const terminalRepo = (ws: string): string | undefined => Object.keys(getWorkspace(readState(), ws).repos)[0];
 
-/** The terminal's command: the user's shell inside the repo's dev shell, or nothing (zellij's default shell). */
+/** The terminal's command: the user's shell inside the repo's dev shell, or nothing (the multiplexer's default shell). */
 function terminalCommand(ws: string, deps: PaneDeps): string[] {
   const repo = terminalRepo(ws);
   if (!repo) return [];
@@ -45,76 +37,56 @@ function terminalCommand(ws: string, deps: PaneDeps): string[] {
   } catch {
     return [];
   }
-  return ["--", ...deps.self, "shell", repo, "--ws", ws, "--", process.env.SHELL || "sh"];
+  return [...deps.self, "shell", repo, "--ws", ws, "--", process.env.SHELL || "sh"];
 }
 
 export interface PaneDeps {
-  /** Run a zellij action; returns stdout, or undefined on failure. */
-  zellij: (args: string[]) => string | undefined;
+  mux: Mux;
   self: string[];
 }
 
-const defaultDeps = (): PaneDeps => ({
-  zellij: (args) => {
-    const r = run(["zellij", "action", ...args]);
-    return r.ok ? r.stdout : undefined;
-  },
-  self: selfCommand(),
-});
-
-const listPanes = (deps: PaneDeps): ZellijPane[] => {
-  try {
-    return JSON.parse(deps.zellij(["list-panes", "--json"]) ?? "[]") as ZellijPane[];
-  } catch {
-    return [];
-  }
-};
-
-const target = (p: ZellijPane) => `terminal_${p.id}`;
+const defaultDeps = (): PaneDeps => ({ mux: defaultMux(), self: selfCommand() });
 
 /**
  * Press of a pane button. Claude: focus it. Terminal / diff: close it if open, else open it to the
  * right of claude, or below the other right-hand pane when one is already there.
  */
 export function togglePane(ws: string, kind: PaneKind, deps: PaneDeps = defaultDeps()): string | undefined {
-  const panes = listPanes(deps);
+  const { mux } = deps;
+  const panes = mux.listPanes();
   const claude = findPane(panes, ws, "claude");
   if (kind === "claude") {
     if (!claude) return "no claude pane in this tab";
-    deps.zellij(["focus-pane-id", target(claude)]);
+    mux.focusPane(claude.id);
     return undefined;
   }
   const open = findPane(panes, ws, kind);
   if (open) {
-    deps.zellij(["close-pane", "--pane-id", target(open)]);
-    if (claude) deps.zellij(["focus-pane-id", target(claude)]);
+    mux.closePane(open.id);
+    if (claude) mux.focusPane(claude.id);
     return undefined;
   }
   const other = findPane(panes, ws, kind === "terminal" ? "diff" : "terminal");
   const anchor = other ?? claude;
   if (!anchor) return "no claude pane in this tab";
-  deps.zellij(["focus-pane-id", target(anchor)]);
-  const args = ["new-pane", "--direction", other ? "down" : "right", "--name", paneTitle(ws, kind), "--cwd", terminalDir(ws)];
-  if (kind === "diff") args.push("--close-on-exit", "--", ...deps.self, "diff", "--ws", ws);
-  else args.push(...terminalCommand(ws, deps));
-  return deps.zellij(args) === undefined ? `could not open ${kind}` : undefined;
+  const opened = mux.newPane({
+    anchor: anchor.id,
+    direction: other ? "down" : "right",
+    title: paneTitle(ws, kind),
+    cwd: terminalDir(ws),
+    command: kind === "diff" ? [...deps.self, "diff", "--ws", ws] : terminalCommand(ws, deps),
+    closeOnExit: kind === "diff",
+  });
+  return opened ? undefined : `could not open ${kind}`;
 }
 
 /**
- * Focus the Claude pane of `tab`'s tab; false when the tab has none (then focus stays where zellij put it).
- * Takes a `ZellijExec` so `overbridge go` can reach the session from outside it.
+ * Focus the Claude pane of `tab`'s tab; false when the tab has none (then focus stays where the multiplexer put it).
+ * Takes a `Mux` so `overbridge go` can reach the session from outside it.
  */
-export function focusClaude(tab: string, exec: ZellijExec): boolean {
-  const listed = exec(["zellij", "action", "list-panes", "--json"]);
-  let panes: ZellijPane[] = [];
-  try {
-    panes = listed.ok ? (JSON.parse(listed.stdout) as ZellijPane[]) : [];
-  } catch {
-    panes = [];
-  }
-  const claude = findPane(panes, tab, "claude");
-  if (!claude) return false;
-  return exec(["zellij", "action", "focus-pane-id", target(claude)]).ok;
+export function focusClaude(tab: string, mux: Mux): boolean {
+  const claude = findPane(mux.listPanes(), tab, "claude");
+  return claude !== undefined && mux.focusPane(claude.id);
 }
 
 /** Delta needs room for side-by-side; below this many columns it is turned off. */

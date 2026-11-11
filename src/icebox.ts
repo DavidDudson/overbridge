@@ -9,7 +9,7 @@ import { isOrchestrationTab } from "./orchestration";
 import { worktreePath } from "./paths";
 import { loadRepoConfig, normalizePrunePath } from "./project-config";
 import { defaultDeps, leaveTab, type RemovalDeps, stopApps } from "./remove";
-import { currentTab, entries } from "./sidebar";
+import { entries } from "./sidebar";
 import { scaffold } from "./scaffold";
 import { type DroppedRepo, getWorkspace, isIceboxed, isRemoving, readState, withState } from "./state";
 import { runHooks } from "./hooks";
@@ -19,14 +19,14 @@ import { errorMessage, fail, log, run } from "./util";
 /** The first message of a thawed agent: its resumed conversation reads the handoff `icebox` wrote. */
 export const THAW_PROMPT = "/read-handoff";
 
-export interface IceboxDeps extends Pick<RemovalDeps, "exec" | "inZellij"> {
+export interface IceboxDeps extends Pick<RemovalDeps, "mux"> {
   stopApps: (ws: string) => Promise<void>;
   stopChecks: (ws: string) => number;
 }
 
 const defaultIceboxDeps = (): IceboxDeps => {
-  const { exec, inZellij } = defaultDeps();
-  return { exec, inZellij, stopApps, stopChecks: stopChecksFor };
+  const { mux } = defaultDeps();
+  return { mux, stopApps, stopChecks: stopChecksFor };
 };
 
 /** Repos of `ws` holding uncommitted changes or unpushed commits. */
@@ -168,9 +168,9 @@ export async function icebox(ws: string, opts: IceboxOptions = {}, deps: IceboxD
   } catch (e) {
     reclaimError = e;
   }
-  if (deps.inZellij) {
+  if (deps.mux.inSession()) {
     const list = entries();
-    leaveTab(ws, currentTab(deps.exec) === ws ? landingTab(list, ws) : undefined, deps.exec);
+    leaveTab(ws, deps.mux.currentTab() === ws ? landingTab(list, ws) : undefined, deps.mux);
   }
   if (reclaimError !== undefined) {
     fail(`${ws} is iceboxed but not fully reclaimed: ${errorMessage(reclaimError)}`);

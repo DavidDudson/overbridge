@@ -53,7 +53,7 @@ overbridge spinup                                 # rebuild the zellij session o
 overbridge up [--fresh]                           # zellij session "workspaces": the @root tab (Claude in the
                                           # root, guarded to coordinate only), then one tab per workspace with a sidebar,
                                           # a top panel, and the agent
-overbridge layout                                 # print the layout `up` would use (stderr says where from)
+overbridge layout                                 # print the layout `up` would use (stderr says where from); a tmux script under OVERBRIDGE_MUX=tmux
 overbridge claude <name|@root>                    # run a bound Claude, or the root Claude, outside zellij
 ```
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { zellijMux } from "../src/mux";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -269,7 +270,7 @@ describe("agent state", () => {
 describe("switchTab", () => {
   test("goes to the tab, then focuses its sidebar when known", () => {
     const calls: string[][] = [];
-    const record = (c: string[]) => { calls.push(c); return { ok: true }; };
+    const record = zellijMux((c) => { calls.push(c); return { ok: true, stdout: "" }; });
     expect(switchTab("w2", record)).toBe(true);
     expect(calls).toEqual([["zellij", "action", "go-to-tab-name", "w2"]]);
 
@@ -286,14 +287,14 @@ describe("switchTab", () => {
   test("fails only when the tab switch fails, not when its sidebar already has focus", () => {
     mkdirSync(join(metaDir(), "sidebars"), { recursive: true });
     writeFileSync(join(metaDir(), "sidebars", "w2"), "7\n");
-    expect(switchTab("w2", (c) => ({ ok: c[2] !== "focus-pane-id" }))).toBe(true);
-    expect(switchTab("w2", () => ({ ok: false }))).toBe(false);
+    expect(switchTab("w2", zellijMux((c) => ({ ok: c[2] !== "focus-pane-id", stdout: "" })))).toBe(true);
+    expect(switchTab("w2", zellijMux(() => ({ ok: false, stdout: "" })))).toBe(false);
   });
 });
 
 describe("switching with history", () => {
-  const ok = () => ({ ok: true });
-  const fail = () => ({ ok: false });
+  const ok = zellijMux(() => ({ ok: true, stdout: "" }));
+  const fail = zellijMux(() => ({ ok: false, stdout: "" }));
 
   test("a visit records the tab left, and ← then → walk back and forward", () => {
     expect(visitTab("w1", "w2", ok)).toBe(true);
@@ -314,7 +315,7 @@ describe("switching with history", () => {
 
   test("travel with nowhere to go does not switch", () => {
     const calls: string[][] = [];
-    expect(travelTab("w1", Travel.Back, list, (c) => { calls.push(c); return { ok: true }; })).toBe(false);
+    expect(travelTab("w1", Travel.Back, list, zellijMux((c) => { calls.push(c); return { ok: true, stdout: "" }; }))).toBe(false);
     expect(calls).toEqual([]);
   });
 });

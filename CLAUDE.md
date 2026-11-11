@@ -28,7 +28,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   Providers and apps take injectable runners so tests never need `gh`, `jira` or real processes.
 - Apps: `src/apps.ts` (launch, teardown, port pool, status) and `src/app-command.ts` (`overbridge app`).
 - Panes: `src/top.ts` (pure model, layout, cache) + `src/top-run.ts` (tty loop); `src/sidebar.ts`; shared terminal
-  helpers in `src/term.ts`; both panes read zellij's tab order and focused tab through `src/zellij-view.ts`
+  helpers in `src/term.ts`; both panes read the multiplexer's tab order and focused tab through `src/zellij-view.ts`
   (`readView`: one shared file, refreshed by one pane per second), do their full poll only on the focused tab
   (`shouldPoll`, every `HIDDEN_POLL_MS` when hidden), and write a frame only when it changed (`createPainter`); the sidebar's bottom border shows `src/version.ts`'s version (package.json's when real,
   else `OVERBRIDGE_VERSION`, which the flake sets to the git rev, else `dev`), read once when the pane starts; `src/agent-state.ts` reads what `src/agent-hook.ts` writes; `src/panes.ts` is the terminal/diff/claude pane toggles and `overbridge diff`; `src/pr-actions.ts` is the top panel's Ready/Draft and Merge (PR or `gh stack`); `src/next.ts` picks the next tab needing attention; `src/go.ts` is `overbridge go` (tab by sidebar number, name, next/prev; `sessionExec` in `src/tab.ts` reaches the session by name from outside zellij); `src/limits.ts` reads the usage limits Claude's statusline writes. Pure parts are unit-tested.
@@ -37,7 +37,15 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   ticket ahead is running, fewer than `max-parallel` are, and the load allows (`unsettledLoad` counts runs the 1-minute
   average does not show yet); then the command runs in its own process group, killed on `timeout-seconds` or a CPU stall
   (`groupCpuSeconds` in `src/proc.ts`). Its pure parts are unit-tested; `test/e2e.test.ts` drives the real queue.
-- `src/layout.ts` builds the zellij layout (the orchestration tabs, `orchestrationTabKdl`, then one tab per workspace, `tabKdl`); a user `layouts/overbridge.kdl` replaces it.
+- `src/mux.ts` is the only code that runs `zellij` or `tmux`: the `Mux` interface (tabs, panes, sessions) with `zellijMux` and
+  `tmuxMux`, chosen by `defaultMux` (`$TMUX`, `$ZELLIJ`, then `OVERBRIDGE_MUX`, else zellij; outside a session zellij is reached
+  by `--session`). Call sites take an injectable `Mux`; tests fake the exec with `zellijMux(fake)` or `tmuxMux(fake)`. tmux
+  addresses windows by id or index, never by name: a name starting with `@` (an orchestration tab) reads as a window id even
+  after `=`. Read tabs and panes through `-F` formats, never by parsing text. `src/tmux-layout.ts` renders a `TabSpec` as
+  tmux commands (`tabOpen`, `tabFill`), the `overbridge layout` script and the server config.
+- `src/layout.ts` describes each tab as data (`TabSpec`: `workspaceTabSpec`, `orchestrationTabSpec`, `layoutSpecs`) and renders
+  zellij KDL from it (`specKdl`, `tabKdl`, `layoutKdl`); tmux renders the same specs. A zellij user `layouts/overbridge.kdl`
+  replaces the generated KDL; tmux has no user layout.
 - `src/orchestration.ts` lists the orchestration tabs (`@root`: Claude in the root). Their names start with `@` so they never
   match `NAME_RE`. The sidebar pins them in its Orchestration frame; their Claude gets the agent-state hooks, the orchestrator guard
   (`src/guard-orchestrator.ts`: an allow list, fail closed) and a brief (`orchestratorPrompt`) through `claude --settings`

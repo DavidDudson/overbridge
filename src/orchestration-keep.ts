@@ -1,33 +1,26 @@
-import { closeSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { sidebarWidth } from "./config";
-import { newOrchestrationTabKdl } from "./layout";
+import { orchestrationTabSpec, type TabSpec } from "./layout";
+import { defaultMux, type Mux, TabFocus } from "./mux";
 import { ORCHESTRATION_TABS, type OrchestrationTab } from "./orchestration";
 import { metaDir, selfCommand } from "./paths";
-import { run } from "./util";
 
 /** A reopen lock older than this belongs to a sidebar that died holding it. */
 export const REOPEN_LOCK_STALE_MS = 30_000;
-/** How long the lock holder waits for zellij to list the reopened tab before letting go. */
+/** How long the lock holder waits for the multiplexer to list the reopened tab before letting go. */
 const APPEAR_WAIT_MS = 2_000;
 const APPEAR_POLL_MS = 100;
 
-type Exec = (cmd: string[]) => { ok: boolean; stdout: string };
-
 export interface KeepDeps {
-  exec?: Exec;
+  mux?: Mux;
   sleep?: (ms: number) => void;
-  /** The tab's layout file content; defaults to the generated one. */
-  kdl?: (t: OrchestrationTab) => string;
+  /** The tab to open; defaults to the generated one. */
+  spec?: (t: OrchestrationTab) => TabSpec;
 }
 
 const orchestrationDir = () => join(metaDir(), "orchestration");
 export const reopenLockPath = (tab: string) => join(orchestrationDir(), `${tab}.reopen.lock`);
-
-const queryTabs = (exec: Exec): string[] => {
-  const r = exec(["zellij", "action", "query-tab-names"]);
-  return r.ok ? r.stdout.split("\n").map((s) => s.trim()).filter(Boolean) : [];
-};
 
 const isStale = (path: string): boolean => {
   try {
@@ -56,38 +49,36 @@ function takeLock(tab: string, retry = true): number | undefined {
   }
 }
 
-function waitForTab(tab: string, exec: Exec, sleep: (ms: number) => void) {
-  for (let waitedMs = 0; waitedMs < APPEAR_WAIT_MS && !queryTabs(exec).includes(tab); waitedMs += APPEAR_POLL_MS) {
+function waitForTab(tab: string, mux: Mux, sleep: (ms: number) => void) {
+  for (let waitedMs = 0; waitedMs < APPEAR_WAIT_MS && !mux.tabs().includes(tab); waitedMs += APPEAR_POLL_MS) {
     sleep(APPEAR_POLL_MS);
   }
 }
 
-/** Open `t` as a new tab at `index`, then focus the tab the user was on. Returns whether zellij opened it. */
-function reopen(t: OrchestrationTab, index: number, tabCount: number, exec: Exec, kdl: (t: OrchestrationTab) => string): boolean {
-  const focused = /^name: (.+)$/m.exec(exec(["zellij", "action", "current-tab-info"]).stdout)?.[1]?.trim();
-  const file = join(orchestrationDir(), `${t.tab}.kdl`);
-  writeFileSync(file, kdl(t));
-  if (!exec(["zellij", "action", "new-tab", "--layout", file, "--name", t.tab]).ok) {
+/** Open `t` as a new tab at `index`, then focus the tab the user was on. Returns whether the multiplexer opened it. */
+function reopen(t: OrchestrationTab, index: number, mux: Mux, spec: (t: OrchestrationTab) => TabSpec): boolean {
+  const focused = mux.currentTab();
+  if (!mux.openTab(spec(t), TabFocus.Foreground).ok) {
     return false;
   }
-  // new-tab appends the tab and focuses it, so walk it left to its slot at the front
-  Array.from({ length: Math.max(0, tabCount - index) }).forEach(() => exec(["zellij", "action", "move-tab", "left"]));
+  // a new tab is appended and focused, so walk it to its slot at the front
+  mux.moveTab(t.tab, index);
   if (focused && focused !== t.tab) {
-    exec(["zellij", "action", "go-to-tab-name", focused]);
+    mux.goToTab(focused);
   }
   return true;
 }
 
 /**
- * Reopen any orchestration tab missing from the running zellij session; returns the tabs it reopened.
+ * Reopen any orchestration tab missing from the running session; returns the tabs it reopened.
  * Every sidebar calls this on its poll, so a per-tab lock picks one owner. The owner checks again under
- * the lock and holds it until zellij lists the new tab, so a second sidebar never opens a copy. `tabs` is
- * the tab list the caller already queried; empty (outside zellij, or the query failed) does nothing.
+ * the lock and holds it until the multiplexer lists the new tab, so a second sidebar never opens a copy. `tabs` is
+ * the tab list the caller already queried; empty (outside a session, or the query failed) does nothing.
  */
 export function ensureOrchestrationTabs(tabs: string[], deps: KeepDeps = {}): string[] {
-  const exec = deps.exec ?? ((cmd) => run(cmd));
+  const mux = deps.mux ?? defaultMux();
   const sleep = deps.sleep ?? ((ms) => Bun.sleepSync(ms));
-  const kdl = deps.kdl ?? ((t) => newOrchestrationTabKdl(t, selfCommand(), { sidebarWidth: sidebarWidth() }));
+  const spec = deps.spec ?? ((t) => orchestrationTabSpec(t, selfCommand(), { sidebarWidth: sidebarWidth(), focus: true }));
   if (!tabs.length) {
     return [];
   }
@@ -100,11 +91,11 @@ export function ensureOrchestrationTabs(tabs: string[], deps: KeepDeps = {}): st
       return [];
     }
     try {
-      const now = queryTabs(exec);
-      if (!now.length || now.includes(t.tab) || !reopen(t, index, now.length, exec, kdl)) {
+      const now = mux.tabs();
+      if (!now.length || now.includes(t.tab) || !reopen(t, index, mux, spec)) {
         return [];
       }
-      waitForTab(t.tab, exec, sleep);
+      waitForTab(t.tab, mux, sleep);
       return [t.tab];
     } finally {
       closeSync(fd);

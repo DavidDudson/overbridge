@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { agentStateFile, EndReason, sessionEndedForGood } from "../src/agent-state";
 import { createReaper } from "../src/auto-remove";
 import { CleanupCause, CleanupOutcome } from "../src/cleanup-log";
-import { beginRemoval, finishRemoval, FINISH_FLAG, Landing, parseTabIds, type RemovalDeps } from "../src/remove";
+import { zellijMux } from "../src/mux";
+import { beginRemoval, finishRemoval, FINISH_FLAG, Landing, type RemovalDeps } from "../src/remove";
 import { cleanable, gitClean } from "../src/top";
 import { entries, entryLines } from "../src/sidebar";
 import { isRemoving, readState, REMOVING_GRACE_MS, watchState, withState, type WorkspaceState } from "../src/state";
@@ -34,18 +35,20 @@ function fakeDeps(listTabs: string, focused = "") {
   const calls: string[][] = [];
   const spawned: string[] = [];
   const deps: RemovalDeps = {
-    exec: (cmd) => {
-      calls.push(cmd);
-      if (cmd[2] === "list-tabs") {
-        return ok(listTabs);
-      }
-      return cmd[2] === "current-tab-info" && focused ? ok(`name: ${focused}\n`) : ok();
-    },
+    mux: zellijMux(
+      (cmd) => {
+        calls.push(cmd);
+        if (cmd[2] === "list-tabs") {
+          return ok(listTabs);
+        }
+        return cmd[2] === "current-tab-info" && focused ? ok(`name: ${focused}\n`) : ok();
+      },
+      { env: { ZELLIJ: "0" } },
+    ),
     spawnWorker: (ws) => {
       spawned.push(ws);
       return process.pid;
     },
-    inZellij: true,
   };
   return { deps, calls, spawned };
 }
@@ -96,13 +99,6 @@ afterAll(() => {
     }
   });
   rmSync(tmp, { recursive: true, force: true });
-});
-
-describe("parseTabIds", () => {
-  test("maps each tab name to its stable id, skipping the header", () => {
-    const ids = parseTabIds("TAB_ID  POSITION  NAME\n0  0  @root\n2  1  75\n4  2  ENG 1 x\n");
-    expect([...ids]).toEqual([["@root", "0"], ["75", "2"], ["ENG 1 x", "4"]]);
-  });
 });
 
 describe("isRemoving", () => {
@@ -257,7 +253,7 @@ describe("a session closed on purpose", () => {
       proc.unref();
       return proc.pid;
     };
-    const deps: RemovalDeps = { exec: () => ok(), spawnWorker: realSpawn, inZellij: false };
+    const deps: RemovalDeps = { mux: zellijMux(() => ok(), { env: {} }), spawnWorker: realSpawn };
     const reap = createReaper({ endedForGood: sessionEndedForGood, gitClean, remove: (ws) => beginRemoval(ws, { landing: Landing.IfFocused, deps }), now: Date.now });
 
     const { unsaved, faults } = reap(entries().filter((e) => e.tab === "i1" || e.tab === "i2"));
@@ -279,7 +275,7 @@ describe("the background worker", () => {
     proc.unref();
     return proc.pid;
   };
-  const noZellij = (): RemovalDeps => ({ exec: () => ok(), spawnWorker: realSpawn, inZellij: false });
+  const noZellij = (): RemovalDeps => ({ mux: zellijMux(() => ok(), { env: {} }), spawnWorker: realSpawn });
 
   test("finishes the removal after the caller returns", async () => {
     ob(["new", "e1", "-r", "app"]);
