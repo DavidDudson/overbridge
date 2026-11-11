@@ -17,7 +17,7 @@ import { fail, log, must, run } from "./util";
  * The repo's `overbridge.yml` as committed on its default branch, so no worktree has to exist yet, with
  * the root config's layers applied.
  */
-function committedConfig(spec: RepoSpec): ProjectConfig {
+export function committedConfig(spec: RepoSpec): ProjectConfig {
   const file = `${spec.name}:${CONFIG_FILE}`;
   const r = run(["git", "-C", barePath(spec.name), "show", `origin/${git.defaultBranch(spec)}:${CONFIG_FILE}`]);
   return resolveConfig(r.ok ? parseYaml(r.stdout, file) : undefined, spec.name, file);

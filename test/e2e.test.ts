@@ -133,12 +133,13 @@ describe("workflow", () => {
     }
   });
 
-  test("layout opens the root orchestration tab, then one tab per workspace, each with sidebar and top panel", () => {
+  test("layout opens the orchestration tabs (root, work list), then one tab per workspace, each with sidebar and top panel", () => {
     for (const n of ["ws3", "ws4", "ws5"]) ws(["new", n]);
     const kdl = ws(["layout"]).out;
-    expect(kdl.match(/\btab name=/g)?.length).toBe(6);
+    expect(kdl.match(/\btab name=/g)?.length).toBe(7);
     expect(kdl.indexOf('tab name="@root"')).toBeLessThan(kdl.indexOf('tab name="ws'));
     expect(kdl).toContain('"claude" "@root"');
+    expect(kdl).toMatch(/args .*"worklist"/);
     expect(kdl).toContain('"claude" "ws5"');
     expect(kdl).toContain('"sidebar" "--ws" "ws5"');
     expect(kdl).toContain('"top" "--ws" "ws5"');
