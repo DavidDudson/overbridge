@@ -14,6 +14,13 @@ project-management:
   # issue-type: Task                     # Jira only: issue type for new items; default: Task
   # worklist-jql: "sprint in openSprints()"   # Jira only: narrows the @work list; default: open sprint or in progress; "" lists all
 
+# GitHub Projects v2 only: how the board's Status column maps to the @work list. Needs `gh auth refresh -s read:project`.
+# board:
+#   columns:                     # column name (any case) -> todo | in-progress | blocked | done
+#     Ready: todo
+#     In review: in-progress
+#     Waiting on vendor: blocked
+
 # Apps `overbridge app` and the top panel can start and stop. Default: none.
 apps:
   - id: web                    # unique within the repo

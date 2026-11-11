@@ -56,7 +56,7 @@ ide: zed
   });
 
   test("lists allowed keys when nothing is close", () => {
-    expect(err("zzzzzzzzzz: 1")).toContain("allowed: version, project-management, apps, commands, review, ide");
+    expect(err("zzzzzzzzzz: 1")).toContain("allowed: version, project-management, board, apps, commands, review, ide");
   });
 
   test("names the key for a bad provider", () => {
@@ -148,5 +148,17 @@ describe("getConfigValue", () => {
     expect(getConfigValue(c, "commands.build")).toBeUndefined();
     expect(getConfigValue(c, "nope.deeper")).toBeUndefined();
     expect(getConfigValue(c, "commands.test.deeper")).toBeUndefined();
+  });
+});
+
+describe("board columns", () => {
+  test("maps column names, lower-cased, to work statuses", () => {
+    expect(parseConfig("board:\n  columns:\n    Ready: todo\n    In Review: in-progress\n").boardColumns).toEqual({ ready: "todo", "in review": "in-progress" });
+    expect(parseConfig("").boardColumns).toEqual({});
+  });
+
+  test("rejects an unknown status and an unknown key", () => {
+    expect(() => parseConfig("board:\n  columns:\n    Ready: soon\n")).toThrow("board.columns.Ready");
+    expect(() => parseConfig("board:\n  column: {}\n")).toThrow("board");
   });
 });

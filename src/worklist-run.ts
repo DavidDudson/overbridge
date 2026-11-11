@@ -4,7 +4,7 @@ import { loadRepos } from "./config";
 import { metaDir, selfCommand } from "./paths";
 import { githubRows, slugFromUrl } from "./pm/board-github";
 import { jiraRows } from "./pm/board-jira";
-import { keyOf, rank, type Ranked, type WorkRow } from "./pm/worklist";
+import { keyOf, rank, type Ranked, type WorkRow, type WorkStatus } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
 import type { ProjectManagement } from "./project-config";
 import { committedConfig } from "./start";
@@ -43,13 +43,15 @@ function writeWorklist(cache: WorklistCache) {
 
 /** One board read: a GitHub repo, or a Jira project shared by every repo that names it. */
 export type BoardSource =
-  | { kind: "github"; repo: string; slug: string }
+  | { kind: "github"; repo: string; slug: string; columns?: Record<string, WorkStatus> }
   | { kind: "jira"; project: string; repos: string[]; filter?: string; site?: string };
 
 export interface RepoBoard {
   repo: string;
   url: string;
   pm?: ProjectManagement;
+  /** `board.columns`, when the repo sets any. */
+  columns?: Record<string, WorkStatus>;
 }
 
 /**
@@ -74,17 +76,17 @@ export function boardSources(repos: readonly RepoBoard[]): { sources: BoardSourc
     };
   });
   return {
-    sources: [...github.flatMap(({ r, slug }): BoardSource[] => (slug ? [{ kind: "github", repo: r.repo, slug }] : [])), ...jira],
+    sources: [...github.flatMap(({ r, slug }): BoardSource[] => (slug ? [{ kind: "github", repo: r.repo, slug, ...(r.columns && Object.keys(r.columns).length ? { columns: r.columns } : {}) }] : [])), ...jira],
     notes: github.filter((g) => !g.slug).map(({ r }) => `${r.repo}: cannot tell the GitHub repo from ${r.url}`),
   };
 }
 
 export interface BoardReaders {
-  github: (slug: string, repo: string) => WorkRow[];
+  github: (slug: string, repo: string, columns?: Record<string, WorkStatus>) => WorkRow[];
   jira: (project: string, repos: string[], opts: { filter?: string; site?: string }) => WorkRow[];
 }
 
-const defaultReaders: BoardReaders = { github: (slug, repo) => githubRows(slug, repo), jira: (project, repos, opts) => jiraRows(project, repos, opts) };
+const defaultReaders: BoardReaders = { github: (slug, repo, columns) => githubRows(slug, repo, undefined, columns), jira: (project, repos, opts) => jiraRows(project, repos, opts) };
 
 const sourceName = (s: BoardSource) => (s.kind === "github" ? s.repo : s.project);
 
@@ -92,7 +94,7 @@ const sourceName = (s: BoardSource) => (s.kind === "github" ? s.repo : s.project
 export function readBoards(sources: readonly BoardSource[], readers: BoardReaders = defaultReaders): { rows: WorkRow[]; notes: string[]; failedRepos: string[] } {
   const results = sources.map((s): { rows: WorkRow[]; notes: string[]; failedRepos: string[] } => {
     try {
-      const rows = s.kind === "github" ? readers.github(s.slug, s.repo) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
+      const rows = s.kind === "github" ? readers.github(s.slug, s.repo, s.columns) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
       return { rows, notes: [], failedRepos: [] };
     } catch (e) {
       return { rows: [], notes: [`${sourceName(s)}: ${(e as Error).message.split("\n")[0]}`], failedRepos: s.kind === "github" ? [s.repo] : s.repos };
@@ -115,8 +117,9 @@ export function keepLastGood(previous: readonly WorkRow[], fresh: readonly WorkR
 export function refreshWorklist(now = Date.now()): WorklistCache {
   const configs = Object.values(loadRepos()).map((spec): RepoBoard | string => {
     try {
-      const pm = committedConfig(spec).projectManagement;
-      return { repo: spec.name, url: spec.url, ...(pm ? { pm } : {}) };
+      const config = committedConfig(spec);
+      const pm = config.projectManagement;
+      return { repo: spec.name, url: spec.url, ...(pm ? { pm } : {}), columns: config.boardColumns };
     } catch (e) {
       return `${spec.name}: ${(e as Error).message.split("\n")[0]}`;
     }
