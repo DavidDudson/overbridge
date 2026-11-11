@@ -69,7 +69,7 @@ Workspaces
                                         overbridge.yml); as it is when the repo has none
   overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>
                                         run a heavy command (lint, typecheck, test, build) in the repo's
-                                        dev shell, one at a time across workspaces, once the load allows;
+                                        dev shell, queued across workspaces, several at once while the load allows;
                                         killed on timeout or when it stops using CPU (check-queue in overbridge.yml)
   overbridge rm <name> [--force]              remove a workspace and its worktrees (the top panel's
                                         Cleanup button does this once the PR is open and nothing is unpushed)

@@ -295,21 +295,24 @@ Where it applies:
 ### Check queue
 
 `overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>` runs a heavy command, such as lint, typecheck,
-test or build, so that only one runs at a time across every workspace. The skills send the repo's `commands.lint`,
+test or build, in queue order across every workspace. Several run at once while the machine's load leaves room. The skills send the repo's `commands.lint`,
 `typecheck`, `test`, and `build` through it. The repo defaults to the one the current directory is in, then to the
 workspace's only repo.
 
-1. **Queue.** Each call writes a ticket to `.overbridge/check-queue/`. The oldest ticket whose process is still alive
-   holds the turn, and the others wait in order. Waiters remove tickets whose process has died. If a dead holder left
-   its command running, they kill that command too.
-2. **Load.** Once it holds the turn, the run waits until the 1-minute load average is under `max-load-percent` of the cores.
+1. **Queue.** Each call writes a ticket to `.overbridge/check-queue/`. Tickets start in the order they were queued:
+   a ticket waits until every ticket ahead of it, whose process is still alive, has started. Waiters remove tickets
+   whose process has died. If a dead ticket left its command running, they kill that command too.
+2. **Load.** The next ticket in line starts once the 1-minute load average is under `max-load-percent` of the cores,
+   whether or not other runs are still going. The average takes about a minute to show a new run, so each run that
+   started in the last minute counts as up to one extra core of load. Set `max-parallel` to cap how many run at once;
+   `max-parallel: 1` runs them one at a time.
 3. **Run.** The command runs in the repo's dev shell, as with `overbridge shell`, in a process group of its own. A
    command started inside a held run, such as a git hook, runs straight away instead of queueing behind its parent.
 4. **Stop.** The command is killed (TERM, then KILL after 10 seconds) when it runs past `timeout-seconds` (exit 124),
-   or when its process group uses no CPU for `stall-seconds` (exit 137). If no turn comes within `wait-seconds`, the
-   call gives up with exit 75. Otherwise it exits with the command's own code.
+   or when its process group uses no CPU for `stall-seconds` (exit 137). If a call cannot start within `wait-seconds`, it
+   gives up with exit 75. Otherwise it exits with the command's own code.
 
-`--timeout-seconds` raises or lowers the time limit for one run. The tab sidebar shows the running command, how long
+`--timeout-seconds` raises or lowers the time limit for one run. The tab sidebar shows each running command, how long
 it has run, and who is waiting.
 
 ### Keys and defaults
@@ -328,9 +331,10 @@ it has run, and who is waiting.
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
 | `check-queue.max-load-percent` | `70` | start a queued run only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. See [Check queue](#check-queue) |
+| `check-queue.max-parallel` | none | run at most this many commands at once; unset leaves the load as the only limit |
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
-| `check-queue.wait-seconds` | `900` | give up (exit 75) when a run gets no turn, or the load stays high, for this long |
+| `check-queue.wait-seconds` | `900` | give up (exit 75) when a run cannot start for this long, because of the queue ahead, `max-parallel`, or the load |
 | `shell` | none | the repo's dev shell: a command prefix (`nix develop --command`, `direnv exec .`), or a mapping `enter` (the prefix), `env` (a command printing the env NUL-separated, as `env -0` does) and `key` (repo-relative files whose contents invalidate the cached env; needs `env`). See [Dev shells](#dev-shells) |
 | `review.personas` | auto | reviewer personas to run; unset selects by diff signals |
 | `review.exclude` | `[]` | personas to skip, applied after selection |
@@ -586,8 +590,8 @@ opens it again at the front and returns focus to the tab you were on. A lock in
 (`layouts/overbridge.kdl`) decides its own tabs, so nothing is reopened when one exists.
 
 Under the list, up to three rows show workspaces being removed or removed in the last hour (see **Seeing what was
-removed** above). Below them, while the [check queue](#check-queue) is busy, a `▶` row shows the running command, its
-workspace, and how long it has run, and a `⧗` row lists the workspaces waiting.
+removed** above). Below them, while the [check queue](#check-queue) is busy, a `▶` row for each running command shows its
+workspace and how long it has run, and a `⧗` row lists the workspaces waiting.
 
 The width (default 60) comes from the global config:
 

@@ -108,7 +108,12 @@
       "additionalProperties": false,
       "properties": {
         "max-load-percent": {
-          "description": "Start only while the 1-minute load average is under this share of the cores. Over 100 allows more load than there are cores. Default 70.",
+          "description": "Start a run only while the 1-minute load average is under this share of the cores. Over 100 allows more load than there are cores. Default 70.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "max-parallel": {
+          "description": "Run at most this many commands at once. Unset leaves the load as the only limit; 1 runs them one at a time.",
           "type": "integer",
           "minimum": 1
         },

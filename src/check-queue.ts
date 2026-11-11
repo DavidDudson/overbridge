@@ -8,10 +8,11 @@ import type { ShellInvocation } from "./shell";
 import { exec, log } from "./util";
 
 /**
- * `overbridge check`: one heavy command at a time across every workspace. Each caller drops a ticket in
- * `<meta>/check-queue/`; the oldest ticket whose process is alive holds the turn. Only a ticket's owner
- * writes it, so the queue needs no lock. The holder waits for the load to drop, then runs the command in its
- * own process group and kills that group on a timeout or a stall.
+ * `overbridge check`: heavy commands from every workspace, started in queue order while the load leaves room.
+ * Each caller drops a ticket in `<meta>/check-queue/`. A ticket starts once every live ticket ahead of it is
+ * running, fewer than `max-parallel` of them are, and the load allows. Only a ticket's owner writes it, and
+ * only the first waiting ticket may start, so the queue needs no lock. Each run has its own process group,
+ * which its owner kills on a timeout or a stall.
  */
 
 /** Set in the command's env; a nested `overbridge check` sees it and runs at once instead of queueing behind itself. */
@@ -41,7 +42,8 @@ export interface Ticket {
 }
 
 const TURN_POLL_MS = 1_000;
-const LOAD_POLL_MS = 15_000;
+/** How long the 1-minute load average takes to show most of a new run. */
+const LOAD_SETTLE_MS = 60_000;
 const MAX_SAMPLE_MS = 15_000;
 const KILL_GRACE_MS = 10_000;
 
@@ -76,7 +78,7 @@ export function readTickets(dir = queueDir()): Ticket[] {
     .toSorted(byQueueOrder);
 }
 
-/** Tickets whose owner is alive, in queue order (the first holds the turn), and the ones left by dead owners. */
+/** Tickets whose owner is alive, in queue order, and the ones left by dead owners. */
 export function splitQueue(tickets: Ticket[], alive: (pid: number) => boolean): { live: Ticket[]; dead: Ticket[] } {
   return { live: tickets.filter((t) => alive(t.pid)), dead: tickets.filter((t) => !alive(t.pid)) };
 }
@@ -101,13 +103,46 @@ export const sampleIntervalMs = (stallSeconds: number) => Math.min(MAX_SAMPLE_MS
 
 export const exitFor = (reason: StopReason): CheckExit => (reason === StopReason.TimedOut ? CheckExit.TimedOut : CheckExit.Stalled);
 
-/** The running ticket and the ones waiting behind it, for the sidebar. */
-export function queueView(tickets: Ticket[]): { running?: Ticket; waiting: Ticket[] } {
-  const [head, ...rest] = tickets;
-  if (!head) {
-    return { waiting: [] };
+const isRunning = (t: Ticket) => t.runPid !== undefined;
+
+/**
+ * The load that runs started in the last minute add but the 1-minute average does not show yet. It counts
+ * one core for a run that just started, less as the average catches up, so a burst of starts cannot slip
+ * under the load gate together.
+ */
+export const unsettledLoad = (running: Ticket[], nowMs: number) =>
+  running.reduce((sum, t) => sum + Math.exp(-Math.max(0, nowMs - (t.runningSinceMs ?? nowMs)) / LOAD_SETTLE_MS), 0);
+
+export const Gate = {
+  Start: "start",
+  /** A ticket ahead has not started, so starting now would jump the queue. */
+  Queue: "queue",
+  /** `max-parallel` runs are already going. */
+  Parallel: "parallel",
+  Load: "load",
+} as const;
+export type Gate = (typeof Gate)[keyof typeof Gate];
+
+export interface Machine {
+  load1: number;
+  cores: number;
+}
+
+/** Whether `me` may start now, given the live queue, or what holds it back. */
+export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machine: Machine, nowMs: number): Gate {
+  const ahead = live.filter((t) => byQueueOrder(t, me) < 0);
+  if (!ahead.every(isRunning)) {
+    return Gate.Queue;
   }
-  return head.runPid !== undefined ? { running: head, waiting: rest } : { waiting: tickets };
+  if (settings.maxParallel !== undefined && ahead.length >= settings.maxParallel) {
+    return Gate.Parallel;
+  }
+  return loadAllows(machine.load1 + unsettledLoad(ahead, nowMs), machine.cores, settings.maxLoadPercent) ? Gate.Start : Gate.Load;
+}
+
+/** The running tickets and the ones waiting, each in queue order, for the sidebar. */
+export function queueView(tickets: Ticket[]): { running: Ticket[]; waiting: Ticket[] } {
+  return { running: tickets.filter(isRunning), waiting: tickets.filter((t) => !isRunning(t)) };
 }
 
 /** The live queue as the sidebar shows it. */
@@ -148,47 +183,39 @@ function reap(ticket: Ticket, dir: string) {
 
 const label = (t: Ticket) => `${t.ws}/${t.repo}: ${t.command}`;
 
-/** Wait until `me` is first among live tickets; false when `deadlineMs` passes first. */
-async function waitForTurn(me: Ticket, dir: string, deadlineMs: number, waitSeconds: number): Promise<boolean> {
-  const mine = ticketName(me);
+/** Wait until `me` may start (see `gateFor`); false when `deadlineMs` passes first. */
+async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadlineMs: number): Promise<boolean> {
+  const cores = availableParallelism();
+  const limit = (cores * settings.maxLoadPercent) / 100;
   let announced: string | undefined;
   for (;;) {
     const { live, dead } = splitQueue(readTickets(dir), pidAlive);
     dead.forEach((t) => reap(t, dir));
-    const head = live[0];
-    if (!head || ticketName(head) === mine) {
+    const now = Date.now();
+    const ahead = live.filter((t) => byQueueOrder(t, me) < 0);
+    const load1 = loadavg()[0] ?? 0;
+    const gate = gateFor(me, live, settings, { load1, cores }, now);
+    if (gate === Gate.Start) {
       return true;
     }
-    if (Date.now() >= deadlineMs) {
-      log(`overbridge check: the queue was still busy after ${waitSeconds}s (wait-seconds), held by ${label(head)}`);
+    const running = ahead.filter(isRunning);
+    const runningNow = running.length ? `running: ${running.map(label).join("; ")}` : "nothing running yet";
+    const overLoad = `load ${(load1 + unsettledLoad(running, now)).toFixed(2)} is over ${limit.toFixed(1)} (${settings.maxLoadPercent}% of ${cores} cores)`;
+    if (now >= deadlineMs) {
+      log(
+        gate === Gate.Load
+          ? `overbridge check: ${overLoad} for ${settings.waitSeconds}s (wait-seconds); giving up`
+          : `overbridge check: the queue was still busy after ${settings.waitSeconds}s (wait-seconds); ${runningNow}`,
+      );
       return false;
     }
-    if (announced !== ticketName(head)) {
-      announced = ticketName(head);
-      const ahead = live.findIndex((t) => ticketName(t) === mine);
-      log(`overbridge check: waiting behind ${ahead} in the queue; running: ${label(head)}`);
+    const key = `${gate} ${ahead.map(ticketName).join(" ")}`;
+    if (announced !== key) {
+      announced = key;
+      const cap = gate === Gate.Parallel ? ` (max-parallel ${settings.maxParallel})` : "";
+      log(gate === Gate.Load ? `overbridge check: ${overLoad}, waiting; ${runningNow}` : `overbridge check: waiting behind ${ahead.length} in the queue${cap}; ${runningNow}`);
     }
-    await Bun.sleep(TURN_POLL_MS);
-  }
-}
-
-/** Wait until the load leaves room; false when `deadlineMs` passes first. */
-async function waitForLoad(settings: CheckQueue, deadlineMs: number): Promise<boolean> {
-  const cores = availableParallelism();
-  const limit = (cores * settings.maxLoadPercent) / 100;
-  for (;;) {
-    const load = loadavg()[0] ?? 0;
-    if (loadAllows(load, cores, settings.maxLoadPercent)) {
-      return true;
-    }
-    const leftMs = deadlineMs - Date.now();
-    const why = `load ${load.toFixed(2)} is over ${limit.toFixed(1)} (${settings.maxLoadPercent}% of ${cores} cores)`;
-    if (leftMs <= 0) {
-      log(`overbridge check: ${why} for ${settings.waitSeconds}s (wait-seconds); giving up`);
-      return false;
-    }
-    log(`overbridge check: ${why}, waiting`);
-    await Bun.sleep(Math.min(LOAD_POLL_MS, leftMs));
+    await Bun.sleep(Math.min(TURN_POLL_MS, Math.max(0, deadlineMs - now)));
   }
 }
 
@@ -271,7 +298,7 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
 
   try {
     const deadlineMs = me.queuedAtMs + settings.waitSeconds * 1_000;
-    if (!(await waitForTurn(me, dir, deadlineMs, settings.waitSeconds)) || !(await waitForLoad(settings, deadlineMs))) {
+    if (!(await waitForStart(me, dir, settings, deadlineMs))) {
       return CheckExit.GaveUp;
     }
     return await runHeld(inv, me, file, settings, (pid) => {

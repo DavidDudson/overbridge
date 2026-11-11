@@ -178,9 +178,9 @@ access to other workspaces and direct branch switching. Do not try to work aroun
 - Stacked PRs (\`gh stack\`): a claim covers every layer of its stack. \`gh stack init/add/up/down/top/bottom\`,
   \`push\`, \`submit\`, \`rebase\` and \`sync\` work as normal; pull an existing stack with \`overbridge checkout <repo> #<pr>\`
   (never \`gh stack checkout\` or \`gh stack trunk\`). Run \`overbridge pr <repo>\` after moving between layers or submitting.
-- Run lint, typecheck, test, and build commands through \`overbridge check <repo> -- <cmd>\`. Only one runs at a time
-  across all workspaces. It runs in the repo's dev shell once the machine's load allows. overbridge kills a run that
-  goes over its time limit (exit 124) or stops using CPU (exit 137). If no turn comes in time, it gives up with exit 75.
+- Run lint, typecheck, test, and build commands through \`overbridge check <repo> -- <cmd>\`. It queues them
+  across all workspaces and runs several at once, in the repo's dev shell, while the machine's load allows. overbridge kills a run that
+  goes over its time limit (exit 124) or stops using CPU (exit 137). If it cannot start in time, it gives up with exit 75.
 ${devShells}
 ## GitHub repos
 
