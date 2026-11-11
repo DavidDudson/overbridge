@@ -21,7 +21,11 @@ An item id (`123`, `#123`, `ENG-123`). Ask for it if missing.
 Run `start-item` with the id, in loop mode: it orients, scope-checks, claims the branch and writes the
 plan as text, without entering plan mode or waiting for approval.
 The scope gate is the one stop in this loop: on `SPLIT` or `CLARIFY`, wait for the user. If the item
-splits, this loop runs the first slice only. The rest are separate runs, stacked with `gh stack add`.
+splits, this loop runs the first slice only. The rest are separate runs, stacked with `gh stack add` in this
+same workspace: never a new workspace for a layer.
+
+Workspace: stay in the one you are in when the work is related (the affinity table in the `workspace` skill).
+A `task/` claim with no PR re-binds to the item (`start-item` step 4); do not open a second workspace for it.
 
 ## 2. Plan (no stop)
 
@@ -76,7 +80,8 @@ not loop on human review comments: that is `resolve-feedback`, run on its own wh
 
 ## Report
 
-One line: item id, branch, PR URL, build status, and what the review left for the user.
+One line: item id, branch, PR URL, build status, and what the review left for the user. When the loop
+spun off follow-up items, name them and say where each should run, per the `workspace` skill's table.
 
 ## Rules
 

@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userLayoutPath } from "./layout";
 import { join } from "node:path";
-import { type AgentState, glyphFor, readAgentState, UNKNOWN_GLYPH } from "./agent-state";
+import { ATTENTION, type AgentState, glyphFor, readAgentState, UNKNOWN_GLYPH } from "./agent-state";
+import { iceboxHint } from "./icebox-suggest";
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
@@ -64,6 +65,8 @@ export interface Entry {
   stacks?: { prs: number[]; current: number }[];
   /** This entry could not be read: a bad cache or state record, or a reader that threw. Replaces the status line. */
   fault?: string;
+  /** Its draft PRs have sat idle past `icebox.idle-days`: a suggestion to icebox it, never done automatically. */
+  idleHint?: string;
 }
 
 export { sidebarLabel, stripConventional } from "./top";
@@ -104,7 +107,8 @@ function workspaceEntry(ws: string, w: unknown): Entry {
   const { cache, fault } = readTopCacheChecked(ws);
   const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
   const stacks = stacksOf(cache);
-  return { ...entry, ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}) };
+  const idleHint = fault ? undefined : iceboxHint(ws, cache);
+  return { ...entry, ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}), ...(idleHint ? { idleHint } : {}) };
 }
 
 /** `w` as the record of a workspace being removed right now, else undefined; a malformed record is never one. */
@@ -200,12 +204,13 @@ const BLOCK_TEXT: Record<RemovalBlock, { text: string; color: Color }> = {
 const UNSAVED_TEXT: { text: string; color: Color } = { text: "ended · unsaved work", color: "red" };
 const FAULT_COLOR: Color = "red";
 
-/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, then the agent state. */
+/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, an icebox suggestion (unless the agent wants you), then the agent state. */
 function statusFor(e: Entry): { text: string; color: Color } | undefined {
   if (e.fault) return { text: `error: ${e.fault}`, color: FAULT_COLOR };
   if (e.error) return { text: `cleanup failed: ${e.error}`, color: FAULT_COLOR };
   if (e.blocked) return BLOCK_TEXT[e.blocked];
   if (e.unsaved) return UNSAVED_TEXT;
+  if (e.idleHint && !(e.state && ATTENTION.includes(e.state))) return { text: e.idleHint, color: "cyan" };
   return e.state ? STATE_TEXT[e.state] : undefined;
 }
 
@@ -274,13 +279,16 @@ export function queueRows(queue: { running: Ticket[]; waiting: Ticket[] }, inner
   return [...running, ...waiting];
 }
 
+/** ` · dropped` when an iceboxed workspace gave back its worktrees. */
+const droppedLabel = (w: WorkspaceState): string => (w.iceboxed?.dropped?.length ? " · dropped" : "");
+
 /** Iceboxed workspaces, one dim row each under the divider; they have no tab, so no card and no digit. */
 export function icedRows(state: State, inner: number): string[] {
   const workspaces = state.workspaces as Record<string, unknown>;
   return Object.keys(workspaces)
     .filter((ws) => isIced(workspaces, ws))
     .sort(naturalSort)
-    .map((ws) => dim(fit(`❄ ${ws} iceboxed`, inner)));
+    .map((ws) => dim(fit(`❄ ${ws} iceboxed${isWorkspaceState(workspaces[ws]) ? droppedLabel(workspaces[ws]) : ""}`, inner)));
 }
 
 /** Workspaces being removed in the background right now, labelled as their cards were; a malformed record is skipped (its card reports it). */
