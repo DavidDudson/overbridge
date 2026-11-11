@@ -78,7 +78,7 @@ overbridge config get commands.test
 
 An unset key means the repo has no such command: say so rather than guessing. Run a single file or project before the whole suite, and ask before an expensive full run. Follow the repo's `CLAUDE.md` for how to scope a run.
 
-Run each through the check queue: `overbridge check <repo> -- <command>`. It runs one at a time across workspaces, in the repo's dev shell. Exit 124 means it went over its time limit, 137 that it stopped using CPU, and 75 that no turn came: report it rather than retrying in a loop.
+Run each through the check queue: `overbridge check <repo> -- <command>`. It queues them across workspaces and runs several at once while the load allows, in the repo's dev shell. Exit 124 means it went over its time limit, 137 that it stopped using CPU, and 75 that no turn came: report it rather than retrying in a loop.
 
 ## 4. Commit
 

@@ -1,6 +1,6 @@
 import type { ProjectManagement } from "../project-config";
 import { fail, run, type RunResult } from "../util";
-import { namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
+import { ItemStatus, namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
 
 export type Runner = (cmd: string[], opts?: { cwd?: string }) => RunResult;
 
@@ -50,6 +50,14 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
     title(id) {
       const r = gh(["issue", "view", id.replace(/^#/, ""), "-R", repo(), "--json", "title", "-q", ".title"]);
       return r.ok && r.stdout ? r.stdout : undefined;
+    },
+
+    status(id) {
+      const r = gh(["issue", "view", id.replace(/^#/, ""), "-R", repo(), "--json", "state", "-q", ".state"]);
+      if (!r.ok || !r.stdout) {
+        return undefined;
+      }
+      return r.stdout === "CLOSED" ? ItemStatus.Done : ItemStatus.Open;
     },
 
     assigned() {

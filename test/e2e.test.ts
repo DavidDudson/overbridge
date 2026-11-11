@@ -2,14 +2,18 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { HELD_ENV } from "../src/check-queue";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 let tmp: string;
 let root: string;
 let remote: string;
 
+/** Without the held marker, so the suite's own checks queue when it runs inside `overbridge check`. */
+const inherited = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== HELD_ENV));
+
 const env = () => ({
-  ...process.env,
+  ...inherited(),
   OVERBRIDGE_ROOT: root,
   ZELLIJ_CONFIG_DIR: join(root, "zellij-config"), // keep a real user layout out of the tests
   OVERBRIDGE_NAME: "",
@@ -133,12 +137,13 @@ describe("workflow", () => {
     }
   });
 
-  test("layout opens the root orchestration tab, then one tab per workspace, each with sidebar and top panel", () => {
+  test("layout opens the orchestration tabs (root, work list), then one tab per workspace, each with sidebar and top panel", () => {
     for (const n of ["ws3", "ws4", "ws5"]) ws(["new", n]);
     const kdl = ws(["layout"]).out;
-    expect(kdl.match(/\btab name=/g)?.length).toBe(6);
+    expect(kdl.match(/\btab name=/g)?.length).toBe(7);
     expect(kdl.indexOf('tab name="@root"')).toBeLessThan(kdl.indexOf('tab name="ws'));
     expect(kdl).toContain('"claude" "@root"');
+    expect(kdl).toMatch(/args .*"worklist"/);
     expect(kdl).toContain('"claude" "ws5"');
     expect(kdl).toContain('"sidebar" "--ws" "ws5"');
     expect(kdl).toContain('"top" "--ws" "ws5"');
@@ -335,7 +340,21 @@ describe("check queue", () => {
     expect(check(["--timeout-seconds", "x", "--", "true"]).err).toContain("--timeout-seconds expects a whole number");
   }, CHECK_TEST_MS);
 
-  test("two runs take turns instead of overlapping", async () => {
+  test("two runs overlap while the load allows", async () => {
+    config();
+    const log = join(tmp, "overlap.log");
+    const step = (name: string) => ["--", "sh", "-c", `echo start ${name} >> ${log}; sleep 2; echo end ${name} >> ${log}`];
+    const first = spawnCheck(step("a"));
+    await waitFor(() => existsSync(log));
+    const second = spawnCheck(step("b"));
+    expect(await first.exited).toBe(0);
+    expect(await second.exited).toBe(0);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "start b", "end a", "end b"]);
+    expect(tickets()).toEqual([]);
+  }, CHECK_TEST_MS);
+
+  test("with max-parallel 1, two runs take turns instead of overlapping", async () => {
+    config("  max-parallel: 1\n");
     const log = join(tmp, "turns.log");
     const step = (name: string) => ["--", "sh", "-c", `echo start ${name} >> ${log}; sleep 1; echo end ${name} >> ${log}`];
     const first = spawnCheck(step("a"));
@@ -343,11 +362,12 @@ describe("check queue", () => {
     const second = spawnCheck(step("b"));
     expect(await first.exited).toBe(0);
     expect(await second.exited).toBe(0);
-    expect(await new Response(second.stderr).text()).toContain("waiting behind 1 in the queue");
+    expect(await new Response(second.stderr).text()).toContain("waiting behind 1 in the queue (max-parallel 1)");
     expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "end a", "start b", "end b"]);
   }, CHECK_TEST_MS);
 
   test("a nested check inside a held run runs at once", () => {
+    config();
     const r = check(["--", "sh", "-c", `${process.execPath} ${CLI} check -- echo nested`]);
     expect(r.code).toBe(0);
     expect(r.out.trim()).toBe("nested");
@@ -369,7 +389,7 @@ describe("check queue", () => {
   }, CHECK_TEST_MS);
 
   test("a waiter gives up with 75 after wait-seconds", async () => {
-    config("  wait-seconds: 1\n");
+    config("  wait-seconds: 1\n  max-parallel: 1\n");
     const holder = spawnCheck(["--", "sleep", "3"]);
     await waitFor(() => tickets().length === 1);
     const r = check(["--", "true"]);

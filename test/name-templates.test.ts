@@ -41,6 +41,13 @@ describe("config", () => {
     });
   });
 
+  test("reads worklist-jql, keeping an empty one so it can turn the default filter off", () => {
+    expect(parseConfig(pm("  worklist-jql: sprint in openSprints()\n")).projectManagement?.worklistJql).toBe("sprint in openSprints()");
+    expect(parseConfig(pm("  worklist-jql: ''\n")).projectManagement?.worklistJql).toBe("");
+    expect(parseConfig(pm("")).projectManagement?.worklistJql).toBeUndefined();
+    expect(problems(pm("  worklist-jql: [a]\n"))).toContain("worklist-jql");
+  });
+
   test("rejects unknown placeholders and a template with no id", () => {
     expect(problems(pm("  branch: '{type}/{ticket}-{slug}'\n"))).toContain(
       "project-management.branch: unknown placeholder {ticket} (allowed: {id}, {number}, {slug}, {type})",

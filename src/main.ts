@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import * as cmd from "./commands";
 import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
+import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
@@ -13,9 +14,10 @@ import { FINISH_FLAG, finishRemoval } from "./remove";
 import { sweepMerged } from "./merge-sweep";
 import { showTab, start, startStack, startTask } from "./start";
 import { topPanel, topRefresh } from "./top-run";
+import { refreshWorklist, worklistPane } from "./worklist-run";
 import { silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
-import { exec, OverbridgeError } from "./util";
+import { exec, log, OverbridgeError } from "./util";
 
 const START_USAGE =
   "usage: overbridge start <repo> <id> [--prompt text] [--here] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] | overbridge start <repo> --task <slug> --prompt <text>";
@@ -38,6 +40,7 @@ Setup
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
+  overbridge worklist [refresh]                 work list pane (the @work tab); refresh reads every board into its cache
 
 Work items (the repo's project-management provider)
   overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
@@ -68,10 +71,14 @@ Workspaces
                                         overbridge.yml); as it is when the repo has none
   overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>
                                         run a heavy command (lint, typecheck, test, build) in the repo's
-                                        dev shell, one at a time across workspaces, once the load allows;
+                                        dev shell, queued across workspaces, several at once while the load allows;
                                         killed on timeout or when it stops using CPU (check-queue in overbridge.yml)
   overbridge rm <name> [--force]              remove a workspace and its worktrees (the top panel's
-                                        Cleanup button does this once the PR is open and nothing is unpushed)
+                                        Cleanup button does this once the PR is open and nothing is unpushed);
+                                        also removes an orphan: a workspace folder that status does not list
+  overbridge cleanup [--json] [--no-fetch]      report what each workspace and orphan folder is fit for: remove,
+                                        review (unsaved work), rebind, ask or keep. Removes nothing; --dry-run
+                                        is accepted and changes nothing (the cleanup skill acts on the report)
   overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty state
   overbridge whoami                             workspace for the current dir/session
 
@@ -160,6 +167,18 @@ async function main(argv: string[]): Promise<number> {
       diff(cmd.requireWs(values.ws));
       break;
     }
+    case "worklist": {
+      const sub = rest[0];
+      if (sub === "refresh") {
+        const cache = refreshWorklist();
+        log(`worklist: ${cache.rows.length} open item(s)${cache.notes.length ? `; ${cache.notes.join("; ")}` : ""}`);
+      } else if (sub !== undefined) {
+        throw new OverbridgeError("usage: overbridge worklist [refresh]");
+      } else {
+        await worklistPane();
+      }
+      break;
+    }
     case "top": {
       const { values, positionals } = opts(rest, ws);
       if (positionals[0] === "refresh") topRefresh(values.ws);
@@ -190,6 +209,12 @@ async function main(argv: string[]): Promise<number> {
       } else {
         cmd.removeWorkspace(positionals[0]!, !!values.force);
       }
+      break;
+    }
+    case "cleanup": {
+      const { values, positionals } = opts(rest, { json: { type: "boolean" }, "no-fetch": { type: "boolean" }, "dry-run": { type: "boolean" } });
+      if (positionals.length) throw new OverbridgeError("usage: overbridge cleanup [--json] [--no-fetch]");
+      cleanup(values.json ? Format.Json : Format.Table, values["no-fetch"] ? Fetch.No : Fetch.Yes);
       break;
     }
     case "status":

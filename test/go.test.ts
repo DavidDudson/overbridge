@@ -109,25 +109,26 @@ describe("go", () => {
   });
 
   test("switches tab and lands on its claude pane", () => {
-    const z = fakeZellij(["@root", "b", "a"], "a", [claudePane("b", 9)]);
-    expect(go("2", z.exec)).toBe("→ b");
+    const z = fakeZellij(["@root", "@work", "b", "a"], "a", [claudePane("b", 9)]);
+    expect(go("3", z.exec)).toBe("→ b");
     expect(z.actions()).toEqual(["query-tab-names", "current-tab-info", "go-to-tab-name b", "list-panes --json", "focus-pane-id terminal_9"]);
   });
   test("numbers follow the sidebar: orchestration tabs first, then workspaces in tab order", () => {
-    const z = fakeZellij(["@root", "b", "a"], "a");
+    const z = fakeZellij(["@root", "@work", "b", "a"], "a");
     expect(go("1", z.exec)).toBe("→ @root");
-    expect(go("3", z.exec)).toBe("→ a");
+    expect(go("2", z.exec)).toBe("→ @work");
+    expect(go("4", z.exec)).toBe("→ a");
     expect(go("next", z.exec)).toBe("→ @root");
     expect(go("prev", z.exec)).toBe("→ b");
   });
   test("the switch stands when the tab has no claude pane", () => {
-    const z = fakeZellij(["@root", "a", "b"], "a");
+    const z = fakeZellij(["@root", "@work", "a", "b"], "a");
     expect(go("b", z.exec)).toBe("→ b");
     expect(z.actions()).toEqual(["query-tab-names", "current-tab-info", "go-to-tab-name b", "list-panes --json"]);
   });
   test("a bad target or a failed switch is an error", () => {
-    expect(() => go("9", fakeZellij(["@root", "a", "b"], "a").exec)).toThrow("no tab 9: 3 tabs");
-    expect(() => go("next", fakeZellij(["@root", "a", "b"], undefined).exec)).toThrow("not on a tab");
-    expect(() => go("b", fakeZellij(["@root", "a", "b"], "a", [], false).exec)).toThrow("could not switch to b: no such tab");
+    expect(() => go("9", fakeZellij(["@root", "@work", "a", "b"], "a").exec)).toThrow("no tab 9: 4 tabs");
+    expect(() => go("next", fakeZellij(["@root", "@work", "a", "b"], undefined).exec)).toThrow("not on a tab");
+    expect(() => go("b", fakeZellij(["@root", "@work", "a", "b"], "a", [], false).exec)).toThrow("could not switch to b: no such tab");
   });
 });

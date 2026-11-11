@@ -125,6 +125,8 @@ describe("orchestrator: bash", () => {
     "overbridge start app 12 --prompt 'file a ticket for X; then stop'",
     'overbridge start app --task file-x --prompt "file a ticket for X > Y"',
     "overbridge rm old-ws",
+    "overbridge cleanup --json",
+    "overbridge cleanup --dry-run --json; overbridge rm ENG-1; overbridge rm ENG-2",
     "overbridge release app",
     "ws status",
     "cd /w/ws1/app && git log | head -5",

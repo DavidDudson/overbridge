@@ -17,8 +17,9 @@ describe("generated layout", () => {
 
   test("structure: the orchestration tab is sidebar | agent, every workspace tab sidebar | (top panel over agent)", () => {
     const kdl = layoutKdl(["a", "b", "c"], ["overbridge"]);
-    const [orchestration, ...tabs] = kdl.split(/\n(?=  tab )/).slice(1);
+    const [orchestration, work, ...tabs] = kdl.split(/\n(?=  tab )/).slice(1);
     expect([...orchestration!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@root · claude"]);
+    expect([...work!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@work · worklist"]);
     expect(tabs).toHaveLength(3);
     for (const tab of tabs) {
       const order = [...tab.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1]!.replace(/^\w+ · /, ""));

@@ -450,16 +450,21 @@ describe("check queue rows", () => {
   const t = (ws: string, extra = {}) => ({ pid: 1, ws, repo: "app", command: "just test", queuedAtMs: 0, ...extra });
 
   test("nothing when the queue is empty", () => {
-    expect(queueRows({ waiting: [] }, 30, 0)).toEqual([]);
+    expect(queueRows({ running: [], waiting: [] }, 30, 0)).toEqual([]);
   });
 
   test("the running command with its time, then who waits", () => {
-    const rows = queueRows({ running: t("67", { runPid: 9, runningSinceMs: 0 }), waiting: [t("68"), t("70")] }, 40, 83_000);
+    const rows = queueRows({ running: [t("67", { runPid: 9, runningSinceMs: 0 })], waiting: [t("68"), t("70")] }, 40, 83_000);
     expect(plain(rows)).toEqual(["▶ 67 1m23s just test", "⧗ 2 waiting: 68 70"]);
   });
 
+  test("a row for each running command", () => {
+    const running = [t("67", { runPid: 9, runningSinceMs: 0 }), t("68", { runPid: 10, runningSinceMs: 60_000, command: "just lint" })];
+    expect(plain(queueRows({ running, waiting: [t("70")] }, 40, 83_000))).toEqual(["▶ 67 1m23s just test", "▶ 68 23s just lint", "⧗ 1 waiting: 70"]);
+  });
+
   test("the rows take space from the list, so the frame keeps its height", () => {
-    const queue = queueRows({ running: t("67", { runPid: 9, runningSinceMs: 0 }), waiting: [t("68")] }, 26, 5_000);
+    const queue = queueRows({ running: [t("67", { runPid: 9, runningSinceMs: 0 })], waiting: [t("68")] }, 26, 5_000);
     const rows = renderSidebar(list, 0, 0, 20, 30, undefined, 0, "", queue);
     expect(rows).toHaveLength(20);
     expect(rows.join("\n")).toContain("▶ 67 5s just test");

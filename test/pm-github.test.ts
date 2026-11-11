@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ItemStatus } from "../src/pm/provider";
 import { githubProvider, type Runner } from "../src/pm/github";
 import { providerFor, registerBuiltins } from "../src/pm";
 import { clearProviders } from "../src/pm/registry";
@@ -51,6 +52,13 @@ describe("owner/repo project", () => {
     const { runner, calls } = stub({ "issue view": { stdout: "Fix login" } });
     expect(githubProvider(repoCfg, "/w", runner).title("12")).toBe("Fix login");
     expect(calls[0]).toEqual(["gh", "issue", "view", "12", "-R", "acme/app", "--json", "title", "-q", ".title"]);
+  });
+
+  test("status reads a closed issue as done", () => {
+    const status = (reply: { ok?: boolean; stdout?: string }) => githubProvider(repoCfg, "/w", stub({ "issue view": reply }).runner).status("#12");
+    expect(status({ stdout: "CLOSED" })).toBe(ItemStatus.Done);
+    expect(status({ stdout: "OPEN" })).toBe(ItemStatus.Open);
+    expect(status({ ok: false })).toBeUndefined();
   });
 
   test("title is undefined when gh fails", () => {
