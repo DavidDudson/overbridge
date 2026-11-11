@@ -31,6 +31,8 @@ export interface ProjectManagement {
   branchTypes?: Record<string, string>;
   /** Issue type for new items (Jira). Unset means `Task`. */
   issueType?: string;
+  /** JQL that narrows the work list's Jira query. Unset means `DEFAULT_WORKLIST_JQL`; empty means no narrowing. */
+  worklistJql?: string;
 }
 
 export const BRANCH_PLACEHOLDERS = ["id", "number", "slug", "type"] as const;
@@ -150,7 +152,7 @@ const TOP_KEYS = ["version", "project-management", "apps", "commands", "review",
 const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "timeout-seconds", "stall-seconds", "wait-seconds"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
-const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type"];
+const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
 
 function distance(a: string, b: string): number {
@@ -361,6 +363,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       const workspace = p.string(pm, "workspace", "project-management", false);
       if (workspace) for (const problem of templateProblems(workspace, WORKSPACE_PLACEHOLDERS, true)) p.add("project-management.workspace", problem);
       const issueType = p.string(pm, "issue-type", "project-management", false);
+      const worklistJql = pm["worklist-jql"] === "" ? "" : p.string(pm, "worklist-jql", "project-management", false);
       let branchTypes: Record<string, string> | undefined;
       const types = pm["branch-types"];
       if (types !== undefined && types !== null) {
@@ -383,6 +386,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
           ...(workspace ? { workspace } : {}),
           ...(branchTypes ? { branchTypes } : {}),
           ...(issueType ? { issueType } : {}),
+          ...(worklistJql !== undefined ? { worklistJql } : {}),
         };
       }
     }

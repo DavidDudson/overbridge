@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { loadRepos } from "./config";
 import { metaDir } from "./paths";
 import { githubRows, slugFromUrl } from "./pm/board-github";
+import { jiraRows } from "./pm/board-jira";
 import { rank, type Ranked, type WorkRow } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
+import type { ProjectManagement } from "./project-config";
 import { committedConfig } from "./start";
 import { bold, boxBottom, boxRow, boxTop, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN, type Color } from "./term";
 
@@ -17,7 +19,7 @@ export const WORKLIST_REFRESH_MS = 60_000;
 export interface WorklistCache {
   at: number;
   rows: WorkRow[];
-  /** One line per repo that could not be read or is not supported yet. */
+  /** One line per repo or Jira project that could not be read. */
   notes: string[];
 }
 
@@ -38,28 +40,91 @@ function writeWorklist(cache: WorklistCache) {
   renameSync(tmp, cacheFile());
 }
 
-/** Read every registered repo's board into the cache. A repo that fails adds a note and does not stop the rest. */
+/** One board read: a GitHub repo, or a Jira project shared by every repo that names it. */
+export type BoardSource =
+  | { kind: "github"; repo: string; slug: string }
+  | { kind: "jira"; project: string; repos: string[]; filter?: string; site?: string };
+
+export interface RepoBoard {
+  repo: string;
+  url: string;
+  pm?: ProjectManagement;
+}
+
+/**
+ * The reads a refresh makes. Repos on the same Jira project and filter share one read, so a ticket is listed once
+ * however many repos it could land in.
+ */
+export function boardSources(repos: readonly RepoBoard[]): { sources: BoardSource[]; notes: string[] } {
+  const withPm = repos.filter((r): r is RepoBoard & { pm: ProjectManagement } => r.pm !== undefined);
+  const github = withPm
+    .filter((r) => r.pm.name === "github")
+    .map((r) => ({ r, slug: slugFromUrl(r.url) ?? (/^[\w.-]+\/[\w.-]+$/.test(r.pm.project) ? r.pm.project : undefined) }));
+  const jiraRepos = withPm.filter((r) => r.pm.name === "jira");
+  const jiraGroups = Map.groupBy(jiraRepos, (r) => JSON.stringify([r.pm.project.toUpperCase(), r.pm.worklistJql ?? null, r.pm.url ?? null]));
+  const jira = [...jiraGroups.values()].map((group): BoardSource => {
+    const pm = group[0]!.pm;
+    return {
+      kind: "jira",
+      project: pm.project.toUpperCase(),
+      repos: group.map((r) => r.repo),
+      ...(pm.worklistJql !== undefined ? { filter: pm.worklistJql } : {}),
+      ...(pm.url ? { site: pm.url } : {}),
+    };
+  });
+  return {
+    sources: [...github.flatMap(({ r, slug }): BoardSource[] => (slug ? [{ kind: "github", repo: r.repo, slug }] : [])), ...jira],
+    notes: github.filter((g) => !g.slug).map(({ r }) => `${r.repo}: cannot tell the GitHub repo from ${r.url}`),
+  };
+}
+
+export interface BoardReaders {
+  github: (slug: string, repo: string) => WorkRow[];
+  jira: (project: string, repos: string[], opts: { filter?: string; site?: string }) => WorkRow[];
+}
+
+const defaultReaders: BoardReaders = { github: (slug, repo) => githubRows(slug, repo), jira: (project, repos, opts) => jiraRows(project, repos, opts) };
+
+const sourceName = (s: BoardSource) => (s.kind === "github" ? s.repo : s.project);
+
+/** Read every source. A source that fails adds a note and does not stop the rest. */
+export function readBoards(sources: readonly BoardSource[], readers: BoardReaders = defaultReaders): { rows: WorkRow[]; notes: string[] } {
+  const results = sources.map((s): { rows: WorkRow[]; notes: string[] } => {
+    try {
+      const rows = s.kind === "github" ? readers.github(s.slug, s.repo) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
+      return { rows, notes: [] };
+    } catch (e) {
+      return { rows: [], notes: [`${sourceName(s)}: ${(e as Error).message.split("\n")[0]}`] };
+    }
+  });
+  return { rows: results.flatMap((r) => r.rows), notes: results.flatMap((r) => r.notes) };
+}
+
+/** Read every registered repo's board into the cache. A repo whose config cannot be read adds a note. */
 export function refreshWorklist(now = Date.now()): WorklistCache {
-  const rows: WorkRow[] = [];
-  const notes: string[] = [];
-  for (const spec of Object.values(loadRepos())) {
+  const configs = Object.values(loadRepos()).map((spec): RepoBoard | string => {
     try {
       const pm = committedConfig(spec).projectManagement;
-      if (!pm) continue;
-      if (pm.name !== "github") {
-        notes.push(`${spec.name}: ${pm.name} board not read yet`);
-        continue;
-      }
-      const slug = slugFromUrl(spec.url) ?? (/^[\w.-]+\/[\w.-]+$/.test(pm.project) ? pm.project : undefined);
-      if (!slug) notes.push(`${spec.name}: cannot tell the GitHub repo from ${spec.url}`);
-      else rows.push(...githubRows(slug, spec.name));
+      return { repo: spec.name, url: spec.url, ...(pm ? { pm } : {}) };
     } catch (e) {
-      notes.push(`${spec.name}: ${(e as Error).message.split("\n")[0]}`);
+      return `${spec.name}: ${(e as Error).message.split("\n")[0]}`;
     }
-  }
-  const cache = { at: now, rows, notes };
+  });
+  const planned = boardSources(configs.filter((c): c is RepoBoard => typeof c !== "string"));
+  const read = readBoards(planned.sources);
+  const cache = { at: now, rows: read.rows, notes: [...configs.filter((c): c is string => typeof c === "string"), ...planned.notes, ...read.notes] };
   writeWorklist(cache);
   return cache;
+}
+
+/** The prompt shown while choosing which repo to start an item in. Digits pick; the list is at most nine long. */
+export const repoPrompt = (key: string, repos: readonly string[]) =>
+  `start ${key} in: ${repos.slice(0, 9).map((r, i) => `${i + 1} ${r}`).join("  ")}   esc cancel`;
+
+/** The repo a digit key picks from `repos`, or undefined when the key is not one of the offered digits. */
+export function pickRepo(key: string, repos: readonly string[]): string | undefined {
+  const n = /^[1-9]$/.test(key) ? Number(key) : 0;
+  return n > 0 && n <= Math.min(9, repos.length) ? repos[n - 1] : undefined;
 }
 
 const STATUS_COLOR: Record<string, Color> = { todo: "grey", "in-progress": "yellow", blocked: "red", done: "green" };
@@ -94,6 +159,8 @@ export async function worklistPane() {
   let offset = 0;
   let message = "";
   let busy = false;
+  /** The item waiting for a repo choice, when it can be started in more than one. */
+  let picking: Ranked | undefined;
   const ranked = () => rank(cache.rows);
 
   const draw = () => {
@@ -133,20 +200,42 @@ export async function worklistPane() {
   process.stdout.write(ENTER_SCREEN);
   process.stdin.setRawMode?.(true);
   process.stdin.setEncoding("utf8");
+  const startIn = async (repo: string, item: Ranked) => {
+    message = `starting ${item.key} in ${repo}…`;
+    draw();
+    const footer = await runStart(repo, item.id);
+    message = footer.kind === FooterKind.Error ? `error: ${footer.message}` : `started ${item.key} in ${repo}`;
+  };
+
   process.stdin.on("data", async (data: string) => {
     for (const input of decodeInput(data)) {
       if (input.kind !== "key") continue;
       const list = ranked();
+      if (picking) {
+        const item = picking;
+        const repo = pickRepo(input.key, item.repos ?? []);
+        if (repo) {
+          picking = undefined;
+          await startIn(repo, item);
+        } else if (input.key === "escape" || input.key === "q" || input.key === "ctrl-c") {
+          picking = undefined;
+          message = "";
+        }
+        continue;
+      }
       if (input.key === "q" || input.key === "ctrl-c") quit();
       else if (input.key === "j" || input.key === "down") selected = Math.min(list.length - 1, selected + 1);
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
       else if (input.key === "r") refresh();
       else if (input.key === "s" && list[selected]) {
         const item = list[selected]!;
-        message = `starting ${item.key}…`;
-        draw();
-        const footer = await runStart(item.repo, item.id);
-        message = footer.kind === FooterKind.Error ? `error: ${footer.message}` : `started ${item.key}`;
+        const repos = item.repos ?? [item.repo];
+        if (repos.length === 1) {
+          await startIn(repos[0]!, item);
+        } else {
+          picking = item;
+          message = repoPrompt(item.key, repos);
+        }
       }
     }
     draw();
