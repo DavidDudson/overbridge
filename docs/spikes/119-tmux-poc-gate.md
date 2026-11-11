@@ -29,7 +29,7 @@ Config under test (`119-tmux-poc/tmux.conf`): `prefix None`, `status off`, `mous
 | Truecolour | Pass | `ESC[38;2;10;20;30m` and italics (`SGR 3`) reach the outer terminal; pane `$TERM` is `tmux-256color` |
 | Hidden-window CPU | Pass | 28 windows, 82 panes, each redrawing 20 rows 5x/s, one client attached: server 6.6 % of a core over 30 s, 36 MB RSS, 1 thread (spike benchmark C: 7.6 %) |
 | OSC title with `allow-set-title off` | Pass | A pane that prints `ESC]2;HIJACK BEL` and `ESC]0;...` keeps the title set with `select-pane -T`. Control with `allow-set-title on` becomes `HIJACK` |
-| Exact-name target for `@root` | Pass | `-t 'workspaces:=@root'` resolves to the window named `@root` (`@0`) |
+| Exact-name target for `@root` | **Fail** | `select-window`, `split-window` and `select-pane` with `-t 'workspaces:=@root'` all report `can't find window: @root`; tmux reads a leading `@` as a window id even after `=`. Only `display-message` seemed to accept it, by falling back to the active window. Use the window id (`#{window_id}` from `list-windows -F`) or the index. The spike's `=`-prefix advice does not work for orchestration tabs |
 
 Other observations:
 
@@ -51,4 +51,4 @@ Other observations:
 ## Consequences for #120
 
 - Use the config above as the generated tmux conf; no change to the migration outline.
-- The adapter's `listPanes` must key on titles it set itself, and every orchestration name must be `=`-prefixed.
+- The adapter's `listPanes` must key on titles it set itself, and every window must be addressed by id or index, never by name (the `=`-prefix advice in the spike fails for `@root` and `@work`).
