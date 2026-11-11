@@ -10,7 +10,8 @@ import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
 import { barePath, currentWorkspace, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, sessionName, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
 import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, workspaceSettingsPath } from "./scaffold";
-import { openTab, TabFocus, type ZellijExec } from "./tab";
+import { defaultMux, layoutPath, type Mux, MuxKind, tmuxConfPath } from "./mux";
+import { openTab, TabFocus } from "./tab";
 import { runCheck } from "./check-queue";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
@@ -59,10 +60,10 @@ export function sync() {
   }
 }
 
-export function newWorkspace(name: string | undefined, repos: string[], exec?: ZellijExec) {
+export function newWorkspace(name: string | undefined, repos: string[], mux?: Mux) {
   if (!name) fail("usage: overbridge new <name> [-r repo]... (name it for its work item, e.g. ENG-123 or gh-app-12)");
   createWorkspace(name, repos);
-  openTab(name, undefined, TabFocus.Background, exec);
+  openTab(name, undefined, TabFocus.Background, mux);
   console.log(name);
 }
 
@@ -331,54 +332,49 @@ function workspaceNames(): string[] {
 }
 
 /** Print the layout `up` would use; stderr says whether it is the user's file or the generated one. */
-export function layout() {
-  const choice = chooseLayout(workspaceNames(), selfCommand());
+export function layout(mux: Mux = defaultMux()) {
+  const choice = chooseLayout(workspaceNames(), selfCommand(), mux.kind);
   if (choice.source === "user") {
     log(`layout: ${choice.path} (user file, replaces the generated layout)`);
     process.stdout.write(readFileSync(choice.path, "utf8"));
   } else {
-    log(`layout: generated (a file at ${userLayoutPath()} would replace it)`);
-    process.stdout.write(choice.kdl);
+    log(mux.kind === MuxKind.Tmux ? "layout: generated tmux script" : `layout: generated (a file at ${userLayoutPath()} would replace it)`);
+    process.stdout.write(choice.text);
   }
 }
 
-export function up(fresh: boolean) {
-  if (process.env.ZELLIJ) fail("already inside zellij; detach first");
+export function up(fresh: boolean, mux: Mux = defaultMux()) {
+  if (mux.inSession()) fail(`already inside ${mux.kind}; detach first`);
   const names = workspaceNames();
   names.forEach(scaffold);
-  const choice = chooseLayout(names, selfCommand());
+  const session = sessionName();
+  const choice = chooseLayout(names, selfCommand(), mux.kind, session);
   let file: string;
   if (choice.source === "user") file = choice.path;
   else {
-    file = join(metaDir(), "layout.kdl");
-    writeFileSync(file, choice.kdl);
+    file = layoutPath(mux.kind);
+    writeFileSync(file, choice.text);
+    if (choice.conf !== undefined) writeFileSync(tmuxConfPath(), choice.conf);
   }
 
-  const session = sessionName();
-  const sessions = run(["zellij", "list-sessions", "--short", "--no-formatting"]).stdout.split("\n");
-  let exists = sessions.includes(session);
+  let exists = mux.sessionExists(session);
   if (exists && fresh) {
-    run(["zellij", "kill-session", session]);
-    run(["zellij", "delete-session", "--force", session]);
+    mux.killSession(session);
     exists = false;
   }
   if (exists) log(`attaching to ${session} (use \`overbridge up --fresh\` to rebuild the layout)`);
-  process.exit(
-    exists
-      ? exec(["zellij", "attach", session])
-      : exec(["zellij", "--session", session, "--new-session-with-layout", file]),
-  );
+  process.exit(exec(exists ? mux.attachCommand(session) : mux.createCommand(session, file)));
 }
 
 /** Name of the empty workspace `spinup` creates when there are none. */
 export const SCRATCH = "scratch";
 
 /** Rebuild the session over the existing workspaces; with none, create an empty scratch one first. */
-export function spinup() {
-  if (process.env.ZELLIJ) fail("already inside zellij; detach first");
+export function spinup(mux: Mux = defaultMux()) {
+  if (mux.inSession()) fail(`already inside ${mux.kind}; detach first`);
   init();
   if (!Object.keys(readState().workspaces).length) createWorkspace(SCRATCH, []);
-  up(true);
+  up(true, mux);
 }
 
 /**

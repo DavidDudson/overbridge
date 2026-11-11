@@ -6,7 +6,8 @@ import { agentStateFile, EndReason, readAgentState } from "../src/agent-state";
 import { clearCompact, COMPACT_MARKER_MS, markCompact, nextState, recordState, takeCompactRestart } from "../src/agent-hook";
 import { limitColor, limitRows, readLimits, timeLeft, WEEK_SECS } from "../src/limits";
 import { landingTab, pickNext } from "../src/next";
-import { findPane, togglePane, type ZellijPane } from "../src/panes";
+import { zellijMux } from "../src/mux";
+import { findPane, togglePane } from "../src/panes";
 import { fit, textWidth } from "../src/term";
 import { withState } from "../src/state";
 
@@ -127,24 +128,26 @@ describe("pane toggles", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
+  /** A pane as `zellij action list-panes --json` reports it. */
+  type ZellijPane = { id: number; title: string; tab_name: string; exited?: boolean; is_plugin?: boolean };
   const pane = (id: number, kind: string, extra: Partial<ZellijPane> = {}): ZellijPane => ({ id, title: `w1 · ${kind}`, tab_name: "w1", ...extra });
   const fake = (panes: ZellijPane[]) => {
     const calls: string[][] = [];
-    return {
-      calls,
-      deps: {
-        self: ["ob"],
-        zellij: (args: string[]) => {
-          calls.push(args);
-          return args[0] === "list-panes" ? JSON.stringify(panes) : "terminal_9";
-        },
-      },
+    const exec = (cmd: string[]) => {
+      const args = cmd.slice(2);
+      calls.push(args);
+      return { ok: true, stdout: args[0] === "list-panes" ? JSON.stringify(panes) : "terminal_9" };
     };
+    return { calls, deps: { self: ["ob"], mux: zellijMux(exec) } };
   };
 
-  test("findPane matches tab and title, and skips exited or plugin panes", () => {
-    const panes = [pane(1, "claude"), pane(2, "terminal", { exited: true }), pane(3, "terminal", { tab_name: "w2" }), pane(4, "diff", { is_plugin: true })];
-    expect(findPane(panes, "w1", "claude")?.id).toBe(1);
+  test("findPane matches tab and title, and skips exited panes", () => {
+    const panes = [
+      { id: "1", title: "w1 · claude", tab: "w1", exited: false },
+      { id: "2", title: "w1 · terminal", tab: "w1", exited: true },
+      { id: "3", title: "w1 · terminal", tab: "w2", exited: false },
+    ];
+    expect(findPane(panes, "w1", "claude")?.id).toBe("1");
     expect(findPane(panes, "w1", "terminal")).toBeUndefined();
     expect(findPane(panes, "w1", "diff")).toBeUndefined();
   });

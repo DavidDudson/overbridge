@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { newOrchestrationTabKdl } from "../src/layout";
+import { zellijMux } from "../src/mux";
 import { ORCHESTRATION_TABS } from "../src/orchestration";
 import { ensureOrchestrationTabs, QUICK_EXIT_MS, REOPEN_LOCK_STALE_MS, reopenLockPath, restartAfter } from "../src/orchestration-keep";
 
@@ -49,7 +50,7 @@ function fakeZellij(initial: string[], focused = initial.at(-1) ?? "") {
   return { tabs, calls, state, exec };
 }
 
-const deps = (exec: ReturnType<typeof fakeZellij>["exec"]) => ({ exec, sleep: () => {}, kdl: () => "layout {}" });
+const deps = (exec: ReturnType<typeof fakeZellij>["exec"]) => ({ mux: zellijMux(exec), sleep: () => {} });
 const opened = (calls: string[][]) => calls.filter((c) => c[2] === "new-tab").length;
 
 describe("ensureOrchestrationTabs", () => {

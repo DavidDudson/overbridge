@@ -32,6 +32,13 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   transcript for its folder. A file at
   `<zellij config dir>/layouts/overbridge.kdl` replaces the generated layout;
   `overbridge layout` prints what would be used and where it came from.
+- **zellij or tmux.** Everything that drives the terminal multiplexer goes through one adapter (`src/mux.ts`), so
+  zellij and tmux both work. zellij is the default; set `OVERBRIDGE_MUX=tmux` to build the session in tmux instead
+  (inside a session, whichever multiplexer you are in is used). With tmux, `overbridge layout` prints a tmux command
+  script rather than KDL and there is no user layout file. `overbridge up` starts the server with a generated config
+  (`.overbridge/tmux.conf`): no prefix key, no status bar, mouse on, extended keys on so Shift+Enter and Ctrl+Enter
+  reach Claude, and pane titles left alone. Its only bindings are Alt+1…9, Alt+`,`, Alt+`.` and Alt+w, which run
+  `overbridge go` and `overbridge next`.
 
 ## Quick start
 
@@ -131,7 +138,7 @@ Run `overbridge help` for every command.
   repos.toml                registry: [repos.<name>] url, default_branch?
   .bare/<repo>.git          bare clones (refspec → refs/remotes/origin/*)
   .overbridge/state.json    claims, lock-protected (.overbridge/state.lock)
-  .overbridge/layout.kdl    generated zellij layout (plus agent/, top/, apps state)
+  .overbridge/layout.kdl    generated zellij layout (layout.tmux and tmux.conf under tmux; plus agent/, top/, apps state)
   .overbridge/check-queue/  one ticket per queued or running `overbridge check`
   <ws>/                     named for its work item, e.g. gh-app-12
     CLAUDE.md               generated workspace rules
@@ -207,7 +214,7 @@ file gets no output and carries on as written.
 
 ## Install
 
-overbridge runs on [Bun](https://bun.sh) 1.3 or later and needs `git`, `gh`, and `zellij` on PATH.
+overbridge runs on [Bun](https://bun.sh) 1.3 or later and needs `git`, `gh`, and `zellij` (or `tmux`) on PATH.
 
 ### npm, from GitHub Packages
 
@@ -248,7 +255,8 @@ treat it as a guardrail there too, not a sandbox.
 | ------------ | -------------- | ------------------------------------------ |
 | `OVERBRIDGE_ROOT`    | `~/workspaces` | workspaces root                            |
 | `OVERBRIDGE_NAME`    | –              | binds the process to a workspace (Claude)  |
-| `OVERBRIDGE_SESSION` | `workspaces`   | zellij session name                        |
+| `OVERBRIDGE_SESSION` | `workspaces`   | session name (zellij or tmux)              |
+| `OVERBRIDGE_MUX`     | `zellij`       | `tmux` builds the session in tmux          |
 | `OVERBRIDGE_SELF`    | script path    | how generated hooks/layouts invoke `overbridge` |
 
 ## Limits

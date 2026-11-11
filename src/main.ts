@@ -93,11 +93,11 @@ Branches & PRs (workspace inferred from $OVERBRIDGE_NAME or cwd)
   overbridge release [repo]                     drop claim, detach worktree in place
   overbridge pr [repo]                          record the open PR; claim follows HEAD within a stack
 
-Zellij
+Session (zellij by default; OVERBRIDGE_MUX=tmux for tmux)
   overbridge spinup                             rebuild the session (creates an empty 'scratch' workspace if none)
   overbridge up [--fresh]                       attach/launch session: the orchestration tabs (@root: Claude in
                                         the root, guarded to coordinate only), then one tab per workspace
-  overbridge layout                             print the generated zellij layout
+  overbridge layout                             print the generated layout (zellij KDL, or a tmux script)
   overbridge claude <name|@tab> [-- args]       run Claude bound to a workspace, or an orchestration tab's Claude
 
 Hooks

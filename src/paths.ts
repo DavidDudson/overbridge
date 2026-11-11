@@ -28,7 +28,7 @@ export function envVar(name: "ROOT" | "NAME" | "SELF" | "SESSION"): string | und
   return legacy;
 }
 
-/** The zellij session `up` creates and `go` targets from outside it: `$OVERBRIDGE_SESSION`, else `workspaces`. */
+/** The multiplexer session `up` creates and `go` targets from outside it: `$OVERBRIDGE_SESSION`, else `workspaces`. */
 export const sessionName = () => envVar("SESSION") ?? "workspaces";
 
 /**

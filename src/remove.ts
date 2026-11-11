@@ -6,11 +6,12 @@ import { removeWorkspace } from "./commands";
 import { landingTab } from "./next";
 import { isOrchestrationTab, orchestrationRemoveMessage } from "./orchestration";
 import { metaDir, root, selfCommand } from "./paths";
-import { currentTab, entries, switchTab, tabOrder } from "./sidebar";
+import { defaultMux, type Mux } from "./mux";
+import { entries, switchTab } from "./sidebar";
 import { openTab } from "./tab";
 import { getWorkspace, isRemoving, readState, withState } from "./state";
 import { cleanable, noUnsavedWork, readTopCache, refreshTop, sidebarLabel, snapshotTop } from "./top";
-import { fail, type RunResult, run } from "./util";
+import { fail } from "./util";
 
 /** The internal `rm` flag that runs `finishRemoval` in the detached worker. */
 export const FINISH_FLAG = "background-finish";
@@ -21,17 +22,14 @@ const TAB_GONE_TIMEOUT_MS = 5_000;
 export const removeLogPath = (ws: string) => join(metaDir(), "remove", `${ws}.log`);
 
 export interface RemovalDeps {
-  exec: (cmd: string[]) => RunResult;
+  mux: Mux;
   /** Start the background worker for `ws`, detached so it outlives this tab; returns its pid. */
   spawnWorker: (ws: string) => number;
-  /** Whether this runs inside zellij, so there is a tab to switch away from and close. */
-  inZellij: boolean;
 }
 
 export const defaultDeps = (): RemovalDeps => ({
-  exec: (cmd) => run(cmd),
+  mux: defaultMux(),
   spawnWorker: spawnFinishWorker,
-  inZellij: !!process.env.ZELLIJ,
 });
 
 function spawnFinishWorker(ws: string): number {
@@ -60,18 +58,6 @@ function spawnFinishWorker(ws: string): number {
 export const Landing = { Always: "always", IfFocused: "if-focused" } as const;
 export type Landing = (typeof Landing)[keyof typeof Landing];
 
-/** Tab name → stable tab id, from `zellij action list-tabs` (`TAB_ID POSITION NAME` rows under a header). */
-export function parseTabIds(listTabs: string): Map<string, string> {
-  return new Map(
-    listTabs
-      .split("\n")
-      .flatMap((line) => {
-        const m = /^\s*(\d+)\s+\d+\s+(.+?)\s*$/.exec(line);
-        return m ? [[m[2]!, m[1]!] as const] : [];
-      }),
-  );
-}
-
 /**
  * Remove `ws` without making the user wait: refuse at once when git holds unsaved work, otherwise mark it
  * removing (every sidebar hides it), start the worker that does the slow part, switch to the landing tab
@@ -91,7 +77,7 @@ export function beginRemoval(ws: string, opts: { previous?: string; landing?: La
   if (!noUnsavedWork(ws)) {
     return `${ws} has uncommitted changes or unpushed commits; not removing`;
   }
-  const list = deps.inZellij ? entries() : [];
+  const list = deps.mux.inSession() ? entries() : [];
   // several sidebars can start the same automatic removal at once, so the check and the mark share one lock
   const claimed = withState((s) => {
     const current = getWorkspace(s, ws);
@@ -112,27 +98,25 @@ export function beginRemoval(ws: string, opts: { previous?: string; landing?: La
       s.workspaces[ws] = { ...current, removing: { ...current.removing, pid } };
     }
   });
-  if (deps.inZellij) {
-    const switchAway = opts.landing !== Landing.IfFocused || currentTab(deps.exec) === ws;
-    leaveTab(ws, switchAway ? landingTab(list, ws, opts.previous) : undefined, deps.exec);
+  if (deps.mux.inSession()) {
+    const switchAway = opts.landing !== Landing.IfFocused || deps.mux.currentTab() === ws;
+    leaveTab(ws, switchAway ? landingTab(list, ws, opts.previous) : undefined, deps.mux);
   }
   return undefined;
 }
 
 /** Switch to `landing` first, then close `ws`'s tab by id, so the close never depends on which tab has focus. */
-export function leaveTab(ws: string, landing: string | undefined, exec: RemovalDeps["exec"]) {
+export function leaveTab(ws: string, landing: string | undefined, mux: Mux) {
   if (landing !== undefined) {
-    switchTab(landing, exec);
+    switchTab(landing, mux);
   }
-  const id = parseTabIds(exec(["zellij", "action", "list-tabs"]).stdout).get(ws);
-  if (id !== undefined) {
-    exec(["zellij", "action", "close-tab-by-id", id]);
-  }
+  mux.closeTab(ws);
 }
 
 function waitTabGone(ws: string) {
   const deadline = Date.now() + TAB_GONE_TIMEOUT_MS;
-  while (tabOrder().includes(ws) && Date.now() < deadline) {
+  const mux = defaultMux();
+  while (mux.tabs().includes(ws) && Date.now() < deadline) {
     Bun.sleepSync(100);
   }
 }
@@ -146,7 +130,7 @@ export async function finishRemoval(ws: string): Promise<void> {
   const label = sidebarLabel(ws, readTopCache(ws));
   const cause = readState().workspaces[ws]?.removing?.cause ?? CleanupCause.Cleanup;
   try {
-    if (process.env.ZELLIJ) {
+    if (defaultMux().inSession()) {
       waitTabGone(ws);
     }
     refreshTop(ws);
@@ -181,7 +165,7 @@ function restore(ws: string, error: string) {
     s.workspaces[ws] = { ...rest, removeError: error };
     return true;
   });
-  if (kept && process.env.ZELLIJ) {
+  if (kept && defaultMux().inSession()) {
     openTab(ws);
   }
 }

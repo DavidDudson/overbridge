@@ -16,6 +16,7 @@ import { isIceboxed, isRemoving, isWorkspaceState, RemovalBlock, readState, type
 import { claimSweep, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache, readTopCacheChecked, sidebarLabel } from "./top";
+import { defaultMux, type Mux } from "./mux";
 import { currentTab, tabOrder } from "./tab";
 import { createPainter, readView, shouldPoll } from "./zellij-view";
 import { errorMessage, naturalSort, run, spawnCwd } from "./util";
@@ -331,7 +332,7 @@ export function gather(readers: SidebarReaders, inner: number, last: Model): Mod
   }
   const stateUnreadable = faults.length > 0;
   const state = stateUnreadable ? last.state : read.state;
-  const order = attempt("zellij tabs", readers.tabOrder, []);
+  const order = attempt("tabs", readers.tabOrder, []);
   attempt("orchestration tabs", () => readers.keepOrchestration(order), undefined);
   if (!stateUnreadable) {
     attempt("merge sweep", readers.sweep, undefined);
@@ -509,7 +510,7 @@ export function startError(repo: string, id: string, result: Finished): string {
 
 /**
  * Run `overbridge start <repo> <id>` as a child process, so its git fetch does not freeze the pane and its
- * output does not draw over it. The child inherits `ZELLIJ`, so it opens the new tab or focuses an existing one.
+ * output does not draw over it. The child inherits the session's environment, so it opens the new tab or focuses an existing one.
  * Resolves to the footer to show next: the legend on success, the error otherwise.
  */
 export async function runStart(repo: string, id: string, spawn: Spawner = spawnAsync): Promise<Footer> {
@@ -594,7 +595,7 @@ export function stepFor(input: Input, current: number, offset: number, heights: 
 }
 
 /**
- * The tab a digit held by `self`'s sidebar goes to once the wait runs out. None when `focused` (the tab zellij has
+ * The tab a digit held by `self`'s sidebar goes to once the wait runs out. None when `focused` (the tab the multiplexer has
  * focused now) is another one, so leaving the tab some other way drops the digit instead of pulling you back.
  */
 export function commitDigit(pending: string, list: Entry[], self: string, focused: string | undefined): number | undefined {
@@ -604,11 +605,11 @@ export function commitDigit(pending: string, list: Entry[], self: string, focuse
   return inRange(Number(pending) - 1, list.length, list.findIndex((e) => e.tab === self));
 }
 
-/** Each sidebar records its zellij pane id here, so another tab's sidebar can focus it. */
+/** Each sidebar records its multiplexer pane id here, so another tab's sidebar can focus it. */
 const paneFile = (ws: string) => join(metaDir(), "sidebars", ws);
 
 function registerPane(ws: string) {
-  const id = process.env.ZELLIJ_PANE_ID;
+  const id = defaultMux().ownPaneId();
   if (id === undefined) return;
   mkdirSync(join(metaDir(), "sidebars"), { recursive: true });
   writeFileSync(paneFile(ws), id);
@@ -623,36 +624,35 @@ const sidebarPane = (ws: string): string | undefined => {
 };
 
 /**
- * Switch to `tab` and focus its sidebar; false when zellij could not go to the tab. Focusing the sidebar exits 2
- * when it already has focus, so its result is ignored.
+ * Switch to `tab` and focus its sidebar; false when the multiplexer could not go to the tab. Focusing a sidebar
+ * that already has focus can fail, so its result is ignored.
  */
-export function switchTab(tab: string, exec: (cmd: string[]) => { ok: boolean } = (cmd) => run(cmd)): boolean {
-  const went = exec(["zellij", "action", "go-to-tab-name", tab]).ok;
-  if (!went) {
+export function switchTab(tab: string, mux: Mux = defaultMux()): boolean {
+  if (!mux.goToTab(tab).ok) {
     return false;
   }
   const pane = sidebarPane(tab);
   if (pane !== undefined) {
-    exec(["zellij", "action", "focus-pane-id", `terminal_${pane}`]);
+    mux.focusPane(pane);
   }
   return true;
 }
 
 /** Go from `self` to `tab`, picked any way but ← and →, recording the visit in the session's history. */
-export function visitTab(self: string, tab: string, exec?: (cmd: string[]) => { ok: boolean }): boolean {
+export function visitTab(self: string, tab: string, mux?: Mux): boolean {
   const before = readHistory();
-  return moveWithHistory(before, visit(before, self), () => switchTab(tab, exec));
+  return moveWithHistory(before, visit(before, self), () => switchTab(tab, mux));
 }
 
 /** ← or → from `self`, skipping tabs no longer in `list`; false when there is nowhere to go or the switch failed. */
-export function travelTab(self: string, way: Travel, list: Entry[], exec?: (cmd: string[]) => { ok: boolean }): boolean {
+export function travelTab(self: string, way: Travel, list: Entry[], mux?: Mux): boolean {
   const before = readHistory();
   const moved = travel(before, way, self, new Set(list.map((e) => e.tab)));
   if (moved.target === undefined) {
     return false;
   }
   const target = moved.target;
-  return moveWithHistory(before, moved.history, () => switchTab(target, exec));
+  return moveWithHistory(before, moved.history, () => switchTab(target, mux));
 }
 
 /** `overbridge sidebar [--ws]`. `q` or Ctrl-C quits. */

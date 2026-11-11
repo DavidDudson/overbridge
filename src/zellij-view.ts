@@ -1,11 +1,11 @@
 import { mkdirSync, readFileSync, renameSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { metaDir } from "./paths";
-import { currentTab, tabOrder, type ZellijExec, zellijQuery } from "./tab";
+import { defaultMux, type Mux } from "./mux";
 
 /**
- * One shared copy of zellij's tab order and focused tab, so every sidebar and top panel reads a file
- * instead of starting its own zellij client each poll. One reader per `VIEW_MAX_AGE_MS` refreshes it.
+ * One shared copy of the multiplexer's tab order and focused tab, so every sidebar and top panel reads a file
+ * instead of starting its own client each poll. One reader per `VIEW_MAX_AGE_MS` refreshes it.
  */
 
 /** How old the shared view may be before a reader refreshes it. */
@@ -23,7 +23,7 @@ export interface ZellijView {
 export interface ViewDeps {
   dir?: string;
   nowMs?: number;
-  exec?: ZellijExec;
+  mux?: Mux;
 }
 
 const EMPTY_VIEW: ZellijView = { order: [], atMs: 0 };
@@ -87,9 +87,9 @@ export function readView(deps: ViewDeps = {}): ZellijView {
     if (!claimViewRefresh(dir, nowMs)) {
       return cached ?? EMPTY_VIEW;
     }
-    const exec = deps.exec ?? zellijQuery;
-    const focused = currentTab(exec);
-    const view: ZellijView = { order: tabOrder(exec), ...(focused === undefined ? {} : { focused }), atMs: nowMs };
+    const mux = deps.mux ?? defaultMux();
+    const focused = mux.currentTab();
+    const view: ZellijView = { order: mux.tabs(), ...(focused === undefined ? {} : { focused }), atMs: nowMs };
     writeView(dir, view);
     return view;
   } catch {

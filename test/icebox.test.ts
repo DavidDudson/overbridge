@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { queueDir, stopChecksFor, ticketName, type Ticket } from "../src/check-queue";
 import { handoffStamp, HandoffReason, renderHandoff } from "../src/handoff";
+import { zellijMux } from "../src/mux";
 import { icebox, type IceboxDeps, THAW_PROMPT, thaw } from "../src/icebox";
 import { entries, icedRows } from "../src/sidebar";
 import { isIceboxed, readState, withState } from "../src/state";
@@ -34,12 +35,14 @@ function fakeDeps(listTabs: string, focused = "") {
   const calls: string[][] = [];
   const stopped = { apps: [] as string[], checks: [] as string[] };
   const deps: IceboxDeps = {
-    exec: (cmd) => {
-      calls.push(cmd);
-      if (cmd[2] === "list-tabs") return ok(listTabs);
-      return cmd[2] === "current-tab-info" && focused ? ok(`name: ${focused}\n`) : ok();
-    },
-    inZellij: true,
+    mux: zellijMux(
+      (cmd) => {
+        calls.push(cmd);
+        if (cmd[2] === "list-tabs") return ok(listTabs);
+        return cmd[2] === "current-tab-info" && focused ? ok(`name: ${focused}\n`) : ok();
+      },
+      { env: { ZELLIJ: "0" } },
+    ),
     stopApps: async (ws) => void stopped.apps.push(ws),
     stopChecks: (ws) => (stopped.checks.push(ws), 0),
   };
