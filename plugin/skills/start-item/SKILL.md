@@ -1,9 +1,12 @@
 ---
 name: start-item
 description: Start work on a work item (GitHub issue or Jira ticket). Reads the item, runs the scope check, claims a branch named for it in this workspace, then enters plan mode to design the change and waits for the user to approve the plan and its scope. When `loop-item` calls it, it writes the plan and carries on. Use when the user says "start 123", "pick up ENG-123", "work on issue 123", "begin this item", or passes an item id and wants to start.
+requires: gh-stack
 ---
 
 # Start an item
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 ```
 orient → read the item → scope-item → [scope gate] → claim branch → plan mode

@@ -1,9 +1,12 @@
 ---
 name: update-library
 description: Upgrade a dependency (or a batch of non-breaking dependency bumps) to a target version under a tracked tech-debt item, driven end to end to a PR. Resolve from/to versions, compile the changelog and a breaking-change table with "affects us" analysis, gather blog and migration links, carry out the mandatory breaking-change migrations, and make a judgment call on deprecations (apply the small ones, spin off follow-up tech-debt items for the large ones). Both the item body and the PR body follow the library-update template. Use when the user wants to bump or upgrade a library ("update X to vN", "upgrade the Y dependency", "bump Z", "update library", "bump X, Y and Z together"). Also run by audit-vulns for each item it plans.
+requires: gh-stack
 ---
 
 # Update library
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 Upgrade one dependency, or a batch of them (see *Batch mode*), to a target version, as a tracked and shipped tech-debt change:
 

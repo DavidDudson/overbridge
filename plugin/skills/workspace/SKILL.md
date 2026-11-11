@@ -1,9 +1,12 @@
 ---
 name: workspace
 description: Work inside an overbridge workspace — check which workspace/branch/PR you are on, switch to a branch, pick up a PR, or release a branch. Use when the session is bound to an overbridge workspace ($OVERBRIDGE_NAME set or cwd under ~/workspaces/<ws>) and the user says "work on branch X", "pick up PR #N", "start a feature", "what am I on", "switch branch", or "free this branch".
+requires: gh-stack
 ---
 
 # Working in an overbridge workspace
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 Sessions launched by `overbridge` are bound to one workspace (`$OVERBRIDGE_NAME`). An `overbridge guard`
 PreToolUse hook enforces this; treat a guard block as a hard rule, never work around it.

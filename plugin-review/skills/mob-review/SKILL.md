@@ -1,9 +1,12 @@
 ---
 name: mob-review
 description: Run the full staff-engineer review panel over a PR or branch. Spawns every in-scope persona reviewer (security, code-quality, naming, comments, error-handling, architecture, test-design, integration-test, performance, resilience, pr-size, api-design, database, github-actions, shell, typing, a11y, async-state, ac-check, production-protector, skills, plus any repo-local personas) and Claude's built-in /code-review at medium effort in parallel against the diff, aggregates their findings into one ranked report, then applies the small clear-cut fixes when the branch is your own (report-only on someone else's). The panel comes from `review.personas` / `review.exclude` in overbridge.yml; with no config each persona's diff-signal guard decides. Use when the user says "mob review", "mob-review", "review this PR", "run the panel", "full review", or wants a broad multi-lens review of the current branch or a given PR.
+requires: gh-stack
 ---
 
 # Mob Review: staff-engineer review panel
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 Spawn every in-scope `persona-*` reviewer in parallel over one diff, then aggregate their findings into a single ranked report. Each persona is a narrow, non-overlapping specialist; this skill is the orchestrator.
 

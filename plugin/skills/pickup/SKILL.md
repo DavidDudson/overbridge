@@ -1,9 +1,12 @@
 ---
 name: pickup
 description: Pick up an open PR from any handle (a PR URL, PR number, work item id or branch name), claim its branch in this workspace, sync it with the remote, merge the latest default branch, resolve the review feedback and confirm the build is green. Use when the user says "pickup <thing>", "pick up this PR", "get on <branch>", "jump on 123's PR", or hands you a PR link, number, item id or branch and wants it cleaned up.
+requires: gh-stack
 ---
 
 # Pick up a PR
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 Take whatever handle the user has, resolve it to one branch and PR, make the local branch match the
 remote, bring it up to date, deal with the review feedback and check CI.

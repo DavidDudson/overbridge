@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { packageRoot } from "./paths";
 import { run } from "./util";
@@ -77,4 +78,37 @@ export function pluginProblems(root = packageRoot(), known: () => KnownMarketpla
       ]
     : [];
   return { errors: missing, warnings };
+}
+
+/** Skills the overbridge skills build on. Each overbridge skill that needs one lists it in its `requires:` frontmatter. */
+export const REQUIRED_SKILLS = ["gh-stack"];
+
+/** Where Claude loads skills from: the user's skills folder and the `skills/` of each installed plugin. */
+export function skillDirs(): string[] {
+  const config = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+  const dirs = [join(config, "skills")];
+  try {
+    const installed = JSON.parse(readFileSync(join(config, "plugins", "installed_plugins.json"), "utf8")) as {
+      plugins?: Record<string, { installPath?: string }[]>;
+    };
+    for (const entries of Object.values(installed.plugins ?? {})) {
+      for (const e of entries) {
+        if (e.installPath) dirs.push(join(e.installPath, "skills"));
+      }
+    }
+  } catch {
+    // no plugin list: the user skills folder is all there is
+  }
+  return dirs;
+}
+
+/** One error per required skill that no skills folder holds, each with its fix. */
+export function requiredSkillProblems(required: string[] = REQUIRED_SKILLS, dirs: string[] = skillDirs()): string[] {
+  return required
+    .filter((name) => !dirs.some((d) => existsSync(join(d, name, "SKILL.md"))))
+    .map(
+      (name) =>
+        `the '${name}' skill is not installed, and the overbridge skills depend on it. ` +
+        `Install it (a skill folder with ${name}/SKILL.md under ${dirs[0]}).`,
+    );
 }

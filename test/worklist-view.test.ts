@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { rank, type WorkRow } from "../src/pm/worklist";
 import type { ProjectManagement } from "../src/project-config";
-import { boardSources, keepLastGood, pickRepo, readBoards, refreshInChild, renderWorklist, repoPrompt } from "../src/worklist-run";
+import { boardSources, keepLastGood, pickRepo, readBoards, refreshInChild, renderWorklist, repoPrompt, showWorklist } from "../src/worklist-run";
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
@@ -129,5 +129,18 @@ describe("last good cache", () => {
     const text = renderWorklist(rank([row("1")]), 0, 0, 12, 100, "", ["a: API rate limit exceeded"]).map(strip).join("\n");
     expect(text).toContain("error: a: API rate limit exceeded");
     expect(text).toContain("last good list");
+  });
+});
+
+describe("showWorklist", () => {
+  test("prints ranked rows, tab separated, then the notes", () => {
+    const lines = showWorklist({ at: 0, rows: [row("2", { blockedBy: ["ob#1"] }), row("1", { labels: ["p0"] })], notes: ["jira X: down"] });
+    expect(lines[0]).toBe("1\tready\tob#1\ttitle 1\tready, priority p0, unblocks 1");
+    expect(lines[1]).toContain("2\ttodo\tob#2");
+    expect(lines[2]).toBe("note: jira X: down");
+  });
+
+  test("says so when nothing is assigned", () => {
+    expect(showWorklist({ at: 0, rows: [], notes: [] })).toEqual(["nothing assigned to you"]);
   });
 });

@@ -143,6 +143,9 @@ function waitTabGone(ws: string) {
  * Either way the outcome goes in the cleanup log the sidebar lists.
  */
 export async function finishRemoval(ws: string): Promise<void> {
+  if (isOrchestrationTab(ws)) {
+    fail(orchestrationRemoveMessage(ws));
+  }
   const label = sidebarLabel(ws, readTopCache(ws));
   const cause = readState().workspaces[ws]?.removing?.cause ?? CleanupCause.Cleanup;
   try {
