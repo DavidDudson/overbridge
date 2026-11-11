@@ -160,12 +160,6 @@ export const defaultConfig = (): ProjectConfig => ({
 const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons"];
 const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
-/** A relative path that stays inside the repo and names something below its root (no `..`, no leading `/`, not `.`). */
-export function isPrunablePath(path: string): boolean {
-  const parts = path.split("/").filter((part) => part !== "" && part !== ".");
-  return !path.startsWith("/") && parts.length > 0 && !parts.includes("..") && !/[*?[\\]/.test(path);
-}
-
 const ICEBOX_KEYS = ["prune"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
 const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql"];
@@ -345,6 +339,15 @@ export interface ButtonSpec {
   side: "left" | "right";
 }
 const BUTTON_KEYS = ["id", "label", "status", "run", "url", "side"];
+
+/** `path` without a leading `./` or trailing `/`, so a configured prune path compares equal to what git lists. */
+export const normalizePrunePath = (path: string): string => path.replace(/^(\.\/)+/, "").replace(/\/+$/, "");
+
+/** A path below the repo root: no `..`, no absolute path, no glob or pathspec magic, and never git's or the workspace's own files. */
+export function isPrunablePath(path: string): boolean {
+  const parts = normalizePrunePath(path).split("/");
+  return !path.startsWith("/") && !parts.includes("") && !parts.includes("..") && !parts.includes(".") && ![".git", ".claude"].includes(parts[0]!) && !/[*?[\\:]/.test(path);
+}
 
 /**
  * Validate parsed YAML. Throws one error naming `file` and every offending key. With `partial`, `raw` is

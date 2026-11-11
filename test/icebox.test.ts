@@ -153,7 +153,7 @@ describe("opt-in reclaim", () => {
     const wt = join(root, ws, "app");
     mkdirSync(join(wt, "keep"), { recursive: true });
     writeFileSync(join(wt, "keep", "tracked.txt"), "t");
-    writeFileSync(join(wt, ".gitignore"), "node_modules/\n");
+    writeFileSync(join(wt, ".gitignore"), "node_modules/\n*.env\n");
     writeFileSync(join(wt, "overbridge.yml"), "version: 1\nicebox:\n  prune: [node_modules, keep, missing]\n");
     sh(["git", "add", "-A"], wt);
     sh(["git", "commit", "-q", "-m", "seed"], wt);
@@ -180,7 +180,7 @@ describe("opt-in reclaim", () => {
 
   test("prunable refuses tracked paths and symlinks out of the repo", () => {
     const wt = join(root, "tidy", "app");
-    expect(prunable(wt, "keep")).toEqual({ ok: false, why: "tracked by git" });
+    expect(prunable(wt, "keep")).toEqual({ ok: false, why: "not ignored by git" });
     expect(prunable(wt, "missing")).toEqual({ ok: false, why: "not there" });
     mkdirSync(join(tmp, "sub"), { recursive: true });
     symlinkSync(tmp, join(wt, "out"));
@@ -193,7 +193,7 @@ describe("opt-in reclaim", () => {
     await icebox("drop", { dropWorktree: true }, fakeDeps("").deps);
     expect(existsSync(wt)).toBe(false);
     const w = readState().workspaces.drop!;
-    expect(w.iceboxed?.dropped).toEqual(["app"]);
+    expect(w.iceboxed?.dropped).toEqual([{ repo: "app", branch: "feat/drop" }]);
     expect(w.repos.app?.branch).toBe("feat/drop");
     expect(icedRows(readState(), 40).join("\n")).toContain("drop iceboxed · dropped");
     const opened: string[] = [];
@@ -211,6 +211,71 @@ describe("opt-in reclaim", () => {
     await expect(icebox("risky", { dropWorktree: true }, fakeDeps("").deps)).rejects.toThrow("unpushed");
     expect(existsSync(wt)).toBe(true);
     expect(isIceboxed(readState().workspaces.risky)).toBe(false);
+  });
+
+  test("--drop-worktree refuses ignored files that --prune does not cover, and removes nothing", async () => {
+    const wt = seeded("secret", "feat/secret");
+    writeFileSync(join(wt, "local.env"), "TOKEN=1");
+    await expect(icebox("secret", { dropWorktree: true }, fakeDeps("").deps)).rejects.toThrow("ignored files");
+    await expect(icebox("secret", { prune: true, dropWorktree: true }, fakeDeps("").deps)).rejects.toThrow("local.env");
+    expect(existsSync(join(wt, "local.env"))).toBe(true);
+    expect(existsSync(join(wt, "node_modules"))).toBe(true);
+    expect(isIceboxed(readState().workspaces.secret)).toBe(false);
+  });
+
+  test("--prune with --drop-worktree prunes the covered artifacts, then drops", async () => {
+    const wt = seeded("both", "feat/both");
+    await icebox("both", { prune: true, dropWorktree: true }, fakeDeps("").deps);
+    expect(existsSync(wt)).toBe(false);
+    expect(readState().workspaces.both!.iceboxed?.dropped).toEqual([{ repo: "app", branch: "feat/both" }]);
+  });
+
+  test("a bad icebox config refuses before anything is stopped or deleted", async () => {
+    ob(["new", "badcfg", "-r", "app"]);
+    ob(["checkout", "app", "feat/badcfg", "--ws", "badcfg"]);
+    const wt = join(root, "badcfg", "app");
+    writeFileSync(join(wt, "overbridge.yml"), 'version: 1\nicebox:\n  prune: ["../x"]\n');
+    sh(["git", "add", "-A"], wt);
+    sh(["git", "commit", "-q", "-m", "bad"], wt);
+    sh(["git", "push", "-q", "origin", "feat/badcfg"], wt);
+    const { deps, stopped } = fakeDeps("");
+    await expect(icebox("badcfg", { prune: true }, deps)).rejects.toThrow("icebox.prune");
+    expect(stopped).toEqual({ apps: [], checks: [] });
+    expect(isIceboxed(readState().workspaces.badcfg)).toBe(false);
+  });
+
+  test("thaw undoes the worktrees it made when a later repo fails, and stays iceboxed", async () => {
+    ob(["repo", "add", "lib", join(tmp, "remote.git")]);
+    ob(["new", "duo", "-r", "app", "-r", "lib"]);
+    for (const [repo, branch] of [["app", "feat/duo-a"], ["lib", "feat/duo-b"]] as const) {
+      ob(["checkout", repo, branch, "--ws", "duo"]);
+      sh(["git", "commit", "-q", "--allow-empty", "-m", branch], join(root, "duo", repo));
+      sh(["git", "push", "-q", "origin", branch], join(root, "duo", repo));
+    }
+    await icebox("duo", { dropWorktree: true }, fakeDeps("").deps);
+    expect(readState().workspaces.duo!.iceboxed?.dropped).toEqual([
+      { repo: "app", branch: "feat/duo-a" },
+      { repo: "lib", branch: "feat/duo-b" },
+    ]);
+    // hold lib's branch in another worktree so checking it out fails after app's worktree was made
+    const bare = join(root, ".bare", "lib.git");
+    const holder = join(tmp, "holder");
+    sh(["git", "-C", bare, "worktree", "add", "--quiet", holder, "feat/duo-b"], tmp);
+    expect(() => thaw("duo", { open: () => {} })).toThrow("cannot thaw");
+    expect(existsSync(join(root, "duo", "app"))).toBe(false);
+    expect(isIceboxed(readState().workspaces.duo)).toBe(true);
+    sh(["git", "-C", bare, "worktree", "remove", "--force", holder], tmp);
+    thaw("duo", { open: () => {} });
+    expect(sh(["git", "branch", "--show-current"], join(root, "duo", "app"))).toBe("feat/duo-a");
+    expect(sh(["git", "branch", "--show-current"], join(root, "duo", "lib"))).toBe("feat/duo-b");
+  });
+
+  test("the CLI flags reach icebox: --prune deletes only the artifacts and keeps the worktree", () => {
+    const wt = seeded("viacli", "feat/viacli");
+    ob(["icebox", "viacli", "--prune"]);
+    expect(existsSync(join(wt, "node_modules"))).toBe(false);
+    expect(existsSync(wt)).toBe(true);
+    expect(readState().workspaces.viacli!.iceboxed?.dropped).toBeUndefined();
   });
 
   test("thaw refuses, staying iceboxed, when a dropped worktree's folder is taken", async () => {

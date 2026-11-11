@@ -112,9 +112,9 @@
       "additionalProperties": false,
       "properties": {
         "prune": {
-          "description": "Repo-relative paths removed by `icebox --prune`, such as node_modules or target. Tracked files are never touched; no `..`, absolute paths or globs.",
+          "description": "Repo-relative paths removed by `icebox --prune`, such as node_modules or target. Only paths git ignores and does not track are deleted; no `..`, absolute paths, globs, `.git` or `.claude`.",
           "type": "array",
-          "items": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))[^*?\\[\\\\]+$" }
+          "items": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!\\.git(/|$))(?!\\.claude(/|$))(?!.*(^|/)\\.\\.(/|$))[^*?\\[\\\\:]+$" }
         }
       }
     },

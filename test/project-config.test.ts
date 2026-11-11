@@ -99,7 +99,7 @@ review:
   });
 
   test("icebox.prune refuses paths that leave the repo or glob", () => {
-    for (const bad of ["/etc", "../x", "a/../../x", ".", "*.o", "a[b]"]) {
+    for (const bad of ["/etc", "../x", "a/../../x", ".", "*.o", "a[b]", ".git", "./.git/", ".claude", ":(exclude)x", "a//b"]) {
       expect(err(`icebox: { prune: ["${bad}"] }`)).toContain("icebox.prune");
     }
     expect(err("icebox: { zap: 1 }")).toContain("icebox");

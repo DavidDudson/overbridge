@@ -264,7 +264,7 @@ export function queueRows(queue: { running: Ticket[]; waiting: Ticket[] }, inner
 }
 
 /** ` · dropped` when an iceboxed workspace gave back its worktrees. */
-const droppedCount = (w: unknown): string => ((w as WorkspaceState).iceboxed?.dropped?.length ? " · dropped" : "");
+const droppedLabel = (w: WorkspaceState): string => (w.iceboxed?.dropped?.length ? " · dropped" : "");
 
 /** Iceboxed workspaces, one dim row each under the divider; they have no tab, so no card and no digit. */
 export function icedRows(state: State, inner: number): string[] {
@@ -272,7 +272,7 @@ export function icedRows(state: State, inner: number): string[] {
   return Object.keys(workspaces)
     .filter((ws) => isIced(workspaces, ws))
     .sort(naturalSort)
-    .map((ws) => dim(fit(`❄ ${ws} iceboxed${droppedCount(workspaces[ws])}`, inner)));
+    .map((ws) => dim(fit(`❄ ${ws} iceboxed${isWorkspaceState(workspaces[ws]) ? droppedLabel(workspaces[ws]) : ""}`, inner)));
 }
 
 /** Workspaces being removed in the background right now, labelled as their cards were; a malformed record is skipped (its card reports it). */
