@@ -5,8 +5,8 @@ import { call, startServer } from "./server-net";
  * running, a version mismatch, an unknown workspace), and the caller then runs the work itself.
  */
 
-/** A refresh waits on `gh`; this is longer than the server's own worker timeout, so a slow refresh is never run twice. */
-const REFRESH_TIMEOUT_MS = 130_000;
+/** A refresh waits on `gh`; this is over two server worker timeouts (a forced call waits for a running fetch, then runs its own), so a slow refresh is not run twice. */
+const REFRESH_TIMEOUT_MS = 270_000;
 
 export interface ServerRefresh {
   ws: string;
