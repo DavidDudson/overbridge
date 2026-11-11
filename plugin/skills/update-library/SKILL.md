@@ -123,6 +123,8 @@ Otherwise invoke **`loop-tech-debt`** with the filled template as the problem de
 
 `loop-item` runs without a plan-approval stop: write the migration plan (Phase 5) as its plan and go on. Stop only for its scope gate (`SPLIT` or `CLARIFY`).
 
+Stay in this workspace for related work (the `workspace` skill's affinity table). An upgrade that must land on top of another open upgrade (a bump that needs the previous major first) is a layer: `gh stack add` here, never a new workspace. Independent upgrades each get their own item and workspace.
+
 ## Phase 5: Implement (bump, migrate, judge deprecations)
 
 During the implement phase:
@@ -136,7 +138,7 @@ During the implement phase:
 3. **Carry out every breaking-change migration that affects us**: these are mandatory. This is the minimum shippable change: after it, the project builds, typechecks and tests pass on the new version.
 4. **Deprecations are a judgment call (optional):**
    - **Small, mechanical, localised** (few callsites, no behaviour change, no design decision): apply it now, in this PR.
-   - **Large** (many callsites, behaviour change, or needs a design decision): **do not** balloon this PR. Recommend a **separate tech-debt item** per deprecation cluster, and record the recommendation in the template's Deprecations and Migration plan sections. Optionally file those items (`overbridge item create --tech-debt`) and link them. Leave a `// TODO(<item link>): migrate off <deprecated API>` at the callsites, naming the follow-up item.
+   - **Large** (many callsites, behaviour change, or needs a design decision): **do not** balloon this PR. Recommend a **separate tech-debt item** per deprecation cluster, and record the recommendation in the template's Deprecations and Migration plan sections. Optionally file those items (`overbridge item create --tech-debt`) and link them. Do not start them from here while this PR is open unless the user asks: a follow-up that builds on this PR is a stacked layer in this workspace, anything else is its own workspace (`overbridge start <repo> <id>`). Leave a `// TODO(<item link>): migrate off <deprecated API>` at the callsites, naming the follow-up item.
    - State the reasoning for each apply-vs-defer decision in the template.
 5. Verify with the **smallest** scope that proves it: the repo's `commands.typecheck`, then `commands.test` on the touched files or project only. Run the full suite once at the end.
 

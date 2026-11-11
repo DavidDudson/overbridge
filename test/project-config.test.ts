@@ -93,6 +93,25 @@ review:
     expect(c.review).toEqual({ personas: ["security", "naming"], exclude: ["pr-size"], localDir: ".review" });
   });
 
+  test("icebox.prune lists repo-relative paths and defaults to none", () => {
+    expect(parseConfig("icebox: { prune: [node_modules, target/debug] }").icebox.prune).toEqual(["node_modules", "target/debug"]);
+    expect(parseConfig("version: 1").icebox.prune).toEqual([]);
+  });
+
+  test("icebox.idle-days is a positive whole number and unset by default", () => {
+    expect(parseConfig("icebox: { idle-days: 14 }").icebox.idleDays).toBe(14);
+    expect(parseConfig("version: 1").icebox.idleDays).toBeUndefined();
+    expect(err("icebox: { idle-days: 0 }")).toContain("icebox.idle-days");
+    expect(err("icebox: { idle-days: soon }")).toContain("icebox.idle-days");
+  });
+
+  test("icebox.prune refuses paths that leave the repo or glob", () => {
+    for (const bad of ["/etc", "../x", "a/../../x", ".", "*.o", "a[b]", ".git", "./.git/", ".claude", ":(exclude)x", "a//b"]) {
+      expect(err(`icebox: { prune: ["${bad}"] }`)).toContain("icebox.prune");
+    }
+    expect(err("icebox: { zap: 1 }")).toContain("icebox");
+  });
+
   test("review defaults: auto-select personas, no excludes, standard local dir", () => {
     expect(parseConfig("review: {}").review).toEqual({ exclude: [], localDir: ".overbridge/personas" });
   });
