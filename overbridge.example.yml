@@ -59,9 +59,12 @@ check-queue:
   stall-seconds: 300         # kill the run once its processes have used no CPU for this long
   wait-seconds: 900          # give up (exit 75) when there is still no turn after this long
 
-# What `overbridge icebox <ws> --prune` deletes before pausing: repo-relative paths git does not track.
+# What `overbridge icebox <ws> --prune` deletes: repo-relative paths git ignores and does not track.
 # Default: none, so --prune reclaims nothing.
+# `idle-days` makes the sidebar suggest `overbridge icebox` for a workspace whose PRs are all drafts and idle that
+# long (last commit, PR update and agent activity); it never iceboxes by itself. Default: off.
 icebox:
   prune: [node_modules, target]
+  # idle-days: 14
 
 ide: vscode                  # vscode | zed | webstorm; default: $OVERBRIDGE_IDE, then $EDITOR (personal; usually leave unset)

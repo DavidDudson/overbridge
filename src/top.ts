@@ -60,6 +60,7 @@ export interface PrView extends ReviewerView {
   url?: string;
   title?: string;
   isDraft?: boolean;
+  updatedAt?: string;
   state?: string;
   headRefOid?: string;
   mergeable?: string;
@@ -102,6 +103,10 @@ export interface TopCache {
   links: TopLink[];
   /** Every claimed repo's PR is open (and there is at least one claim). Half of what makes a workspace cleanable. */
   prsOpen?: boolean;
+  /** Every claimed branch has an open draft PR: the first condition for suggesting `overbridge icebox`. */
+  draftOnly?: boolean;
+  /** When the claimed PRs last changed (the latest `updatedAt`, ms); part of the idle check. */
+  prActiveAt?: number;
   /** Set when every claimed branch's PR has merged: each repo's PR head commit, keyed by repo. */
   merged?: Record<string, string>;
   /** What each configured button's `status` printed, keyed `<repo>/<id>`. A missing entry hides the button. */
@@ -220,6 +225,8 @@ export function topCacheFault(raw: unknown): string | undefined {
     optional("title", typeof raw.title === "string") ??
     optional("message", typeof raw.message === "string") ??
     optional("prsOpen", typeof raw.prsOpen === "boolean") ??
+    optional("draftOnly", typeof raw.draftOnly === "boolean") ??
+    optional("prActiveAt", typeof raw.prActiveAt === "number" && Number.isFinite(raw.prActiveAt)) ??
     optional("merged", isRecord(raw.merged)) ??
     optional("buttons", isRecord(raw.buttons)) ??
     wrong("links", Array.isArray(raw.links)) ??
@@ -284,6 +291,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   const claimed = claims.filter(([, c]) => c.branch).length;
   let openPrs = 0;
   let mergedPrs = 0;
+  let draftPrs = 0;
+  let prActiveAt: number | undefined;
   const mergedHeads: Record<string, string> = {};
   let headline: string | undefined;
   let itemTitle: string | undefined;
@@ -321,7 +330,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       if (out !== undefined) buttonStates[`${repo}/${spec.id}`] = parseButtonStatus(out);
     }
     if (claim.pr !== undefined) {
-      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,title,isDraft,state,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments"], dir));
+      const view = parsePrView(exec(["gh", "pr", "view", String(claim.pr), "--json", "url,title,isDraft,updatedAt,state,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments"], dir));
       if (view?.url) {
         const threads = threadsCommand(view.url);
         if (threads) view.unresolved = parseUnresolved(exec(threads, dir));
@@ -335,8 +344,13 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
         });
       }
       else problems.push(`${repo}: no URL for PR #${claim.pr}`);
-      if (view?.state === "OPEN") openPrs++;
+      if (view?.state === "OPEN") {
+        openPrs++;
+        if (view.isDraft === true) draftPrs++;
+      }
       else if (view?.state === "MERGED") mergedPrs++;
+      const updated = Date.parse(view?.updatedAt ?? "");
+      if (Number.isFinite(updated)) prActiveAt = Math.max(prActiveAt ?? 0, updated);
       if (claim.branch && view?.state === "MERGED" && view.headRefOid) {
         mergedHeads[repo] = view.headRefOid;
       }
@@ -351,6 +365,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     // released repos hold no branch, so only claimed branches need an open PR
     // an open PR somewhere, and every other claim already merged: a merged branch is finished, not a reason to keep the workspace
     prsOpen: claimed > 0 && openPrs > 0 && openPrs + mergedPrs === claimed,
+    ...(claimed > 0 && openPrs === claimed && draftPrs === claimed ? { draftOnly: true } : {}),
+    ...(prActiveAt !== undefined ? { prActiveAt } : {}),
     // a claim with no PR, a closed PR or an unreadable one leaves this unset, so the workspace stays
     ...(claimed > 0 && Object.keys(mergedHeads).length === claimed ? { merged: mergedHeads } : {}),
     ...(Object.keys(buttonStates).length ? { buttons: buttonStates } : {}),

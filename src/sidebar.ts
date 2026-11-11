@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userLayoutPath } from "./layout";
 import { join } from "node:path";
-import { type AgentState, glyphFor, readAgentState, UNKNOWN_GLYPH } from "./agent-state";
+import { ATTENTION, type AgentState, glyphFor, readAgentState, UNKNOWN_GLYPH } from "./agent-state";
+import { iceboxHint } from "./icebox-suggest";
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
@@ -62,6 +63,8 @@ export interface Entry {
   unsaved?: boolean;
   /** This entry could not be read: a bad cache or state record, or a reader that threw. Replaces the status line. */
   fault?: string;
+  /** Its draft PRs have sat idle past `icebox.idle-days`: a suggestion to icebox it, never done automatically. */
+  idleHint?: string;
 }
 
 export { sidebarLabel, stripConventional } from "./top";
@@ -94,7 +97,8 @@ function workspaceEntry(ws: string, w: unknown): Entry {
   const { removeError: error, removalBlocked: blocked } = w as WorkspaceState;
   const { cache, fault } = readTopCacheChecked(ws);
   const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
-  return { ...entry, ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}) };
+  const idleHint = fault ? undefined : iceboxHint(ws, cache);
+  return { ...entry, ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}), ...(idleHint ? { idleHint } : {}) };
 }
 
 /** `w` as the record of a workspace being removed right now, else undefined; a malformed record is never one. */
@@ -190,12 +194,13 @@ const BLOCK_TEXT: Record<RemovalBlock, { text: string; color: Color }> = {
 const UNSAVED_TEXT: { text: string; color: Color } = { text: "ended · unsaved work", color: "red" };
 const FAULT_COLOR: Color = "red";
 
-/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, then the agent state. */
+/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, an icebox suggestion (unless the agent wants you), then the agent state. */
 function statusFor(e: Entry): { text: string; color: Color } | undefined {
   if (e.fault) return { text: `error: ${e.fault}`, color: FAULT_COLOR };
   if (e.error) return { text: `cleanup failed: ${e.error}`, color: FAULT_COLOR };
   if (e.blocked) return BLOCK_TEXT[e.blocked];
   if (e.unsaved) return UNSAVED_TEXT;
+  if (e.idleHint && !(e.state && ATTENTION.includes(e.state))) return { text: e.idleHint, color: "cyan" };
   return e.state ? STATE_TEXT[e.state] : undefined;
 }
 
