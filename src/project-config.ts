@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoOf, root, worktreePath } from "./paths";
+import type { WorkStatus } from "./pm/worklist";
 import { fail, isRecord } from "./util";
 
 /** Per-repo rules live in `overbridge.yml` at the repo (worktree) root. */
@@ -127,6 +128,8 @@ export interface ReviewConfig {
   localDir: string;
 }
 
+export const WORK_STATUSES = ["todo", "in-progress", "blocked", "done"] as const satisfies readonly WorkStatus[];
+
 /** What `overbridge icebox` may delete with `--prune` (repo-relative paths git ignores, such as `node_modules`), and when the sidebar suggests it. */
 export interface IceboxConfig {
   prune: string[];
@@ -137,6 +140,8 @@ export interface IceboxConfig {
 export interface ProjectConfig {
   version: typeof CONFIG_VERSION;
   projectManagement?: ProjectManagement;
+  /** GitHub Projects v2 `Status` column name (lower-cased) to work status. Names not listed fall back to `statusFromColumn`. */
+  boardColumns: Record<string, WorkStatus>;
   apps: AppSpec[];
   commands: Commands;
   review: ReviewConfig;
@@ -155,6 +160,7 @@ export interface ProjectConfig {
 
 export const defaultConfig = (): ProjectConfig => ({
   version: CONFIG_VERSION,
+  boardColumns: {},
   apps: [],
   commands: {},
   review: { exclude: [], localDir: DEFAULT_PERSONA_DIR },
@@ -163,11 +169,12 @@ export const defaultConfig = (): ProjectConfig => ({
   buttons: [],
 });
 
-const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons"];
+const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons"];
 const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
 const ICEBOX_KEYS = ["prune", "idle-days"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
+const BOARD_KEYS = ["columns"];
 const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql", "worklist-project", "worklist-statuses"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
 
@@ -418,6 +425,24 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
           ...(worklistProject ? { worklistProject } : {}),
           ...(worklistStatuses ? { worklistStatuses } : {}),
         };
+      }
+    }
+  }
+
+  const board = raw.board;
+  if (board !== undefined && board !== null) {
+    if (!isRecord(board)) p.add("board", "expected a mapping with columns");
+    else {
+      p.unknownKeys(board, BOARD_KEYS, "board");
+      const columns = board.columns;
+      if (columns !== undefined && columns !== null) {
+        if (!isRecord(columns)) p.add("board.columns", `expected a mapping of column name to ${WORK_STATUSES.join(", ")}`);
+        else {
+          for (const name of Object.keys(columns)) {
+            const status = p.oneOf(p.string(columns, name, "board.columns", true), WORK_STATUSES, `board.columns.${name}`);
+            if (status) config.boardColumns[name.trim().toLowerCase()] = status;
+          }
+        }
       }
     }
   }

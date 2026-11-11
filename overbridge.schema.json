@@ -51,6 +51,17 @@
         }
       }
     },
+    "board": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "type": "object",
+          "description": "GitHub Projects v2 Status column name to work status. Names not listed fall back to common names (done, in progress, blocked), else todo.",
+          "additionalProperties": { "enum": ["todo", "in-progress", "blocked", "done"] }
+        }
+      }
+    },
     "apps": {
       "type": "array",
       "items": {

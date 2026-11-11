@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { githubRows, MAX_PAGES, nextCursor, rowsFromGraphql, slugFromUrl } from "../src/pm/board-github";
+import { BOARD_QUERY, githubRows, MAX_PAGES, nextCursor, rowsFromGraphql, slugFromUrl } from "../src/pm/board-github";
 
 const reply = JSON.stringify({
   data: {
@@ -87,5 +87,32 @@ describe("github board", () => {
 
   test("a cursor that never ends stops at the page cap", () => {
     expect(() => githubRows("o/r", "ob", (cmd) => (cmd[2] === "user" ? ok("me") : ok(page(1, "again"))))).toThrow(`more than ${MAX_PAGES * 100}`);
+  });
+
+  const withStatus = (status: string | null | undefined, labels: string[] = []) =>
+    JSON.stringify({
+      data: { repository: { issues: { nodes: [{ number: 9, title: "t", url: "u", updatedAt: "2026-01-01T00:00:00Z", labels: { nodes: labels.map((name) => ({ name })) }, parent: null, blockedBy: { nodes: [] },
+        projectItems: { nodes: [null, { fieldValueByName: null }, { fieldValueByName: status ? { name: status } : null }] } }] } } },
+    });
+  const statusOf = (reply: string, columns = {}) => rowsFromGraphql(reply, "ob", columns)[0]!.status;
+
+  test("the project Status column sets the status, through the configured map first", () => {
+    expect(statusOf(withStatus("Done"))).toBe("done");
+    expect(statusOf(withStatus("In review"))).toBe("in-progress");
+    expect(statusOf(withStatus("Waiting on vendor"))).toBe("todo");
+    expect(statusOf(withStatus("Waiting on vendor"), { "waiting on vendor": "blocked" })).toBe("blocked");
+    expect(statusOf(withStatus("Done"), { done: "todo" })).toBe("todo");
+  });
+
+  test("a todo column or no column still lets a label speak", () => {
+    expect(statusOf(withStatus("Ready", ["blocked"]))).toBe("blocked");
+    expect(statusOf(withStatus(null, ["In Progress"]))).toBe("in-progress");
+    expect(statusOf(withStatus("Done", ["blocked"]))).toBe("done");
+  });
+
+  test("the query asks for the Status field, and githubRows passes the column map on", () => {
+    expect(BOARD_QUERY).toContain('fieldValueByName(name:"Status")');
+    const rows = githubRows("o/r", "ob", (cmd) => (cmd[2] === "user" ? ok("me") : ok(withStatus("Parked"))), { parked: "blocked" });
+    expect(rows[0]!.status).toBe("blocked");
   });
 });
