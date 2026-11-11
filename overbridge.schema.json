@@ -34,7 +34,11 @@
           "description": "Item type (a Jira issue type or a GitHub label) to the {type} of a branch name; 'default' covers the rest.",
           "additionalProperties": { "type": "string", "minLength": 1 }
         },
-        "issue-type": { "type": "string", "minLength": 1, "description": "Issue type for new items (Jira). Default: Task." }
+        "issue-type": { "type": "string", "minLength": 1, "description": "Issue type for new items (Jira). Default: Task." },
+        "worklist-jql": {
+          "type": "string",
+          "description": "Jira only: JQL that narrows the work list to some of your open tickets. Default: (sprint in openSprints() OR statusCategory = \"In Progress\"). Empty lists every open ticket."
+        }
       }
     },
     "apps": {

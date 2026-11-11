@@ -31,6 +31,19 @@ describe("worklist", () => {
     expect(priorityOf(["bug"])).toBe(9);
   });
 
+  test("a Jira key is its own key; a bare number is keyed by repo", () => {
+    expect(keyOf({ repo: "ENG", id: "ENG-12" })).toBe("ENG-12");
+    expect(keyOf({ repo: "ob", id: "12" })).toBe("ob#12");
+  });
+
+  test("a priority field outranks the labels", () => {
+    const ranked = rank([row("1", { labels: ["p0"], priority: 3 }), row("2", { priority: 1 })]);
+    expect(ranked.map((r) => [r.id, r.reasons])).toEqual([
+      ["2", ["ready", "priority p1"]],
+      ["1", ["ready", "priority p3"]],
+    ]);
+  });
+
   test("status from column", () => {
     expect(statusFromColumn("In Progress")).toBe("in-progress");
     expect(statusFromColumn("Done")).toBe("done");

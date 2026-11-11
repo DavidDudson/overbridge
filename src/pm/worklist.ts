@@ -6,16 +6,21 @@
 export type WorkStatus = "todo" | "in-progress" | "blocked" | "done";
 
 export interface WorkRow {
+  /** The repo the row came from, or the Jira project key when one project backs several repos. */
   repo: string;
+  /** Repos the item can be started in, when there is a choice. Unset means `repo`. */
+  repos?: string[];
   id: string;
   title: string;
   url: string;
   status: WorkStatus;
   labels: string[];
-  /** Keys (`repo#id`) of rows that must finish first. */
+  /** Keys (see `keyOf`) of rows that must finish first. */
   blockedBy: string[];
   /** Key of the parent item, if any. */
   parent?: string;
+  /** 0 (most urgent) to 3, from a provider's own priority field. Unset falls back to the labels. */
+  priority?: number;
   /** ISO timestamp from the provider. Compared as a string, never against now. */
   updatedAt: string;
 }
@@ -29,7 +34,8 @@ export interface Ranked extends WorkRow {
   reasons: string[];
 }
 
-export const keyOf = (r: Pick<WorkRow, "repo" | "id">): string => `${r.repo}#${r.id}`;
+/** A Jira key such as `ENG-12` is unique on its own; a bare number needs its repo. */
+export const keyOf = (r: Pick<WorkRow, "repo" | "id">): string => (/^[A-Z][A-Z0-9_]*-\d+$/.test(r.id) ? r.id : `${r.repo}#${r.id}`);
 
 /** `p0`..`p3` or `priority: high|medium|low`. Lower is more urgent; no label sorts last. */
 export function priorityOf(labels: string[]): number {
@@ -93,7 +99,7 @@ export function isReady(row: WorkRow, byKey: Map<string, WorkRow>): boolean {
 /**
  * Rules, in order; the first that differs decides:
  *  1. ready before not ready
- *  2. priority label (p0 before p3, none last)
+ *  2. priority field, else label (p0 before p3, none last)
  *  3. unblocks more open items (fan-out)
  *  4. parent already in progress
  *  5. least recently updated first
@@ -109,7 +115,7 @@ export function rank(rows: WorkRow[]): Ranked[] {
   const scored = open.map((r) => {
     const key = keyOf(r);
     const ready = isReady(r, byKey);
-    const prio = priorityOf(r.labels);
+    const prio = r.priority ?? priorityOf(r.labels);
     const unblocks = fanOut.get(key) ?? 0;
     const inProgressParent = r.parent !== undefined && byKey.get(r.parent)?.status === "in-progress";
     const reasons: string[] = [ready ? "ready" : r.status === "in-progress" ? "in progress" : "waiting on blockers"];

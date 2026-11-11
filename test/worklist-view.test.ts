@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { rank, type WorkRow } from "../src/pm/worklist";
-import { renderWorklist } from "../src/worklist-run";
+import type { ProjectManagement } from "../src/project-config";
+import { boardSources, pickRepo, readBoards, renderWorklist, repoPrompt } from "../src/worklist-run";
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
@@ -40,5 +41,57 @@ describe("renderWorklist", () => {
     const rows = renderWorklist(list, 2, 1, 8, 70).map(strip);
     expect(rows.join("\n")).toContain("ob#2");
     expect(rows.join("\n")).not.toContain("title 1");
+  });
+});
+
+describe("board sources", () => {
+  const jira = (project: string, extra: Partial<ProjectManagement> = {}): ProjectManagement => ({ name: "jira", project, ...extra });
+
+  test("repos on one Jira project share one read; GitHub repos read alone", () => {
+    const { sources, notes } = boardSources([
+      { repo: "web", url: "git@github.com:o/web.git", pm: jira("abc") },
+      { repo: "api", url: "git@github.com:o/api.git", pm: jira("ABC") },
+      { repo: "ops", url: "git@github.com:o/ops.git", pm: jira("ABC", { worklistJql: "" }) },
+      { repo: "ob", url: "git@github.com:o/ob.git", pm: { name: "github", project: "o/ob" } },
+      { repo: "odd", url: "/local/odd", pm: { name: "github", project: "7" } },
+      { repo: "none", url: "git@github.com:o/none.git" },
+    ]);
+    expect(sources).toEqual([
+      { kind: "github", repo: "ob", slug: "o/ob" },
+      { kind: "jira", project: "ABC", repos: ["web", "api"] },
+      { kind: "jira", project: "ABC", repos: ["ops"], filter: "" },
+    ]);
+    expect(notes).toEqual(["odd: cannot tell the GitHub repo from /local/odd"]);
+  });
+
+  test("a failing source adds a note and the rest still read", () => {
+    const out = readBoards(
+      [
+        { kind: "jira", project: "ABC", repos: ["web"], site: "https://x" },
+        { kind: "github", repo: "ob", slug: "o/ob" },
+      ],
+      {
+        jira: (project, repos, opts) => {
+          expect(opts).toEqual({ site: "https://x" });
+          throw new Error(`jira: reading ${project} for ${repos.join()} failed\nmore`);
+        },
+        github: (_slug, repo) => [row("1", { repo })],
+      },
+    );
+    expect(out.rows.map((r) => r.id)).toEqual(["1"]);
+    expect(out.notes).toEqual(["ABC: jira: reading ABC for web failed"]);
+  });
+});
+
+describe("repo picker", () => {
+  test("digits pick one of the offered repos, anything else does not", () => {
+    expect(pickRepo("2", ["web", "api"])).toBe("api");
+    expect(pickRepo("3", ["web", "api"])).toBeUndefined();
+    expect(pickRepo("0", ["web"])).toBeUndefined();
+    expect(pickRepo("s", ["web"])).toBeUndefined();
+  });
+
+  test("the prompt numbers the repos", () => {
+    expect(repoPrompt("ABC-1", ["web", "api"])).toBe("start ABC-1 in: 1 web  2 api   esc cancel");
   });
 });
