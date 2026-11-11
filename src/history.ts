@@ -53,7 +53,9 @@ const SECRET_FLAG = String.raw`--?[\w-]*(?:token|secret|passw|key|auth|cred)[\w-
 const VALUE = String.raw`"[^"]*"|'[^']*'|[^\s'"]+`;
 const REDACTIONS: readonly [RegExp, string][] = [
   // https://user:pw@host
-  [/(\w+:\/\/)[^/\s@'"]+@/g, "$1***@"],
+  [/(\b[a-z][a-z0-9+.-]{0,15}:\/\/)[^/\s@'"]+@/gi, "$1***@"],
+  // ?token=x, &api_key=x, X-Amz-Signature=x in a URL
+  [/([?&;][\w-]*(?:token|secret|passw|key|auth|cred|sig)[\w-]*=)[^&\s'"]*/gi, "$1***"],
   // Authorization: Bearer x, Bearer x, Basic x
   [/(authorization:?\s*)(?:(?:bearer|basic|token)\s+)?[^\s'"]+/gi, "$1***"],
   [/\b(bearer|basic)\s+[^\s'"]+/gi, "$1 ***"],
@@ -62,18 +64,19 @@ const REDACTIONS: readonly [RegExp, string][] = [
   // a secret-looking flag's value, `--token x` or `--api-key=x`
   [new RegExp(String.raw`(${SECRET_FLAG})(=|\s+)(?!-)(?:${VALUE})`, "gi"), "$1$2***"],
   // header and basic-auth arguments
-  [new RegExp(String.raw`(-H|--header|--user)(=|\s+)(?:${VALUE})`, "g"), "$1$2***"],
-  [/(\s-u\s+)[^\s'"]*:[^\s'"]*/g, "$1***"],
+  [new RegExp(String.raw`(-H|--header|--user)(=|\s*)(?:${VALUE})`, "g"), "$1$2***"],
+  [/(\s-u\s*)[^\s'"]*:[^\s'"]*/g, "$1***"],
 ];
 
 /**
  * A command line for history: the whole line with what looks like a secret blanked. Best effort, by pattern: it blanks
  * every `NAME=value`, URL credentials, `Authorization`/`Bearer`/`Basic` values, the value of a flag whose name looks
- * secret (`--token x`) and the arguments of `-H`, `--header`, `--user` and `-u user:pass`. A secret passed as a bare
- * positional argument cannot be told apart from any other word and is kept. At most 500 characters.
+ * secret (`--token x`), secret-looking URL query parameters and the arguments of `-H`, `--header`, `--user` and `-u user:pass`.
+ * A secret passed as a bare positional argument or after a flag like `-p` (a port, a package or a password), or one
+ * inside an escaped quote, cannot be told apart from any other word and is kept. At most 500 characters.
  */
 export function redactCommand(command: string): string {
-  return REDACTIONS.reduce((text, [re, to]) => text.replace(re, to), command.trim().replace(/\s+/g, " ")).slice(0, 500);
+  return REDACTIONS.reduce((text, [re, to]) => text.replace(re, to), command.trim().slice(0, 2000).replace(/\s+/g, " ")).slice(0, 500);
 }
 
 /** Programs whose next word is the task they run: `just check`, `make lint`. */
@@ -81,7 +84,7 @@ const TASK_RUNNERS = new Set(["just", "make", "task", "nx", "turbo", "mise"]);
 /** Package managers: `bun run lint`, `npm test`, `pnpm lint`. */
 const PACKAGE_MANAGERS = new Set(["bun", "npm", "pnpm", "yarn"]);
 /** Flags that take the next word as their value, so it is not the task: `just --justfile ci.just check`. */
-const VALUE_FLAGS = new Set(["-C", "-f", "-d", "-w", "--justfile", "--working-directory", "--directory", "--file", "--filter", "--cwd", "--prefix", "--workspace", "--set"]);
+const VALUE_FLAGS = new Set(["-C", "-f", "-d", "-w", "--justfile", "--working-directory", "--directory", "-j", "-E", "-l", "--file", "--filter", "--cwd", "--prefix", "--workspace", "--set"]);
 /** Words after a package manager that run another program: `bun x vitest`. */
 const EXEC_WORDS = new Set(["run", "x", "exec", "dlx"]);
 

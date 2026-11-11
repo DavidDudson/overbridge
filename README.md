@@ -616,7 +616,7 @@ then cut to the newest half). Two things write it:
 - The Claude hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `Stop`,
   `SessionEnd`) record the event, the tool name and, for Bash, a class (`test`, `lint`, `build`, `typecheck`,
   `format`, `git`, `other`). Prompts and command text are never stored.
-- `overbridge check` records each run: the full command line (best effort: every `NAME=value`, URL credentials, `Authorization`/`Bearer` values, the value of a secret-looking flag such as
+- `overbridge check` records each run: the full command line (best effort: every `NAME=value`, URL credentials and secret-looking query parameters, `Authorization`/`Bearer` values, the value of a secret-looking flag such as
   `--token` and the arguments of `-H`/`--header`/`-u user:pass` are blanked; a secret passed as a bare positional argument is kept), its leading words, its group (the task it ran: `nix develop --command just check` is `check`), its class,
   queue time, run time and exit code (including 124, 137, 75). The tab and reports show the group; the full command is kept.
 

@@ -99,6 +99,8 @@ export async function perfPane() {
 
   let reloadedAtMs = Date.now();
   let reloading = false;
+  let forceNext = false;
+  let notice = "";
   const painter = createPainter((text) => process.stdout.write(text));
   const draw = () => {
     const height = process.stdout.rows ?? 24;
@@ -108,22 +110,34 @@ export async function perfPane() {
     if (selected < offset) offset = selected;
     if (selected >= offset + body) offset = selected - body + 1;
     const label = WINDOWS[windowAt]!.label;
-    const screen = list.grouping === "repo" ? renderRepos(list.rows, selected, offset, height, width, label) : renderPerf(list.rows, selected, offset, height, width, label);
+    const screen = list.grouping === "repo" ? renderRepos(list.rows, selected, offset, height, width, label, notice) : renderPerf(list.rows, selected, offset, height, width, label, notice);
     painter.paint(frame(screen, height, width));
   };
   /** Ask the server for fresh views (`force`: a rebuild that starts now, for the user's `r`), else compute them here. */
-  const reload = async (force: boolean) => {
-    if (reloading) return;
+  const reload = async (force: boolean): Promise<void> => {
+    if (reloading) {
+      // a forced rebuild asked for during another reload runs when that one ends
+      forceNext ||= force;
+      return;
+    }
     reloading = true;
     reloadedAtMs = Date.now();
     try {
       const built = await serverRefreshPerf(force ? { force } : {});
       views = (built ? readPerfCache() : undefined) ?? computePerf();
       list = rows();
+      notice = "";
+    } catch (e) {
+      // keep the last views on screen
+      notice = `reload failed: ${e instanceof Error ? e.message : String(e)}`;
     } finally {
       reloading = false;
     }
     draw();
+    if (forceNext) {
+      forceNext = false;
+      await reload(true);
+    }
   };
   const quit = () => {
     process.stdout.write(LEAVE_SCREEN);

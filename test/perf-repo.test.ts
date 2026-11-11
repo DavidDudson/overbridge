@@ -27,6 +27,8 @@ describe("commandGroup", () => {
     ["bun x vitest", "vitest"],
     ["bun run --filter web lint", "lint"],
     ["bun run test:unit", "test:unit"],
+    ["make -j 4 lint", "lint"],
+    ["just -E env check", "check"],
     ["just", "just"],
     ["bun run", "bun run"],
   ])("%s -> %s", (command, group) => expect(commandGroup(command)).toBe(group));
@@ -45,7 +47,15 @@ describe("redactCommand", () => {
     ["tool --header=X-Key:abc go", "tool --header=*** go"],
     ["tool --password --verbose", "tool --password --verbose"],
     ["call Bearer abc.def", "call Bearer ***"],
+    ["curl https://x/?api_key=abc&y=1", "curl https://x/?api_key=***&y=1"],
+    ["curl -uuser:pw x", "curl -u*** x"],
+    ["curl -Hx-token:abc x", "curl -H*** x"],
   ])("%s", (input, out) => expect(redactCommand(input)).toBe(out));
+  test("a huge argument is cut before the patterns run", () => {
+    const started = performance.now();
+    redactCommand("a".repeat(200_000));
+    expect(performance.now() - started).toBeLessThan(200);
+  });
   test("caps the length", () => {
     expect(redactCommand("x ".repeat(400)).length).toBe(500);
   });
