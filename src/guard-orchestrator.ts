@@ -138,6 +138,7 @@ const OVERBRIDGE_ALLOWED: Record<string, readonly string[]> = {
   item: ["view", "from-branch", "branch", "assigned"],
   config: ["get", "check", "show"],
   ext: [],
+  worklist: ["show"],
 };
 
 /** Redirections that cannot write a file: to another descriptor or to /dev/null. */

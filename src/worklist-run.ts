@@ -128,6 +128,12 @@ export function refreshWorklist(now = Date.now()): WorklistCache {
   return cache;
 }
 
+/** The list `overbridge worklist show` prints for a Claude: one ranked row per line, then the repos that could not be read. */
+export function showWorklist(cache: WorklistCache): string[] {
+  const rows = rank(cache.rows).map((r) => `${r.rank}\t${r.ready ? "ready" : r.status}\t${r.key}\t${r.title}\t${r.reasons.join(", ")}`);
+  return [...(rows.length ? rows : ["nothing assigned to you"]), ...cache.notes.map((n) => `note: ${n}`)];
+}
+
 export interface RefreshResult {
   ok: boolean;
   /** The first line the child printed to stderr, or its exit code, when it failed. */
