@@ -23,6 +23,10 @@ import { createPainter, readView, shouldPoll } from "./zellij-view";
 import { errorMessage, naturalSort, run, spawnCwd } from "./util";
 import { overbridgeVersion } from "./version";
 
+/** The key that jumps to the performance tab, and the tab it reaches. */
+export const PERF_KEY = "p";
+export const PERF_TAB = "@perf";
+
 /** How long a held digit waits for a second one before it goes to its one-digit tab. */
 export const DIGIT_MS = 600;
 
@@ -32,7 +36,7 @@ export function legend(count: number, pending = ""): string {
     return `${pending}…`;
   }
   const digits = count > 1 ? `1-${count} go  ` : count === 1 ? "1 go  " : "";
-  return `${digits}←→ back  ⌥w next  s new ws`;
+  return `${digits}←→ back  ⌥w next  s new ws  p perf`;
 }
 
 /**
@@ -827,6 +831,12 @@ export async function sidebar(wsOpt?: string) {
           if (input.kind === "key" && input.key === "n") {
             hold("");
             next(self);
+            return;
+          }
+          if (input.kind === "key" && input.key === PERF_KEY) {
+            hold("");
+            const perf = last.list.find((e) => e.tab === PERF_TAB);
+            if (perf && perf.tab !== self) visitTab(self, perf.tab);
             return;
           }
           // the list on screen, so a click lands on the card the user saw

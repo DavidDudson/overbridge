@@ -380,6 +380,8 @@ it has run, and who is waiting.
 | `project-management.worklist-project` | none | GitHub only: a Projects v2 board, `<owner>/<number>` (or a bare number for the repo's owner), such as `DavidDudson/2`. The `@work` tab then lists that board's issues for the repo, assigned to you or not, instead of only your assigned issues. Needs `gh auth refresh -s project` |
 | `project-management.worklist-statuses` | every Status but Done | With `worklist-project`: the board Status values to list, such as `[Backlog, Ready]` |
 | `project-management.worklist-jql` | `(sprint in openSprints() OR statusCategory = "In Progress")` | Jira only: JQL that narrows the `@work` tab to some of your open tickets. Set it to `""` to list every open ticket. Repos on the same project and filter share one read, so each ticket appears once and `s` asks which repo to start it in |
+| `project-management.worklist-scope` | `assigned` | GitHub only: whose open issues `@work` lists. `assigned` is yours; `unassigned` is nobody's issues that sit on a Projects v2 board; `all` is both |
+| `board.columns` | none | GitHub Projects v2 only: maps a `Status` column name (any case) to `todo`, `in-progress`, `blocked` or `done`. Unlisted names fall back to common ones (done, in progress, blocked), then to labels. Needs `gh auth refresh -s read:project` |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
 | `check-queue.max-load-percent` | `70` | start a queued run only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. See [Check queue](#check-queue) |
@@ -606,6 +608,23 @@ overbridge app web log         # print the log path
 
 Use `--repo <name>` when two repos declare the same id and `--no-wait` to skip the ready check.
 
+### History
+
+Each workspace keeps a history of where its time went, in `.overbridge/history/<workspace>.jsonl` (capped at 4 MB,
+then cut to the newest half). Two things write it:
+
+- The Claude hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `Stop`,
+  `SessionEnd`) record the event, the tool name and, for Bash, a class (`test`, `lint`, `build`, `typecheck`,
+  `format`, `git`, `other`). Prompts and command text are never stored.
+- `overbridge check` records each run: the command's leading words (no arguments), its class, queue time, run time and exit code (including 124, 137, 75).
+
+`overbridge history` (flags: `--ws`, `--hours`, `--json`) folds that into time totals: turn time split into model,
+tool and permission-prompt time, time waiting on the user (a gap over 30 minutes counts as away), and the checks by
+class. The `@perf` orchestration tab (`overbridge perf`) shows the same per workspace, busiest first: turns, time in
+turns, the model, tool, permission and user shares, and the check count and time, with the selected workspace's
+slowest tools and checks below. `j`/`k` move, `w` cycles the window (1h, 24h, 7d, all), `r` reloads; it reloads
+itself every 5 seconds. The store sits behind the `HistoryStore` interface in `src/history.ts`, so a long-running server can take it over.
+
 ### Tab sidebar
 
 `overbridge sidebar` is the pane down the left of every tab. It lists each workspace with
@@ -619,6 +638,7 @@ Left/Right or `h`/`l` go back and forward through the tabs visited from the side
 Every tab's sidebar shares one history per zellij session (`<meta>/sidebar-history/<session>.json`),
 tabs closed since are skipped, and a failed switch leaves it as it was. Switches made outside the sidebar
 (zellij keys, the tab bar, `overbridge next`, `overbridge go`) are not recorded.
+`p` jumps to the `@perf` tab (also `overbridge go perf`, or its number), where the legend lists it.
 The new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. Long titles wrap under their text (up to three rows).
 

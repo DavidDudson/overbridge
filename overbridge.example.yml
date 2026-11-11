@@ -12,9 +12,17 @@ project-management:
   # workspace: "{id}"                    # {id} {number} {repo}; default: github gh-{repo}-{number}, jira {id}
   # branch-types: { Bug: fix, default: feat }   # item type or label -> {type}; default: feat
   # issue-type: Task                     # Jira only: issue type for new items; default: Task
+  # worklist-scope: assigned             # GitHub only: assigned (yours) | unassigned (nobody's, on a project board) | all; default: assigned
   # worklist-jql: "sprint in openSprints()"   # Jira only: narrows the @work list; default: open sprint or in progress; "" lists all
   # worklist-project: DavidDudson/2      # GitHub only: list this Projects v2 board (owner/number) in @work, not just issues assigned to you
   # worklist-statuses: [Backlog, Ready]  # with worklist-project: Status values to list; default: all but Done
+
+# GitHub Projects v2 only: how the board's Status column maps to the @work list. Needs `gh auth refresh -s read:project`.
+# board:
+#   columns:                     # column name (any case) -> todo | in-progress | blocked | done
+#     Ready: todo
+#     In review: in-progress
+#     Waiting on vendor: blocked
 
 # Apps `overbridge app` and the top panel can start and stop. Default: none.
 apps:
