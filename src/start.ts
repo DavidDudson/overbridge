@@ -112,7 +112,8 @@ function rebind(ws: string, repo: string, id: string, branch: string, claim: Cla
   if (!task && (git.isDirty(wt) || git.hasUnpushed(wt))) {
     fail(`${ws}/${repo} has uncommitted changes or unpushed commits${old ? ` on ${old}` : ""}; commit and push them, or run without --here`);
   }
-  checkout([repo, branch], ws, task ? { base: "HEAD" } : {});
+  const reboundFrom = old ? { branch: old, ...(claim.pr !== undefined ? { pr: claim.pr } : {}) } : undefined;
+  checkout([repo, branch], ws, { ...(task ? { base: "HEAD" } : {}), ...(reboundFrom ? { reboundFrom } : {}) });
   if (task && old) {
     if (run(["git", "-C", wt, "branch", "-d", old]).ok) log(`deleted ${old}`);
     else log(`kept ${old}: it has commits not on ${branch}`);

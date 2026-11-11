@@ -91,6 +91,50 @@ export function githubRows(slug: string, repo: string, runner: Runner = run, col
   throw new Error(`github: ${slug} has more than ${MAX_PAGES * 100} open issues, stopping`);
 }
 
+export interface ProjectBoard {
+  owner: string;
+  number: number;
+  /** Status values to keep, matched without case. Unset keeps all but Done. */
+  statuses?: string[];
+}
+
+/** Reads `worklist-project`: `<owner>/<number>`, or a bare number for `defaultOwner`. */
+export function parseProject(spec: string, defaultOwner: string | undefined, statuses?: string[]): ProjectBoard | undefined {
+  const m = /^(?:([\w.-]+)\/)?(\d+)$/.exec(spec.trim());
+  const owner = m?.[1] ?? defaultOwner;
+  return m && owner ? { owner, number: Number(m[2]), ...(statuses ? { statuses } : {}) } : undefined;
+}
+
+interface ProjectItem {
+  id?: string;
+  title?: string;
+  status?: string;
+  labels?: string[];
+  priority?: string;
+  content?: { type?: string; number?: number; repository?: string; title?: string; url?: string };
+}
+
+/** Rows for `repo` (GitHub `slug`) from `gh project item-list --format json`. Items of other repos, drafts and pull requests are left out. */
+export function rowsFromProject(json: string, slug: string, repo: string, statuses?: string[], columns: Record<string, WorkStatus> = {}): WorkRow[] {
+  const items = (JSON.parse(json) as { items?: ProjectItem[] }).items ?? [];
+  const want = statuses?.map((s) => s.trim().toLowerCase());
+  return items.flatMap((i): WorkRow[] => {
+    const c = i.content;
+    if (!c || c.type !== "Issue" || c.number === undefined || c.repository !== slug) return [];
+    const status = statusFromColumn(i.status, columns);
+    if (want ? !want.includes((i.status ?? "").trim().toLowerCase()) : status === "done") return [];
+    const labels = i.labels ?? [];
+    return [{ repo, id: String(c.number), title: c.title ?? i.title ?? "", url: c.url ?? "", status, labels: i.priority ? [...labels, i.priority] : labels, blockedBy: [], updatedAt: "" }];
+  });
+}
+
+/** Items of a Projects v2 board that belong to `slug`, as work rows labelled with `repo`. Needs `gh auth refresh -s project`. */
+export function projectRows(board: ProjectBoard, slug: string, repo: string, runner: Runner = run, columns: Record<string, WorkStatus> = {}): WorkRow[] {
+  const r = runner(["gh", "project", "item-list", String(board.number), "--owner", board.owner, "--limit", "500", "--format", "json"]);
+  if (!r.ok) throw new Error(`github: reading project ${board.owner}/${board.number} failed: ${(r.stderr || r.stdout).trim().split("\n")[0]}. Check \`gh auth refresh -s project\``);
+  return rowsFromProject(r.stdout, slug, repo, board.statuses, columns);
+}
+
 /** `owner/name` from a GitHub remote URL (ssh or https), else undefined. */
 export function slugFromUrl(url: string): string | undefined {
   return /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(url)?.[1];
