@@ -6,7 +6,9 @@ import { pidAlive } from "./proc";
 import { type Cover, overlaps } from "./stack";
 import { describeValue, errorMessage, fail, isRecord } from "./util";
 
-export type Claim = { branch?: string; pr?: number };
+/** What a claim was moved from by a re-bind (`overbridge start` inside a task workspace, or `--here`). */
+export type ReboundFrom = { branch: string; pr?: number };
+export type Claim = { branch?: string; pr?: number; reboundFrom?: ReboundFrom };
 /** A background removal in flight: when it started, what started it and, once spawned, the worker's pid. */
 export type Removing = { since: string; cause?: CleanupCause; pid?: number };
 /** Why a workspace that would be removed by itself is kept; shown on its sidebar card. */

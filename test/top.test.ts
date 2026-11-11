@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
-import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type TopApp, type TopLink, type TopSnapshot } from "../src/top";
+import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, claimedCache, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type TopApp, type TopLink, type TopSnapshot } from "../src/top";
 import { textWidth } from "../src/term";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -341,6 +341,24 @@ describe("cleanable", () => {
       s.workspaces.w1!.repos.r2 = { branch: "feat/13-other" };
     });
     expect(open("OPEN", "OPEN")).toBe(false);
+  });
+
+  test("a claim that moved after the cache was built is not finished on the old PR's say", () => {
+    expect(cachePr("MERGED", { headRefOid: headSha() }).merged).toBeDefined();
+    expect(claimedCache("w1").merged).toBeDefined();
+    withState((s) => {
+      s.workspaces.w1!.repos.r = { branch: "feat/13-follow-up", reboundFrom: { branch: "feat/12-dark-mode", pr: 3 } };
+    });
+    expect(claimedCache("w1").merged).toBeUndefined();
+    expect(claimedCache("w1").prsOpen).toBeUndefined();
+    expect(cleanable("w1")).toBe(false);
+    expect(cachePr("OPEN").branches).toEqual({ r: "feat/13-follow-up" });
+  });
+
+  test("a cache from before branches were recorded is trusted", () => {
+    const old = cachePr("MERGED", { headRefOid: headSha() });
+    const { branches: _b, ...legacy } = old;
+    expect(claimedCache("w1", legacy as typeof old).merged).toBeDefined();
   });
 
   test("a just-cleared agent makes it a candidate even without an open PR, but dirty trees still block", () => {
