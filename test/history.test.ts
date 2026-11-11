@@ -3,7 +3,8 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recordHistory } from "../src/agent-hook";
-import { type ClaudeEvent, classifyCommand, type CommandClass, claudeRecord, type ClaudeRecord, fileStore, type HistoryRecord, summarize } from "../src/history";
+import { type ClaudeEvent, classifyCommand, commandLabel, type CommandClass, claudeRecord, type ClaudeRecord, fileStore, type HistoryRecord, summarize } from "../src/history";
+import { recordCheck } from "../src/check-queue";
 import { duration, summaries, summaryLines } from "../src/history-report";
 
 let dir: string;
@@ -24,7 +25,22 @@ describe("classifyCommand", () => {
     ["nix build .#x", "build"],
     ["git status", "git"],
     ["prettier --write .", "format"],
+    ['git commit -m "add tests"', "git"],
+    ["gh pr checks", "git"],
+    ["bun run lint && bun test", "lint"],
+    ["tsc && vite build", "typecheck"],
   ])("%s is %s", (command, cls) => expect(classifyCommand(command)).toBe(cls));
+});
+
+describe("commandLabel", () => {
+  test.each([
+    ["bun test test/foo.test.ts --bail", "bun test test/foo.test.ts"],
+    ["API_TOKEN=hunter2 bun test --token=hunter2", "bun test"],
+    ["just typecheck", "just typecheck"],
+    ["curl https://u:pw@host/x", "curl"],
+    ["a b c d e f", "a b c d"],
+    ["", ""],
+  ])("%s -> %s", (command, label) => expect(commandLabel(command)).toBe(label));
 });
 
 describe("claudeRecord", () => {
@@ -111,12 +127,48 @@ describe("summarize", () => {
     expect(s.toolMs).toBe(0);
     expect(s.modelMs).toBe(9);
   });
+  test("parallel tool calls count their overlap once, so the split still adds up", () => {
+    const s = summarize([
+      ev(0, "UserPromptSubmit"),
+      ev(0, "PreToolUse", { tool: "Read", id: "a" }),
+      ev(0, "PreToolUse", { tool: "Grep", id: "b" }),
+      ev(10 * S, "PostToolUse", { tool: "Read", id: "a" }),
+      ev(10 * S, "PostToolUse", { tool: "Grep", id: "b" }),
+      ev(20 * S, "Stop"),
+    ]);
+    expect(s.toolMs).toBe(10 * S);
+    expect(s.modelMs).toBe(10 * S);
+    expect(s.tools.Read).toEqual({ count: 1, ms: 10 * S });
+  });
+  test("a failed tool closes like a finished one", () => {
+    const s = summarize([ev(0, "UserPromptSubmit"), ev(S, "PreToolUse", { tool: "Bash", id: "a" }), ev(5 * S, "PostToolUseFailure", { tool: "Bash", id: "a" }), ev(6 * S, "Stop")]);
+    expect(s.toolMs).toBe(4 * S);
+    expect(s.tools.Bash?.count).toBe(1);
+  });
   test("counts check runs by class, with failures and queue time", () => {
     const s = summarize([
       { kind: "check", at: 1, repo: "r", command: "bun test", cls: "test", queuedMs: 100, runMs: 4000, exit: 0 },
       { kind: "check", at: 2, repo: "r", command: "bun test", cls: "test", queuedMs: 50, runMs: 2000, exit: 1 },
     ]);
     expect(s.checks.test).toEqual({ count: 2, ms: 6000, failed: 1, queuedMs: 150 });
+  });
+});
+
+describe("recordCheck", () => {
+  const queued = { pid: 1, ws: "w", repo: "r", command: "bun test --token=x", queuedAtMs: 1000 };
+  test("a run records its queue time, run time, exit and class, never its arguments", () => {
+    const store = fileStore(dir);
+    recordCheck(queued, 4000, 9000, 1, store);
+    expect(store.read("w")).toEqual([{ kind: "check", at: 9000, repo: "r", command: "bun test", cls: "test", queuedMs: 3000, runMs: 5000, exit: 1 }]);
+  });
+  test("giving up records the wait and no run", () => {
+    const store = fileStore(dir);
+    recordCheck(queued, 7000, undefined, 75, store);
+    expect(store.read("w")[0]).toMatchObject({ queuedMs: 6000, runMs: 0, exit: 75 });
+  });
+  test("a failing store never throws", () => {
+    const broken = { append: () => { throw new Error("full"); }, read: () => [], workspaces: () => [] };
+    expect(() => recordCheck(queued, 2000, 3000, 0, broken)).not.toThrow();
   });
 });
 

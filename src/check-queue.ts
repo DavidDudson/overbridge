@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, constants, loadavg } from "node:os";
 import { join } from "node:path";
-import { classifyCommand, type HistoryStore, historyStore } from "./history";
+import { classifyCommand, commandLabel, type HistoryStore, historyStore } from "./history";
 import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
@@ -203,13 +203,13 @@ export function stopChecksFor(ws: string, dir = queueDir()): number {
 }
 
 /** Append the run to the workspace's history. Never throws: a check's exit code does not depend on it. */
-function recordCheck(me: Ticket, startedMs: number, endedMs: number | undefined, exit: number, store: HistoryStore = historyStore()) {
+export function recordCheck(me: Ticket, startedMs: number, endedMs: number | undefined, exit: number, store: HistoryStore = historyStore()) {
   try {
     store.append(me.ws, {
       kind: "check",
       at: endedMs ?? startedMs,
       repo: me.repo,
-      command: me.command.slice(0, 200),
+      command: commandLabel(me.command),
       cls: classifyCommand(me.command),
       queuedMs: startedMs - me.queuedAtMs,
       runMs: endedMs === undefined ? 0 : endedMs - startedMs,

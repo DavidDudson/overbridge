@@ -68,6 +68,8 @@ function agentStateHooks() {
     PreToolUse: [{ matcher: "*", hooks: [hook("guard"), hook("hook")] }],
     ...Object.fromEntries(["SessionStart", "UserPromptSubmit", "Notification", "PreCompact", "Stop", "SessionEnd"].map((event) => [event, state])),
     PostToolUse: [{ matcher: "*", hooks: [hook("hook")] }],
+    // a tool that fails never reaches PostToolUse, and its time would count as the model's
+    PostToolUseFailure: [{ matcher: "*", hooks: [hook("hook")] }],
   };
 }
 

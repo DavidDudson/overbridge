@@ -12,7 +12,7 @@ import { metaDir } from "./paths";
  */
 
 /** Claude Code hook events that are recorded. */
-export const CLAUDE_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "SessionEnd"] as const;
+export const CLAUDE_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Notification", "Stop", "SessionEnd"] as const;
 export type ClaudeEvent = (typeof CLAUDE_EVENTS)[number];
 
 /** A coarse class for a command, so history never needs to keep a Bash command's text. */
@@ -20,17 +20,32 @@ export const COMMAND_CLASSES = ["test", "lint", "build", "typecheck", "format", 
 export type CommandClass = (typeof COMMAND_CLASSES)[number];
 
 const CLASS_PATTERNS: readonly [CommandClass, RegExp][] = [
+  ["git", /^\s*(git|gh)\b/],
   ["typecheck", /\b(typecheck|tsc|mypy|pyright|type-check)\b/],
   ["lint", /\b(lint|eslint|clippy|ruff|biome|shellcheck|statix)\b/],
   ["format", /\b(fmt|format|prettier|rustfmt|nixfmt|treefmt)\b/],
   ["test", /\b(test|tests|vitest|jest|pytest|spec|e2e)\b/],
   ["build", /\b(build|compile|bundle|nix build|cargo build|webpack|vite)\b/],
-  ["git", /^\s*(git|gh)\b/],
 ];
 
 /** The class of a command line: the first pattern it matches, else `other`. */
 export function classifyCommand(command: string): CommandClass {
   return CLASS_PATTERNS.find(([, re]) => re.test(command))?.[0] ?? "other";
+}
+
+/**
+ * What a check command is, for display: its leading words up to the first flag, assignment or quote, at most four.
+ * `API_TOKEN=x bun test --token=y` is `bun test`. Arguments are where secrets sit, so they are never kept.
+ */
+export function commandLabel(command: string): string {
+  const words = command.trim().split(/\s+/);
+  const start = words.findIndex((w) => !/^\w+=/.test(w));
+  const label: string[] = [];
+  for (const w of words.slice(start < 0 ? words.length : start)) {
+    if (w.startsWith("-") || /[=:'"$]/.test(w) || label.length === 4) break;
+    label.push(w);
+  }
+  return label.join(" ");
 }
 
 export interface ClaudeRecord {
@@ -51,6 +66,7 @@ export interface CheckRecord {
   /** Epoch ms when the run ended. */
   at: number;
   repo: string;
+  /** `commandLabel` of the command, never its arguments. */
   command: string;
   cls: CommandClass;
   /** Time waiting in the check queue. */
@@ -89,9 +105,9 @@ export function fileStore(dir: string, maxBytes = MAX_FILE_BYTES): HistoryStore 
     });
   return {
     append(ws, record) {
-      mkdirSync(dir, { recursive: true });
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
       const path = file(ws);
-      appendFileSync(path, JSON.stringify(record) + "\n");
+      appendFileSync(path, JSON.stringify(record) + "\n", { mode: 0o600 });
       if (statSync(path).size > maxBytes) {
         const lines = readFileSync(path, "utf8").split("\n").filter(Boolean);
         writeFileSync(path, lines.slice(Math.floor(lines.length / 2)).join("\n") + "\n");
@@ -122,14 +138,19 @@ export const historyDir = () => join(metaDir(), "history");
 /** The store in use. The server, when it lands, is returned here. */
 export const historyStore = (): HistoryStore => fileStore(historyDir());
 
+/** The parts of a Claude hook payload that history reads. */
+export interface HookPayload {
+  hook_event_name?: string;
+  tool_name?: string;
+  tool_use_id?: string;
+  tool_input?: { command?: unknown };
+}
+
 /** The record for a Claude hook payload, or undefined for an event that is not recorded. */
-export function claudeRecord(
-  input: { hook_event_name?: string; tool_name?: string; tool_use_id?: string; tool_input?: { command?: unknown } },
-  at = Date.now(),
-): ClaudeRecord | undefined {
+export function claudeRecord(input: HookPayload, at = Date.now()): ClaudeRecord | undefined {
   const event = CLAUDE_EVENTS.find((e) => e === input.hook_event_name);
   if (!event) return undefined;
-  const tool = event === "PreToolUse" || event === "PostToolUse" ? input.tool_name : undefined;
+  const tool = event === "PreToolUse" || event === "PostToolUse" || event === "PostToolUseFailure" ? input.tool_name : undefined;
   const command = tool === "Bash" && typeof input.tool_input?.command === "string" ? input.tool_input.command : undefined;
   return {
     kind: "claude",
@@ -172,6 +193,18 @@ export const AWAY_AFTER_MS = 30 * 60_000;
 
 const bump = (t: Tally | undefined, ms: number): Tally => ({ count: (t?.count ?? 0) + 1, ms: (t?.ms ?? 0) + ms });
 
+/** Total length covered by `spans`, counting overlapping time once. */
+function unionMs(spans: [number, number][]): number {
+  let total = 0;
+  let end = -Infinity;
+  for (const [from, to] of spans.sort((a, b) => a[0] - b[0])) {
+    if (to <= end) continue;
+    total += to - Math.max(from, end);
+    end = to;
+  }
+  return total;
+}
+
 /** Fold a workspace's records into time totals. Records need not be sorted. */
 export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_AFTER_MS): Summary {
   const s: Summary = { turns: 0, turnMs: 0, modelMs: 0, toolMs: 0, permissionMs: 0, userMs: 0, awayMs: 0, tools: {}, bash: {}, checks: {} };
@@ -179,6 +212,8 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
   let lastStop: number | undefined;
   let notifiedAt: number | undefined;
   const open = new Map<string, { at: number; tool: string; cls?: CommandClass }>();
+  // parallel tool calls overlap, so tool time is the union of the intervals, not their sum
+  const spans: [number, number][] = [];
   for (const r of [...records].sort((a, b) => a.at - b.at)) {
     if (r.kind === "check") {
       const prev = s.checks[r.cls];
@@ -208,7 +243,8 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
         // an idle notification after the turn ended waits on nobody
         if (turnStart !== undefined && notifiedAt === undefined) notifiedAt = r.at;
         break;
-      case "PostToolUse": {
+      case "PostToolUse":
+      case "PostToolUseFailure": {
         const started = r.id ? open.get(r.id) : undefined;
         if (!started || r.id === undefined) break;
         open.delete(r.id);
@@ -217,7 +253,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
         notifiedAt = undefined;
         const ms = Math.max(0, r.at - started.at - wait);
         s.permissionMs += wait;
-        s.toolMs += ms;
+        spans.push([started.at, started.at + ms]);
         s.tools[started.tool] = bump(s.tools[started.tool], ms);
         if (started.cls) s.bash[started.cls] = bump(s.bash[started.cls], ms);
         break;
@@ -233,6 +269,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
         break;
     }
   }
+  s.toolMs = unionMs(spans);
   s.modelMs = Math.max(0, s.turnMs - s.toolMs - s.permissionMs);
   return s;
 }

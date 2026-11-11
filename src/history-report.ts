@@ -23,12 +23,18 @@ export function summaries(store: HistoryStore = historyStore(), windowMs?: numbe
   return (only ? [only] : store.workspaces()).map((ws) => ({ ws, summary: summarize(store.read(ws, since)) }));
 }
 
+/** Time the user could be watching: Claude's own, plus waiting on the user. */
+export const activeMs = (s: Summary) => s.modelMs + s.toolMs + s.permissionMs + s.userMs;
+
+/** Check runs across every class. */
+export const checkTotals = (s: Summary) => Object.values(s.checks).reduce((n, c) => ({ count: n.count + (c?.count ?? 0), ms: n.ms + (c?.ms ?? 0) }), { count: 0, ms: 0 });
+
 /** The share of `part` in `whole`, as a whole percent. */
 export const percent = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 
 /** Plain-text lines for one workspace: the Claude split, then the check runs by class. */
 export function summaryLines({ ws, summary: s }: WorkspaceSummary): string[] {
-  const active = s.modelMs + s.toolMs + s.permissionMs + s.userMs;
+  const active = activeMs(s);
   const lines = [
     `${ws}: ${s.turns} turn${s.turns === 1 ? "" : "s"}, ${duration(s.turnMs)} in turns`,
     `  claude   model ${duration(s.modelMs)} (${percent(s.modelMs, active)}%)  tools ${duration(s.toolMs)} (${percent(s.toolMs, active)}%)  ` +

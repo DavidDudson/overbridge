@@ -8,6 +8,7 @@ import { extCommand } from "./ext";
 import { icebox, thaw } from "./icebox";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
+import { historyStore } from "./history";
 import { summaries, summaryLines } from "./history-report";
 import { next } from "./next";
 import { diff } from "./panes";
@@ -189,6 +190,7 @@ async function main(argv: string[]): Promise<number> {
       const { values } = opts(rest, { ...ws, hours: { type: "string" }, json: { type: "boolean" } });
       const hours = values.hours === undefined ? undefined : Number(values.hours);
       if (hours !== undefined && !(hours > 0)) throw new OverbridgeError("usage: overbridge history [--ws name] [--hours n] [--json]");
+      if (values.ws && !historyStore().workspaces().includes(values.ws)) throw new OverbridgeError(`no history for ${values.ws}`);
       const rows = summaries(undefined, hours === undefined ? undefined : hours * 3600_000, values.ws);
       if (values.json) console.log(JSON.stringify(rows, null, 2));
       else if (!rows.length) log("no history yet");

@@ -603,10 +603,10 @@ Use `--repo <name>` when two repos declare the same id and `--no-wait` to skip t
 Each workspace keeps a history of where its time went, in `.overbridge/history/<workspace>.jsonl` (capped at 4 MB,
 then cut to the newest half). Two things write it:
 
-- The Claude hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Notification`, `Stop`,
+- The Claude hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `Stop`,
   `SessionEnd`) record the event, the tool name and, for Bash, a class (`test`, `lint`, `build`, `typecheck`,
   `format`, `git`, `other`). Prompts and command text are never stored.
-- `overbridge check` records each run: command, class, queue time, run time and exit code (including 124, 137, 75).
+- `overbridge check` records each run: the command's leading words (no arguments), its class, queue time, run time and exit code (including 124, 137, 75).
 
 `overbridge history` (flags: `--ws`, `--hours`, `--json`) folds that into time totals: turn time split into model,
 tool and permission-prompt time, time waiting on the user (a gap over 30 minutes counts as away), and the checks by
