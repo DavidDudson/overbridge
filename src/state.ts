@@ -7,6 +7,10 @@ import { type Cover, overlaps } from "./stack";
 import { describeValue, errorMessage, fail, isRecord } from "./util";
 
 export type Claim = { branch?: string; pr?: number };
+/** Branch prefix for a workspace started with no work item. */
+export const TASK_BRANCH_PREFIX = "task/";
+/** A claim on a `task/` branch that has no PR yet: work with no item that can continue into one. */
+export const isTaskClaim = (c: Claim): boolean => c.branch?.startsWith(TASK_BRANCH_PREFIX) === true && c.pr === undefined;
 /** A background removal in flight: when it started, what started it and, once spawned, the worker's pid. */
 export type Removing = { since: string; cause?: CleanupCause; pid?: number };
 /** Why a workspace that would be removed by itself is kept; shown on its sidebar card. */

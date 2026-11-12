@@ -61,6 +61,11 @@ attention, or else the tab next to it. A background process then re-checks the P
 runs `overbridge rm`. If any of that fails, the workspace comes back with the error on its sidebar card, and its tab
 reopens. A merged claim does not block it; a closed (unmerged) PR or a branch with no PR does.
 
+A workspace on a `task/` branch never needs a PR to show the button. It shows while every claimed branch is a `task/`
+branch with no PR and no commits past the default branch, and nothing is uncommitted, even while its session runs.
+That covers a workspace that only filed a ticket, or a spike that came to nothing. The merged-PR check never removes
+one by itself; `overbridge cleanup` reports it once its session is at rest.
+
 **Ending a session.** When you exit a workspace's Claude on purpose (`/exit` or Ctrl-D), overbridge removes the
 workspace the way Cleanup does. Its tab closes, it leaves every sidebar, and a background process finishes the removal.
 It doesn't need an open PR. If a repo has uncommitted changes or unpushed commits, the workspace stays in the list,

@@ -76,7 +76,7 @@ item, do not switch this workspace: `overbridge start <repo> <id>` makes the ite
 (see `start-item`). Related work stays here: when this workspace is on a `task/` branch with no PR (it filed
 a ticket, or spiked), `overbridge start <repo> <id>` re-binds it to the item instead, carrying the task
 branch's commits and uncommitted work onto the item's branch; `--here` does the same from any clean claim. Once a workspace's PRs are open and nothing is uncommitted or unpushed, the top panel
-shows a Cleanup button; wiping a workspace is the user's call, so never run `overbridge rm` yourself. A workspace
+shows a Cleanup button (a `task/` workspace with no PR and no commits shows it too); wiping a workspace is the user's call, so never run `overbridge rm` yourself. A workspace
 also removes itself when the user exits its Claude with every repo clean and pushed.
 Once every PR has merged and nothing is unsaved, overbridge removes the workspace after your turn ends.
 Commit and push everything before then. Otherwise the workspace stays, marked "merged · unsaved work".

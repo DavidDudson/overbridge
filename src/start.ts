@@ -10,7 +10,7 @@ import { scaffold } from "./scaffold";
 import { switchTab } from "./sidebar";
 import { openTab, TabFocus, tabOrder, type ZellijExec } from "./tab";
 import { cover, hasGhStack, localStacks } from "./stack";
-import { type Claim, claimOwner, isRemoving, readState, type State } from "./state";
+import { type Claim, claimOwner, isRemoving, isTaskClaim, readState, type State, TASK_BRANCH_PREFIX } from "./state";
 import { fail, log, must, run } from "./util";
 
 /**
@@ -86,12 +86,6 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
   }
   openWorkspace(name, repo, branch, prompts, deps.exec);
 }
-
-/** Branch prefix for a workspace started with no work item. */
-export const TASK_BRANCH_PREFIX = "task/";
-
-/** A claim on a `task/` branch that has no PR yet: work with no item that can continue into one. */
-const isTaskClaim = (c: Claim) => c.branch?.startsWith(TASK_BRANCH_PREFIX) === true && c.pr === undefined;
 
 /**
  * Move workspace `ws`'s claim on `repo` from `claim` to the item's `branch`, in place. A task branch is the

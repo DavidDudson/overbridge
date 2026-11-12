@@ -92,6 +92,16 @@ export function hasUnpushed(wt: string): boolean {
   return !r.ok || r.stdout !== "0";
 }
 
+/**
+ * How many commits HEAD holds that `ref` lacks. Fails safe: undefined when the worktree is missing or git cannot
+ * tell, so a caller never reads a failure as "nothing ahead".
+ */
+export function commitsPast(wt: string, ref: string): number | undefined {
+  if (!existsSync(wt)) return undefined;
+  const r = run(["git", "-C", wt, "rev-list", "--count", `${ref}..HEAD`]);
+  return r.ok && /^\d+$/.test(r.stdout) ? Number(r.stdout) : undefined;
+}
+
 export type PrInfo = { number: number; url: string; headRefName: string; isCrossRepository: boolean };
 
 /** Accepts `#123`, `pr:123`, or a PR URL. Returns the gh selector, or undefined if `ref` is a branch. */
