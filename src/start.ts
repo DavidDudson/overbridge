@@ -12,7 +12,7 @@ import { switchTab } from "./sidebar";
 import { defaultMux, type Mux } from "./mux";
 import { openTab, TabFocus } from "./tab";
 import { cover, hasGhStack, localStacks } from "./stack";
-import { type Claim, claimOwner, isIceboxed, isRemoving, readState, type State } from "./state";
+import { type Claim, claimOwner, isIceboxed, isRemoving, isTaskClaim, readState, type State, TASK_BRANCH_PREFIX } from "./state";
 import { fail, log, must, run } from "./util";
 
 /**
@@ -93,12 +93,6 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
   }
   openWorkspace(name, repo, branch, prompts, deps.mux);
 }
-
-/** Branch prefix for a workspace started with no work item. */
-export const TASK_BRANCH_PREFIX = "task/";
-
-/** A claim on a `task/` branch that has no PR yet: work with no item that can continue into one. */
-const isTaskClaim = (c: Claim) => c.branch?.startsWith(TASK_BRANCH_PREFIX) === true && c.pr === undefined;
 
 /**
  * Move workspace `ws`'s claim on `repo` from `claim` to the item's `branch`, in place. A task branch is the

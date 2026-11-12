@@ -2,13 +2,14 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { basename, join } from "node:path";
 import { AppStatus, appAvailable, appStatus, appUrl, readRecord } from "./apps";
 import { readAgentState, sessionEndedForGood } from "./agent-state";
+import { getRepo } from "./config";
 import * as git from "./git";
 import { isOrchestrationTab } from "./orchestration";
 import { metaDir, wsDir, worktreePath } from "./paths";
 import { providerFor, refreshTitle } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
-import { getWorkspace, readState } from "./state";
+import { getWorkspace, isTaskClaim, readState } from "./state";
 import { boxBottom, boxRow, boxTop, type Color, COLORS, colorize, fit, inverse, textWidth } from "./term";
 import { parseUnresolved, REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses, threadsCommand } from "./reviewers";
 import { stackOf, localStacks } from "./stack";
@@ -417,19 +418,42 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 
 /**
  * Whether `ws` can be wiped: every claimed PR has merged, its agent is empty (just started or cleared), its session was
- * closed on purpose, or at least one claimed branch has an open PR and every other one has merged (from the cache), and
- * `noUnsavedWork` holds (read from git now, so it is never stale).
+ * closed on purpose, at least one claimed branch has an open PR and every other one has merged (from the cache), or it
+ * is a task workspace that made no commits (`taskWithoutCommits`), and `noUnsavedWork` holds (read from git now, so it
+ * is never stale).
  */
 export function cleanable(ws: string): boolean {
   if (isOrchestrationTab(ws)) {
     return false;
   }
   const cache = claimedCache(ws);
-  const finished = cache.merged !== undefined || cache.prsOpen || readAgentState(ws) === "empty" || sessionEndedForGood(ws);
+  const finished = cache.merged !== undefined || cache.prsOpen || readAgentState(ws) === "empty" || sessionEndedForGood(ws) || taskWithoutCommits(ws);
   if (!finished) {
     return false;
   }
   return noUnsavedWork(ws, cache);
+}
+
+/**
+ * Every claimed branch in `ws` is a `task/` branch with no PR and no commits past its repo's default branch: work that
+ * never needed a PR (it filed a ticket, or a spike came to nothing), so no PR will ever mark it finished. A repo whose
+ * default branch can't be read keeps the workspace.
+ */
+export function taskWithoutCommits(ws: string): boolean {
+  const claims = Object.entries(getWorkspace(readState(), ws).repos).filter(([, claim]) => claim.branch);
+  return (
+    claims.length > 0 &&
+    claims.every(([repo, claim]) => {
+      if (!isTaskClaim(claim)) {
+        return false;
+      }
+      try {
+        return git.commitsPast(worktreePath(ws, repo), `origin/${git.defaultBranch(getRepo(repo))}`) === 0;
+      } catch {
+        return false;
+      }
+    })
+  );
 }
 
 /** `mergedClean` once every PR has merged, else `gitClean`. */

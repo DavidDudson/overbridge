@@ -7,7 +7,7 @@ import { createReaper } from "../src/auto-remove";
 import { CleanupCause, CleanupOutcome } from "../src/cleanup-log";
 import { zellijMux } from "../src/mux";
 import { beginRemoval, finishRemoval, FINISH_FLAG, Landing, type RemovalDeps } from "../src/remove";
-import { cleanable, gitClean } from "../src/top";
+import { cleanable, gitClean, taskWithoutCommits } from "../src/top";
 import { entries, entryLines } from "../src/sidebar";
 import { isRemoving, readState, REMOVING_GRACE_MS, watchState, withState, type WorkspaceState } from "../src/state";
 import type { RunResult } from "../src/util";
@@ -202,6 +202,64 @@ describe("beginRemoval", () => {
     expect(beginRemoval("g2", { deps, landing: Landing.IfFocused })).toBeUndefined();
     expect(calls.some((c) => c[2] === "go-to-tab-name")).toBe(true);
     expect(calls.at(-1)).toEqual(["zellij", "action", "close-tab-by-id", "8"]);
+  });
+});
+
+describe("a task workspace with a running session", () => {
+  const busy = (ws: string) => {
+    mkdirSync(join(root, ".overbridge", "agent"), { recursive: true });
+    writeFileSync(agentStateFile(ws), JSON.stringify({ state: "busy", at: Date.now() }));
+  };
+
+  test("is cleanable while it has no commits, no PR and a clean tree", () => {
+    ob(["new", "t1", "-r", "app"]);
+    busy("t1");
+    expect(cleanable("t1")).toBe(false);
+    ob(["checkout", "app", "task/t1", "--ws", "t1"]);
+    expect(taskWithoutCommits("t1")).toBe(true);
+    expect(cleanable("t1")).toBe(true);
+    writeFileSync(join(root, "t1", "app", "dirty.txt"), "x");
+    expect(cleanable("t1")).toBe(false);
+  });
+
+  test("a commit keeps it, even once pushed", () => {
+    ob(["new", "t2", "-r", "app"]);
+    ob(["checkout", "app", "task/t2", "--ws", "t2"]);
+    busy("t2");
+    const wt = join(root, "t2", "app");
+    sh(["git", "commit", "-q", "--allow-empty", "-m", "spike"], wt);
+    sh(["git", "push", "-q", "origin", "task/t2"], wt);
+    expect(taskWithoutCommits("t2")).toBe(false);
+    expect(cleanable("t2")).toBe(false);
+  });
+
+  test("an item branch with no PR is not a task", () => {
+    ob(["new", "t3", "-r", "app"]);
+    ob(["checkout", "app", "feat/9-thing", "--ws", "t3"]);
+    busy("t3");
+    expect(taskWithoutCommits("t3")).toBe(false);
+    expect(cleanable("t3")).toBe(false);
+  });
+
+  test("a task branch that has a PR waits for the PR", () => {
+    ob(["new", "t4", "-r", "app"]);
+    ob(["checkout", "app", "task/t4", "--ws", "t4"]);
+    busy("t4");
+    withState((s) => {
+      s.workspaces.t4!.repos.app = { branch: "task/t4", pr: 7 };
+    });
+    expect(taskWithoutCommits("t4")).toBe(false);
+  });
+
+  test("a repo whose default branch cannot be read keeps it", () => {
+    busy("t5");
+    withState((s) => {
+      s.workspaces.t5 = { created: "now", repos: { ghost: { branch: "task/t5" } } };
+    });
+    expect(taskWithoutCommits("t5")).toBe(false);
+    withState((s) => {
+      delete s.workspaces.t5;
+    });
   });
 });
 

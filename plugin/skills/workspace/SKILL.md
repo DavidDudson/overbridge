@@ -91,7 +91,7 @@ Skills follow one rule when related work comes up (`loop-item`, `loop-tech-debt`
 | An unrelated item, or one another workspace already claims | Its own workspace (`overbridge start`), or the claiming workspace's tab. |
 
 Once a workspace's PRs are open and nothing is uncommitted or unpushed, the top panel
-shows a Cleanup button; wiping a workspace is the user's call, so never run `overbridge rm` yourself. A workspace
+shows a Cleanup button (a `task/` workspace with no PR and no commits shows it too); wiping a workspace is the user's call, so never run `overbridge rm` yourself. A workspace
 also removes itself when the user exits its Claude with every repo clean and pushed.
 Once every PR has merged and nothing is unsaved, overbridge removes the workspace after your turn ends.
 Commit and push everything before then. Otherwise the workspace stays, marked "merged · unsaved work".

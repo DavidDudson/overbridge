@@ -138,7 +138,7 @@ export async function finishRemoval(ws: string): Promise<void> {
     }
     refreshTop(ws);
     if (!cleanable(ws)) {
-      fail(`${ws} is no longer clean (no open or merged PRs, or uncommitted or unpushed work); not removed`);
+      fail(`${ws} is no longer clean (no open or merged PRs and not a task branch without commits, or uncommitted or unpushed work); not removed`);
     }
     await stopApps(ws);
     removeWorkspace(ws, false);
