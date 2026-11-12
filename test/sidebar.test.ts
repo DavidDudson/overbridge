@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { zellijMux } from "../src/mux";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +7,7 @@ import { agentStateFile, glyphFor, readAgentState, UNKNOWN_GLYPH } from "../src/
 import { sidebarWidth } from "../src/config";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { bodyRowsFor, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryLines, type Finished, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
+import { bodyRowsFor, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Finished, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
 import { readHistory, Travel, writeHistory } from "../src/sidebar-history";
 import { type Input, textWidth } from "../src/term";
 
@@ -269,7 +270,7 @@ describe("agent state", () => {
 describe("switchTab", () => {
   test("goes to the tab, then focuses its sidebar when known", () => {
     const calls: string[][] = [];
-    const record = (c: string[]) => { calls.push(c); return { ok: true }; };
+    const record = zellijMux((c) => { calls.push(c); return { ok: true, stdout: "" }; });
     expect(switchTab("w2", record)).toBe(true);
     expect(calls).toEqual([["zellij", "action", "go-to-tab-name", "w2"]]);
 
@@ -286,14 +287,14 @@ describe("switchTab", () => {
   test("fails only when the tab switch fails, not when its sidebar already has focus", () => {
     mkdirSync(join(metaDir(), "sidebars"), { recursive: true });
     writeFileSync(join(metaDir(), "sidebars", "w2"), "7\n");
-    expect(switchTab("w2", (c) => ({ ok: c[2] !== "focus-pane-id" }))).toBe(true);
-    expect(switchTab("w2", () => ({ ok: false }))).toBe(false);
+    expect(switchTab("w2", zellijMux((c) => ({ ok: c[2] !== "focus-pane-id", stdout: "" })))).toBe(true);
+    expect(switchTab("w2", zellijMux(() => ({ ok: false, stdout: "" })))).toBe(false);
   });
 });
 
 describe("switching with history", () => {
-  const ok = () => ({ ok: true });
-  const fail = () => ({ ok: false });
+  const ok = zellijMux(() => ({ ok: true, stdout: "" }));
+  const fail = zellijMux(() => ({ ok: false, stdout: "" }));
 
   test("a visit records the tab left, and ← then → walk back and forward", () => {
     expect(visitTab("w1", "w2", ok)).toBe(true);
@@ -314,7 +315,7 @@ describe("switching with history", () => {
 
   test("travel with nowhere to go does not switch", () => {
     const calls: string[][] = [];
-    expect(travelTab("w1", Travel.Back, list, (c) => { calls.push(c); return { ok: true }; })).toBe(false);
+    expect(travelTab("w1", Travel.Back, list, zellijMux((c) => { calls.push(c); return { ok: true, stdout: "" }; }))).toBe(false);
     expect(calls).toEqual([]);
   });
 });
@@ -346,6 +347,23 @@ describe("sidebarLabel", () => {
     expect(sidebarLabel("w1", {})).toBe("w1");
     expect(sidebarLabel("w1", { headline: "12" })).toBe("w1");
     expect(stripConventional("fix:")).toBe("fix:");
+  });
+});
+
+describe("stacked PRs on a card", () => {
+  const stacked: Entry = { ...entry("a", "●", "12 Add dark mode"), state: "busy", stacks: [{ prs: [11, 12, 13], current: 12 }] };
+
+  test("a three-layer stack is one line, bottom to top, the claimed layer in brackets", () => {
+    const rows = entryLines(stacked, 0, false, 30);
+    expect(rows).toHaveLength(entryHeight(stacked, 0, 30));
+    expect(rows.at(-1)).toContain("stack 11·[12]·13");
+    expect(entryLines(entry("a"), 0, false, 30)).toHaveLength(entryHeight(entry("a"), 0, 30));
+    expect(entryHeight(stacked, 0, 30)).toBe(entryHeight(entry("a", "●", "12 Add dark mode"), 0, 30) + 1);
+  });
+
+  test("the selected card keeps the stack line inside its inverse block", () => {
+    const rows = entryLines(stacked, 0, true, 30);
+    expect(rows.every((r) => r.startsWith("\x1b[7m"))).toBe(true);
   });
 });
 

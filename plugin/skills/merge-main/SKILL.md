@@ -1,9 +1,12 @@
 ---
 name: merge-main
 description: Merge the latest default branch (main) into the current branch and resolve conflicts by what both sides intended, not by picking a side. Keeps history, adds one merge commit, never force-pushes. Use when the user says "merge main", "update from main", "this branch is behind", or a PR shows conflicts and they want history kept.
+requires: gh-stack
 ---
 
 # Merge main into the branch
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 Prefer this over `rebase-main` unless the user asks for linear history. It never rewrites commits, so it
 is safe on a branch other people are building on.

@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoOf, root, worktreePath } from "./paths";
+import { WORKLIST_SCOPES, type WorklistScope } from "./pm/board-github";
+import type { WorkStatus } from "./pm/worklist";
 import { fail, isRecord } from "./util";
 
 /** Per-repo rules live in `overbridge.yml` at the repo (worktree) root. */
@@ -33,6 +35,12 @@ export interface ProjectManagement {
   issueType?: string;
   /** JQL that narrows the work list's Jira query. Unset means `DEFAULT_WORKLIST_JQL`; empty means no narrowing. */
   worklistJql?: string;
+  /** GitHub only: whose issues the work list shows. Unset means `assigned`. Ignored when `worklistProject` is set. */
+  worklistScope?: WorklistScope;
+  /** GitHub only: a Projects v2 board, `<owner>/<number>` or a bare number (the repo's owner), whose items replace "assigned to me". */
+  worklistProject?: string;
+  /** With `worklistProject`: the Status values to list. Unset means every status except Done. */
+  worklistStatuses?: string[];
 }
 
 export const BRANCH_PLACEHOLDERS = ["id", "number", "slug", "type"] as const;
@@ -123,9 +131,20 @@ export interface ReviewConfig {
   localDir: string;
 }
 
+export const WORK_STATUSES = ["todo", "in-progress", "blocked", "done"] as const satisfies readonly WorkStatus[];
+
+/** What `overbridge icebox` may delete with `--prune` (repo-relative paths git ignores, such as `node_modules`), and when the sidebar suggests it. */
+export interface IceboxConfig {
+  prune: string[];
+  /** Suggest iceboxing a workspace whose PRs are all drafts and idle this many days; unset turns the suggestion off. */
+  idleDays?: number;
+}
+
 export interface ProjectConfig {
   version: typeof CONFIG_VERSION;
   projectManagement?: ProjectManagement;
+  /** GitHub Projects v2 `Status` column name (lower-cased) to work status. Names not listed fall back to `statusFromColumn`. */
+  boardColumns: Record<string, WorkStatus>;
   apps: AppSpec[];
   commands: Commands;
   review: ReviewConfig;
@@ -133,6 +152,7 @@ export interface ProjectConfig {
   /** The repo's dev shell, if it declares one. */
   shell?: ShellSpec;
   checkQueue: CheckQueue;
+  icebox: IceboxConfig;
   /** Lifecycle hooks, from the root `config.yml` only. Present only when there are any. */
   hooks?: Hooks;
   /** Top panel buttons, from the root `config.yml` only. */
@@ -143,18 +163,22 @@ export interface ProjectConfig {
 
 export const defaultConfig = (): ProjectConfig => ({
   version: CONFIG_VERSION,
+  boardColumns: {},
   apps: [],
   commands: {},
   review: { exclude: [], localDir: DEFAULT_PERSONA_DIR },
   checkQueue: defaultCheckQueue(),
+  icebox: { prune: [] },
   buttons: [],
 });
 
-const TOP_KEYS = ["version", "project-management", "apps", "commands", "review", "ide", "shell", "check-queue", "hooks", "buttons"];
+const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons"];
 const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
+const ICEBOX_KEYS = ["prune", "idle-days"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
-const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql"];
+const BOARD_KEYS = ["columns"];
+const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql", "worklist-scope", "worklist-project", "worklist-statuses"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
 
 function distance(a: string, b: string): number {
@@ -332,6 +356,15 @@ export interface ButtonSpec {
 }
 const BUTTON_KEYS = ["id", "label", "status", "run", "url", "side"];
 
+/** `path` without a leading `./` or trailing `/`, so a configured prune path compares equal to what git lists. */
+export const normalizePrunePath = (path: string): string => path.replace(/^(\.\/)+/, "").replace(/\/+$/, "");
+
+/** A path below the repo root: no `..`, no absolute path, no glob or pathspec magic, and never git's or the workspace's own files. */
+export function isPrunablePath(path: string): boolean {
+  const parts = normalizePrunePath(path).split("/");
+  return !path.startsWith("/") && !parts.includes("") && !parts.includes("..") && !parts.includes(".") && ![".git", ".claude"].includes(parts[0]!) && !/[*?[\\:]/.test(path);
+}
+
 /**
  * Validate parsed YAML. Throws one error naming `file` and every offending key. With `partial`, `raw` is
  * one layer of a merged config, so a missing required key is not an error. With `root`, the root-only keys
@@ -366,6 +399,10 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       if (workspace) for (const problem of templateProblems(workspace, WORKSPACE_PLACEHOLDERS, true)) p.add("project-management.workspace", problem);
       const issueType = p.string(pm, "issue-type", "project-management", false);
       const worklistJql = pm["worklist-jql"] === "" ? "" : p.string(pm, "worklist-jql", "project-management", false);
+      const worklistScope = p.oneOf(p.string(pm, "worklist-scope", "project-management", false), WORKLIST_SCOPES, "project-management.worklist-scope");
+      const worklistProject = p.string(pm, "worklist-project", "project-management", false);
+      if (worklistProject && !/^(?:[\w.-]+\/)?\d+$/.test(worklistProject)) p.add("project-management.worklist-project", "expected <owner>/<number> or a project number, e.g. DavidDudson/2");
+      const worklistStatuses = p.stringList(pm, "worklist-statuses", "project-management");
       let branchTypes: Record<string, string> | undefined;
       const types = pm["branch-types"];
       if (types !== undefined && types !== null) {
@@ -389,7 +426,28 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
           ...(branchTypes ? { branchTypes } : {}),
           ...(issueType ? { issueType } : {}),
           ...(worklistJql !== undefined ? { worklistJql } : {}),
+          ...(worklistScope ? { worklistScope } : {}),
+          ...(worklistProject ? { worklistProject } : {}),
+          ...(worklistStatuses ? { worklistStatuses } : {}),
         };
+      }
+    }
+  }
+
+  const board = raw.board;
+  if (board !== undefined && board !== null) {
+    if (!isRecord(board)) p.add("board", "expected a mapping with columns");
+    else {
+      p.unknownKeys(board, BOARD_KEYS, "board");
+      const columns = board.columns;
+      if (columns !== undefined && columns !== null) {
+        if (!isRecord(columns)) p.add("board.columns", `expected a mapping of column name to ${WORK_STATUSES.join(", ")}`);
+        else {
+          for (const name of Object.keys(columns)) {
+            const status = p.oneOf(p.string(columns, name, "board.columns", true), WORK_STATUSES, `board.columns.${name}`);
+            if (status) config.boardColumns[name.trim().toLowerCase()] = status;
+          }
+        }
       }
     }
   }
@@ -480,6 +538,21 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
     }
   }
 
+  const icebox = raw.icebox;
+  if (icebox !== undefined && icebox !== null) {
+    if (!isRecord(icebox)) p.add("icebox", "expected a mapping with prune, idle-days");
+    else {
+      p.unknownKeys(icebox, ICEBOX_KEYS, "icebox");
+      const prune = p.stringList(icebox, "prune", "icebox") ?? [];
+      for (const path of prune) {
+        if (!isPrunablePath(path)) p.add("icebox.prune", `'${path}' must be a path inside the repo, such as node_modules or target`);
+      }
+      config.icebox.prune = prune;
+      const idleDays = p.positiveInt(icebox, "idle-days", "icebox");
+      if (idleDays !== undefined) config.icebox.idleDays = idleDays;
+    }
+  }
+
   const ide = p.oneOf(p.string(raw, "ide", "", false), IDES, "ide");
   if (ide) config.ide = ide;
 
@@ -538,7 +611,7 @@ export const configPath = (repoDir: string) => join(repoDir, CONFIG_FILE);
 /** The root config, `<root>/config.yml`: settings that live outside the repos. */
 export const ROOT_CONFIG_FILE = "config.yml";
 export const rootConfigPath = () => join(root(), ROOT_CONFIG_FILE);
-const ROOT_KEYS = ["version", "defaults", "repos", "skill-extensions", "guard"];
+const ROOT_KEYS = ["version", "defaults", "repos", "skill-extensions", "guard", "github-orgs"];
 const GUARD_KEYS = ["read-paths", "deny"];
 
 /**
@@ -563,11 +636,13 @@ export interface RootLayers {
   /** Directories of skill extension files (`<dir>/<skill>/<phase>.md`), as written: absolute, `~/` or root-relative. */
   skillExtensions: string[];
   guard: GuardConfig;
+  /** GitHub owners the `@prs` and `@reviews` tabs search. Empty means every owner. */
+  githubOrgs: string[];
 }
 
 /** Read and check `<root>/config.yml`. A missing or empty file has no layers. */
 export function loadRootLayers(file = rootConfigPath()): RootLayers {
-  const layers: RootLayers = { file, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] } };
+  const layers: RootLayers = { file, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] };
   if (!existsSync(file)) return layers;
   const raw = parseYaml(readFileSync(file, "utf8"), file);
   if (raw === null || raw === undefined) return layers;
@@ -591,6 +666,7 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
       }
   }
   layers.skillExtensions = p.stringList(raw, "skill-extensions", "") ?? [];
+  layers.githubOrgs = p.stringList(raw, "github-orgs", "") ?? [];
   if (raw.guard !== undefined && raw.guard !== null) {
     if (!isRecord(raw.guard)) p.add("guard", "expected a mapping with read-paths and deny");
     else {

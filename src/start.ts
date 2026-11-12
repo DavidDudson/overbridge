@@ -1,16 +1,18 @@
 import { checkout, createWorkspace, holdings, removeWorkspace } from "./commands";
 import { getRepo, type RepoSpec } from "./config";
 import * as git from "./git";
+import { thaw } from "./icebox";
 import { barePath, currentWorkspace, NAME_RE, worktreePath } from "./paths";
-import { type PluginProblems, pluginProblems } from "./plugins";
+import { type PluginProblems, pluginProblems, requiredSkillProblems } from "./plugins";
 import { providerFor } from "./pm";
 import type { Provider } from "./pm/provider";
 import { CONFIG_FILE, type ProjectConfig, parseYaml, ROOT_CONFIG_FILE, resolveConfig } from "./project-config";
 import { scaffold } from "./scaffold";
 import { switchTab } from "./sidebar";
-import { openTab, TabFocus, tabOrder, type ZellijExec } from "./tab";
+import { defaultMux, type Mux } from "./mux";
+import { openTab, TabFocus } from "./tab";
 import { cover, hasGhStack, localStacks } from "./stack";
-import { type Claim, claimOwner, isRemoving, readState, type State } from "./state";
+import { type Claim, claimOwner, isIceboxed, isRemoving, readState, type State } from "./state";
 import { fail, log, must, run } from "./util";
 
 /**
@@ -34,21 +36,26 @@ type TabPrompt = { prompt?: string; defaultPrompt?: string };
 
 /**
  * Bring `ws`'s tab to the front, since you asked for it, opening one with `prompt` (else `defaultPrompt`) when
- * it has none. An open tab already has its agent, so only an explicit `prompt` is reported as not sent.
+ * it has none (an iceboxed workspace is thawed instead). An open tab already has its agent, so only an explicit `prompt` is reported as not sent.
  */
-export function showTab(ws: string, prompts: TabPrompt = {}, exec: ZellijExec = run) {
-  if (process.env.ZELLIJ && tabOrder(exec).includes(ws)) {
-    switchTab(ws, exec);
+export function showTab(ws: string, prompts: TabPrompt = {}, mux: Mux = defaultMux()) {
+  if (isIceboxed(readState().workspaces[ws])) {
+    // an iceboxed workspace has no tab and its agent has a handoff to read, so asking for it thaws it
+    thaw(ws, { open: (name, prompt) => openTab(name, prompt, TabFocus.Foreground, mux, true) });
+    return;
+  }
+  if (mux.inSession() && mux.tabs().includes(ws)) {
+    switchTab(ws, mux);
     if (prompts.prompt) {
       log(`${ws} already has a tab; prompt not sent`);
     }
     return;
   }
-  openTab(ws, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Foreground, exec);
+  openTab(ws, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Foreground, mux);
 }
 
-/** What `start` may inject: the provider, the zellij runner, the plugin check, and `--here`. */
-type StartDeps = { provider?: Provider; exec?: ZellijExec; plugins?: () => PluginProblems; here?: boolean };
+/** What `start` may inject: the provider, the multiplexer, the plugin check, and `--here`. */
+type StartDeps = { provider?: Provider; mux?: Mux; plugins?: () => PluginProblems; here?: boolean };
 
 /**
  * `overbridge start <repo> <id>`: the work item gets its own workspace, named by its provider
@@ -81,10 +88,10 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
   const holder = workspaceOf(state, repo, branch, provider);
   if (holder) {
     log(`${id} is in ${holder}`);
-    showTab(holder, prompts, deps.exec);
+    showTab(holder, prompts, deps.mux);
     return console.log(holder);
   }
-  openWorkspace(name, repo, branch, prompts, deps.exec);
+  openWorkspace(name, repo, branch, prompts, deps.mux);
 }
 
 /** Branch prefix for a workspace started with no work item. */
@@ -106,7 +113,8 @@ function rebind(ws: string, repo: string, id: string, branch: string, claim: Cla
   if (!task && (git.isDirty(wt) || git.hasUnpushed(wt))) {
     fail(`${ws}/${repo} has uncommitted changes or unpushed commits${old ? ` on ${old}` : ""}; commit and push them, or run without --here`);
   }
-  checkout([repo, branch], ws, task ? { base: "HEAD" } : {});
+  const reboundFrom = old ? { branch: old, ...(claim.pr !== undefined ? { pr: claim.pr } : {}) } : undefined;
+  checkout([repo, branch], ws, { ...(task ? { base: "HEAD" } : {}), ...(reboundFrom ? { reboundFrom } : {}) });
   if (task && old) {
     if (run(["git", "-C", wt, "branch", "-d", old]).ok) log(`deleted ${old}`);
     else log(`kept ${old}: it has commits not on ${branch}`);
@@ -130,13 +138,19 @@ function workspaceOf(s: State, repo: string, branch: string, provider: Provider)
  * spike. The workspace is named `slug` and holds `repo` on a new claimed `task/<slug>` branch; its agent starts
  * with `prompt`, since there is no item to read.
  */
-export function startTask(repo: string, slug: string, prompt: string, deps: { exec?: ZellijExec; plugins?: () => PluginProblems } = {}) {
+export function startTask(repo: string, slug: string, prompt: string, deps: { mux?: Mux; plugins?: () => PluginProblems } = {}) {
   if (!NAME_RE.test(slug)) fail(`invalid task name '${slug}': use letters, digits, '.', '_' and '-'`);
   if (!prompt.trim()) fail("a task needs --prompt: say what the workspace's Claude should do");
   requirePlugins(deps.plugins);
   const spec = getRepo(repo);
   git.fetch(spec);
-  openWorkspace(slug, repo, `${TASK_BRANCH_PREFIX}${slug}`, { prompt }, deps.exec);
+  openWorkspace(slug, repo, `${TASK_BRANCH_PREFIX}${slug}`, { prompt }, deps.mux);
+}
+
+/** Plugin problems plus any required skill (gh-stack) the new tab's Claude would lack. */
+function pluginAndSkillProblems(): PluginProblems {
+  const p = pluginProblems();
+  return { errors: [...p.errors, ...requiredSkillProblems()], warnings: p.warnings };
 }
 
 /** Suffix of the workspace name `startStack` derives from its bottom item. */
@@ -156,7 +170,7 @@ export function startStack(
   repo: string,
   ids: string[],
   opts: { name?: string; prompt?: string } = {},
-  deps: { provider?: Provider; exec?: ZellijExec; plugins?: () => PluginProblems; ghStack?: () => boolean } = {},
+  deps: { provider?: Provider; mux?: Mux; plugins?: () => PluginProblems; ghStack?: () => boolean } = {},
 ) {
   if (ids.length < 2) fail("a stack needs at least two items; use `overbridge start <repo> <id>` for one");
   const dup = ids.find((id, i) => ids.indexOf(id) !== i);
@@ -177,7 +191,7 @@ export function startStack(
 
   const name = opts.name ?? `${provider.workspaceName(ids[0]!, repo)}${STACK_SUFFIX}`;
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}'`);
-  if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, {}, deps.exec);
+  if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, {}, deps.mux);
 
   // layers must be new: a branch already on origin belongs to checking out its existing PR or stack
   const remote = branches.find((b) => hasRef(repo, `refs/remotes/origin/${b}`));
@@ -194,7 +208,7 @@ export function startStack(
     repo,
     branches[0]!,
     { prompt: opts.prompt, defaultPrompt: `/start-item ${ids[0]}. ${brief}` },
-    deps.exec,
+    deps.mux,
     (wt) => {
       try {
         // the bottom branch exists already (the claim made it off origin's default); init adopts it and builds the rest
@@ -217,7 +231,7 @@ function undoStack(repo: string, wt: string, made: string[]) {
 }
 
 /** Stop before any workspace exists when its Claude could not load the overbridge skills; print the warnings. */
-function requirePlugins(check: () => PluginProblems = pluginProblems) {
+function requirePlugins(check: () => PluginProblems = pluginAndSkillProblems) {
   const { errors, warnings } = check();
   if (errors.length) {
     fail(`the new tab's Claude would not have the overbridge skills, so a command such as /start-item would be unknown:\n${errors.join("\n")}`);
@@ -229,10 +243,10 @@ function requirePlugins(check: () => PluginProblems = pluginProblems) {
  * Create workspace `name` holding `repo` on `branch` and open its tab in the background, or show its tab when it
  * already exists, since you asked for it.
  */
-function openWorkspace(name: string, repo: string, branch: string, prompts: TabPrompt, exec: ZellijExec = run, setup?: (wt: string) => void) {
+function openWorkspace(name: string, repo: string, branch: string, prompts: TabPrompt, mux: Mux = defaultMux(), setup?: (wt: string) => void) {
   if (readState().workspaces[name]) {
     log(`${name} already exists`);
-    showTab(name, prompts, exec);
+    showTab(name, prompts, mux);
     return console.log(name);
   }
 
@@ -246,6 +260,6 @@ function openWorkspace(name: string, repo: string, branch: string, prompts: TabP
     throw e;
   }
   scaffold(name);
-  openTab(name, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Background, exec);
+  openTab(name, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Background, mux);
   console.log(name);
 }

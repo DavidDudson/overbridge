@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ZellijExec } from "../src/tab";
+import { type MuxExec, zellijMux } from "../src/mux";
 import { createPainter, HIDDEN_POLL_MS, isFocused, readView, shouldPoll, VIEW_MAX_AGE_MS, viewPath, type ZellijView } from "../src/zellij-view";
 
 let dir: string;
@@ -20,7 +20,7 @@ const NOW_MS = 1_800_000_000_000;
 /** A fake zellij that records its calls and answers with the given tabs, focused on `focused`. */
 function fakeZellij(tabs: string[], focused: string) {
   const calls: string[][] = [];
-  const exec: ZellijExec = (cmd) => {
+  const exec: MuxExec = (cmd) => {
     calls.push(cmd);
     if (cmd.includes("query-tab-names")) {
       return { ok: true, stdout: tabs.join("\n") };
@@ -44,7 +44,7 @@ const touchLock = (atMs: number) => {
 describe("readView", () => {
   test("asks zellij once and writes the shared file when there is none", () => {
     const zellij = fakeZellij(["a", "b"], "b");
-    const view = readView({ dir, nowMs: NOW_MS, exec: zellij.exec });
+    const view = readView({ dir, nowMs: NOW_MS, mux: zellijMux(zellij.exec) });
     expect(view).toEqual({ order: ["a", "b"], focused: "b", atMs: NOW_MS });
     expect(zellij.calls).toHaveLength(2);
     expect(JSON.parse(readFileSync(viewPath(dir), "utf8"))).toEqual(view);
@@ -53,7 +53,7 @@ describe("readView", () => {
   test("a fresh shared file starts no zellij client", () => {
     writeCached({ order: ["a"], focused: "a", atMs: NOW_MS - VIEW_MAX_AGE_MS + 1 });
     const zellij = fakeZellij(["x"], "x");
-    expect(readView({ dir, nowMs: NOW_MS, exec: zellij.exec }).focused).toBe("a");
+    expect(readView({ dir, nowMs: NOW_MS, mux: zellijMux(zellij.exec) }).focused).toBe("a");
     expect(zellij.calls).toHaveLength(0);
   });
 
@@ -61,7 +61,7 @@ describe("readView", () => {
     writeCached({ order: ["a"], focused: "a", atMs: NOW_MS - 5_000 });
     touchLock(NOW_MS - 10);
     const zellij = fakeZellij(["x"], "x");
-    expect(readView({ dir, nowMs: NOW_MS, exec: zellij.exec }).focused).toBe("a");
+    expect(readView({ dir, nowMs: NOW_MS, mux: zellijMux(zellij.exec) }).focused).toBe("a");
     expect(zellij.calls).toHaveLength(0);
   });
 
@@ -69,26 +69,26 @@ describe("readView", () => {
     writeCached({ order: ["a"], focused: "a", atMs: NOW_MS - 5_000 });
     touchLock(NOW_MS - 5_000);
     const zellij = fakeZellij(["a", "b"], "b");
-    expect(readView({ dir, nowMs: NOW_MS, exec: zellij.exec }).focused).toBe("b");
+    expect(readView({ dir, nowMs: NOW_MS, mux: zellijMux(zellij.exec) }).focused).toBe("b");
     expect(zellij.calls).toHaveLength(2);
   });
 
   test("a failed zellij call gives an empty order and no focused tab, without throwing", () => {
-    const exec: ZellijExec = () => ({ ok: false, stdout: "" });
-    expect(readView({ dir, nowMs: NOW_MS, exec })).toEqual({ order: [], atMs: NOW_MS });
+    const exec: MuxExec = () => ({ ok: false, stdout: "" });
+    expect(readView({ dir, nowMs: NOW_MS, mux: zellijMux(exec) })).toEqual({ order: [], atMs: NOW_MS });
   });
 
   test("a corrupt shared file is treated as missing", () => {
     writeFileSync(viewPath(dir), "{not json");
     const zellij = fakeZellij(["a"], "a");
-    expect(readView({ dir, nowMs: NOW_MS, exec: zellij.exec }).order).toEqual(["a"]);
+    expect(readView({ dir, nowMs: NOW_MS, mux: zellijMux(zellij.exec) }).order).toEqual(["a"]);
   });
 
   test("a directory it cannot write to gives an empty view, without throwing", () => {
     const missing = join(dir, "file");
     writeFileSync(missing, "");
     const zellij = fakeZellij(["a"], "a");
-    expect(readView({ dir: join(missing, "under-a-file"), nowMs: NOW_MS, exec: zellij.exec })).toEqual({ order: [], atMs: 0 });
+    expect(readView({ dir: join(missing, "under-a-file"), nowMs: NOW_MS, mux: zellijMux(zellij.exec) })).toEqual({ order: [], atMs: 0 });
     expect(existsSync(join(missing, "under-a-file"))).toBe(false);
   });
 });

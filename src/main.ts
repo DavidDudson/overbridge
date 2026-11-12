@@ -1,20 +1,26 @@
 import { parseArgs } from "node:util";
 import * as cmd from "./commands";
+import { REQUIRED_SKILLS, requiredSkillProblems } from "./plugins";
 import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
 import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
+import { icebox, thaw } from "./icebox";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
+import { historyStore } from "./history";
+import { repoLines, repoSummaries, summaries, summaryLines } from "./history-report";
 import { next } from "./next";
 import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
 import { FINISH_FLAG, finishRemoval } from "./remove";
-import { sweepMerged } from "./merge-sweep";
+import { sweepWithServer } from "./merge-sweep";
 import { showTab, start, startStack, startTask } from "./start";
+import { perfPane } from "./perf-run";
 import { topPanel, topRefresh } from "./top-run";
-import { refreshWorklist, worklistPane } from "./worklist-run";
+import { prListPane, refreshPrList, type PrListKind } from "./prlist-run";
+import { readWorklist, refreshWorklist, showWorklist, worklistPane } from "./worklist-run";
 import { silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
 import { exec, log, OverbridgeError } from "./util";
@@ -38,9 +44,15 @@ Setup
   overbridge diff [--ws name]                   changes since the default branch, whitespace ignored, via delta
   overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
+  overbridge serve                              the one long-running process that owns network refreshes and the shared
+                                        cache; panels and hooks start it on demand, it exits when idle, and each
+                                        refresh falls back to a child process when it is down
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
-  overbridge worklist [refresh]                 work list pane (the @work tab); refresh reads every board into its cache
+  overbridge worklist [refresh|show]            work list pane (the @work tab); refresh reads every board into its cache; show prints it
+  overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
+  overbridge perf                               performance pane (the @perf tab): the history per workspace
+  overbridge history [--ws name] [--hours n] [--by repo] [--json]   where time went: Claude turns, tools, waiting, checks
 
 Work items (the repo's project-management provider)
   overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
@@ -79,8 +91,17 @@ Workspaces
   overbridge cleanup [--json] [--no-fetch]      report what each workspace and orphan folder is fit for: remove,
                                         review (unsaved work), rebind, ask or keep. Removes nothing; --dry-run
                                         is accepted and changes nothing (the cleanup skill acts on the report)
-  overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty state
+  overbridge icebox <name> [--prune] [--drop-worktree]
+                                        pause a workspace: stop its apps and checks, write a handoff, close
+                                        its tab; keeps claims; refuses with unsaved work. --prune deletes the
+                                        repo's icebox.prune paths (never tracked files); --drop-worktree removes
+                                        the worktrees, keeping the branches. Nothing is reclaimed without a flag
+  overbridge thaw <name>                        reopen an iceboxed workspace's tab, its agent resuming and
+                                        reading the handoff; recreates dropped worktrees on their branches
+  overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty and iceboxed state
   overbridge whoami                             workspace for the current dir/session
+  overbridge prereqs                            exit 1 unless the skills overbridge's skills depend on (gh-stack)
+                                        are installed
 
 Branches & PRs (workspace inferred from $OVERBRIDGE_NAME or cwd)
   overbridge checkout [repo] <branch|#pr|url>   claim + switch (adds repo if missing);
@@ -88,11 +109,11 @@ Branches & PRs (workspace inferred from $OVERBRIDGE_NAME or cwd)
   overbridge release [repo]                     drop claim, detach worktree in place
   overbridge pr [repo]                          record the open PR; claim follows HEAD within a stack
 
-Zellij
+Session (zellij by default; OVERBRIDGE_MUX=tmux for tmux)
   overbridge spinup                             rebuild the session (creates an empty 'scratch' workspace if none)
   overbridge up [--fresh]                       attach/launch session: the orchestration tabs (@root: Claude in
                                         the root, guarded to coordinate only), then one tab per workspace
-  overbridge layout                             print the generated zellij layout
+  overbridge layout                             print the generated layout (zellij KDL, or a tmux script)
   overbridge claude <name|@tab> [-- args]       run Claude bound to a workspace, or an orchestration tab's Claude
 
 Hooks
@@ -167,24 +188,69 @@ async function main(argv: string[]): Promise<number> {
       diff(cmd.requireWs(values.ws));
       break;
     }
+    case "history": {
+      const { values } = opts(rest, { ...ws, hours: { type: "string" }, by: { type: "string" }, json: { type: "boolean" } });
+      const hours = values.hours === undefined ? undefined : Number(values.hours);
+      const usage = "usage: overbridge history [--ws name] [--hours n] [--by repo] [--json]";
+      if (hours !== undefined && !(hours > 0)) throw new OverbridgeError(usage);
+      if (values.by !== undefined && values.by !== "repo") throw new OverbridgeError(usage);
+      if (values.ws && !historyStore().workspaces().includes(values.ws)) throw new OverbridgeError(`no history for ${values.ws}`);
+      const windowMs = hours === undefined ? undefined : hours * 3600_000;
+      if (values.by === "repo") {
+        const repos = repoSummaries(undefined, windowMs, values.ws);
+        if (values.json) console.log(JSON.stringify(repos, null, 2));
+        else if (!repos.length) log("no check runs yet");
+        else for (const r of repos) console.log(repoLines(r).join("\n"));
+        break;
+      }
+      const rows = summaries(undefined, windowMs, values.ws);
+      if (values.json) console.log(JSON.stringify(rows, null, 2));
+      else if (!rows.length) log("no history yet");
+      else for (const row of rows) console.log(summaryLines(row).join("\n"));
+      break;
+    }
+    case "perf":
+      await perfPane();
+      break;
     case "worklist": {
       const sub = rest[0];
       if (sub === "refresh") {
         const cache = refreshWorklist();
         log(`worklist: ${cache.rows.length} open item(s)${cache.notes.length ? `; ${cache.notes.join("; ")}` : ""}`);
+      } else if (sub === "show") {
+        console.log(showWorklist(readWorklist()).join("\n"));
       } else if (sub !== undefined) {
-        throw new OverbridgeError("usage: overbridge worklist [refresh]");
+        throw new OverbridgeError("usage: overbridge worklist [refresh|show]");
       } else {
         await worklistPane();
+      }
+      break;
+    }
+    case "prs":
+    case "reviews": {
+      const kind: PrListKind = sub;
+      if (rest[0] === "refresh") {
+        const cache = refreshPrList(kind);
+        log(`${kind}: ${cache.rows.length} open PR(s)${cache.error ? `; ${cache.error}` : ""}`);
+      } else if (rest[0] !== undefined) {
+        throw new OverbridgeError(`usage: overbridge ${kind} [refresh]`);
+      } else {
+        await prListPane(kind);
       }
       break;
     }
     case "top": {
       const { values, positionals } = opts(rest, ws);
       if (positionals[0] === "refresh") topRefresh(values.ws);
-      else if (positionals[0] === "sweep") sweepMerged();
+      else if (positionals[0] === "sweep") await sweepWithServer();
       else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh|sweep] [--ws name]");
       else await topPanel(values.ws);
+      break;
+    }
+    case "serve": {
+      opts(rest, {});
+      const { serve } = await import("./server");
+      await serve();
       break;
     }
     case "sync":
@@ -226,6 +292,12 @@ async function main(argv: string[]): Promise<number> {
     case "whoami":
       cmd.whoami();
       break;
+    case "prereqs": {
+      const problems = requiredSkillProblems();
+      if (problems.length) throw new OverbridgeError(problems.join("\n"));
+      console.log(`ok: ${REQUIRED_SKILLS.join(", ")} installed`);
+      break;
+    }
     case "checkout":
     case "co": {
       const { values, positionals } = opts(rest, ws);
@@ -255,6 +327,19 @@ async function main(argv: string[]): Promise<number> {
       const { values, positionals } = opts(rest, { prompt: { type: "string" } });
       if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge tab <name> [--prompt text]");
       showTab(cmd.requireWs(positionals[0]!), { prompt: values.prompt });
+      break;
+    }
+    case "icebox": {
+      const { values, positionals } = opts(rest, { prune: { type: "boolean" }, "drop-worktree": { type: "boolean" } });
+      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge icebox <name> [--prune] [--drop-worktree]");
+      const handoff = await icebox(cmd.requireWs(positionals[0]!), { prune: values.prune, dropWorktree: values["drop-worktree"] });
+      console.log(`iceboxed ${positionals[0]}; handoff at ${handoff}`);
+      break;
+    }
+    case "thaw": {
+      const { positionals } = opts(rest, {});
+      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge thaw <name>");
+      thaw(cmd.requireWs(positionals[0]!));
       break;
     }
     case "start": {
@@ -290,6 +375,7 @@ async function main(argv: string[]): Promise<number> {
       if (!name) throw new OverbridgeError("usage: overbridge claude <name> [-- claude args]");
       const args = extra[0] === "--" ? extra.slice(1) : extra;
       const tab = orchestrationTab(name);
+      if (tab?.pane) throw new OverbridgeError(`${tab.tab} runs \`overbridge ${tab.pane}\`, not Claude`);
       if (tab) cmd.claudeOrchestration(tab, args);
       else cmd.claude(name, args);
       break;

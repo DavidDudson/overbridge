@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userLayoutPath } from "./layout";
 import { join } from "node:path";
-import { type AgentState, glyphFor, readAgentState, UNKNOWN_GLYPH } from "./agent-state";
+import { ATTENTION, type AgentState, glyphFor, readAgentState, UNKNOWN_GLYPH } from "./agent-state";
+import { iceboxHint } from "./icebox-suggest";
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
@@ -12,14 +13,19 @@ import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
 import { ensureOrchestrationTabs } from "./orchestration-keep";
 import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-history";
-import { isRemoving, isWorkspaceState, RemovalBlock, readState, type Removing, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
+import { isIceboxed, isRemoving, isWorkspaceState, RemovalBlock, readState, type Removing, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
 import { claimSweep, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
-import { readTopCache, readTopCacheChecked, sidebarLabel } from "./top";
+import { readTopCache, readTopCacheChecked, sidebarLabel, type TopCache } from "./top";
+import { defaultMux, type Mux } from "./mux";
 import { currentTab, tabOrder } from "./tab";
 import { createPainter, readView, shouldPoll } from "./zellij-view";
 import { errorMessage, naturalSort, run, spawnCwd } from "./util";
 import { overbridgeVersion } from "./version";
+
+/** The key that jumps to the performance tab, and the tab it reaches. */
+export const PERF_KEY = "p";
+export const PERF_TAB = "@perf";
 
 /** How long a held digit waits for a second one before it goes to its one-digit tab. */
 export const DIGIT_MS = 600;
@@ -30,7 +36,7 @@ export function legend(count: number, pending = ""): string {
     return `${pending}…`;
   }
   const digits = count > 1 ? `1-${count} go  ` : count === 1 ? "1 go  " : "";
-  return `${digits}←→ back  ⌥w next  s new ws`;
+  return `${digits}←→ back  ⌥w next  s new ws  p perf`;
 }
 
 /**
@@ -60,8 +66,12 @@ export interface Entry {
   blocked?: RemovalBlock;
   /** The session ended, but uncommitted or unpushed work keeps the workspace. */
   unsaved?: boolean;
+  /** Stacked PRs of this workspace, bottom first, with the claimed one's number; one compact line each. */
+  stacks?: { prs: number[]; current: number }[];
   /** This entry could not be read: a bad cache or state record, or a reader that threw. Replaces the status line. */
   fault?: string;
+  /** Its draft PRs have sat idle past `icebox.idle-days`: a suggestion to icebox it, never done automatically. */
+  idleHint?: string;
 }
 
 export { sidebarLabel, stripConventional } from "./top";
@@ -85,6 +95,13 @@ function guardedEntry(tab: string, section: Section, build: () => Entry, label =
   }
 }
 
+/** The stacks in `cache`: each claimed stacked PR's layers, bottom first. */
+const stacksOf = (cache: Pick<TopCache, "links">): NonNullable<Entry["stacks"]> =>
+  cache.links.flatMap((l) => (l.pr && l.pr.stack.length > 1 && l.pr.claimed !== false ? [{ prs: l.pr.stack, current: l.pr.number }] : []));
+
+/** `stack 12·[13]·14`: the claimed layer in brackets, layers in order bottom to top. */
+const stackText = (s: { prs: number[]; current: number }) => `stack ${s.prs.map((n) => (n === s.current ? `[${n}]` : String(n))).join("·")}`;
+
 /** The card for workspace `ws` whose state record is `w`: a fault card when the record or its top cache is malformed. */
 function workspaceEntry(ws: string, w: unknown): Entry {
   const recordFault = workspaceFault(w);
@@ -94,12 +111,24 @@ function workspaceEntry(ws: string, w: unknown): Entry {
   const { removeError: error, removalBlocked: blocked } = w as WorkspaceState;
   const { cache, fault } = readTopCacheChecked(ws);
   const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
-  return { ...entry, ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}) };
+  const stacks = stacksOf(cache);
+  const idleHint = fault ? undefined : iceboxHint(ws, cache);
+  return { ...entry, ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}), ...(idleHint ? { idleHint } : {}) };
 }
 
 /** `w` as the record of a workspace being removed right now, else undefined; a malformed record is never one. */
 const removingRecord = (w: unknown, now = Date.now()): (WorkspaceState & { removing: Removing }) | undefined =>
   isWorkspaceState(w) && w.removing && isRemoving(w, now) ? (w as WorkspaceState & { removing: Removing }) : undefined;
+
+/** Whether `w` is iceboxed: it has no tab, so it gets no card and no digit. A malformed record is never one. */
+const isIced = (workspaces: Record<string, unknown>, ws: string): boolean => {
+  try {
+    const w = workspaces[ws];
+    return isWorkspaceState(w) && isIceboxed(w);
+  } catch {
+    return false; // a record that throws is a card to show, never one to hide
+  }
+};
 
 /**
  * Whether `workspaces[ws]` hides its workspace as being removed. Reading the record and checking its worker's pid
@@ -120,7 +149,7 @@ const hiddenByRemoval = (workspaces: Record<string, unknown>, ws: string): boole
  */
 export function entries(order: string[] = tabOrder(), state: State = readState()): Entry[] {
   const workspaces: Record<string, unknown> = state.workspaces;
-  const names = Object.keys(workspaces).filter((ws) => !hiddenByRemoval(workspaces, ws)).sort(naturalSort);
+  const names = Object.keys(workspaces).filter((ws) => !hiddenByRemoval(workspaces, ws) && !isIced(workspaces, ws)).sort(naturalSort);
   const rank = (ws: string) => { const i = order.indexOf(ws); return i < 0 ? order.length : i; };
   return [
     ...ORCHESTRATION_TABS.map((t) => guardedEntry(t.tab, Section.Orchestration, () => entryFor(t.tab, Section.Orchestration, t.label), t.label)),
@@ -180,12 +209,13 @@ const BLOCK_TEXT: Record<RemovalBlock, { text: string; color: Color }> = {
 const UNSAVED_TEXT: { text: string; color: Color } = { text: "ended · unsaved work", color: "red" };
 const FAULT_COLOR: Color = "red";
 
-/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, then the agent state. */
+/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, an icebox suggestion (unless the agent wants you), then the agent state. */
 function statusFor(e: Entry): { text: string; color: Color } | undefined {
   if (e.fault) return { text: `error: ${e.fault}`, color: FAULT_COLOR };
   if (e.error) return { text: `cleanup failed: ${e.error}`, color: FAULT_COLOR };
   if (e.blocked) return BLOCK_TEXT[e.blocked];
   if (e.unsaved) return UNSAVED_TEXT;
+  if (e.idleHint && !(e.state && ATTENTION.includes(e.state))) return { text: e.idleHint, color: "cyan" };
   return e.state ? STATE_TEXT[e.state] : undefined;
 }
 
@@ -226,7 +256,7 @@ function titleRows(e: Entry, index: number, inner: number): string[] {
 }
 
 /** Screen rows one entry takes: its wrapped title and a status line. */
-export const entryHeight = (e: Entry, index: number, inner: number) => titleRows(e, index, inner).length + 1;
+export const entryHeight = (e: Entry, index: number, inner: number) => titleRows(e, index, inner).length + 1 + (e.stacks?.length ?? 0);
 
 /** Row heights for the whole list in a pane `width` columns wide. */
 export const entryHeights = (list: Entry[], width: number) => list.map((e, i) => entryHeight(e, i, Math.max(1, width - 4)));
@@ -237,8 +267,9 @@ export function entryLines(e: Entry, index: number, selected: boolean, inner: nu
   const status = statusFor(e);
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
   const sub = fit(`${indent}${status?.text ?? ""}`, inner);
-  if (selected) return [...titles, sub].map(inverse);
-  return [...titles, status ? colorize(sub, status.color) : sub];
+  const stacks = (e.stacks ?? []).map((st) => fit(`${indent}${stackText(st)}`, inner));
+  if (selected) return [...titles, sub, ...stacks].map(inverse);
+  return [...titles, status ? colorize(sub, status.color) : sub, ...stacks.map(dim)];
 }
 
 const elapsed = (sinceMs: number, now: number) => {
@@ -251,6 +282,18 @@ export function queueRows(queue: { running: Ticket[]; waiting: Ticket[] }, inner
   const running = queue.running.map((t) => colorize(fit(`▶ ${t.ws} ${elapsed(t.runningSinceMs ?? now, now)} ${t.command}`, inner), "blue"));
   const waiting = queue.waiting.length ? [dim(fit(`⧗ ${queue.waiting.length} waiting: ${queue.waiting.map((t) => t.ws).join(" ")}`, inner))] : [];
   return [...running, ...waiting];
+}
+
+/** ` · dropped` when an iceboxed workspace gave back its worktrees. */
+const droppedLabel = (w: WorkspaceState): string => (w.iceboxed?.dropped?.length ? " · dropped" : "");
+
+/** Iceboxed workspaces, one dim row each under the divider; they have no tab, so no card and no digit. */
+export function icedRows(state: State, inner: number): string[] {
+  const workspaces = state.workspaces as Record<string, unknown>;
+  return Object.keys(workspaces)
+    .filter((ws) => isIced(workspaces, ws))
+    .sort(naturalSort)
+    .map((ws) => dim(fit(`❄ ${ws} iceboxed${isWorkspaceState(workspaces[ws]) ? droppedLabel(workspaces[ws]) : ""}`, inner)));
 }
 
 /** Workspaces being removed in the background right now, labelled as their cards were; a malformed record is skipped (its card reports it). */
@@ -312,7 +355,7 @@ export function gather(readers: SidebarReaders, inner: number, last: Model): Mod
   }
   const stateUnreadable = faults.length > 0;
   const state = stateUnreadable ? last.state : read.state;
-  const order = attempt("zellij tabs", readers.tabOrder, []);
+  const order = attempt("tabs", readers.tabOrder, []);
   attempt("orchestration tabs", () => readers.keepOrchestration(order), undefined);
   if (!stateUnreadable) {
     attempt("merge sweep", readers.sweep, undefined);
@@ -490,7 +533,7 @@ export function startError(repo: string, id: string, result: Finished): string {
 
 /**
  * Run `overbridge start <repo> <id>` as a child process, so its git fetch does not freeze the pane and its
- * output does not draw over it. The child inherits `ZELLIJ`, so it opens the new tab or focuses an existing one.
+ * output does not draw over it. The child inherits the session's environment, so it opens the new tab or focuses an existing one.
  * Resolves to the footer to show next: the legend on success, the error otherwise.
  */
 export async function runStart(repo: string, id: string, spawn: Spawner = spawnAsync): Promise<Footer> {
@@ -575,7 +618,7 @@ export function stepFor(input: Input, current: number, offset: number, heights: 
 }
 
 /**
- * The tab a digit held by `self`'s sidebar goes to once the wait runs out. None when `focused` (the tab zellij has
+ * The tab a digit held by `self`'s sidebar goes to once the wait runs out. None when `focused` (the tab the multiplexer has
  * focused now) is another one, so leaving the tab some other way drops the digit instead of pulling you back.
  */
 export function commitDigit(pending: string, list: Entry[], self: string, focused: string | undefined): number | undefined {
@@ -585,11 +628,11 @@ export function commitDigit(pending: string, list: Entry[], self: string, focuse
   return inRange(Number(pending) - 1, list.length, list.findIndex((e) => e.tab === self));
 }
 
-/** Each sidebar records its zellij pane id here, so another tab's sidebar can focus it. */
+/** Each sidebar records its multiplexer pane id here, so another tab's sidebar can focus it. */
 const paneFile = (ws: string) => join(metaDir(), "sidebars", ws);
 
 function registerPane(ws: string) {
-  const id = process.env.ZELLIJ_PANE_ID;
+  const id = defaultMux().ownPaneId();
   if (id === undefined) return;
   mkdirSync(join(metaDir(), "sidebars"), { recursive: true });
   writeFileSync(paneFile(ws), id);
@@ -604,36 +647,35 @@ const sidebarPane = (ws: string): string | undefined => {
 };
 
 /**
- * Switch to `tab` and focus its sidebar; false when zellij could not go to the tab. Focusing the sidebar exits 2
- * when it already has focus, so its result is ignored.
+ * Switch to `tab` and focus its sidebar; false when the multiplexer could not go to the tab. Focusing a sidebar
+ * that already has focus can fail, so its result is ignored.
  */
-export function switchTab(tab: string, exec: (cmd: string[]) => { ok: boolean } = (cmd) => run(cmd)): boolean {
-  const went = exec(["zellij", "action", "go-to-tab-name", tab]).ok;
-  if (!went) {
+export function switchTab(tab: string, mux: Mux = defaultMux()): boolean {
+  if (!mux.goToTab(tab).ok) {
     return false;
   }
   const pane = sidebarPane(tab);
   if (pane !== undefined) {
-    exec(["zellij", "action", "focus-pane-id", `terminal_${pane}`]);
+    mux.focusPane(pane);
   }
   return true;
 }
 
 /** Go from `self` to `tab`, picked any way but ← and →, recording the visit in the session's history. */
-export function visitTab(self: string, tab: string, exec?: (cmd: string[]) => { ok: boolean }): boolean {
+export function visitTab(self: string, tab: string, mux?: Mux): boolean {
   const before = readHistory();
-  return moveWithHistory(before, visit(before, self), () => switchTab(tab, exec));
+  return moveWithHistory(before, visit(before, self), () => switchTab(tab, mux));
 }
 
 /** ← or → from `self`, skipping tabs no longer in `list`; false when there is nowhere to go or the switch failed. */
-export function travelTab(self: string, way: Travel, list: Entry[], exec?: (cmd: string[]) => { ok: boolean }): boolean {
+export function travelTab(self: string, way: Travel, list: Entry[], mux?: Mux): boolean {
   const before = readHistory();
   const moved = travel(before, way, self, new Set(list.map((e) => e.tab)));
   if (moved.target === undefined) {
     return false;
   }
   const target = moved.target;
-  return moveWithHistory(before, moved.history, () => switchTab(target, exec));
+  return moveWithHistory(before, moved.history, () => switchTab(target, mux));
 }
 
 /** `overbridge sidebar [--ws]`. `q` or Ctrl-C quits. */
@@ -653,7 +695,7 @@ export async function sidebar(wsOpt?: string) {
     readState: tryReadState,
     entries,
     reap: createReaper(),
-    status: (state, inner) => [...cleanupRows(inFlightCleanups(state), cleanupRecords(state.cleanups), inner, Date.now(), state.mergeSweepAt), ...queueRows(readQueue(), inner)],
+    status: (state, inner) => [...icedRows(state, inner), ...cleanupRows(inFlightCleanups(state), cleanupRecords(state.cleanups), inner, Date.now(), state.mergeSweepAt), ...queueRows(readQueue(), inner)],
     limits: readLimits,
   };
   let last: Model = EMPTY_MODEL;
@@ -789,6 +831,12 @@ export async function sidebar(wsOpt?: string) {
           if (input.kind === "key" && input.key === "n") {
             hold("");
             next(self);
+            return;
+          }
+          if (input.kind === "key" && input.key === PERF_KEY) {
+            hold("");
+            const perf = last.list.find((e) => e.tab === PERF_TAB);
+            if (perf && perf.tab !== self) visitTab(self, perf.tab);
             return;
           }
           // the list on screen, so a click lands on the card the user saw

@@ -29,7 +29,7 @@ describe("orchestration tab scaffolding", () => {
     const preToolUse = settings.hooks.PreToolUse;
     expect(preToolUse).toHaveLength(1);
     expect(preToolUse[0].matcher).toBe("*");
-    expect(preToolUse[0].hooks.map((h: { command: string }) => h.command).join(" ")).toMatch(/ guard$/);
+    expect(preToolUse[0].hooks.map((h: { command: string }) => h.command).join(" ")).toMatch(/ guard .* hook$/);
   });
 
   test("its brief tells it to start a workspace with the user's request for every task", () => {
@@ -38,6 +38,15 @@ describe("orchestration tab scaffolding", () => {
     expect(brief).toContain("overbridge start <repo> <id> --prompt");
     expect(brief).toContain("overbridge start <repo> --task");
     expect(brief).toContain("/pickup #<pr>");
+  });
+
+  test("its brief routes a PR to the workspace that already claims its branch before starting a new one", () => {
+    const brief = orchestratorPrompt();
+    expect(brief).toContain("overbridge status --all");
+    expect(brief).toMatch(/do not start a\s+duplicate/);
+    expect(brief).toContain("notify_when_idle: true");
+    expect(brief).toContain("Only when no workspace claims the branch");
+    expect(brief.indexOf("SendMessage")).toBeLessThan(brief.indexOf("overbridge item from-branch"));
   });
 
   test("claude starts with the settings and the brief appended to the system prompt", () => {

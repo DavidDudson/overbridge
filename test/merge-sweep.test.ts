@@ -215,6 +215,20 @@ describe("sweepMerged", () => {
     expect(refreshed).not.toContain("m6");
     expect(removed).not.toContain("m6");
   });
+
+  test("a workspace re-bound onto a follow-up PR is kept while its cache still describes the merged one", () => {
+    const head = mergedWorkspace("m7");
+    cacheMerged("m7", head, Date.now());
+    const file = join(root, ".overbridge", "top", "m7.json");
+    writeFileSync(file, JSON.stringify({ links: [], merged: { app: head }, branches: { app: "feat/m7" }, at: Date.now() }));
+    setAgent("m7", "idle");
+    withState((s) => {
+      s.workspaces.m7!.repos.app = { branch: "feat/m7-next", pr: 2, reboundFrom: { branch: "feat/m7", pr: 1 } };
+    });
+    const { deps, removed } = recordingDeps();
+    expect(sweepMerged(deps).m7).toBe(Verdict.Keep);
+    expect(removed).not.toContain("m7");
+  });
 });
 
 describe("claimSweep", () => {

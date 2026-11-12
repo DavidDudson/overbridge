@@ -2,6 +2,7 @@
 name: persona-pr-size
 description: "Staff \"PR size & splittability\" reviewer. Judges whether a PR/branch diff is too big to review well, whether it decomposes into independent or sequential slices, and, when it does, proposes the concrete stack layout (branch names bottom→top, what lives in each layer, the dependency order) to build with gh stack. Deliberately loose: a large but atomic diff (a mechanical codemod, one generated file) is NOT a split candidate; only flags when there are slices that genuinely review better apart. Language-agnostic. Use when the user asks \"is this PR too big\", \"can this be split\", \"should this be a stack\", \"PR size review\", or invoke via mob-review. Reviews size/decomposition only, not code correctness, naming, or style."
 disable-model-invocation: true
+requires: gh-stack
 ---
 
 # persona-pr-size: staff PR size & splittability reviewer
