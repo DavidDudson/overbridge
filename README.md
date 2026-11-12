@@ -140,7 +140,8 @@ orchestration tab: find every workspace with work still outstanding, such as a d
 review feedback, a red build, uncommitted or unpushed work or an item not yet shipped, and message its Claude a
 plain "continue" naming what is left; done workspaces are skipped; it ends with a sent/skipped table and takes
 `--dry-run`) and `cleanup` (from the orchestration tab: report the finished, orphaned, and never-started
-workspaces that `overbridge cleanup` finds, and remove the safe ones once you confirm; it also takes `--dry-run`). They read the
+workspaces that `overbridge cleanup` finds, and remove the safe ones once you confirm; it also takes `--dry-run`) and `distill` (shorten skill and agent-instruction files without
+changing what they tell the agent to do, then report the bytes saved per file). They read the
 repo's `overbridge.yml` (`project-management`, `commands`) and work with work items through `overbridge item`.
 `loop-tech-debt` files items with `overbridge item create --tech-debt`, so set `project-management.tech-debt`.
 `audit-vulns` reads Dependabot alerts, so it needs a GitHub repo.
