@@ -63,9 +63,9 @@ describe("overlay", () => {
 
 describe("loadRootLayers", () => {
   test("a missing or empty file has no layers", () => {
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] } });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] });
     writeRoot("");
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] } });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] });
   });
 
   test("reads defaults and per-repo layers", () => {
@@ -76,6 +76,7 @@ describe("loadRootLayers", () => {
       repos: { app: { commands: { test: "bun test" } } },
       skillExtensions: [],
       guard: { readPaths: [], deny: [] },
+      githubOrgs: [],
     });
   });
 
@@ -326,5 +327,12 @@ describe("guard hook", () => {
     const r = guard(call("npm test"));
     expect(r.code).toBe(2);
     expect(r.err).toContain("internal error, blocking to be safe");
+  });
+});
+
+describe("github-orgs", () => {
+  test("reads the owners the PR tabs search", () => {
+    writeRoot("github-orgs: [DavidDudson, megaport]\n");
+    expect(loadRootLayers().githubOrgs).toEqual(["DavidDudson", "megaport"]);
   });
 });

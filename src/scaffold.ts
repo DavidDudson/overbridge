@@ -53,20 +53,23 @@ const workspaceSettings = (ws: string, plansDirectory: string) => ({
   plansDirectory,
   permissions: { allow: ALLOWED_COMMANDS },
   autoMode: { allow: ["$defaults", ...AUTO_MODE_ALLOW] },
-  hooks: {
-    PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }],
-    ...agentStateHooks(),
-  },
+  hooks: agentStateHooks(),
 });
 
 const hook = (sub: string) => ({ type: "command", command: [...selfCommand(), sub].map(shellQuote).join(" ") });
 
-/** The hooks that record what an agent is doing, for the sidebar glyphs: see agent-hook.ts. */
+/**
+ * The hooks every Claude gets: the guard, and the recorder of what the agent is doing (the sidebar glyphs, and
+ * the history of where its time goes): see agent-hook.ts and history.ts.
+ */
 function agentStateHooks() {
   const state = [{ hooks: [hook("hook")] }];
   return {
+    PreToolUse: [{ matcher: "*", hooks: [hook("guard"), hook("hook")] }],
     ...Object.fromEntries(["SessionStart", "UserPromptSubmit", "Notification", "PreCompact", "Stop", "SessionEnd"].map((event) => [event, state])),
     PostToolUse: [{ matcher: "*", hooks: [hook("hook")] }],
+    // a tool that fails never reaches PostToolUse, and its time would count as the model's
+    PostToolUseFailure: [{ matcher: "*", hooks: [hook("hook")] }],
   };
 }
 
@@ -82,7 +85,7 @@ export function scaffoldOrchestration(tab: string): string {
   mkdirSync(dirname(file), { recursive: true });
   const settings = {
     env: { [ORCHESTRATION_ENV]: tab, OVERBRIDGE_ROOT: root(), OVERBRIDGE_NAME: "" },
-    hooks: { PreToolUse: [{ matcher: "*", hooks: [hook("guard")] }], ...agentStateHooks() },
+    hooks: agentStateHooks(),
     ...pluginSettings(),
   };
   writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
@@ -116,16 +119,24 @@ When the user asks for any task (fixing something, filing a ticket, planning a s
 a PR), start a workspace for it first, passing their request on, then stop:
 
 - For a work item: \`overbridge start <repo> <id> --prompt "<the request, in the user's words>"\`
-- For a PR: find its item with \`overbridge item from-branch <its head branch>\`, then
+- For a PR (pick up, fix, resolve a conflict or review feedback, rebase): first look for the workspace that
+  already has it. Run \`overbridge status --all\` and find the row whose \`pr\` is that PR or whose \`claim\` (or
+  \`head\`) is the PR's head branch (\`gh pr view <pr> --json headRefName\`). If one exists, do not start a
+  duplicate: find that workspace's Claude with \`ListAgents\` (its session is named after the workspace, with
+  an optional short suffix such as \`ws5-37\`) and send it \`/pickup #<pr> <anything else they asked>\` with
+  \`SendMessage\`, passing \`notify_when_idle: true\` so you hear when it finishes. Tell the user which
+  workspace took it. Only when no workspace claims the branch, find the PR's item with
+  \`overbridge item from-branch <its head branch>\` and run
   \`overbridge start <repo> <that id> --prompt "/pickup #<pr> <anything else they asked>"\`. A PR with no item
   uses \`--task pr-<number>\` instead of an id.
 - With no item yet: \`overbridge start <repo> --task <short-slug> --prompt "<the request, in the user's words>"\`
 
 The new workspace opens in its own tab and its Claude does the work. Tell the user which workspace and tab
-opened. If \`overbridge start\` refuses, say why and stop.
+opened. If \`overbridge start\` refuses, say why and stop. A refusal that names another workspace means that
+workspace already holds the branch: message its Claude as above instead of retrying.
 
-You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge item view\`, read-only
-\`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`release\`, \`up\`, \`repo add\`). You may also message
+You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge worklist show\` (the ranked list the @work tab keeps; ask the user what to start next from it), \`overbridge item view\`, read-only
+\`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`icebox\`, \`thaw\`, \`release\`, \`up\`, \`repo add\`). You may also message
 workspace Claudes with \`ListAgents\` and \`SendMessage\`, for example to tell every tab to resume its work; the
 \`whip\` skill does that for every workspace whose work is still outstanding. The \`cleanup\` skill finds finished
 and orphaned workspaces with \`overbridge cleanup --json\` and removes the safe ones once the user confirms.`;
@@ -174,6 +185,8 @@ access to other workspaces and direct branch switching. Do not try to work aroun
 - After \`gh pr create\`, run \`overbridge pr <repo>\` to record the PR against this workspace.
 - \`overbridge status\` shows this workspace's claims; \`overbridge status --all\` shows every workspace.
 - \`overbridge release <repo>\` frees a branch when you are done with it.
+- \`overbridge icebox <workspace>\` pauses a workspace you will not touch for a while (no process, no tab; claims stay);
+  commit and push first. \`overbridge thaw <workspace>\` brings it back.
 - One workspace per work item. To start a different item, run \`overbridge start <repo> <id>\` (it opens the
   item's own workspace and tab) rather than switching this one.
 - Stacked PRs (\`gh stack\`): a claim covers every layer of its stack. \`gh stack init/add/up/down/top/bottom\`,

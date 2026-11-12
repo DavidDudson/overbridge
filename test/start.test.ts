@@ -7,6 +7,7 @@ import { metaDir } from "../src/paths";
 import { localStacks } from "../src/stack";
 import { showTab, start, startStack, startTask } from "../src/start";
 import { readState, withState } from "../src/state";
+import { zellijMux } from "../src/mux";
 import { openTab, TabFocus } from "../src/tab";
 import type { RunResult } from "../src/util";
 import { fakeProvider } from "./helpers/fake-provider";
@@ -191,7 +192,7 @@ const fakeZellij = (current: string | undefined, opens = true, tabs: string[] = 
     }
     return { ok: true, code: 0, stdout: "", stderr: "" };
   };
-  return { calls, exec, actions: () => calls.map((c) => c[2]) };
+  return { calls, exec, mux: zellijMux(exec), actions: () => calls.map((c) => c[2]) };
 };
 
 describe("start inside zellij", () => {
@@ -204,7 +205,7 @@ describe("start inside zellij", () => {
 
   test("a new workspace's tab opens in the background", () => {
     const z = fakeZellij("mine");
-    start("app", "20", undefined, { provider: fakeProvider([{ id: "20", title: "Background", url: "" }]), exec: z.exec, plugins: noProblems });
+    start("app", "20", undefined, { provider: fakeProvider([{ id: "20", title: "Background", url: "" }]), mux: z.mux, plugins: noProblems });
     expect(z.actions()).toEqual(["current-tab-info", "new-tab", "go-to-tab-name"]);
     expect(z.calls[1]).toContain("gh-app-20");
     expect(z.calls[2]).toEqual(["zellij", "action", "go-to-tab-name", "mine"]);
@@ -212,20 +213,20 @@ describe("start inside zellij", () => {
 
   test("an item that already has a workspace switches to its tab", () => {
     const z = fakeZellij("mine", true, ["mine", "gh-app-20"]);
-    start("app", "20", undefined, { provider: fakeProvider([{ id: "20", title: "Background", url: "" }]), exec: z.exec, plugins: noProblems });
+    start("app", "20", undefined, { provider: fakeProvider([{ id: "20", title: "Background", url: "" }]), mux: z.mux, plugins: noProblems });
     expect(z.actions()).toEqual(["query-tab-names", "go-to-tab-name"]);
     expect(z.calls[1]).toEqual(["zellij", "action", "go-to-tab-name", "gh-app-20"]);
   });
 
   test("no current tab means nothing to go back to", () => {
     const z = fakeZellij(undefined);
-    openTab("ws-a", undefined, TabFocus.Background, z.exec);
+    openTab("ws-a", undefined, TabFocus.Background, z.mux);
     expect(z.actions()).toEqual(["current-tab-info", "new-tab"]);
   });
 
   test("a tab that fails to open does not move focus", () => {
     const z = fakeZellij("mine", false);
-    openTab("ws-b", undefined, TabFocus.Background, z.exec);
+    openTab("ws-b", undefined, TabFocus.Background, z.mux);
     expect(z.actions()).toEqual(["current-tab-info", "new-tab"]);
   });
 });
@@ -294,7 +295,7 @@ describe("tabs", () => {
 
   test("start on a workspace with no tab opens one in front, running /start-item", () => {
     const z = fakeZellij("mine");
-    start("app", "12", undefined, { provider: provider(), exec: z.exec, plugins: noProblems });
+    start("app", "12", undefined, { provider: provider(), mux: z.mux, plugins: noProblems });
     expect(z.actions()).toEqual(["query-tab-names", "new-tab"]);
     expect(z.calls[1]).toContain("gh-app-12");
     expect(tabLayout("gh-app-12")).toContain("/start-item 12");
@@ -302,7 +303,7 @@ describe("tabs", () => {
 
   test("start on a workspace with no tab opens one running the given prompt", () => {
     const z = fakeZellij("mine");
-    start("app", "12", "fix the build", { provider: provider(), exec: z.exec, plugins: noProblems });
+    start("app", "12", "fix the build", { provider: provider(), mux: z.mux, plugins: noProblems });
     expect(z.actions()).toEqual(["query-tab-names", "new-tab"]);
     expect(tabLayout("gh-app-12")).toContain("fix the build");
   });
@@ -310,7 +311,7 @@ describe("tabs", () => {
   test("start on a workspace whose tab is open switches to it", () => {
     captureLog();
     const z = fakeZellij("mine", true, ["mine", "gh-app-12"]);
-    start("app", "12", undefined, { provider: provider(), exec: z.exec, plugins: noProblems });
+    start("app", "12", undefined, { provider: provider(), mux: z.mux, plugins: noProblems });
     expect(z.actions()).toEqual(["query-tab-names", "go-to-tab-name"]);
     expect(errors.some((e) => e.includes("prompt not sent"))).toBe(false);
   });
@@ -318,14 +319,14 @@ describe("tabs", () => {
   test("start with --prompt on a workspace whose tab is open says the prompt was not sent", () => {
     captureLog();
     const z = fakeZellij("mine", true, ["mine", "gh-app-12"]);
-    start("app", "12", "fix the build", { provider: provider(), exec: z.exec, plugins: noProblems });
+    start("app", "12", "fix the build", { provider: provider(), mux: z.mux, plugins: noProblems });
     expect(z.actions()).not.toContain("new-tab");
     expect(errors).toContain("gh-app-12 already has a tab; prompt not sent");
   });
 
   test("new opens the workspace's tab in the background with a bare agent", () => {
     const z = fakeZellij("mine");
-    newWorkspace("fresh", [], z.exec);
+    newWorkspace("fresh", [], z.mux);
     expect(z.actions()).toEqual(["current-tab-info", "new-tab", "go-to-tab-name"]);
     expect(z.calls[1]).toContain("fresh");
     expect(tabLayout("fresh")).toContain('"claude" "fresh"\n');
@@ -333,7 +334,7 @@ describe("tabs", () => {
 
   test("showTab reopens a closed tab in front with the prompt", () => {
     const z = fakeZellij("mine", true, ["mine"]);
-    showTab("fresh", { prompt: "carry on" }, z.exec);
+    showTab("fresh", { prompt: "carry on" }, z.mux);
     expect(z.actions()).toEqual(["query-tab-names", "new-tab"]);
     expect(tabLayout("fresh")).toContain("carry on");
   });
@@ -355,6 +356,8 @@ describe("start inside a task workspace", () => {
       { id: "72", title: "Other", url: "" },
       { id: "73", title: "Fresh", url: "" },
       { id: "74", title: "Dirty", url: "" },
+      { id: "75", title: "Lineage", url: "" },
+      { id: "76", title: "Chained", url: "" },
     ]);
   /** Run `fn` as the workspace's own Claude would: with `OVERBRIDGE_NAME` set. */
   const inside = (ws: string, fn: () => void) => {
@@ -395,6 +398,28 @@ describe("start inside a task workspace", () => {
     expect(hasBranch("spike-a", "task/spike-a")).toBe(false);
     expect(errors.some((e) => e.includes("deleted task/spike-a"))).toBe(true);
     expect(errors.some((e) => e.includes("spike-a/app now on 70"))).toBe(true);
+  });
+
+  test("records what a re-bind moved from; a plain checkout leaves no lineage", () => {
+    startTask("app", "spike-c", "spike it", { plugins: noProblems });
+    inside("spike-c", () => start("app", "75", undefined, { provider: items(), plugins: noProblems }));
+    expect(readState().workspaces["spike-c"]!.repos.app?.reboundFrom).toEqual({ branch: "task/spike-c" });
+
+    createWorkspace("plain", ["app"]);
+    checkout(["app", "feat/plain-work"], "plain");
+    expect(readState().workspaces["plain"]!.repos.app?.reboundFrom).toBeUndefined();
+  });
+
+  test("--here records the old branch and its PR as lineage", () => {
+    createWorkspace("lineage", ["app"]);
+    checkout(["app", "feat/old-work"], "lineage");
+    withState((s) => {
+      s.workspaces["lineage"]!.repos.app = { branch: "feat/old-work", pr: 9 };
+    });
+
+    inside("lineage", () => start("app", "76", undefined, { provider: items(), plugins: noProblems, here: true }));
+
+    expect(readState().workspaces["lineage"]!.repos.app?.reboundFrom).toEqual({ branch: "feat/old-work", pr: 9 });
   });
 
   test("keeps the task branch when the item branch already exists without its commits", () => {
@@ -447,7 +472,7 @@ describe("start inside a task workspace", () => {
     process.env.ZELLIJ = "0";
     try {
       const z = fakeZellij("mine", true, ["mine", "spike-a"]);
-      start("app", "70", undefined, { provider: items(), exec: z.exec, plugins: noProblems });
+      start("app", "70", undefined, { provider: items(), mux: z.mux, plugins: noProblems });
       expect(z.actions()).toEqual(["query-tab-names", "go-to-tab-name"]);
       expect(z.calls[1]).toEqual(["zellij", "action", "go-to-tab-name", "spike-a"]);
       expect(readState().workspaces["gh-app-70"]).toBeUndefined();

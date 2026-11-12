@@ -3,7 +3,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { type AgentState, agentStatePath, CONTINUING_END_REASONS, readAgentState } from "./agent-state";
 import { backgroundShells } from "./bg-tasks";
+import { claudeRecord, type HookPayload, type HistoryStore, historyStore } from "./history";
 import { envVar, ORCHESTRATION_ENV, root, selfCommand, silenceLegacyWarnings } from "./paths";
+import { notifyRefresh } from "./server-net";
 
 /**
  * Claude Code hook that records what a workspace's agent is doing, for the sidebar glyphs.
@@ -98,13 +100,16 @@ export function recordState(metaDir: string, ws: string, state: AgentState, now 
   renameSync(tmp, file);
 }
 
+/** Whether the top-panel cache file for `ws` is old enough to refresh. */
+export const cacheStale = (metaDir: string, ws: string, now = Date.now()): boolean => ageMs(join(metaDir, "top", `${ws}.json`), now) >= REFRESH_AFTER_MS;
+
 /**
  * True when the top-panel cache for `ws` is stale and nobody started a refresh recently.
- * Claims the refresh by touching a lock file, so concurrent hooks start one.
+ * Claims the refresh by touching a lock file, so concurrent hooks start one. The fallback for when no server answers.
  */
 export function claimRefresh(metaDir: string, ws: string, now = Date.now()): boolean {
   const dir = join(metaDir, "top");
-  if (ageMs(join(dir, `${ws}.json`), now) < REFRESH_AFTER_MS) return false;
+  if (!cacheStale(metaDir, ws, now)) return false;
   const lock = join(dir, `${ws}.refresh`);
   if (ageMs(lock, now) < REFRESH_LOCK_MS) return false;
   mkdirSync(dir, { recursive: true });
@@ -118,6 +123,16 @@ function startRefresh(ws: string) {
   Bun.spawn({ cmd: [cmd!, ...args, "top", "refresh", "--ws", ws], cwd: homedir(), stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
 }
 
+/** Append the event to `ws`'s history. A history fault never reaches the agent or the state recording. */
+export function recordHistory(ws: string, input: HookPayload, store: HistoryStore = historyStore(), now = Date.now()) {
+  try {
+    const record = claudeRecord(input, now);
+    if (record) store.append(ws, record);
+  } catch {
+    // history is best effort
+  }
+}
+
 /** Entry point for `overbridge hook`: the hook payload is JSON on stdin. Always exits 0. */
 export async function hookMain(): Promise<number> {
   try {
@@ -126,7 +141,7 @@ export async function hookMain(): Promise<number> {
     // an orchestration tab has no top panel, so it records state but never refreshes a top cache
     const ws = workspace || process.env[ORCHESTRATION_ENV];
     if (!ws) return 0;
-    const input = JSON.parse(await Bun.stdin.text()) as { hook_event_name?: string; source?: string; reason?: string; trigger?: string; stop_hook_active?: boolean };
+    const input = JSON.parse(await Bun.stdin.text()) as HookPayload & { source?: string; reason?: string; trigger?: string; stop_hook_active?: boolean };
     const meta = join(root(), ".overbridge");
     const event = input.hook_event_name ?? "";
     if (event === "PreCompact" && input.trigger === "auto") markCompact(meta, ws);
@@ -137,9 +152,12 @@ export async function hookMain(): Promise<number> {
       console.log(JSON.stringify({ decision: "block", reason: COMPACT_RESTART_REASON }));
       return 0;
     }
+    // after the compact restart above: a Stop the hook blocks does not end the turn
+    recordHistory(ws, input);
     const state = nextState(event, input.source, event === "Notification" ? readAgentState(ws) : undefined, input.reason);
     if (state) recordState(meta, ws, state, Date.now(), state === "done" ? backgroundShells() : [], state === "end" ? input.reason : undefined);
-    if (workspace && claimRefresh(meta, workspace)) startRefresh(workspace);
+    // the server decides whether a refresh is due; with none answering the hook refreshes on its own
+    if (workspace && cacheStale(meta, workspace) && !(await notifyRefresh(workspace)) && claimRefresh(meta, workspace)) startRefresh(workspace);
   } catch {
     // a status hook must never get in the way of the agent
   }

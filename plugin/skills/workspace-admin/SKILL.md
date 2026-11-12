@@ -43,6 +43,9 @@ overbridge rm <name> [--force]                    # refuses with uncommitted cha
                                           # an orphan (a workspace folder that status does not list)
 overbridge cleanup [--json] [--no-fetch]          # report which workspaces and orphans can go (remove, review,
                                           # rebind, ask, keep); removes nothing. The cleanup skill acts on it
+overbridge icebox <name> [--prune] [--drop-worktree]  # pause: stop apps and checks, write a handoff, close the tab; claims stay; refuses with unsaved work
+                                                  # --prune deletes the repo's icebox.prune paths (untracked only); --drop-worktree removes worktrees, keeps branches
+overbridge thaw <name>                            # reopen an iceboxed workspace; its agent resumes and reads the handoff; recreates dropped worktrees
 overbridge status --all
 
 overbridge spinup                                 # rebuild the zellij session over existing workspaces
@@ -50,7 +53,7 @@ overbridge spinup                                 # rebuild the zellij session o
 overbridge up [--fresh]                           # zellij session "workspaces": the @root tab (Claude in the
                                           # root, guarded to coordinate only), then one tab per workspace with a sidebar,
                                           # a top panel, and the agent
-overbridge layout                                 # print the layout `up` would use (stderr says where from)
+overbridge layout                                 # print the layout `up` would use (stderr says where from); a tmux script under OVERBRIDGE_MUX=tmux
 overbridge claude <name|@root>                    # run a bound Claude, or the root Claude, outside zellij
 ```
 

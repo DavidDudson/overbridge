@@ -130,17 +130,31 @@ describe("workflow", () => {
   });
 
   test("rm refuses an orchestration tab, with or without --force", () => {
-    for (const args of [["rm", "@root"], ["rm", "--force", "@root"]]) {
-      const r = ws(args);
-      expect(r.code).not.toBe(0);
-      expect(r.err).toContain("@root is an orchestration tab");
+    for (const tab of ["@root", "@work"]) {
+      for (const args of [["rm", tab], ["rm", "--force", tab], ["rm", "--background-finish", tab]]) {
+        const r = ws(args);
+        expect(r.code).not.toBe(0);
+        expect(r.err).toContain(`${tab} is an orchestration tab`);
+      }
     }
   });
 
-  test("layout opens the orchestration tabs (root, work list), then one tab per workspace, each with sidebar and top panel", () => {
+  test("claude refuses the work list tab, which has no agent", () => {
+    const r = ws(["claude", "@work"]);
+    expect(r.code).not.toBe(0);
+    expect(r.err).toContain("not Claude");
+  });
+
+  test("worklist show prints the cache and does not need a tty", () => {
+    const r = ws(["worklist", "show"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("nothing assigned to you");
+  });
+
+  test("layout opens the orchestration tabs (root, work list, PRs, reviews, performance), then one tab per workspace, each with sidebar and top panel", () => {
     for (const n of ["ws3", "ws4", "ws5"]) ws(["new", n]);
     const kdl = ws(["layout"]).out;
-    expect(kdl.match(/\btab name=/g)?.length).toBe(7);
+    expect(kdl.match(/\btab name=/g)?.length).toBe(10);
     expect(kdl.indexOf('tab name="@root"')).toBeLessThan(kdl.indexOf('tab name="ws'));
     expect(kdl).toContain('"claude" "@root"');
     expect(kdl).toMatch(/args .*"worklist"/);

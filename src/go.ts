@@ -1,7 +1,7 @@
 import { focusClaude } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { entries } from "./sidebar";
-import { currentTab, sessionExec, tabOrder, type ZellijExec } from "./tab";
+import { defaultMux, type Mux } from "./mux";
 import { OverbridgeError } from "./util";
 
 export const GO_USAGE = "usage: overbridge go <n>|<name>|next|prev";
@@ -32,12 +32,12 @@ export function pickGo(tabs: string[], current: string | undefined, arg: string)
  * `overbridge go <n>|<name>|next|prev`: switch to the tab and focus its Claude pane. Reaches the session by name
  * when run outside it. The sidebar's history is not touched, like `overbridge next`.
  */
-export function go(arg: string, exec: ZellijExec = sessionExec()): string {
-  const tabs = entries(tabOrder(exec)).map((e) => e.tab);
-  const picked = pickGo(tabs, currentTab(exec), arg);
+export function go(arg: string, mux: Mux = defaultMux()): string {
+  const tabs = entries(mux.tabs()).map((e) => e.tab);
+  const picked = pickGo(tabs, mux.currentTab(), arg);
   if ("error" in picked) throw new OverbridgeError(picked.error);
-  const r = exec(["zellij", "action", "go-to-tab-name", picked.tab]);
-  if (!r.ok) throw new OverbridgeError(`could not switch to ${picked.tab}: ${r.stderr || r.stdout || "no session"}`.trim());
-  focusClaude(picked.tab, exec);
+  const r = mux.goToTab(picked.tab);
+  if (!r.ok) throw new OverbridgeError(`could not switch to ${picked.tab}: ${r.error || "no session"}`.trim());
+  focusClaude(picked.tab, mux);
   return `→ ${picked.tab}`;
 }

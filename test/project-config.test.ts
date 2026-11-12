@@ -56,7 +56,7 @@ ide: zed
   });
 
   test("lists allowed keys when nothing is close", () => {
-    expect(err("zzzzzzzzzz: 1")).toContain("allowed: version, project-management, apps, commands, review, ide");
+    expect(err("zzzzzzzzzz: 1")).toContain("allowed: version, project-management, board, apps, commands, review, ide");
   });
 
   test("names the key for a bad provider", () => {
@@ -91,6 +91,25 @@ review:
 `);
     expect(c.commands).toEqual({ test: "pnpm test", format: "pnpm format" });
     expect(c.review).toEqual({ personas: ["security", "naming"], exclude: ["pr-size"], localDir: ".review" });
+  });
+
+  test("icebox.prune lists repo-relative paths and defaults to none", () => {
+    expect(parseConfig("icebox: { prune: [node_modules, target/debug] }").icebox.prune).toEqual(["node_modules", "target/debug"]);
+    expect(parseConfig("version: 1").icebox.prune).toEqual([]);
+  });
+
+  test("icebox.idle-days is a positive whole number and unset by default", () => {
+    expect(parseConfig("icebox: { idle-days: 14 }").icebox.idleDays).toBe(14);
+    expect(parseConfig("version: 1").icebox.idleDays).toBeUndefined();
+    expect(err("icebox: { idle-days: 0 }")).toContain("icebox.idle-days");
+    expect(err("icebox: { idle-days: soon }")).toContain("icebox.idle-days");
+  });
+
+  test("icebox.prune refuses paths that leave the repo or glob", () => {
+    for (const bad of ["/etc", "../x", "a/../../x", ".", "*.o", "a[b]", ".git", "./.git/", ".claude", ":(exclude)x", "a//b"]) {
+      expect(err(`icebox: { prune: ["${bad}"] }`)).toContain("icebox.prune");
+    }
+    expect(err("icebox: { zap: 1 }")).toContain("icebox");
   });
 
   test("review defaults: auto-select personas, no excludes, standard local dir", () => {
@@ -148,5 +167,28 @@ describe("getConfigValue", () => {
     expect(getConfigValue(c, "commands.build")).toBeUndefined();
     expect(getConfigValue(c, "nope.deeper")).toBeUndefined();
     expect(getConfigValue(c, "commands.test.deeper")).toBeUndefined();
+  });
+});
+
+describe("board columns", () => {
+  test("maps column names, lower-cased, to work statuses", () => {
+    expect(parseConfig("board:\n  columns:\n    Ready: todo\n    In Review: in-progress\n").boardColumns).toEqual({ ready: "todo", "in review": "in-progress" });
+    expect(parseConfig("").boardColumns).toEqual({});
+  });
+
+  test("rejects an unknown status and an unknown key", () => {
+    expect(() => parseConfig("board:\n  columns:\n    Ready: soon\n")).toThrow("board.columns.Ready");
+    expect(() => parseConfig("board:\n  column: {}\n")).toThrow("board");
+  });
+});
+
+describe("worklist-scope", () => {
+  const pm = (extra: string) => `project-management:\n  name: github\n  project: o/r\n${extra}`;
+  test("reads a scope and defaults to none set", () => {
+    expect(parseConfig(pm("  worklist-scope: all\n")).projectManagement?.worklistScope).toBe("all");
+    expect(parseConfig(pm("")).projectManagement?.worklistScope).toBeUndefined();
+  });
+  test("rejects an unknown scope", () => {
+    expect(() => parseConfig(pm("  worklist-scope: everyone\n"))).toThrow("worklist-scope");
   });
 });

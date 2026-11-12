@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { AppStatus, logPath, openBrowser, startApp, stopApp, waitReady } from "./apps";
 import { requireWs } from "./commands";
 import { selfCommand } from "./paths";
+import { serverRefresh } from "./server-client";
 import { beginRemoval } from "./remove";
 import { togglePane } from "./panes";
 import { mergePr, setReady } from "./pr-actions";
@@ -120,24 +121,30 @@ export async function topPanel(wsOpt?: string) {
   };
 
   /** Rebuild the cache and redraw; `keep` is a message (an action's result) to leave on the message row afterwards. */
-  const refresh = (keep?: string) => {
+  const refresh = (keep?: string, force = false) => {
     lastRefreshAtMs = Date.now();
     note = keep ?? "refreshing…";
     draw();
-    const self = selfCommand();
-    const child = Bun.spawn({ cmd: [...self, "top", "refresh", "--ws", ws], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
-    void child.exited.then(async () => {
-      note = keep;
+    void (async () => {
+      // through the server when it is up; otherwise a child process rebuilds the cache
+      const served = await serverRefresh(ws, { force });
+      if (!served) {
+        const child = Bun.spawn({ cmd: [...selfCommand(), "top", "refresh", "--ws", ws], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+        await child.exited;
+      }
+      note = served?.error ? `refresh failed: ${served.error}` : keep;
       await reload();
-    });
+    })();
   };
+  /** A refresh that must show a change just made (a PR action, the `r` key): never answered from the cache. */
+  const forceRefresh = (keep?: string) => refresh(keep, true);
 
   const current = (): Button | undefined => frame.placed[cursor]?.button;
   const act = async (button: Button | undefined) => {
     if (!button) return;
     ranPrAction = false;
     note = activate(button, deps) ?? note;
-    if (ranPrAction) return refresh(note);
+    if (ranPrAction) return forceRefresh(note);
     await Bun.sleep(150);
     await reload();
   };
@@ -177,7 +184,7 @@ export async function topPanel(wsOpt?: string) {
       if (key === `${ESC}[C` || key === "l" || key === "\t") cursor = n ? (cursor + 1) % n : 0;
       else if (key === `${ESC}[D` || key === "h" || key === `${ESC}[Z`) cursor = n ? (cursor + n - 1) % n : 0;
       else if (key === "\r" || key === " ") return void act(current());
-      else if (key === "r") return refresh();
+      else if (key === "r") return forceRefresh();
       else if (key === "o") {
         const url = current() && openTarget(current()!);
         if (url) openBrowser(url);

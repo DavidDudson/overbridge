@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { rank, type WorkRow } from "../src/pm/worklist";
 import type { ProjectManagement } from "../src/project-config";
-import { boardSources, pickRepo, readBoards, refreshInChild, renderWorklist, repoPrompt } from "../src/worklist-run";
+import { boardSources, keepLastGood, pickRepo, readBoards, refreshInChild, renderWorklist, repoPrompt, showWorklist } from "../src/worklist-run";
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
@@ -110,5 +110,37 @@ describe("refreshInChild", () => {
   test("a failing child reports its first stderr line, or its exit code when it printed nothing", async () => {
     expect(await refreshInChild(async () => ({ code: 1, stderr: "\noverbridge: config.yml: bad key\nmore\n" }), ["ob"])).toEqual({ ok: false, error: "overbridge: config.yml: bad key" });
     expect(await refreshInChild(async () => ({ code: 137, stderr: "" }), ["ob"])).toEqual({ ok: false, error: "worklist refresh exited with code 137" });
+  });
+});
+
+describe("last good cache", () => {
+  test("a failed repo keeps its previous rows; a read one is replaced", () => {
+    const prev = [row("1", { repo: "a" }), row("2", { repo: "b" })];
+    const out = keepLastGood(prev, [row("3", { repo: "b" })], ["a"]);
+    expect(out.map((r) => `${r.repo}#${r.id}`).sort()).toEqual(["a#1", "b#3"]);
+  });
+
+  test("a failing reader is reported with its repos and adds no rows", () => {
+    const r = readBoards([{ kind: "github", repo: "a", slug: "o/a" }], { github: () => { throw new Error("API rate limit exceeded\nmore"); }, jira: () => [] });
+    expect(r).toEqual({ rows: [], notes: ["a: API rate limit exceeded"], failedRepos: ["a"] });
+  });
+
+  test("the panel shows the error and says the list is the last good one", () => {
+    const text = renderWorklist(rank([row("1")]), 0, 0, 12, 100, "", ["a: API rate limit exceeded"]).map(strip).join("\n");
+    expect(text).toContain("error: a: API rate limit exceeded");
+    expect(text).toContain("last good list");
+  });
+});
+
+describe("showWorklist", () => {
+  test("prints ranked rows, tab separated, then the notes", () => {
+    const lines = showWorklist({ at: 0, rows: [row("2", { blockedBy: ["ob#1"] }), row("1", { labels: ["p0"] })], notes: ["jira X: down"] });
+    expect(lines[0]).toBe("1\tready\tob#1\ttitle 1\tready, priority p0, unblocks 1");
+    expect(lines[1]).toContain("2\ttodo\tob#2");
+    expect(lines[2]).toBe("note: jira X: down");
+  });
+
+  test("says so when nothing is assigned", () => {
+    expect(showWorklist({ at: 0, rows: [], notes: [] })).toEqual(["nothing assigned to you"]);
   });
 });

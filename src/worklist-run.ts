@@ -2,9 +2,10 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadRepos } from "./config";
 import { metaDir, selfCommand } from "./paths";
-import { githubRows, slugFromUrl } from "./pm/board-github";
+import { githubRows, parseProject, projectRows, slugFromUrl, type ProjectBoard, type WorklistScope } from "./pm/board-github";
 import { jiraRows } from "./pm/board-jira";
-import { rank, type Ranked, type WorkRow } from "./pm/worklist";
+import { detailLines, filterRanked } from "./pm/worklist-filter";
+import { keyOf, rank, type Ranked, type WorkRow, type WorkStatus } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
 import type { ProjectManagement } from "./project-config";
 import { committedConfig } from "./start";
@@ -43,13 +44,15 @@ function writeWorklist(cache: WorklistCache) {
 
 /** One board read: a GitHub repo, or a Jira project shared by every repo that names it. */
 export type BoardSource =
-  | { kind: "github"; repo: string; slug: string }
+  | { kind: "github"; repo: string; slug: string; columns?: Record<string, WorkStatus>; scope?: WorklistScope; project?: ProjectBoard }
   | { kind: "jira"; project: string; repos: string[]; filter?: string; site?: string };
 
 export interface RepoBoard {
   repo: string;
   url: string;
   pm?: ProjectManagement;
+  /** `board.columns`, when the repo sets any. */
+  columns?: Record<string, WorkStatus>;
 }
 
 /**
@@ -74,48 +77,87 @@ export function boardSources(repos: readonly RepoBoard[]): { sources: BoardSourc
     };
   });
   return {
-    sources: [...github.flatMap(({ r, slug }): BoardSource[] => (slug ? [{ kind: "github", repo: r.repo, slug }] : [])), ...jira],
-    notes: github.filter((g) => !g.slug).map(({ r }) => `${r.repo}: cannot tell the GitHub repo from ${r.url}`),
+    sources: [
+      ...github.flatMap(({ r, slug }): BoardSource[] => {
+        if (!slug) return [];
+        const project = r.pm.worklistProject ? parseProject(r.pm.worklistProject, slug.split("/")[0], r.pm.worklistStatuses) : undefined;
+        return [
+          {
+            kind: "github",
+            repo: r.repo,
+            slug,
+            ...(r.columns && Object.keys(r.columns).length ? { columns: r.columns } : {}),
+            ...(r.pm.worklistScope ? { scope: r.pm.worklistScope } : {}),
+            ...(project ? { project } : {}),
+          },
+        ];
+      }),
+      ...jira,
+    ],
+    notes: [
+      ...github.filter((g) => !g.slug).map(({ r }) => `${r.repo}: cannot tell the GitHub repo from ${r.url}`),
+      ...github.filter((g) => g.slug && g.r.pm.worklistProject && !parseProject(g.r.pm.worklistProject, g.slug.split("/")[0])).map(({ r }) => `${r.repo}: bad worklist-project ${r.pm.worklistProject}`),
+    ],
   };
 }
 
 export interface BoardReaders {
-  github: (slug: string, repo: string) => WorkRow[];
+  github: (slug: string, repo: string, opts?: { columns?: Record<string, WorkStatus>; scope?: WorklistScope; project?: ProjectBoard }) => WorkRow[];
   jira: (project: string, repos: string[], opts: { filter?: string; site?: string }) => WorkRow[];
 }
 
-const defaultReaders: BoardReaders = { github: (slug, repo) => githubRows(slug, repo), jira: (project, repos, opts) => jiraRows(project, repos, opts) };
+const defaultReaders: BoardReaders = {
+  github: (slug, repo, opts) => (opts?.project ? projectRows(opts.project, slug, repo, undefined, opts.columns) : githubRows(slug, repo, undefined, opts?.columns, opts?.scope)),
+  jira: (project, repos, opts) => jiraRows(project, repos, opts),
+};
 
 const sourceName = (s: BoardSource) => (s.kind === "github" ? s.repo : s.project);
 
 /** Read every source. A source that fails adds a note and does not stop the rest. */
-export function readBoards(sources: readonly BoardSource[], readers: BoardReaders = defaultReaders): { rows: WorkRow[]; notes: string[] } {
-  const results = sources.map((s): { rows: WorkRow[]; notes: string[] } => {
+export function readBoards(sources: readonly BoardSource[], readers: BoardReaders = defaultReaders): { rows: WorkRow[]; notes: string[]; failedRepos: string[] } {
+  const results = sources.map((s): { rows: WorkRow[]; notes: string[]; failedRepos: string[] } => {
     try {
-      const rows = s.kind === "github" ? readers.github(s.slug, s.repo) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
-      return { rows, notes: [] };
+      const rows = s.kind === "github" ? readers.github(s.slug, s.repo, { ...(s.columns ? { columns: s.columns } : {}), ...(s.scope ? { scope: s.scope } : {}), ...(s.project ? { project: s.project } : {}) }) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
+      return { rows, notes: [], failedRepos: [] };
     } catch (e) {
-      return { rows: [], notes: [`${sourceName(s)}: ${(e as Error).message.split("\n")[0]}`] };
+      return { rows: [], notes: [`${sourceName(s)}: ${(e as Error).message.split("\n")[0]}`], failedRepos: s.kind === "github" ? [s.repo] : s.repos };
     }
   });
-  return { rows: results.flatMap((r) => r.rows), notes: results.flatMap((r) => r.notes) };
+  return { rows: results.flatMap((r) => r.rows), notes: results.flatMap((r) => r.notes), failedRepos: results.flatMap((r) => r.failedRepos) };
+}
+
+/**
+ * The rows to cache after a refresh: the fresh ones, plus the last good rows of every repo whose read failed,
+ * so a rate limit or an outage never empties the panel. Fresh rows win on a repeated key.
+ */
+export function keepLastGood(previous: readonly WorkRow[], fresh: readonly WorkRow[], failedRepos: readonly string[]): WorkRow[] {
+  const failed = new Set(failedRepos);
+  const have = new Set(fresh.map((r) => keyOf(r)));
+  return [...fresh, ...previous.filter((r) => failed.has(r.repo) && !have.has(keyOf(r)))];
 }
 
 /** Read every registered repo's board into the cache. A repo whose config cannot be read adds a note. */
 export function refreshWorklist(now = Date.now()): WorklistCache {
   const configs = Object.values(loadRepos()).map((spec): RepoBoard | string => {
     try {
-      const pm = committedConfig(spec).projectManagement;
-      return { repo: spec.name, url: spec.url, ...(pm ? { pm } : {}) };
+      const config = committedConfig(spec);
+      const pm = config.projectManagement;
+      return { repo: spec.name, url: spec.url, ...(pm ? { pm } : {}), columns: config.boardColumns };
     } catch (e) {
       return `${spec.name}: ${(e as Error).message.split("\n")[0]}`;
     }
   });
   const planned = boardSources(configs.filter((c): c is RepoBoard => typeof c !== "string"));
   const read = readBoards(planned.sources);
-  const cache = { at: now, rows: read.rows, notes: [...configs.filter((c): c is string => typeof c === "string"), ...planned.notes, ...read.notes] };
+  const cache = { at: now, rows: keepLastGood(readWorklist().rows, read.rows, read.failedRepos), notes: [...configs.filter((c): c is string => typeof c === "string"), ...planned.notes, ...read.notes] };
   writeWorklist(cache);
   return cache;
+}
+
+/** The list `overbridge worklist show` prints for a Claude: one ranked row per line, then the repos that could not be read. */
+export function showWorklist(cache: WorklistCache): string[] {
+  const rows = rank(cache.rows).map((r) => `${r.rank}\t${r.ready ? "ready" : r.status}\t${r.key}\t${r.title}\t${r.reasons.join(", ")}`);
+  return [...(rows.length ? rows : ["nothing assigned to you"]), ...cache.notes.map((n) => `note: ${n}`)];
 }
 
 export interface RefreshResult {
@@ -156,7 +198,7 @@ const STATUS_COLOR: Record<string, Color> = { todo: "grey", "in-progress": "yell
  * The panel as screen rows: a table of ranked items with the selected row inverted, then the selected
  * row's reasons and a legend. Pure, so it is snapshot-tested.
  */
-export function renderWorklist(list: Ranked[], selected: number, offset: number, height: number, width: number, message = "", notes: string[] = []): string[] {
+export function renderWorklist(list: Ranked[], selected: number, offset: number, height: number, width: number, message = "", notes: string[] = [], filter = ""): string[] {
   const inner = width - 4;
   const body = Math.max(1, height - CHROME);
   const rows: string[] = [boxTop("Work", width), boxRow(dim(fit(`${"#".padEnd(3)} ${"ready".padEnd(5)} ${"stream".padEnd(6)} ${"item".padEnd(14)} title`, inner)))];
@@ -166,13 +208,22 @@ export function renderWorklist(list: Ranked[], selected: number, offset: number,
     const text = fit(line, inner);
     rows.push(boxRow(offset + i === selected ? inverse(text) : colorize(text, STATUS_COLOR[r.status] ?? "grey")));
   }
-  for (let i = visible.length; i < body; i++) rows.push(boxRow(list.length === 0 && i === 0 ? dim(fit("nothing assigned to you", inner)) : fit("", inner)));
+  for (let i = visible.length; i < body; i++) rows.push(boxRow(list.length === 0 && i === 0 ? dim(fit(filter ? `nothing matches /${filter}` : "nothing assigned to you", inner)) : fit("", inner)));
   const chosen = list[selected];
-  rows.push(boxRow(fit(chosen ? `why: ${chosen.reasons.join(", ")}` : (notes[0] ?? ""), inner)));
-  const status = message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit("j/k move   s start in a workspace   r refresh   q quit", inner));
+  rows.push(boxRow(fit(chosen ? `why: ${chosen.reasons.join(", ")}` : "", inner)));
+  const shown = message || (notes[0] ? `error: ${notes[0]}${notes.length > 1 ? ` (+${notes.length - 1} more)` : ""}; showing the last good list` : "");
+  const status = shown.startsWith("error: ") ? colorize(fit(shown, inner), "red") : shown ? bold(fit(shown, inner)) : dim(fit("j/k move   enter detail   / filter   s start   r refresh   q quit", inner));
   rows.push(boxRow(status));
-  rows.push(boxBottom(width, `${list.length} open`));
+  rows.push(boxBottom(width, filter ? `${list.length} match /${filter}` : `${list.length} open`));
   return rows;
+}
+
+/** The detail view as screen rows: the item's facts, then a legend. Pure, so it is tested. */
+export function renderDetail(item: Ranked, all: readonly Ranked[], height: number, width: number): string[] {
+  const inner = width - 4;
+  const body = Math.max(1, height - 3);
+  const lines = detailLines(item, all).slice(0, body);
+  return [boxTop("Work item", width), ...lines.map((l) => boxRow(fit(l, inner))), ...Array.from({ length: body - lines.length }, () => boxRow(fit("", inner))), boxRow(dim(fit("esc back   s start in a workspace   q quit", inner))), boxBottom(width, item.key)];
 }
 
 /** `overbridge worklist`: the @work tab's pane. */
@@ -184,7 +235,13 @@ export async function worklistPane() {
   let busy = false;
   /** The item waiting for a repo choice, when it can be started in more than one. */
   let picking: Ranked | undefined;
-  const ranked = () => rank(cache.rows);
+  /** The `/` filter; while `typing`, keys edit it instead of moving. */
+  let filter = "";
+  let typing = false;
+  /** The item whose detail view is open. */
+  let detail: Ranked | undefined;
+  const everything = () => rank(cache.rows);
+  const ranked = () => filterRanked(everything(), filter);
 
   const draw = () => {
     const list = ranked();
@@ -193,7 +250,10 @@ export async function worklistPane() {
     const body = Math.max(1, height - CHROME);
     if (selected < offset) offset = selected;
     if (selected >= offset + body) offset = selected - body + 1;
-    process.stdout.write(frame(renderWorklist(list, selected, offset, height, process.stdout.columns ?? 80, message, cache.notes), height, process.stdout.columns ?? 80));
+    const width = process.stdout.columns ?? 80;
+    const shown = typing ? `/${filter}▏` : "";
+    const rows = detail ? renderDetail(detail, everything(), height, width) : renderWorklist(list, selected, offset, height, width, typing ? shown : message, cache.notes, filter);
+    process.stdout.write(frame(rows, height, width));
   };
 
   /** When the last refresh started, so a failing one waits a full interval before the next try. */
@@ -233,6 +293,32 @@ export async function worklistPane() {
     for (const input of decodeInput(data)) {
       if (input.kind !== "key") continue;
       const list = ranked();
+      if (typing) {
+        if (input.key === "enter") typing = false;
+        else if (input.key === "escape" || input.key === "ctrl-c") {
+          typing = false;
+          filter = "";
+        } else if (input.key === "\x7f" || input.key === "\b") filter = filter.slice(0, -1);
+        else if ([...input.key].length === 1) filter += input.key;
+        selected = 0;
+        offset = 0;
+        continue;
+      }
+      if (detail) {
+        if (input.key === "escape" || input.key === "enter" || input.key === "h" || input.key === "left") detail = undefined;
+        else if (input.key === "q" || input.key === "ctrl-c") quit();
+        else if (input.key === "s") {
+          const item = detail;
+          const repos = item.repos ?? [item.repo];
+          detail = undefined;
+          if (repos.length === 1) await startIn(repos[0]!, item);
+          else {
+            picking = item;
+            message = repoPrompt(item.key, repos);
+          }
+        }
+        continue;
+      }
       if (picking) {
         const item = picking;
         const repo = pickRepo(input.key, item.repos ?? []);
@@ -249,6 +335,9 @@ export async function worklistPane() {
       else if (input.key === "j" || input.key === "down") selected = Math.min(list.length - 1, selected + 1);
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
       else if (input.key === "r") refresh();
+      else if (input.key === "/") typing = true;
+      else if (input.key === "escape" && filter) filter = "";
+      else if ((input.key === "enter" || input.key === "l" || input.key === "right") && list[selected]) detail = list[selected];
       else if (input.key === "s" && list[selected]) {
         const item = list[selected]!;
         const repos = item.repos ?? [item.repo];

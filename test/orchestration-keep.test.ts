@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { newOrchestrationTabKdl } from "../src/layout";
+import { zellijMux } from "../src/mux";
 import { ORCHESTRATION_TABS } from "../src/orchestration";
 import { ensureOrchestrationTabs, QUICK_EXIT_MS, REOPEN_LOCK_STALE_MS, reopenLockPath, restartAfter } from "../src/orchestration-keep";
 
@@ -49,27 +50,27 @@ function fakeZellij(initial: string[], focused = initial.at(-1) ?? "") {
   return { tabs, calls, state, exec };
 }
 
-const deps = (exec: ReturnType<typeof fakeZellij>["exec"]) => ({ exec, sleep: () => {}, kdl: () => "layout {}" });
+const deps = (exec: ReturnType<typeof fakeZellij>["exec"]) => ({ mux: zellijMux(exec), sleep: () => {} });
 const opened = (calls: string[][]) => calls.filter((c) => c[2] === "new-tab").length;
 
 describe("ensureOrchestrationTabs", () => {
   test("a closed @root tab reopens at the front and focus returns to the tab the user was on", () => {
-    const z = fakeZellij(["@work", "w1", "w2"], "w2");
+    const z = fakeZellij(["@work", "@prs", "@reviews", "@perf", "w1", "w2"], "w2");
     expect(ensureOrchestrationTabs(z.tabs, deps(z.exec))).toEqual(["@root"]);
-    expect(z.tabs).toEqual(["@root", "@work", "w1", "w2"]);
+    expect(z.tabs).toEqual(["@root", "@work", "@prs", "@reviews", "@perf", "w1", "w2"]);
     expect(z.state.focused).toBe("w2");
     expect(existsSync(reopenLockPath("@root"))).toBe(false);
   });
 
   test("does nothing when the tab is there, or outside zellij", () => {
-    const z = fakeZellij(["@root", "@work", "w1"]);
+    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "w1"]);
     expect(ensureOrchestrationTabs(z.tabs, deps(z.exec))).toEqual([]);
     expect(ensureOrchestrationTabs([], deps(z.exec))).toEqual([]);
     expect(z.calls).toEqual([]);
   });
 
   test("two sidebars noticing at once open one copy: the second re-checks under the lock", () => {
-    const z = fakeZellij(["@work", "w1"]);
+    const z = fakeZellij(["@work", "@prs", "@reviews", "@perf", "w1"]);
     const stale = [...z.tabs];
     ensureOrchestrationTabs(stale, deps(z.exec));
     ensureOrchestrationTabs(stale, deps(z.exec));
@@ -78,7 +79,7 @@ describe("ensureOrchestrationTabs", () => {
   });
 
   test("a live lock held by another sidebar means hands off", () => {
-    const z = fakeZellij(["@work", "w1"]);
+    const z = fakeZellij(["@work", "@prs", "@reviews", "@perf", "w1"]);
     mkdirSync(dirname(reopenLockPath("@root")), { recursive: true });
     writeFileSync(reopenLockPath("@root"), "");
     expect(ensureOrchestrationTabs(z.tabs, deps(z.exec))).toEqual([]);
@@ -86,7 +87,7 @@ describe("ensureOrchestrationTabs", () => {
   });
 
   test("a stale lock from a dead sidebar is taken over", () => {
-    const z = fakeZellij(["@work", "w1"]);
+    const z = fakeZellij(["@work", "@prs", "@reviews", "@perf", "w1"]);
     mkdirSync(dirname(reopenLockPath("@root")), { recursive: true });
     writeFileSync(reopenLockPath("@root"), "");
     const old = (Date.now() - REOPEN_LOCK_STALE_MS - 1_000) / 1_000;

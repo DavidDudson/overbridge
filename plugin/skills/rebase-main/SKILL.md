@@ -1,9 +1,12 @@
 ---
 name: rebase-main
 description: Rebase the current branch onto the latest default branch (main), resolving conflicts per commit by intent, and finish with a lease-guarded force-push. Rewrites history, so use it only when the user wants a rebase or linear history. Use when the user says "rebase on main", "rebase this branch", or "I want linear history".
+requires: gh-stack
 ---
 
 # Rebase onto main
+
+> Prerequisite: the `gh-stack` skill. Run `overbridge prereqs` first; if it fails, stop and tell the user to install it.
 
 Rewrites the branch's commits. Do not use it on a branch other people are building on without
 agreeing it first. If the user has not asked for a rebase, use `merge-main`.

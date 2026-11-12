@@ -10,12 +10,13 @@ import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
 import { barePath, currentWorkspace, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, sessionName, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
 import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, workspaceSettingsPath } from "./scaffold";
-import { openTab, TabFocus, type ZellijExec } from "./tab";
+import { defaultMux, layoutPath, type Mux, MuxKind, tmuxConfPath } from "./mux";
+import { openTab, TabFocus } from "./tab";
 import { runCheck } from "./check-queue";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
-import { type Claim, claimOwner, getWorkspace, readState, withState } from "./state";
+import { type Claim, claimOwner, type ReboundFrom, getWorkspace, isIceboxed, readState, withState } from "./state";
 import { exec, fail, log, must, naturalSort, run, shellQuote } from "./util";
 
 /** What a workspace really holds in `repo`: its claim, its worktree head, and the stacks of either. */
@@ -59,10 +60,10 @@ export function sync() {
   }
 }
 
-export function newWorkspace(name: string | undefined, repos: string[], exec?: ZellijExec) {
+export function newWorkspace(name: string | undefined, repos: string[], mux?: Mux) {
   if (!name) fail("usage: overbridge new <name> [-r repo]... (name it for its work item, e.g. ENG-123 or gh-app-12)");
   createWorkspace(name, repos);
-  openTab(name, undefined, TabFocus.Background, exec);
+  openTab(name, undefined, TabFocus.Background, mux);
   console.log(name);
 }
 
@@ -183,9 +184,10 @@ export function removeOrphan(name: string, force: boolean) {
 /**
  * `overbridge checkout <repo> <branch|#pr>`: claim `ref` for the workspace and switch its worktree to it.
  * A branch that exists neither locally nor on origin is created from `opts.base` (default: the remote default
- * branch); `start` passes `HEAD` to carry a task branch's work onto the item's branch.
+ * branch); `start` passes `HEAD` to carry a task branch's work onto the item's branch, and `reboundFrom` to record
+ * what the claim moved from (a plain checkout leaves no lineage).
  */
-export function checkout(args: string[], wsOpt?: string, opts: { base?: string } = {}) {
+export function checkout(args: string[], wsOpt?: string, opts: { base?: string; reboundFrom?: ReboundFrom } = {}) {
   const ws = requireWs(wsOpt);
   let [repo, ref] = args;
   const owned = Object.keys(getWorkspace(readState(), ws).repos);
@@ -236,7 +238,7 @@ export function checkout(args: string[], wsOpt?: string, opts: { base?: string }
     // A URL, because gh stack reads a bare number as a stack number first.
     if (remote) must(["gh", "stack", "checkout", prUrl!], { cwd: wt });
     else git.switchTo(wt, branch, base);
-    getWorkspace(s, ws).repos[repo] = { branch, pr: pr ?? git.prForBranch(wt, branch) };
+    getWorkspace(s, ws).repos[repo] = { branch, pr: pr ?? git.prForBranch(wt, branch), ...(opts.reboundFrom ? { reboundFrom: opts.reboundFrom } : {}) };
   });
   const stack = stackOf(localStacks(repo), branch);
   log(`${ws}/${repo} → ${branch}${pr ? ` (PR #${pr})` : ""}${stack ? `\nstack: ${chain(stack)}` : ""}`);
@@ -291,14 +293,15 @@ export function status(all: boolean, json: boolean) {
   const names = (all || !cur ? Object.keys(s.workspaces) : [cur]).sort(naturalSort);
   const rows = names.flatMap((ws) => {
     const repos = Object.entries(getWorkspace(s, ws).repos);
+    const iceboxed = isIceboxed(getWorkspace(s, ws));
     if (!repos.length)
-      return [{ ws, repo: "", branch: "", pr: undefined as number | undefined, head: "", dirty: false, stack: undefined as Stack | undefined }];
+      return [{ ws, repo: "", branch: "", pr: undefined as number | undefined, head: "", dirty: false, iceboxed, stack: undefined as Stack | undefined, reboundFrom: undefined as ReboundFrom | undefined }];
     return repos.map(([repo, c]) => {
       const wt = worktreePath(ws, repo);
       const head = git.head(wt);
       const stacks = localStacks(repo);
       const stack = stackOf(stacks, head) ?? stackOf(stacks, c.branch);
-      return { ws, repo, branch: c.branch ?? "", pr: c.pr, head, dirty: git.isDirty(wt), stack };
+      return { ws, repo, branch: c.branch ?? "", pr: c.pr, head, dirty: git.isDirty(wt), iceboxed, stack, reboundFrom: c.reboundFrom };
     });
   });
   if (json) return console.log(JSON.stringify(rows, null, 2));
@@ -316,66 +319,63 @@ export function status(all: boolean, json: boolean) {
       r.pr ? `#${r.pr}` : "",
       r.head === r.branch ? "" : r.head,
       stackCell(r),
-      r.dirty ? "dirty" : "",
+      [r.iceboxed ? "iceboxed" : "", r.dirty ? "dirty" : "", r.reboundFrom ? `from ${r.reboundFrom.branch}${r.reboundFrom.pr ? ` #${r.reboundFrom.pr}` : ""}` : ""].filter(Boolean).join(" "),
     ]),
   );
 }
 
+/** The workspaces that get a tab: every one but the iceboxed (`thaw` reopens those). */
 function workspaceNames(): string[] {
-  const names = Object.keys(readState().workspaces).sort(naturalSort);
+  const all = readState().workspaces;
+  const names = Object.keys(all).sort(naturalSort);
   if (!names.length) fail("no workspaces yet; create one with `overbridge new`");
-  return names;
+  return names.filter((ws) => !isIceboxed(all[ws]));
 }
 
 /** Print the layout `up` would use; stderr says whether it is the user's file or the generated one. */
-export function layout() {
-  const choice = chooseLayout(workspaceNames(), selfCommand());
+export function layout(mux: Mux = defaultMux()) {
+  const choice = chooseLayout(workspaceNames(), selfCommand(), mux.kind);
   if (choice.source === "user") {
     log(`layout: ${choice.path} (user file, replaces the generated layout)`);
     process.stdout.write(readFileSync(choice.path, "utf8"));
   } else {
-    log(`layout: generated (a file at ${userLayoutPath()} would replace it)`);
-    process.stdout.write(choice.kdl);
+    log(mux.kind === MuxKind.Tmux ? "layout: generated tmux script" : `layout: generated (a file at ${userLayoutPath()} would replace it)`);
+    process.stdout.write(choice.text);
   }
 }
 
-export function up(fresh: boolean) {
-  if (process.env.ZELLIJ) fail("already inside zellij; detach first");
+export function up(fresh: boolean, mux: Mux = defaultMux()) {
+  if (mux.inSession()) fail(`already inside ${mux.kind}; detach first`);
   const names = workspaceNames();
   names.forEach(scaffold);
-  const choice = chooseLayout(names, selfCommand());
+  const session = sessionName();
+  const choice = chooseLayout(names, selfCommand(), mux.kind, session);
   let file: string;
   if (choice.source === "user") file = choice.path;
   else {
-    file = join(metaDir(), "layout.kdl");
-    writeFileSync(file, choice.kdl);
+    file = layoutPath(mux.kind);
+    writeFileSync(file, choice.text);
+    if (choice.conf !== undefined) writeFileSync(tmuxConfPath(), choice.conf);
   }
 
-  const session = sessionName();
-  const sessions = run(["zellij", "list-sessions", "--short", "--no-formatting"]).stdout.split("\n");
-  let exists = sessions.includes(session);
+  let exists = mux.sessionExists(session);
   if (exists && fresh) {
-    run(["zellij", "kill-session", session]);
-    run(["zellij", "delete-session", "--force", session]);
+    mux.killSession(session);
     exists = false;
   }
   if (exists) log(`attaching to ${session} (use \`overbridge up --fresh\` to rebuild the layout)`);
-  process.exit(
-    exists
-      ? exec(["zellij", "attach", session])
-      : exec(["zellij", "--session", session, "--new-session-with-layout", file]),
-  );
+  process.exit(exec(exists ? mux.attachCommand(session) : mux.createCommand(session, file)));
 }
 
 /** Name of the empty workspace `spinup` creates when there are none. */
 export const SCRATCH = "scratch";
 
 /** Rebuild the session over the existing workspaces; with none, create an empty scratch one first. */
-export function spinup() {
-  if (process.env.ZELLIJ) fail("already inside zellij; detach first");
+export function spinup(mux: Mux = defaultMux()) {
+  if (mux.inSession()) fail(`already inside ${mux.kind}; detach first`);
   init();
   if (!Object.keys(readState().workspaces).length) createWorkspace(SCRATCH, []);
-  up(true);
+  up(true, mux);
 }
 
 /**

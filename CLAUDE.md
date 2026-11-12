@@ -4,7 +4,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 
 - `src/cli.ts` is a thin entry with no static imports; `src/main.ts` holds arg dispatch → `src/commands.ts`.
   `overbridge hook` (`src/agent-hook.ts`) runs on every tool call, so it is dispatched before `main.ts`
-  loads; keep its imports to `paths.ts`, `agent-state.ts`, `bg-tasks.ts`, `proc.ts` and node builtins.
+  loads; keep its imports to `paths.ts`, `agent-state.ts`, `bg-tasks.ts`, `proc.ts`, `server-net.ts`, `version.ts` and node builtins.
   Process lookups go through `src/proc.ts` (`/proc` on Linux, `ps` on macOS); never read `/proc` directly.
 - Per-repo config: `src/project-config.ts` parses and validates `overbridge.yml` (`overbridge.schema.json` and
   `overbridge.example.yml` must track its keys). The root `config.yml` layers over it (`loadRootLayers`, `resolveConfig`:
@@ -16,11 +16,19 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   Global config is `repos.toml` (`src/config.ts`, e.g. `[sidebar] width`).
   Keep code generic: no repo names, ports, URLs or branch conventions outside that config.
   This repo dogfoods its own `overbridge.yml` (checked by `test/config-errors.test.ts`).
+- `src/server.ts` is `overbridge serve`: one Bun process per root (`<meta>/server.sock`, `server.pid` doubles as the single-instance lock),
+  HTTP over the unix socket. `POST /refresh/top/<ws>` (`?force=1`, `?async=1`) runs `refreshTop` in a worker (`src/server-worker.ts`)
+  through `src/server-cache.ts` (pure, fake-clock tested: single flight, TTL from fetch start, stale-while-revalidate, error backoff,
+  in-flight cap); `GET /status` shows its counters. A client of another version gets 409; the server also exits (once idle) only when that client started after it.
+  `OVERBRIDGE_NO_SERVER` disables every client. A forced get (`force`) is always a fetch that starts after the call.
+  `src/server-net.ts` is the node-only client (the hook imports it: `call`, `notifyRefresh`, `startServer` throttled by `server.start`);
+  `src/server-client.ts` is `serverRefresh` for the panel and sweep. A caller that gets `undefined` runs its old path, so keep every
+  new caller falling back, and keep panes reading cache files. Tests that call a client pass `start: false` so none starts a real server.
 - Work items: `src/pm/` (`Provider` interface, `github.ts`, `jira.ts`, title cache); `src/item.ts` is `overbridge item`.
   Providers and apps take injectable runners so tests never need `gh`, `jira` or real processes.
 - Apps: `src/apps.ts` (launch, teardown, port pool, status) and `src/app-command.ts` (`overbridge app`).
 - Panes: `src/top.ts` (pure model, layout, cache) + `src/top-run.ts` (tty loop); `src/sidebar.ts`; shared terminal
-  helpers in `src/term.ts`; both panes read zellij's tab order and focused tab through `src/zellij-view.ts`
+  helpers in `src/term.ts`; both panes read the multiplexer's tab order and focused tab through `src/zellij-view.ts`
   (`readView`: one shared file, refreshed by one pane per second), do their full poll only on the focused tab
   (`shouldPoll`, every `HIDDEN_POLL_MS` when hidden), and write a frame only when it changed (`createPainter`); the sidebar's bottom border shows `src/version.ts`'s version (package.json's when real,
   else `OVERBRIDGE_VERSION`, which the flake sets to the git rev, else `dev`), read once when the pane starts; `src/agent-state.ts` reads what `src/agent-hook.ts` writes; `src/panes.ts` is the terminal/diff/claude pane toggles and `overbridge diff`; `src/pr-actions.ts` is the top panel's Ready/Draft and Merge (PR or `gh stack`); `src/next.ts` picks the next tab needing attention; `src/go.ts` is `overbridge go` (tab by sidebar number, name, next/prev; `sessionExec` in `src/tab.ts` reaches the session by name from outside zellij); `src/limits.ts` reads the usage limits Claude's statusline writes. Pure parts are unit-tested.
@@ -29,11 +37,21 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   ticket ahead is running, fewer than `max-parallel` are, and the load allows (`unsettledLoad` counts runs the 1-minute
   average does not show yet); then the command runs in its own process group, killed on `timeout-seconds` or a CPU stall
   (`groupCpuSeconds` in `src/proc.ts`). Its pure parts are unit-tested; `test/e2e.test.ts` drives the real queue.
-- `src/layout.ts` builds the zellij layout (the orchestration tabs, `orchestrationTabKdl`, then one tab per workspace, `tabKdl`); a user `layouts/overbridge.kdl` replaces it.
+- `src/mux.ts` is the only code that runs `zellij` or `tmux`: the `Mux` interface (tabs, panes, sessions) with `zellijMux` and
+  `tmuxMux`, chosen by `defaultMux` (`$TMUX`, `$ZELLIJ`, then `OVERBRIDGE_MUX`, else zellij; outside a session zellij is reached
+  by `--session`). Call sites take an injectable `Mux`; tests fake the exec with `zellijMux(fake)` or `tmuxMux(fake)`. tmux
+  addresses windows by id or index, never by name: a name starting with `@` (an orchestration tab) reads as a window id even
+  after `=`. Read tabs and panes through `-F` formats, never by parsing text. `src/tmux-layout.ts` renders a `TabSpec` as
+  tmux commands (`tabOpen`, `tabFill`), the `overbridge layout` script and the server config.
+- `src/layout.ts` describes each tab as data (`TabSpec`: `workspaceTabSpec`, `orchestrationTabSpec`, `layoutSpecs`) and renders
+  zellij KDL from it (`specKdl`, `tabKdl`, `layoutKdl`); tmux renders the same specs. A zellij user `layouts/overbridge.kdl`
+  replaces the generated KDL; tmux has no user layout.
 - `src/orchestration.ts` lists the orchestration tabs (`@root`: Claude in the root). Their names start with `@` so they never
   match `NAME_RE`. The sidebar pins them in its Orchestration frame; their Claude gets the agent-state hooks, the orchestrator guard
   (`src/guard-orchestrator.ts`: an allow list, fail closed) and a brief (`orchestratorPrompt`) through `claude --settings`
   (`scaffoldOrchestration`); `OVERBRIDGE_TAB` with no `OVERBRIDGE_NAME` selects that guard.
+  The brief routes a PR request to the workspace already claiming its head branch (`overbridge status --all`, then
+  `SendMessage` `/pickup #<pr> ...` with `notify_when_idle`) and starts a workspace only when none holds it.
   They never go away: every removal path checks `isOrchestrationTab` (`removeWorkspace`, `cleanable`, `beginRemoval`, `verdictFor`; add it to any
   new one), `claudeOrchestration` restarts Claude when it exits (`restartAfter`), and the sidebar poll reopens a closed tab
   (`ensureOrchestrationTabs` in `src/orchestration-keep.ts`, one owner per tab through a reopen lock).
@@ -52,17 +70,32 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   keeping the last good `Model` and putting the first failure in the footer. The sidebar reads state through `tryReadState`;
   writers keep `readState`, so a file `withState` cannot parse is never overwritten. A reader that can be fed a bad file must
   report, not throw.
+  A re-bind (`rebind` in `src/start.ts`) records `Claim.reboundFrom` (the old branch and PR; `overbridge status` shows it). `TopCache.branches`
+  records the branches `merged` and `prsOpen` were built for, and `claimedCache` drops both once a claim has moved, so the sweep and Cleanup
+  never act on the PR a workspace was re-bound away from.
   Once every claimed PR has merged (`TopCache.merged`, the PR head commits), `src/merge-sweep.ts` (`overbridge top sweep`) removes the workspace
   through `beginRemoval` with `Landing.IfFocused`, after `mergedClean` checks that each HEAD is its PR head. A squash merge
   leaves no remote branch holding those commits, so `hasUnpushed` cannot do that check. Unsaved work sets `removalBlocked`, which the sidebar card shows.
   The sidebar starts the sweep; `claimSweep` (`src/sweep-trigger.ts`) lets one sidebar run it per `MERGE_SWEEP_MS`.
   Every removal is visible: `beginRemoval` stores its `CleanupCause` in `removing`, `finishRemoval` appends the outcome to
   `State.cleanups` (`src/cleanup-log.ts`), and the sidebar shows a countdown to the next sweep, the removals in flight and those finished since the last sweep (`cleanupRows`).
+- `src/icebox.ts` is `overbridge icebox`/`thaw`: a paused workspace keeps its claims and worktrees, has `iceboxed` in state and no
+  tab. `icebox` refuses on `unsavedRepos`, stops apps (`stopApps`) and checks (`stopChecksFor`), writes a handoff (`src/handoff.ts`)
+  and closes the tab last (`leaveTab`); `thaw` reopens it with `--continue` and `/read-handoff`. `entries()` leaves iceboxed
+  workspaces out (they have no tab, so no digit; the sidebar lists them under `icedRows`), and `workspaceNames()` skips them for
+  `up`/`layout`. Any new code that lists workspaces for tabs must skip `isIceboxed`.
 - `overbridge cleanup` reports what the sweep leaves behind and removes nothing: `src/cleanup-scan.ts` is the pure `classify`
   (facts → `CleanupVerdict` + `CleanupReason`; blockers turn a removal into a review, a failed read into `keep`),
   `src/cleanup-gather.ts` reads the facts through injectable `GatherDeps` (git, `gh`, `Provider.status`), and `src/orphan.ts`
   finds orphans (a folder state does not list that holds a registered worktree or `.claude`). `removeWorkspace` passes an
   orphan to `removeOrphan`. The `cleanup` skill keeps the judgement; keep its verdict table in sync with `CleanupReason`.
+- `src/history.ts` is where each workspace's time goes: the agent hook (`recordHistory`) appends Claude events and `overbridge check` appends
+  each run, to `<meta>/history/<ws>.jsonl` behind `HistoryStore` (the seam for the bun server the refresh spike proposes; `historyStore()` picks
+  the implementation). It stores Claude's tool names and a command class, never prompt or Bash text; only `overbridge check` records keep a command line, through best-effort `redactCommand` (a secret passed as a bare positional argument is kept). `summarize` is the pure fold into turn/model/tool/
+  permission/user time, and `summarizeRepos` the fold of check runs per repo (groups from `commandGroup`; check records keep the full command, blanked by `redactCommand`);
+  `src/history-report.ts` formats it (`overbridge history`) and `src/perf-run.ts` is the `@perf` tab (`p` in the sidebar; `g` toggles workspace/repo).
+  `src/perf-cache.ts` computes every window x grouping into `<meta>/perf.json` (0600): the server writes it from a worker (`POST /refresh/perf`), the tab reads it while young and computes itself otherwise.
+  Like the hook, `history.ts` imports node builtins and `paths.ts` only.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors. The root `config.yml`'s `guard` block (`GuardConfig`) adds
   `read-paths` (reads only) and `deny` rules; it is never read from a repo file, so a branch can't loosen the guard.
