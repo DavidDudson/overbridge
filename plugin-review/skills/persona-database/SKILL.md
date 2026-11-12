@@ -114,7 +114,7 @@ Verify every finding against the changed lines. No speculation. Cite the rule nu
 
 **Group by root cause.** One data fix missing `last_updated`, `updated_by` and `version` is one finding; one table dropped without its audit table and without dependants handled is two (different rules), not five.
 
-**Code references.** Any code you cite that is *not* a changed line of this diff must be a markdown link to that line on `main` on GitHub, in `detail`/`suggestion`. The link format and how to get the line numbers are in [../mob-review/code-references.md](../mob-review/code-references.md); skip that file when the caller's prompt already gave them. Changed lines of the diff stay in `file`/`line`; they aren't on main yet.
+**Code references.** Any code you cite that is *not* a changed line of this diff must be a markdown link to that line on `main` on GitHub, in `failure_scenario` (in `detail`/`suggestion` when the caller asked for JSON). The link format and how to get the line numbers are in [../mob-review/code-references.md](../mob-review/code-references.md); skip that file when the caller's prompt already gave them. Changed lines of the diff stay in `file`/`line`; they aren't on main yet.
 
 **When `mob-review` (or any caller) asks for JSON:** do NOT call ReportFindings. Return only:
 `{"persona":"persona-database","inScope":<bool>,"findings":[{"severity":"change-requested|nit|future","category":"database","file":"","line":0,"summary":"","detail":"","suggestion":""}]}`

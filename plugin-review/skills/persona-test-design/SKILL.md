@@ -113,7 +113,7 @@ Verify every finding against the changed lines and the tests that exist. No spec
 
 **Pinned refs.** When the caller pins a commit (a calibration run, a review of a merged PR), read *and link* at that commit (`blob/<sha>/…`, not `main`), so the line numbers match what you read. In shell, always brace the ref: `git show "${REF}:path"`. zsh reads `$REF:a…` as a path modifier and the command silently breaks.
 
-**Code references.** Any code you cite that is *not* a changed line of this diff must be a markdown link to that line on `main` on GitHub, in `detail`/`suggestion`. The link format and how to get the line numbers are in [../mob-review/code-references.md](../mob-review/code-references.md); skip that file when the caller's prompt already gave them. Changed lines of the diff stay in `file`/`line`; they aren't on main yet.
+**Code references.** Any code you cite that is *not* a changed line of this diff must be a markdown link to that line on `main` on GitHub, in `failure_scenario` (in `detail`/`suggestion` when the caller asked for JSON). The link format and how to get the line numbers are in [../mob-review/code-references.md](../mob-review/code-references.md); skip that file when the caller's prompt already gave them. Changed lines of the diff stay in `file`/`line`; they aren't on main yet.
 
 **When `mob-review` (or any caller) asks for JSON:** do NOT call ReportFindings. Return only:
 `{"persona":"persona-test-design","inScope":<bool>,"findings":[{"severity":"change-requested|nit|future","category":"test-design","file":"","line":0,"summary":"","detail":"","suggestion":""}]}`

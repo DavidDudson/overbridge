@@ -95,7 +95,7 @@ Verify every finding against the actual AC text and changed lines: no speculatio
 - `failure_scenario`: which AC or PR claim is unmet, the evidence (diff shows X / AC says Y), and the recommended direction (update the item vs update the PR) with a one-line why.
 - Zero findings is a valid, common result: call with an empty array. Do not manufacture gaps to look thorough.
 
-**Code references.** Any code you cite that is *not* a changed line of this diff must be a markdown link to that line on `main` on GitHub, in `detail`/`suggestion`. The link format and how to get the line numbers are in [../mob-review/code-references.md](../mob-review/code-references.md); skip that file when the caller's prompt already gave them. Changed lines of the diff stay in `file`/`line`; they aren't on main yet.
+**Code references.** Any code you cite that is *not* a changed line of this diff must be a markdown link to that line on `main` on GitHub, in `failure_scenario` (in `detail`/`suggestion` when the caller asked for JSON). The link format and how to get the line numbers are in [../mob-review/code-references.md](../mob-review/code-references.md); skip that file when the caller's prompt already gave them. Changed lines of the diff stay in `file`/`line`; they aren't on main yet.
 
 **When `mob-review` (or any caller) asks for JSON:** do NOT call ReportFindings. Return only:
 `{"persona":"persona-ac-check","inScope":<bool>,"findings":[{"severity":"change-requested|nit|future","category":"ac-check","file":"","line":0,"summary":"","detail":"","suggestion":""}]}`

@@ -66,7 +66,7 @@ Verify every finding by reading the referenced files (and tool schemas where rel
 - `category`: `skills`. `file`/`line`: the changed line. `failure_scenario`: what the agent does when it hits the line, plus the fix.
 - Zero findings is a valid result: call with an empty array.
 
-**Code references.** Any code you cite that is *not* a changed line of this diff must be a markdown link to that line on `main` on GitHub, in `detail`/`suggestion`. The link format and how to get the line numbers are in [../mob-review/code-references.md](../mob-review/code-references.md); skip that file when the caller's prompt already gave them. Changed lines of the diff stay in `file`/`line`; they aren't on main yet.
+**Code references.** Any code you cite that is *not* a changed line of this diff must be a markdown link to that line on `main` on GitHub, in `failure_scenario` (in `detail`/`suggestion` when the caller asked for JSON). The link format and how to get the line numbers are in [../mob-review/code-references.md](../mob-review/code-references.md); skip that file when the caller's prompt already gave them. Changed lines of the diff stay in `file`/`line`; they aren't on main yet.
 
 **When `mob-review` (or any caller) asks for JSON:** do NOT call ReportFindings. Return only:
 `{"persona":"persona-skills","inScope":<bool>,"findings":[{"severity":"change-requested|nit|future","category":"skills","file":"","line":0,"summary":"","detail":"","suggestion":""}]}`
