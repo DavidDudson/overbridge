@@ -15,13 +15,13 @@ Take the target from the argument: file paths, skill names, or a plugin director
 wc -c -w <files>
 ```
 
-Keep the numbers for the report.
+Keep the numbers for the report. Then copy each target into a new temporary directory (`mktemp -d`) before you edit it. Step 5 compares against these copies, so changes the user made earlier are not mistaken for yours, and an untracked file can still be checked.
 
 ## 2. Find what repeats across files
 
 Do this before touching prose, because it saves the most.
 
-- **A block repeated across sibling files** (the same scope paragraph in every persona, the same spawn parameters in every step). State it once: in the orchestrator's spawn prompt, in a preamble, or in one reference file that each sibling names. Find candidates with `rg -c '<a distinctive phrase>' <dir>`.
+- **A block repeated across sibling files** (the same scope paragraph in every persona, the same spawn parameters in every step). State it once, in a preamble or in one reference file that each sibling names. Put it in the orchestrator's spawn prompt only when no sibling can run without that orchestrator, because a sibling run on its own would lose the rule without an error. Find candidates with `rg -c '<a distinctive phrase>' <dir>`.
 - **A mode most runs skip** (a stacked-PR path, a split path, or a long template). Move it to a file beside `SKILL.md` and leave one line that says when to read it.
 - **A table that copies facts another file owns.** Keep the owner's copy and point at it, unless the reader needs the facts before it can open that file.
 
@@ -53,11 +53,11 @@ Shorten the frontmatter `description` too. It loads in every session, so it cost
 
 Leave a file alone when it would lose less than about 3% of its bytes. The diff costs the reviewer more than the saving is worth.
 
-If the text contradicts itself, names something that does not exist, or asks for the wrong thing, don't fix it silently. List it in the report. Fix it in the same change only when the right answer is not in doubt, and say that you did.
+If the text contradicts itself, names something that does not exist, or asks for the wrong thing, don't fix it silently. List it in the report. Fix it in the same change only when the right answer is not in doubt, and say that you did. This is the one case where a distill changes a name, a command, or what a step asks for.
 
 ## 5. Check nothing was lost
 
-1. Read `git diff` for each file. For every deleted line, name where its instruction now lives, or why it held none. Restore any line you cannot account for.
+1. Run `diff <copy> <file>` for each file against its step 1 copy. For every deleted line, name where its instruction now lives, or why it held none. Restore any line you cannot account for.
 2. Resolve every file path, skill name, step number, and heading link in the changed files, and every citation of them from other files.
 3. Run the repo's own checks for skills and plugins if it has any.
 4. For a skill with output you can compare (a review panel, a report, or a verdict), offer to run it on the same input before and after. Don't run it unasked. It can cost more than the distill saved.
