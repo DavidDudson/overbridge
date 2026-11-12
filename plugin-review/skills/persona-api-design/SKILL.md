@@ -19,7 +19,7 @@ If none changed, return zero findings and stop.
 
 ## Scope
 
-**If the caller handed you a patch file, read that. Do not run git.** `mob-review` computes the branch diff once and passes `<SCRATCH>/diff.patch` plus `<SCRATCH>/files.txt`; when it does, that patch *is* the review scope. Filtering it for your lane (`awk '/^diff --git/{p=0} /^diff --git.*<path>/{p=1} p' <SCRATCH>/diff.patch`) costs the panel nothing, while re-deriving the diff costs the same bytes again for every persona in the round. Run the commands below only when no patch was given, or when you need something a patch cannot show: surrounding lines of a changed file, or a file the diff does not touch.
+**If the caller handed you a patch file, read that. Do not run git.** That patch *is* the review scope. Run the commands below only when no patch was given, or when you need something a patch cannot show: surrounding lines of a changed file, or a file the diff does not touch.
 
 ```bash
 git fetch origin main --quiet
@@ -127,7 +127,7 @@ Verify every finding against the changed lines. No speculation. Name the rule nu
 
 **Group by root cause.** One operation missing every documentation field is one finding. One pasted schema that inlines every paging field is one finding.
 
-**Code references.** Any code you cite that is *not* a changed line of this diff must be a markdown link to that line on `main` on GitHub, in `detail`/`suggestion`. That covers code in another repo and unchanged code elsewhere in this repo. Format: `[path/File.kt:42](https://github.com/<owner>/<repo>/blob/main/path/File.kt#L42)`, or `#L42-L50` for a range. Take the line numbers from `origin/main`, never the local checkout, because local clones lag: `git -C <repo> fetch origin main --quiet && git -C <repo> grep -n '<pattern>' origin/main -- <path>`. Get `<owner>/<repo>` from `git -C <repo> remote get-url origin`. For a repo that isn't on GitHub, give plain `path:line` plus the remote URL. Changed lines of the diff stay in `file`/`line`; they aren't on main yet.
+**Code references.** Any code you cite that is *not* a changed line of this diff must be a markdown link to that line on `main` on GitHub, in `failure_scenario` (in `detail`/`suggestion` when the caller asked for JSON). The link format and how to get the line numbers are in [../mob-review/code-references.md](../mob-review/code-references.md); skip that file when the caller's prompt already gave them. Changed lines of the diff stay in `file`/`line`; they aren't on main yet.
 
 **When `mob-review` (or any caller) asks for JSON:** do NOT call ReportFindings. Return only:
 `{"persona":"persona-api-design","inScope":<bool>,"findings":[{"severity":"change-requested|nit|future","category":"api-design","file":"","line":0,"summary":"","detail":"","suggestion":""}]}`

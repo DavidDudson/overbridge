@@ -14,7 +14,7 @@ Run only if the diff **adds or changes comment lines** in source files: `//`, `/
 
 ## Scope
 
-**If the caller handed you a patch file, read that. Do not run git.** `mob-review` computes the branch diff once and passes `<SCRATCH>/diff.patch` plus `<SCRATCH>/files.txt`; when it does, that patch *is* the review scope. Filtering it for your lane (`awk '/^diff --git/{p=0} /^diff --git.*<path>/{p=1} p' <SCRATCH>/diff.patch`) costs the panel nothing, while re-deriving the diff costs the same bytes again for every persona in the round. Run the commands below only when no patch was given, or when you need something a patch cannot show: surrounding lines of a changed file, or a file the diff does not touch.
+**If the caller handed you a patch file, read that. Do not run git.** That patch *is* the review scope. Run the commands below only when no patch was given, or when you need something a patch cannot show: surrounding lines of a changed file, or a file the diff does not touch.
 
 ```bash
 git fetch origin main --quiet
@@ -96,7 +96,7 @@ Verify every finding against the changed lines: no speculation. Call `ReportFind
 
 **Group by root cause, one finding per cause.** Comment problems cluster: an over-commented diff trips several rules at once, and one rationale pasted into N call sites is one mistake, not N. Emit a single finding that names the pattern, anchors on the clearest instance, and lists the other sites in `detail`. Not one entry per comment. A reader who fixes the cause fixes every site. Splitting them crowds the report and buries the severe findings other reviewers raised. Only report separately when the fixes genuinely differ (a stale doc comment and a leftover commented-out block are two causes; six overlong comments in one file are one).
 
-**Code references.** Any code you cite that is *not* a changed line of this diff must be a markdown link to that line on `main` on GitHub, in `detail`/`suggestion`. That covers code in another repo and unchanged code elsewhere in this repo. Format: `[path/File.kt:42](https://github.com/<owner>/<repo>/blob/main/path/File.kt#L42)`, or `#L42-L50` for a range. Take the line numbers from `origin/main`, never the local checkout, because local clones lag: `git -C <repo> fetch origin main --quiet && git -C <repo> grep -n '<pattern>' origin/main -- <path>`. Get `<owner>/<repo>` from `git -C <repo> remote get-url origin`. For a repo that isn't on GitHub, give plain `path:line` plus the remote URL. Changed lines of the diff stay in `file`/`line`; they aren't on main yet.
+**Code references.** Any code you cite that is *not* a changed line of this diff must be a markdown link to that line on `main` on GitHub, in `failure_scenario` (in `detail`/`suggestion` when the caller asked for JSON). The link format and how to get the line numbers are in [../mob-review/code-references.md](../mob-review/code-references.md); skip that file when the caller's prompt already gave them. Changed lines of the diff stay in `file`/`line`; they aren't on main yet.
 
 **When `mob-review` (or any caller) asks for JSON:** do NOT call ReportFindings. Return only:
 `{"persona":"persona-comments","inScope":<bool>,"findings":[{"severity":"change-requested|nit|future","category":"comments","file":"","line":0,"summary":"","detail":"","suggestion":""}]}`
