@@ -86,6 +86,14 @@ describe("PR batch mapping", () => {
     expect(() => parseBatch("oops", [3])).toThrow("not JSON");
   });
 
+  test("a PR whose comments, reviews or review requests the query cut short is read directly", () => {
+    const cut = (extra: Record<string, unknown>) => parseBatch(JSON.stringify({ data: { repository: { p3: { ...node, ...extra } } } }), [3]).prs[3];
+    expect(cut({ comments: { ...node.comments, pageInfo: { hasPreviousPage: true } } })).toBeUndefined();
+    expect(cut({ latestReviews: { ...node.latestReviews, pageInfo: { hasNextPage: true } } })).toBeUndefined();
+    expect(cut({ reviewRequests: { ...node.reviewRequests, pageInfo: { hasNextPage: true } } })).toBeUndefined();
+    expect(cut({})).toBeTruthy();
+  });
+
   test("owner/repo from ssh and https remotes", () => {
     expect(ownerRepo("git@github.com:o/r.git")).toBe("o/r");
     expect(ownerRepo("https://github.com/o/r")).toBe("o/r");
@@ -240,6 +248,7 @@ describe("prefetchFor and claimedPrs", () => {
     const layer = (branch: string, n: number) => ({ branch, pullRequest: { number: n } });
     writeFileSync(join(tmp, ".bare", "gh.git", "gh-stack"), JSON.stringify({ stacks: [{ trunk: { branch: "main" }, branches: [layer("a", 7), layer("b", 8), layer("c", 9)] }] }));
     withState((s) => {
+      s.workspaces.w4 = { created: "now", iceboxed: true, repos: { gh: { branch: "z", pr: 99 } } } as never;
       s.workspaces.w1 = { created: "now", repos: { gh: { branch: "b", pr: 8 }, lab: { branch: "x", pr: 1 } } };
       s.workspaces.w2 = { created: "now", repos: { gh: { branch: "feat", pr: 3 } } };
       s.workspaces.w3 = { created: "now", repos: { gh: { branch: "feat3", pr: 3 } } };
@@ -250,7 +259,7 @@ describe("prefetchFor and claimedPrs", () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  test("claimedPrs is the union across workspaces, with every layer of a stack, and skips non-GitHub repos", () => {
+  test("claimedPrs is the union across workspaces, with every layer of a stack, and skips non-GitHub repos and iceboxed workspaces", () => {
     expect(claimedPrs("o/r").sort((a, b) => a - b)).toEqual([3, 7, 8, 9]);
   });
 

@@ -15,9 +15,9 @@ export const PR_TTL_MS = 60_000;
 export const PR_STALE_MS = 10 * 60_000;
 
 const FRAGMENT = `fragment F on PullRequest{url title isDraft updatedAt state headRefOid mergeable mergeStateStatus
-reviewRequests(first:20){nodes{requestedReviewer{__typename ...on User{login} ...on Bot{login} ...on Team{name}}}}
-latestReviews(first:20){nodes{author{login} state submittedAt url}}
-comments(last:100){nodes{author{login} body createdAt url}}
+reviewRequests(first:20){pageInfo{hasNextPage} nodes{requestedReviewer{__typename ...on User{login} ...on Bot{login} ...on Team{name}}}}
+latestReviews(first:20){pageInfo{hasNextPage} nodes{author{login} state submittedAt url}}
+comments(last:100){pageInfo{hasPreviousPage} nodes{author{login} body createdAt url}}
 reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved comments(first:1){nodes{author{login}}}}}
 commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}`;
 
@@ -51,9 +51,16 @@ export function mapPr(node: Record<string, any>): PrView {
   } as PrView;
 }
 
-/** More than 100 review threads or check contexts: the counts would be short, so the PR is read the per-PR way. */
+/**
+ * A connection the query cut short: past 100 review threads or check contexts or comments, or 20 reviews or review
+ * requests, the counts and the reviewers' state would be short, so the PR is read the per-PR way.
+ */
 const truncated = (node: Record<string, any>): boolean =>
-  node.reviewThreads?.pageInfo?.hasNextPage === true || node.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.pageInfo?.hasNextPage === true;
+  node.reviewThreads?.pageInfo?.hasNextPage === true ||
+  node.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.pageInfo?.hasNextPage === true ||
+  node.comments?.pageInfo?.hasPreviousPage === true ||
+  node.latestReviews?.pageInfo?.hasNextPage === true ||
+  node.reviewRequests?.pageInfo?.hasNextPage === true;
 
 export interface BatchReply {
   /** Each requested PR; null when GitHub has no such PR or the user cannot see it, undefined when the reply cut its threads or checks short (read it directly). */

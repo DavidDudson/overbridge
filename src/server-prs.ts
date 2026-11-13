@@ -1,7 +1,7 @@
 import { getRepo } from "./config";
 import type { PrBatcher } from "./pr-batch";
 import { localStacks, stackOf } from "./stack";
-import { getWorkspace, readState } from "./state";
+import { getWorkspace, isIceboxed, readState } from "./state";
 import type { PrefetchedPrs } from "./top";
 import { errorText } from "./server-cache";
 
@@ -19,8 +19,8 @@ const safeStacks = (repo: string) => {
 };
 
 /** Every PR a workspace's claim names, with the other layers of its stack: what `refreshTop` reads for `claim`. */
-function claimPrs(repo: string, branch: string | undefined, pr: number): number[] {
-  const layers = stackOf(safeStacks(repo), branch)?.layers ?? [];
+function claimPrs(repo: string, branch: string | undefined, pr: number, stacks: ReturnType<typeof localStacks> = safeStacks(repo)): number[] {
+  const layers = stackOf(stacks, branch)?.layers ?? [];
   const prs = layers.flatMap((l) => (l.pr === undefined ? [] : [l.pr]));
   return [...new Set([pr, ...(prs.length > 1 && prs.includes(pr) ? prs : [])])];
 }
@@ -37,9 +37,13 @@ function repoOf(repo: string): string | undefined {
 export function claimedPrs(repoFullName: string): number[] {
   const out = new Set<number>();
   const state = readState();
+  const catalogs = new Map<string, ReturnType<typeof localStacks>>();
+  const stacks = (repo: string) => catalogs.get(repo) ?? catalogs.set(repo, safeStacks(repo)).get(repo)!;
   for (const ws of Object.keys(state.workspaces)) {
+    // an iceboxed workspace has no tab and no panel to draw, so its PRs are not worth the query's points
+    if (isIceboxed(state.workspaces[ws])) continue;
     for (const [repo, c] of Object.entries(getWorkspace(state, ws).repos)) {
-      if (c.pr !== undefined && repoOf(repo) === repoFullName) for (const n of claimPrs(repo, c.branch, c.pr)) out.add(n);
+      if (c.pr !== undefined && repoOf(repo) === repoFullName) for (const n of claimPrs(repo, c.branch, c.pr, stacks(repo))) out.add(n);
     }
   }
   return [...out];
