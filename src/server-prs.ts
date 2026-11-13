@@ -36,8 +36,9 @@ function repoOf(repo: string): string | undefined {
 /** Every claimed PR in every workspace, grouped by `owner/name`: what one call per repo reads. */
 export function claimedPrs(repoFullName: string): number[] {
   const out = new Set<number>();
-  for (const ws of Object.keys(readState().workspaces)) {
-    for (const [repo, c] of Object.entries(getWorkspace(readState(), ws).repos)) {
+  const state = readState();
+  for (const ws of Object.keys(state.workspaces)) {
+    for (const [repo, c] of Object.entries(getWorkspace(state, ws).repos)) {
       if (c.pr !== undefined && repoOf(repo) === repoFullName) for (const n of claimPrs(repo, c.branch, c.pr)) out.add(n);
     }
   }
@@ -56,8 +57,8 @@ export async function prefetchFor(ws: string, batcher: PrBatcher, o: { force?: b
       const full = repoOf(repo);
       if (!full || c.pr === undefined) return;
       try {
-        const { prs } = await batcher.get(full, claimPrs(repo, c.branch, c.pr), o);
-        out[repo] = { prs };
+        const { prs, error } = await batcher.get(full, claimPrs(repo, c.branch, c.pr), o);
+        out[repo] = { prs, ...(error ? { error } : {}) };
       } catch (e) {
         out[repo] = { error: errorText(e) };
       }

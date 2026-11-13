@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { buildBatchQuery, type GhRun, mapPr, parseBatch, PrBatcher } from "../src/pr-batch";
 import { ownerRepo } from "../src/server-prs";
 import { withState } from "../src/state";
+import { claimedPrs, prefetchFor } from "../src/server-prs";
 import { refreshTop } from "../src/top";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -67,8 +68,18 @@ describe("PR batch mapping", () => {
     expect(mapPr({ ...node, commits: { nodes: [{ commit: { statusCheckRollup: null } }] } }).statusCheckRollup).toEqual([]);
   });
 
+  test("Team and deleted-user reviewers", () => {
+    const m = mapPr({ ...node, reviewRequests: { nodes: [{ requestedReviewer: { __typename: "Team", name: "core" } }, { requestedReviewer: null }] } });
+    expect(m.reviewRequests).toEqual([{ name: "core" }]);
+  });
+
+  test("a non-NOT_FOUND error on one PR fails the call instead of reading as a missing PR", () => {
+    const body = JSON.stringify({ data: { repository: { p3: null } }, errors: [{ type: "RESOURCE_LIMITS_EXCEEDED", path: ["repository", "p3"], message: "timeout" }] });
+    expect(() => parseBatch(body, [3])).toThrow("timeout");
+  });
+
   test("a deleted PR is null and the call still reads; a reply with no repository fails", () => {
-    const r = parseBatch(JSON.stringify({ data: { repository: { p3: null, p4: node } }, errors: [{ type: "NOT_FOUND" }] }), [3, 4]);
+    const r = parseBatch(JSON.stringify({ data: { repository: { p3: null, p4: node } }, errors: [{ type: "NOT_FOUND", path: ["repository", "p3"] }] }), [3, 4]);
     expect(r.prs[3]).toBeNull();
     expect(r.prs[4]?.url).toBe(URL);
     expect(() => parseBatch(JSON.stringify({ errors: [{ message: "Bad credentials" }] }), [3])).toThrow("Bad credentials");
@@ -131,9 +142,23 @@ describe("refreshTop from a batched reply", () => {
     expect(run("w2").message).toBe("r: no URL for PR #4");
   });
 
-  test("a failed batch is that repo's problem, with no per-PR gh call", () => {
-    const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => { throw new Error("no gh call expected"); }, prefetched: { r: { error: "rate limited" } } });
-    expect(cache.message).toContain("r: rate limited");
+  test("a PR the reply did not ask for is read directly; stale prs carry the refetch error", () => {
+    const asked: string[] = [];
+    const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => { asked.push(cmd.join(" ")); return cmd[1] === "api" ? threadsJson : viewJson; }, prefetched: { r: { prs: {}, error: "HTTP 502" } } });
+    expect(asked.some((c) => c.startsWith("gh pr view 3"))).toBe(true);
+    expect(cache.message).toBe("r: HTTP 502");
+  });
+
+  test("a failed batch with no earlier reply reads the PR directly", () => {
+    const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => (cmd[1] === "api" ? threadsJson : viewJson), prefetched: { r: { error: "rate limited" } } });
+    expect(cache.message).toBeUndefined();
+    expect(cache.links[1]!.url).toBe(URL);
+  });
+
+  test("a PR cut short by the 100-node connection cap is read directly, not counted short", () => {
+    const cut = parseBatch(JSON.stringify({ data: { repository: { p3: { ...node, reviewThreads: { ...node.reviewThreads, pageInfo: { hasNextPage: true } } } } } }), [3]);
+    expect(cut.prs[3]).toBeUndefined();
+    expect(3 in cut.prs).toBe(true);
   });
 });
 
@@ -200,5 +225,42 @@ describe("PrBatcher", () => {
     const stale = await b.get("o/r", [1], { force: true });
     expect(stale.prs[1]).toBeTruthy();
     expect(stale.error).toContain("502");
+  });
+});
+
+describe("prefetchFor and claimedPrs", () => {
+  let tmp: string;
+  const saved = process.env.OVERBRIDGE_ROOT;
+  beforeEach(() => {
+    tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-prf-")));
+    process.env.OVERBRIDGE_ROOT = tmp;
+    writeFileSync(join(tmp, "repos.toml"), '[repos.gh]\nurl = "git@github.com:o/r.git"\n[repos.lab]\nurl = "git@gitlab.com:o/x.git"\n');
+    // a stack of PRs 7, 8, 9 in repo gh
+    mkdirSync(join(tmp, ".bare", "gh.git"), { recursive: true });
+    const layer = (branch: string, n: number) => ({ branch, pullRequest: { number: n } });
+    writeFileSync(join(tmp, ".bare", "gh.git", "gh-stack"), JSON.stringify({ stacks: [{ trunk: { branch: "main" }, branches: [layer("a", 7), layer("b", 8), layer("c", 9)] }] }));
+    withState((s) => {
+      s.workspaces.w1 = { created: "now", repos: { gh: { branch: "b", pr: 8 }, lab: { branch: "x", pr: 1 } } };
+      s.workspaces.w2 = { created: "now", repos: { gh: { branch: "feat", pr: 3 } } };
+      s.workspaces.w3 = { created: "now", repos: { gh: { branch: "feat3", pr: 3 } } };
+    });
+  });
+  afterEach(() => {
+    saved === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = saved);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("claimedPrs is the union across workspaces, with every layer of a stack, and skips non-GitHub repos", () => {
+    expect(claimedPrs("o/r").sort((a, b) => a - b)).toEqual([3, 7, 8, 9]);
+  });
+
+  test("prefetchFor leaves a non-GitHub repo out, passes force, and turns a failure into that repo's error", async () => {
+    const seen: { repo: string; numbers: number[]; force?: boolean }[] = [];
+    const batcher = { get: async (repo: string, numbers: number[], o: { force?: boolean }) => (seen.push({ repo, numbers, force: o.force }), { prs: { 8: null } as Record<number, null> }) };
+    const ok = await prefetchFor("w1", batcher as unknown as PrBatcher, { force: true });
+    expect(Object.keys(ok)).toEqual(["gh"]);
+    expect(seen).toEqual([{ repo: "o/r", numbers: [8, 7, 9], force: true }]);
+    const bad = await prefetchFor("w1", { get: async () => { throw new Error("down"); } } as unknown as PrBatcher);
+    expect(bad).toEqual({ gh: { error: "down" } });
   });
 });

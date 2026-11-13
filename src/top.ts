@@ -290,7 +290,7 @@ function parsePrView(out: string | undefined): PrView | undefined {
 }
 
 /** PR reads the server batched for one workspace, keyed by repo name then PR number: a view, or null for a PR GitHub did not return. */
-export type PrefetchedPrs = Record<string, { prs: Record<number, PrView | null> } | { error: string }>;
+export type PrefetchedPrs = Record<string, { prs: Record<number, PrView | null | undefined>; /** The refetch failed; `prs` is the last reply. */ error?: string } | { error: string }>;
 
 export interface RefreshDeps {
   /** Read PRs from these instead of running `gh pr view` and the threads query per PR. */
@@ -361,10 +361,13 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     const batched = deps.prefetched?.[repo];
     const viewOf = (n: number): PrView | undefined => {
       if (!batched) return parsePrView(exec(prViewCommand(n), dir));
-      return "prs" in batched ? (batched.prs[n] ?? undefined) : undefined;
+      // null is GitHub saying the PR is gone. A PR the reply lacks (claimed after the prefetch read the state, cut short,
+      // or the whole call failed) is read directly, so a batch fault never leaves the panel worse off than before
+      const got = "prs" in batched ? batched.prs[n] : undefined;
+      return got === null ? undefined : (got ?? parsePrView(exec(prViewCommand(n), dir)));
     };
     if (claim.pr !== undefined) {
-      if (batched && "error" in batched) problems.push(`${repo}: ${batched.error}`);
+      if (batched && "prs" in batched && batched.error) problems.push(`${repo}: ${batched.error}`);
       const view = viewOf(claim.pr);
       if (view?.url) {
         const layers = stackOf(safeStacks(repo), claim.branch)?.layers ?? [];
