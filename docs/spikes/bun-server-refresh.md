@@ -214,7 +214,7 @@ the epic body carries the checklist.
 5. [#162 feat(server): run the merged-PR sweep on a server timer](https://github.com/DavidDudson/overbridge/issues/162)
 6. [#163 feat(server): SSE events so panes redraw on change](https://github.com/DavidDudson/overbridge/issues/163)
 7. [#164 feat(server): server status, stop, restart and rate-limit backoff](https://github.com/DavidDudson/overbridge/issues/164)
-8. [#165 chore(server): evaluate moving the check-queue gate into the server](https://github.com/DavidDudson/overbridge/issues/165)
+8. [#165 chore(server): evaluate moving the check-queue gate into the server](https://github.com/DavidDudson/overbridge/issues/165): measured and not adopted, see [check-queue-gate.md](check-queue-gate.md)
 
 ## Open questions
 
