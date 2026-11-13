@@ -29,10 +29,19 @@ export function createWorklistRefresher(deps: WorklistDeps) {
       plan.sources.map(async (s): Promise<SourceRead> => {
         try {
           // a failed read with an earlier one to serve is the earlier one: the panel never empties on an outage
-          const got = await boards.get(sourceKey(s), () => deps.read(s), { ttlMs: BOARD_TTL_MS, staleMs: BOARD_STALE_MS, force });
-          return got.value;
+          const got = await boards.get(
+            sourceKey(s),
+            async () => {
+              // `readSource` folds a failed read into notes; as a value it would be cached as a good read for the whole window, so it fails the fetch instead
+              const r = await deps.read(s);
+              if (r.failedRepos.length) throw new Error(r.notes[0] ?? "read failed");
+              return r;
+            },
+            { ttlMs: BOARD_TTL_MS, staleMs: BOARD_STALE_MS, force },
+          );
+          return got.error ? { ...got.value, notes: [...got.value.notes, `${s.kind === "github" ? s.repo : s.project}: ${got.error.split("\n")[0]} (showing the last read)`] } : got.value;
         } catch (e) {
-          return { rows: [], notes: [`${s.kind === "github" ? s.repo : s.project}: ${errorText(e).split("\n")[0]}`], failedRepos: s.kind === "github" ? [s.repo] : s.repos };
+          return { rows: [], notes: [errorText(e).startsWith(`${s.kind === "github" ? s.repo : s.project}:`) ? errorText(e).split("\n")[0]! : `${s.kind === "github" ? s.repo : s.project}: ${errorText(e).split("\n")[0]}`], failedRepos: s.kind === "github" ? [s.repo] : s.repos };
         }
       }),
     );

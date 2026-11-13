@@ -63,6 +63,30 @@ describe("worklist refresher", () => {
     expect(reads).toHaveLength(3);
   });
 
+  test("a failed read is not cached as a good one: the last good read is served with a note, and the next window retries", async () => {
+    let failing = false;
+    let t = 0;
+    const written: SourceRead[] = [];
+    const reads: number[] = [];
+    const r = createWorklistRefresher({
+      now: () => t,
+      plan: async () => ({ sources: [gh("a")], notes: [] }),
+      read: async () => (reads.push(t), failing ? { rows: [], notes: ["a: rate limited"], failedRepos: ["a"] } : { rows: [row("a", "1")], notes: [], failedRepos: [] }),
+      finish: (_n, read) => void written.push(read),
+    });
+    await r.refresh();
+    failing = true;
+    t += 61_000;
+    await r.refresh();
+    expect(written[1]!.rows.map((x) => x.id)).toEqual(["1"]);
+    expect(written[1]!.notes[0]).toContain("rate limited");
+    failing = false;
+    t += 61_000 + 15_000;
+    await r.refresh();
+    expect(written[2]!.notes).toEqual([]);
+    expect(reads).toHaveLength(3);
+  });
+
   test("a failing board is a note and a failed repo for the rest to carry on, not an error", async () => {
     const { r, written } = setup([gh("a"), gh("b")], { fail: new Set(["b"]) });
     await r.refresh();
