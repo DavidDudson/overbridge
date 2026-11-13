@@ -42,3 +42,19 @@ export async function serverRefreshPerf(o: { force?: boolean; sock?: string; sta
   if (!r && o.start !== false) startServer();
   return r?.status === 200;
 }
+
+/**
+ * Refresh the work list through the server and wait for it; it writes the same `worklist.json`. Resolves `undefined` when
+ * the server cannot be used, so the pane runs `overbridge worklist refresh` in a child instead.
+ */
+export async function serverRefreshWorklist(o: { force?: boolean; sock?: string; start?: boolean } = {}): Promise<{ ok: boolean; error: string } | undefined> {
+  const r = await call("POST", `/refresh/worklist${o.force ? "?force=1" : ""}`, { timeoutMs: 120_000, ...(o.sock ? { sock: o.sock } : {}) });
+  if (!r && o.start !== false) startServer();
+  if (!r || (r.status !== 200 && r.status !== 502)) return undefined;
+  try {
+    const body = JSON.parse(r.body) as { error?: string };
+    return { ok: r.status === 200, error: body.error ?? "" };
+  } catch {
+    return undefined;
+  }
+}

@@ -9,6 +9,7 @@ import { keyOf, rank, type Ranked, type WorkRow, type WorkStatus } from "./pm/wo
 import { FooterKind, runStart } from "./sidebar";
 import type { ProjectManagement } from "./project-config";
 import { committedConfig } from "./start";
+import { serverRefreshWorklist } from "./server-client";
 import { spawnCwd } from "./util";
 import { bold, boxBottom, boxRow, boxTop, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN, type Color } from "./term";
 
@@ -113,17 +114,43 @@ const defaultReaders: BoardReaders = {
 
 const sourceName = (s: BoardSource) => (s.kind === "github" ? s.repo : s.project);
 
+export interface SourceRead {
+  rows: WorkRow[];
+  notes: string[];
+  failedRepos: string[];
+}
+
+/** Read one source. A source that fails adds a note and no rows. */
+export function readSource(s: BoardSource, readers: BoardReaders = defaultReaders): SourceRead {
+  try {
+    const rows = s.kind === "github" ? readers.github(s.slug, s.repo, { ...(s.columns ? { columns: s.columns } : {}), ...(s.scope ? { scope: s.scope } : {}), ...(s.project ? { project: s.project } : {}) }) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
+    return { rows, notes: [], failedRepos: [] };
+  } catch (e) {
+    return { rows: [], notes: [`${sourceName(s)}: ${(e as Error).message.split("\n")[0]}`], failedRepos: s.kind === "github" ? [s.repo] : s.repos };
+  }
+}
+
 /** Read every source. A source that fails adds a note and does not stop the rest. */
-export function readBoards(sources: readonly BoardSource[], readers: BoardReaders = defaultReaders): { rows: WorkRow[]; notes: string[]; failedRepos: string[] } {
-  const results = sources.map((s): { rows: WorkRow[]; notes: string[]; failedRepos: string[] } => {
-    try {
-      const rows = s.kind === "github" ? readers.github(s.slug, s.repo, { ...(s.columns ? { columns: s.columns } : {}), ...(s.scope ? { scope: s.scope } : {}), ...(s.project ? { project: s.project } : {}) }) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
-      return { rows, notes: [], failedRepos: [] };
-    } catch (e) {
-      return { rows: [], notes: [`${sourceName(s)}: ${(e as Error).message.split("\n")[0]}`], failedRepos: s.kind === "github" ? [s.repo] : s.repos };
-    }
-  });
-  return { rows: results.flatMap((r) => r.rows), notes: results.flatMap((r) => r.notes), failedRepos: results.flatMap((r) => r.failedRepos) };
+export function readBoards(sources: readonly BoardSource[], readers: BoardReaders = defaultReaders): SourceRead {
+  return mergeReads(sources.map((s) => readSource(s, readers)));
+}
+
+export const mergeReads = (results: readonly SourceRead[]): SourceRead => ({
+  rows: results.flatMap((r) => r.rows),
+  notes: results.flatMap((r) => r.notes),
+  failedRepos: results.flatMap((r) => r.failedRepos),
+});
+
+/**
+ * The server's cache key for a source's read. A GitHub source is its repo and what shapes the rows (scope, project board,
+ * column mapping); a Jira source is its project, filter and site, so every repo that names the same project and filter
+ * shares one read (`boardSources` has already grouped them).
+ */
+export function sourceKey(s: BoardSource): string {
+  const shape = (v: unknown) => new Bun.CryptoHasher("sha1").update(JSON.stringify(v ?? null)).digest("hex").slice(0, 10);
+  return s.kind === "github"
+    ? `board:gh:${s.slug}:${shape([s.scope, s.project, s.columns])}`
+    : `board:jira:${s.project}:${shape([s.filter, s.site])}`;
 }
 
 /**
@@ -136,8 +163,8 @@ export function keepLastGood(previous: readonly WorkRow[], fresh: readonly WorkR
   return [...fresh, ...previous.filter((r) => failed.has(r.repo) && !have.has(keyOf(r)))];
 }
 
-/** Read every registered repo's board into the cache. A repo whose config cannot be read adds a note. */
-export function refreshWorklist(now = Date.now()): WorklistCache {
+/** The reads a refresh makes, and the notes for repos whose config cannot be read: one line per repo. */
+export function planWorklist(): { sources: BoardSource[]; notes: string[] } {
   const configs = Object.values(loadRepos()).map((spec): RepoBoard | string => {
     try {
       const config = committedConfig(spec);
@@ -148,10 +175,20 @@ export function refreshWorklist(now = Date.now()): WorklistCache {
     }
   });
   const planned = boardSources(configs.filter((c): c is RepoBoard => typeof c !== "string"));
-  const read = readBoards(planned.sources);
-  const cache = { at: now, rows: keepLastGood(readWorklist().rows, read.rows, read.failedRepos), notes: [...configs.filter((c): c is string => typeof c === "string"), ...planned.notes, ...read.notes] };
+  return { sources: planned.sources, notes: [...configs.filter((c): c is string => typeof c === "string"), ...planned.notes] };
+}
+
+/** Write the cache from a plan's notes and what its reads returned, keeping the last good rows of a failed repo. */
+export function finishWorklist(planNotes: readonly string[], read: SourceRead, now = Date.now()): WorklistCache {
+  const cache = { at: now, rows: keepLastGood(readWorklist().rows, read.rows, read.failedRepos), notes: [...planNotes, ...read.notes] };
   writeWorklist(cache);
   return cache;
+}
+
+/** Read every registered repo's board into the cache. A repo whose config cannot be read adds a note. */
+export function refreshWorklist(now = Date.now()): WorklistCache {
+  const plan = planWorklist();
+  return finishWorklist(plan.notes, readBoards(plan.sources), now);
 }
 
 /** The list `overbridge worklist show` prints for a Claude: one ranked row per line, then the repos that could not be read. */
@@ -176,6 +213,11 @@ const spawnRefresh: RefreshSpawner = async (cmd) => {
 };
 
 /** Runs `overbridge worklist refresh` in a child, so the pane keeps drawing and taking keys while the boards are read. */
+/** Refresh through the server when one answers, else in a child. The server reads each board once per window however many callers ask. */
+export async function refreshWorklistAny(o: { force?: boolean } = {}, server: (o: { force?: boolean }) => Promise<RefreshResult | undefined> = serverRefreshWorklist, child: () => Promise<RefreshResult> = refreshInChild): Promise<RefreshResult> {
+  return (await server(o)) ?? (await child());
+}
+
 export async function refreshInChild(spawn: RefreshSpawner = spawnRefresh, self: string[] = selfCommand()): Promise<RefreshResult> {
   const { code, stderr } = await spawn([...self, "worklist", "refresh"]);
   const firstLine = stderr.split("\n").find((l) => l.trim())?.trim();
@@ -259,13 +301,13 @@ export async function worklistPane() {
   /** When the last refresh started, so a failing one waits a full interval before the next try. */
   let refreshStartedAtMs = 0;
 
-  const refresh = () => {
+  const refresh = (force = false) => {
     if (busy) return;
     busy = true;
     refreshStartedAtMs = Date.now();
     message = "refreshing…";
     draw();
-    void refreshInChild().then((result) => {
+    void refreshWorklistAny({ force }).then((result) => {
       cache = readWorklist();
       message = result.ok ? "" : `error: ${result.error}`;
       busy = false;
@@ -334,7 +376,7 @@ export async function worklistPane() {
       if (input.key === "q" || input.key === "ctrl-c") quit();
       else if (input.key === "j" || input.key === "down") selected = Math.min(list.length - 1, selected + 1);
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
-      else if (input.key === "r") refresh();
+      else if (input.key === "r") refresh(true);
       else if (input.key === "/") typing = true;
       else if (input.key === "escape" && filter) filter = "";
       else if ((input.key === "enter" || input.key === "l" || input.key === "right") && list[selected]) detail = list[selected];
