@@ -6,7 +6,6 @@ import { getWorkspace, isIceboxed, readState } from "./state";
 import type { PrefetchedPrs } from "./top";
 import { errorText } from "./server-cache";
 
-export { ownerRepo };
 
 const safeStacks = (repo: string) => {
   try {

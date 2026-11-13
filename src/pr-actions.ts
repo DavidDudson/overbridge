@@ -41,7 +41,7 @@ export function mergeFlag(allowed: { squashMergeAllowed?: boolean; mergeCommitAl
  * Merge the PR, or the whole stack when it has one (GitHub's atomic stack merge; it refuses unless every layer can merge).
  * The branch is left alone: workspaces hold claims on it.
  */
-export function mergePr(target: PrTarget, exec: Exec = defaultExec, slug_: (dir: string) => string | undefined = slugOfDir): string {
+export function mergePr(target: PrTarget, exec: Exec = defaultExec, repoSlug: (dir: string) => string | undefined = slugOfDir): string {
   if (target.stack.length > 1) {
     const r = exec(["gh", "stack", "merge", "--yes"], target.dir);
     return r.ok ? `merged a stack of ${target.stack.length} PRs` : `stack merge failed: ${failure(r)}`;
@@ -51,15 +51,23 @@ export function mergePr(target: PrTarget, exec: Exec = defaultExec, slug_: (dir:
     const info = exec(["gh", "repo", "view", "--json", "squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed"], target.dir);
     return info.ok ? info.stdout : undefined;
   };
-  const slug = slug_(target.dir);
-  const settings = slug ? cachedValue(`gh:repo:${slug}:merge-settings`, MERGE_SETTINGS_TTL_MS, read) : read();
-  let flag: string | undefined;
-  try {
-    flag = settings === undefined ? undefined : mergeFlag(JSON.parse(settings));
-  } catch {
-    flag = undefined;
-  }
+  const slug = repoSlug(target.dir);
+  const key = `gh:repo:${slug}:merge-settings`;
+  const flagFrom = (settings: string | undefined): string | undefined => {
+    try {
+      return settings === undefined ? undefined : mergeFlag(JSON.parse(settings));
+    } catch {
+      return undefined;
+    }
+  };
+  const flag = flagFrom(slug ? cachedValue(key, MERGE_SETTINGS_TTL_MS, read) : read());
   if (!flag) return `PR #${target.number}: could not tell which merge method the repo allows`;
-  const r = exec(["gh", "pr", "merge", String(target.number), flag], target.dir);
+  const merge = (f: string) => exec(["gh", "pr", "merge", String(target.number), f], target.dir);
+  let r = merge(flag);
+  if (!r.ok && slug) {
+    // the cached settings may be out of date (an admin turned a method off): read them again and retry once with a different method
+    const fresh = flagFrom(cachedValue(key, 0, read));
+    if (fresh && fresh !== flag) r = merge(fresh);
+  }
   return r.ok ? `merged PR #${target.number}` : `PR #${target.number}: ${failure(r)}`;
 }

@@ -1,4 +1,4 @@
-import { cachedValue, USER_TTL_MS } from "../value-cache";
+import { cachedValue, ghAccountStamp, USER_TTL_MS } from "../value-cache";
 import { run, type RunResult } from "../util";
 import { keyOf, statusFromColumn, type WorkRow, type WorkStatus } from "./worklist";
 
@@ -107,7 +107,7 @@ export function githubRows(slug: string, repo: string, runner: Runner = run, col
       return r.ok && r.stdout.trim() ? r.stdout.trim() : undefined;
     };
     // who is signed in changes almost never: one read per hour for every worklist refresh. A caller that injects its own runner (a test) is not cached.
-    const who = runner === run ? cachedValue("gh:user", USER_TTL_MS, read) : read();
+    const who = runner === run ? cachedValue(`gh:user:${ghAccountStamp()}`, USER_TTL_MS, read) : read();
     if (!who) throw new Error(`github: cannot tell who is signed in: ${failure}`);
     login.push("-F", `login=${who}`);
   }

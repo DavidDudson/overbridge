@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cachedValue } from "../src/value-cache";
+import { cachedValue, ghAccountStamp } from "../src/value-cache";
 import { refreshTitle } from "../src/pm/cache";
 import { mergePr } from "../src/pr-actions";
 import { fakeProvider } from "./helpers/fake-provider";
@@ -62,5 +62,39 @@ describe("mergePr settings", () => {
     mergePr({ dir: "/c", number: 3, stack: [] }, exec, () => undefined);
     mergePr({ dir: "/c", number: 3, stack: [] }, exec, () => undefined);
     expect(calls.filter((c) => c === "gh repo view")).toHaveLength(3);
+  });
+
+  test("a merge that fails on cached settings re-reads them and retries once with the method the repo now allows", () => {
+    let allowed = '{"squashMergeAllowed":true}';
+    const merges: string[] = [];
+    const exec = (cmd: string[]): RunResult => {
+      if (cmd[1] === "repo") return ok(allowed);
+      merges.push(cmd[4]!);
+      return cmd[4] === "--squash" && allowed.includes("mergeCommit") ? { ok: false, code: 1, stdout: "", stderr: "squash disabled" } : ok("");
+    };
+    mergePr({ dir: "/a", number: 1, stack: [] }, exec, () => "o/x"); // caches squash
+    allowed = '{"mergeCommitAllowed":true}';
+    expect(mergePr({ dir: "/a", number: 2, stack: [] }, exec, () => "o/x")).toBe("merged PR #2");
+    expect(merges).toEqual(["--squash", "--squash", "--merge"]);
+  });
+});
+
+describe("ghAccountStamp", () => {
+  test("follows the token in the environment, and hosts.yml's mtime otherwise", () => {
+    const keep = { t: process.env.GH_TOKEN, g: process.env.GITHUB_TOKEN, d: process.env.GH_CONFIG_DIR };
+    try {
+      delete process.env.GITHUB_TOKEN;
+      process.env.GH_TOKEN = "a";
+      const a = ghAccountStamp();
+      process.env.GH_TOKEN = "b";
+      expect(ghAccountStamp()).not.toBe(a);
+      delete process.env.GH_TOKEN;
+      process.env.GH_CONFIG_DIR = tmp;
+      expect(ghAccountStamp()).toBe("none");
+      require("node:fs").writeFileSync(join(tmp, "hosts.yml"), "x");
+      expect(ghAccountStamp()).toMatch(/^\d+$/);
+    } finally {
+      for (const [k, v] of [["GH_TOKEN", keep.t], ["GITHUB_TOKEN", keep.g], ["GH_CONFIG_DIR", keep.d]] as const) v === undefined ? delete process.env[k] : (process.env[k] = v);
+    }
   });
 });

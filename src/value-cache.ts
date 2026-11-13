@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { metaDir } from "./paths";
 
@@ -41,4 +42,19 @@ export function cachedValue(key: string, ttlMs: number, fetch: () => string | un
     // an unwritable cache only costs the next caller a fetch
   }
   return value;
+}
+
+/**
+ * Changes when the signed-in `gh` account does: `gh auth switch` and `gh auth login` rewrite `hosts.yml`, and a token in
+ * the environment names the account directly. Part of any key whose value belongs to the account.
+ */
+export function ghAccountStamp(): string {
+  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  if (token) return `token-${Bun.hash(token).toString(36)}`;
+  const dir = process.env.GH_CONFIG_DIR || join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "gh");
+  try {
+    return String(Math.trunc(statSync(join(dir, "hosts.yml")).mtimeMs));
+  } catch {
+    return "none";
+  }
 }
