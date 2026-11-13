@@ -7,9 +7,10 @@ import { type PrefetchedPrs, refreshTop } from "./top";
  */
 declare const self: Worker;
 
-self.onmessage = (event: MessageEvent<{ ws: string; prefetched?: PrefetchedPrs }>) => {
+self.onmessage = (event: MessageEvent<{ ws: string; prefetched?: PrefetchedPrs; /** Set while `gh` is paused by a rate limit: the last values are kept and this is shown on the message row. */ paused?: string }>) => {
   try {
-    postMessage({ ok: true, cache: refreshTop(event.data.ws, { prefetched: event.data.prefetched }) });
+    const { ws, prefetched, paused } = event.data;
+    postMessage({ ok: true, cache: refreshTop(ws, { prefetched, ...(paused ? { paused } : {}) }) });
   } catch (e) {
     postMessage({ ok: false, error: errorText(e) });
   }

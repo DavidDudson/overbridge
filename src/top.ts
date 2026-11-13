@@ -298,6 +298,8 @@ export interface RefreshDeps {
   provider?: (pm: ProjectManagement, dir: string) => Provider;
   /** Run a command in `cwd`; returns trimmed stdout, or undefined on failure. */
   exec?: (cmd: string[], cwd: string) => string | undefined;
+  /** `gh` is paused (a GitHub rate limit): make no call, keep the last values and put this on the message row. */
+  paused?: string;
 }
 
 const defaultExec = (cmd: string[], cwd: string) => {
@@ -314,6 +316,11 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   const provider = deps.provider ?? providerFor;
   const exec = deps.exec ?? defaultExec;
   const old = readTopCache(ws);
+  if (deps.paused) {
+    const held: TopCache = { ...old, message: deps.paused, at: Date.now() };
+    writeTopCache(ws, held);
+    return held;
+  }
   const claims = Object.entries(getWorkspace(readState(), ws).repos);
   const links: TopLink[] = [];
   const problems: string[] = [];

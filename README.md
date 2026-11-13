@@ -772,7 +772,17 @@ still read `top/<ws>.json`, so the server is a faster writer, not a dependency f
   the cache's error backoff) is not retried by the caller; the panel shows the error.
 - `r` and the panel's PR actions force a refresh: it is always fetched after the request, behind any fetch already
   running. `OVERBRIDGE_NO_SERVER=1` keeps every caller on its own path and starts nothing.
-- `curl --unix-socket <meta>/server.sock http://x/status` shows hits, misses, fetches, in-flight and errors per key.
+- `overbridge server status` shows uptime, the rate-limit state and, per key, hits, misses, whether a fetch is in flight and
+  the last error (`--json` prints the raw `GET /status`). `overbridge server stop` lets the server finish what runs and
+  exits (`--force` kills it); `overbridge server restart` stops it and starts a new one.
+- **Rate limit.** A `gh` failure that reads as a GitHub rate limit pauses every `gh` key until GitHub's reset time
+  (read with `gh api rate_limit`, five minutes when it cannot be read). Paused keys serve what they hold and the top
+  panel's message row says `GitHub rate limit reached: gh calls paused until …`. `status` shows the pause.
+- **Watchdog.** A worker thread restarts a server whose main thread has not beaten for 30 s (a hang): it starts a
+  replacement, then kills the hung process. A suspended machine is not a hang: a check that runs late is skipped.
+- **Events.** `GET /events` is a Server-Sent Events stream of changed keys. Panes redraw on it and a hidden pane stops
+  polling while it is open; down, the polls and file watches run as before. Idle exit waits while a stream is open.
+- `curl --unix-socket <meta>/server.sock http://x/status` is the same data over HTTP.
 
 ## Extending
 

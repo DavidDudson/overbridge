@@ -104,6 +104,11 @@ export function startServer(spawn: (cmd: string[]) => void = defaultSpawn, now =
   }
 }
 
+/** Start `overbridge serve` detached now, past the start throttle: `overbridge server restart` is the user asking. */
+export function spawnServer(): void {
+  defaultSpawn([...selfCommand(), "serve"]);
+}
+
 function defaultSpawn(cmd: string[]) {
   Bun.spawn({ cmd, cwd: process.env.HOME ?? "/", stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
 }

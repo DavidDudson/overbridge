@@ -45,6 +45,11 @@ interface Entry<T> {
   failures: number;
   retryAtMs: number;
   error?: string;
+  /** The last failure, kept after a success clears `error`. */
+  lastError?: string;
+  lastErrorAtMs?: number;
+  hits: number;
+  misses: number;
   flight?: Promise<T>;
   /** The fetch a forced call queued behind the running one. */
   forced?: Promise<T>;
@@ -57,7 +62,7 @@ export interface CacheStats {
   fetches: number;
   inFlight: number;
   queued: number;
-  keys: Record<string, { atMs?: number; failures: number; error?: string; retryAtMs?: number }>;
+  keys: Record<string, { atMs?: number; hits: number; misses: number; inFlight: boolean; failures: number; error?: string; lastError?: string; lastErrorAtMs?: number; retryAtMs?: number }>;
 }
 
 export const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -92,7 +97,7 @@ export class Cache<T> {
   private entry(key: string): Entry<T> {
     let e = this.entries.get(key);
     if (e) return e;
-    e = { failures: 0, retryAtMs: 0 };
+    e = { failures: 0, retryAtMs: 0, hits: 0, misses: 0 };
     this.entries.set(key, e);
     if (this.entries.size > this.maxEntries) {
       for (const [k, v] of this.entries) {
@@ -131,14 +136,17 @@ export class Cache<T> {
 
     if (cached !== undefined && age < o.ttlMs && !o.expired) {
       this.counters.hits++;
+      e.hits++;
       return { value: cached, served: "hit" };
     }
     if (now < e.retryAtMs) {
       this.counters.hits++;
+      e.hits++;
       return this.staleOrThrow(e, new Error(e.error ?? "backing off"));
     }
 
     this.counters.misses++;
+    e.misses++;
     const flight = this.start(key, e, fetch);
     if (o.swr && usable) {
       flight.catch(() => undefined);
@@ -161,6 +169,7 @@ export class Cache<T> {
     else {
       const running = e.flight;
       this.counters.misses++;
+      e.misses++;
       next = (running ? running.then(undefined, () => undefined) : Promise.resolve()).then(() => {
         e.forced = undefined;
         return this.start(key, e, fetch);
@@ -177,7 +186,16 @@ export class Cache<T> {
   stats(): CacheStats {
     const keys: CacheStats["keys"] = {};
     for (const [k, e] of this.entries) {
-      keys[k] = { ...(e.atMs === undefined ? {} : { atMs: e.atMs }), failures: e.failures, ...(e.error ? { error: e.error } : {}), ...(e.retryAtMs > this.now() ? { retryAtMs: e.retryAtMs } : {}) };
+      keys[k] = {
+        ...(e.atMs === undefined ? {} : { atMs: e.atMs }),
+        hits: e.hits,
+        misses: e.misses,
+        inFlight: e.flight !== undefined,
+        failures: e.failures,
+        ...(e.error ? { error: e.error } : {}),
+        ...(e.lastError ? { lastError: e.lastError, lastErrorAtMs: e.lastErrorAtMs } : {}),
+        ...(e.retryAtMs > this.now() ? { retryAtMs: e.retryAtMs } : {}),
+      };
     }
     return { ...this.counters, inFlight: this.active, queued: this.waiting.length, keys };
   }
@@ -198,6 +216,8 @@ export class Cache<T> {
       (err: unknown) => {
         e.failures++;
         e.error = errorText(err);
+        e.lastError = e.error;
+        e.lastErrorAtMs = this.now();
         e.retryAtMs = this.now() + Math.min(this.backoffBaseMs * 2 ** (e.failures - 1), this.backoffMaxMs);
         e.flight = undefined;
         this.onError(key, asError(err));

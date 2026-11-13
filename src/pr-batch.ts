@@ -128,6 +128,8 @@ export interface PrBatcherOptions {
   /** Every PR claimed in `repo` (`owner/name`), which a call fetches along with the ones asked for: one call fills the repo. */
   claimed?: (repo: string) => number[];
   windowMs?: number;
+  /** Why `gh` is paused (a rate limit), or undefined; a paused fetch fails without calling `gh`. */
+  paused?: () => string | undefined;
   perQuery?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -147,12 +149,14 @@ export class PrBatcher {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly windowMs: number;
   private readonly perQuery: number;
+  private readonly paused: () => string | undefined;
   private readonly claimed: (repo: string) => number[];
 
   constructor(o: PrBatcherOptions = {}) {
     this.run = o.run ?? ghRun;
     this.claimed = o.claimed ?? (() => []);
     this.windowMs = o.windowMs ?? BATCH_WINDOW_MS;
+    this.paused = o.paused ?? (() => undefined);
     this.perQuery = o.perQuery ?? PRS_PER_QUERY;
     this.sleep = o.sleep ?? ((ms) => Bun.sleep(ms));
     this.cache = new Cache({ maxInFlight: 2, ...(o.now ? { now: o.now } : {}), ...(o.onError ? { onError: o.onError } : {}) });
@@ -189,6 +193,8 @@ export class PrBatcher {
   }
 
   private async fetch(repo: string): Promise<Record<number, PrView | null | undefined>> {
+    const paused = this.paused();
+    if (paused) throw new Error(paused);
     // the window: refreshes that start together all add their PRs before the one call reads the set
     await this.sleep(this.windowMs);
     const [owner, name] = repo.split("/");
