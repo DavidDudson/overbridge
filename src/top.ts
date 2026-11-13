@@ -289,7 +289,12 @@ function parsePrView(out: string | undefined): PrView | undefined {
   }
 }
 
+/** PR reads the server batched for one workspace, keyed by repo name then PR number: a view, or null for a PR GitHub did not return. */
+export type PrefetchedPrs = Record<string, { prs: Record<number, PrView | null> } | { error: string }>;
+
 export interface RefreshDeps {
+  /** Read PRs from these instead of running `gh pr view` and the threads query per PR. */
+  prefetched?: PrefetchedPrs;
   provider?: (pm: ProjectManagement, dir: string) => Provider;
   /** Run a command in `cwd`; returns trimmed stdout, or undefined on failure. */
   exec?: (cmd: string[], cwd: string) => string | undefined;
@@ -353,14 +358,20 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       const out = exec(["env", ...env, "sh", "-c", spec.status], dir);
       if (out !== undefined) buttonStates[`${repo}/${spec.id}`] = parseButtonStatus(out);
     }
+    const batched = deps.prefetched?.[repo];
+    const viewOf = (n: number): PrView | undefined => {
+      if (!batched) return parsePrView(exec(prViewCommand(n), dir));
+      return "prs" in batched ? (batched.prs[n] ?? undefined) : undefined;
+    };
     if (claim.pr !== undefined) {
-      const view = parsePrView(exec(prViewCommand(claim.pr), dir));
+      if (batched && "error" in batched) problems.push(`${repo}: ${batched.error}`);
+      const view = viewOf(claim.pr);
       if (view?.url) {
         const layers = stackOf(safeStacks(repo), claim.branch)?.layers ?? [];
         const prs = layers.length > 1 ? layers.flatMap((l) => (l.pr === undefined ? [] : [l.pr])) : [];
         const stack = prs.length > 1 && prs.includes(claim.pr as number) ? prs : [];
         const link = (n: number, v: PrView & { url: string }): TopLink => {
-          const threads = threadsCommand(v.url);
+          const threads = v.unresolved === undefined ? threadsCommand(v.url) : undefined;
           if (threads) v.unresolved = parseUnresolved(exec(threads, dir));
           const layer = stack.length ? { n: stack.indexOf(n) + 1, of: stack.length } : undefined;
           return {
@@ -376,7 +387,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
             links.push(link(n, view as PrView & { url: string }));
             continue;
           }
-          const other = parsePrView(exec(prViewCommand(n), dir));
+          const other = viewOf(n);
           if (other?.url) links.push(link(n, other as PrView & { url: string }));
           else problems.push(`${repo}: no URL for PR #${n}`);
         }

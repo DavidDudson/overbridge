@@ -1,5 +1,5 @@
 import { errorText } from "./server-cache";
-import { refreshTop } from "./top";
+import { type PrefetchedPrs, refreshTop } from "./top";
 
 /**
  * One top refresh, off the server's main thread: `refreshTop` runs `gh` synchronously, and the server must keep
@@ -7,9 +7,9 @@ import { refreshTop } from "./top";
  */
 declare const self: Worker;
 
-self.onmessage = (event: MessageEvent<{ ws: string }>) => {
+self.onmessage = (event: MessageEvent<{ ws: string; prefetched?: PrefetchedPrs }>) => {
   try {
-    postMessage({ ok: true, cache: refreshTop(event.data.ws) });
+    postMessage({ ok: true, cache: refreshTop(event.data.ws, { prefetched: event.data.prefetched }) });
   } catch (e) {
     postMessage({ ok: false, error: errorText(e) });
   }

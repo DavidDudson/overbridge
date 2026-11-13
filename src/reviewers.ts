@@ -112,19 +112,26 @@ export function threadsCommand(url: string): string[] | undefined {
   return ["gh", "api", "graphql", "-f", `query=${THREADS_QUERY}`, "-F", `owner=${m[1]}`, "-F", `repo=${m[2]}`, "-F", `number=${m[3]}`];
 }
 
-/** Unresolved review threads per reviewer, from `threadsCommand`'s output. A thread belongs to whoever opened it. */
-export function parseUnresolved(out: string | undefined): NonNullable<ReviewerView["unresolved"]> {
+type ThreadNodes = { isResolved?: boolean; comments?: { nodes?: { author?: { login?: string } }[] } }[];
+
+/** Unresolved review threads per reviewer, from a PR's thread nodes. A thread belongs to whoever opened it. */
+export function countUnresolved(threads: ThreadNodes): NonNullable<ReviewerView["unresolved"]> {
   const counts: NonNullable<ReviewerView["unresolved"]> = {};
-  try {
-    const threads = JSON.parse(out ?? "")?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
-    for (const t of threads as { isResolved?: boolean; comments?: { nodes?: { author?: { login?: string } }[] } }[]) {
-      if (t.isResolved) continue;
-      const login = t.comments?.nodes?.[0]?.author?.login ?? "";
-      const name = COPILOT.test(login) ? "Copilot" : CODERABBIT.test(login) ? "CodeRabbit" : undefined;
-      if (name) counts[name] = (counts[name] ?? 0) + 1;
-    }
-  } catch {
-    // no output or not JSON: no counts
+  for (const t of threads) {
+    if (t.isResolved) continue;
+    const login = t.comments?.nodes?.[0]?.author?.login ?? "";
+    const name = COPILOT.test(login) ? "Copilot" : CODERABBIT.test(login) ? "CodeRabbit" : undefined;
+    if (name) counts[name] = (counts[name] ?? 0) + 1;
   }
   return counts;
+}
+
+/** Unresolved review threads per reviewer, from `threadsCommand`'s output. */
+export function parseUnresolved(out: string | undefined): NonNullable<ReviewerView["unresolved"]> {
+  try {
+    return countUnresolved((JSON.parse(out ?? "")?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? []) as ThreadNodes);
+  } catch {
+    // no output or not JSON: no counts
+    return {};
+  }
 }

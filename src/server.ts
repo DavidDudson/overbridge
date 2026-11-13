@@ -4,7 +4,9 @@ import { pidAlive } from "./proc";
 import { Cache, errorText } from "./server-cache";
 import { CLIENT_START_HEADER, pidFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
 import { readState } from "./state";
-import { readTopCache, type TopCache } from "./top";
+import { type PrefetchedPrs, readTopCache, type TopCache } from "./top";
+import { PrBatcher } from "./pr-batch";
+import { claimedPrs, prefetchFor } from "./server-prs";
 import { log } from "./util";
 import { overbridgeVersion } from "./version";
 
@@ -24,13 +26,16 @@ export const IDLE_EXIT_MS = 10 * 60_000;
 export const MAX_REFRESHES = 4;
 
 export interface HandlerDeps {
-  refreshTop: (ws: string) => Promise<TopCache>;
+  refreshTop: (ws: string, o?: { force?: boolean }) => Promise<TopCache>;
   /** Build every perf view and write `perf.json`; resolves with when it was built (a cached value cannot be undefined). */
   refreshPerf: () => Promise<number>;
   workspaceExists: (ws: string) => boolean;
   /** When `ws`'s top cache file was last written (ms since epoch), 0 when it has none. */
   cacheFileAt: (ws: string) => number;
   version: string;
+  /** What the PR batcher has done, for `/status`. */
+  prBatch?: () => unknown;
+  prBusy?: () => boolean;
   /** Called when a client of another version, started after this server, calls: finish what is running, then exit. */
   onVersionMismatch: () => void;
   /** Where a failed refresh is reported; the server's own stdio is ignored. */
@@ -64,7 +69,7 @@ export function createHandler(deps: HandlerDeps) {
       return json(409, { error: "version mismatch", server: deps.version, client: theirs });
     }
     if (req.method === "GET" && url.pathname === "/status") {
-      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, ...cache.stats(), perf: perf.stats() });
+      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, ...cache.stats(), perf: perf.stats(), ...(deps.prBatch ? { prBatch: deps.prBatch() } : {}) });
     }
     if (req.method === "POST" && url.pathname === "/refresh/perf") {
       const got = perf.get("perf", () => deps.refreshPerf(), { ttlMs: PERF_TTL_MS, staleMs: PERF_STALE_MS, force: url.searchParams.get("force") === "1", swr: true });
@@ -88,10 +93,11 @@ export function createHandler(deps: HandlerDeps) {
         return json(400, { error: "bad workspace name" });
       }
       if (!NAME_RE.test(ws) || !deps.workspaceExists(ws)) return json(404, { error: `no workspace ${ws}` });
-      const got = cache.get(`top:${ws}`, () => deps.refreshTop(ws), {
+      const force = url.searchParams.get("force") === "1";
+      const got = cache.get(`top:${ws}`, () => deps.refreshTop(ws, { force }), {
         ttlMs: TOP_TTL_MS,
         staleMs: TOP_STALE_MS,
-        force: url.searchParams.get("force") === "1",
+        force,
         // a cache file older than the TTL (rewritten, deleted or never written) is refreshed even when the entry is young
         expired: now() - deps.cacheFileAt(ws) >= TOP_TTL_MS,
       });
@@ -113,12 +119,12 @@ export function createHandler(deps: HandlerDeps) {
     handle,
     stats: () => cache.stats(),
     idleForMs: () => now() - lastRequestAt,
-    busy: () => cache.busy || perf.busy,
+    busy: () => cache.busy || perf.busy || (deps.prBusy?.() ?? false),
   };
 }
 
 /** Run `refreshTop` in a worker thread, so the server stays responsive while `gh` runs. */
-export function refreshInWorker(ws: string, timeoutMs = 120_000): Promise<TopCache> {
+export function refreshInWorker(ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000): Promise<TopCache> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL("./server-worker.ts", import.meta.url).href);
     const timer = setTimeout(() => {
@@ -138,7 +144,7 @@ export function refreshInWorker(ws: string, timeoutMs = 120_000): Promise<TopCac
       finish();
       reject(new Error(e.message));
     };
-    worker.postMessage({ ws });
+    worker.postMessage({ ws, prefetched });
   });
 }
 
@@ -178,8 +184,11 @@ export async function serve(): Promise<void> {
   const sock = socketPath();
   rmSync(sock, { force: true });
   let exiting = false;
+  const batcher = new PrBatcher({ claimed: claimedPrs, onError: (key, e) => log(`${key}: ${e.message}`) });
   const handler = createHandler({
-    refreshTop: refreshInWorker,
+    refreshTop: async (ws, o) => refreshInWorker(ws, await prefetchFor(ws, batcher, o)),
+    prBatch: () => batcher.stats(),
+    prBusy: () => batcher.busy,
     refreshPerf: refreshPerfInWorker,
     workspaceExists: (ws) => ws in readState().workspaces,
     cacheFileAt: (ws) => readTopCache(ws).at,
