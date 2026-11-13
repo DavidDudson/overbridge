@@ -6,7 +6,7 @@ import { getRepo } from "./config";
 import * as git from "./git";
 import { isOrchestrationTab } from "./orchestration";
 import { metaDir, wsDir, worktreePath } from "./paths";
-import { providerFor, refreshTitle } from "./pm";
+import { providerFor, refreshTitle, TITLE_TTL_MS } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, isTaskClaim, readState } from "./state";
@@ -343,7 +343,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
         const p = provider(pm, dir);
         const id = p.idFromBranch(claim.branch);
         if (id) {
-          const title = refreshTitle(p, pm.project, id);
+          const title = refreshTitle(p, pm.project, id, { ttlMs: TITLE_TTL_MS });
           headline = title ? `${id} ${title}` : id;
           itemTitle = title || undefined;
           itemLink = { label: id, url: p.link(id) };

@@ -1,3 +1,5 @@
+import { slugOfDir } from "./repo-slug";
+import { MERGE_SETTINGS_TTL_MS, cachedValue } from "./value-cache";
 import { run, type RunResult } from "./util";
 
 type Exec = (cmd: string[], cwd: string) => RunResult;
@@ -39,15 +41,21 @@ export function mergeFlag(allowed: { squashMergeAllowed?: boolean; mergeCommitAl
  * Merge the PR, or the whole stack when it has one (GitHub's atomic stack merge; it refuses unless every layer can merge).
  * The branch is left alone: workspaces hold claims on it.
  */
-export function mergePr(target: PrTarget, exec: Exec = defaultExec): string {
+export function mergePr(target: PrTarget, exec: Exec = defaultExec, slug_: (dir: string) => string | undefined = slugOfDir): string {
   if (target.stack.length > 1) {
     const r = exec(["gh", "stack", "merge", "--yes"], target.dir);
     return r.ok ? `merged a stack of ${target.stack.length} PRs` : `stack merge failed: ${failure(r)}`;
   }
-  const info = exec(["gh", "repo", "view", "--json", "squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed"], target.dir);
+  // the repo's merge settings change rarely: one read per TTL for every workspace of the repo
+  const read = () => {
+    const info = exec(["gh", "repo", "view", "--json", "squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed"], target.dir);
+    return info.ok ? info.stdout : undefined;
+  };
+  const slug = slug_(target.dir);
+  const settings = slug ? cachedValue(`gh:repo:${slug}:merge-settings`, MERGE_SETTINGS_TTL_MS, read) : read();
   let flag: string | undefined;
   try {
-    flag = mergeFlag(JSON.parse(info.stdout));
+    flag = settings === undefined ? undefined : mergeFlag(JSON.parse(settings));
   } catch {
     flag = undefined;
   }

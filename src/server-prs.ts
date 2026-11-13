@@ -1,14 +1,12 @@
 import { getRepo } from "./config";
+import { ownerRepo } from "./repo-slug";
 import type { PrBatcher } from "./pr-batch";
 import { localStacks, stackOf } from "./stack";
 import { getWorkspace, isIceboxed, readState } from "./state";
 import type { PrefetchedPrs } from "./top";
 import { errorText } from "./server-cache";
 
-/** `owner/name` of a GitHub remote URL (ssh or https), or undefined for any other host. */
-export function ownerRepo(url: string): string | undefined {
-  return /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(url)?.slice(1, 3).join("/");
-}
+export { ownerRepo };
 
 const safeStacks = (repo: string) => {
   try {
