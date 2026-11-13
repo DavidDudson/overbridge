@@ -23,6 +23,7 @@ describe("sourceKey", () => {
   test("a GitHub board is keyed by repo and by what shapes its rows", () => {
     expect(sourceKey(gh("a"))).toBe(sourceKey(gh("a")));
     expect(sourceKey(gh("a"))).not.toBe(sourceKey(gh("b")));
+    expect(sourceKey(gh("a", "o/x"))).not.toBe(sourceKey(gh("b", "o/x")));
     expect(sourceKey({ kind: "github", repo: "a", slug: "o/a", scope: "all" })).not.toBe(sourceKey(gh("a")));
   });
 });
@@ -52,6 +53,18 @@ describe("worklist refresher", () => {
     expect(reads).toHaveLength(2);
     expect(written).toHaveLength(1);
     expect(written[0]!.rows.map((x) => x.repo).sort()).toEqual(["a", "x"]);
+  });
+
+  test("a failed plan after a good run answers the old time with the error, so the route can say 502", async () => {
+    let plans = 0;
+    const r = createWorklistRefresher({
+      now: () => 0,
+      plan: async () => (++plans > 1 ? Promise.reject(new Error("git exploded")) : { sources: [], notes: [] }),
+      read: async () => ({ rows: [], notes: [], failedRepos: [] }),
+      finish: () => {},
+    });
+    expect((await r.refresh()).error).toBeUndefined();
+    expect((await r.refresh(true)).error).toContain("git exploded");
   });
 
   test("a new window reads again, and force reads inside the window", async () => {

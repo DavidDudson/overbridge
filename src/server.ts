@@ -232,7 +232,12 @@ export async function serve(): Promise<void> {
     finish: (notes, read) => finishWorklist(notes, read),
   });
   const handler = createHandler({
-    refreshWorklist: async (force) => (await worklist.refresh(force)).value,
+    refreshWorklist: async (force) => {
+      const r = await worklist.refresh(force);
+      // a failed planning job serves the last timestamp with `error`; the file was not rebuilt, so the route must not answer 200
+      if (r.error) throw new Error(r.error);
+      return r.value;
+    },
     worklistStats: () => worklist.stats(),
     worklistBusy: () => worklist.busy,
     refreshTop: async (ws, o) => refreshInWorker(ws, await prefetchFor(ws, batcher, o)),

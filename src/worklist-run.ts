@@ -142,14 +142,14 @@ export const mergeReads = (results: readonly SourceRead[]): SourceRead => ({
 });
 
 /**
- * The server's cache key for a source's read. A GitHub source is its repo and what shapes the rows (scope, project board,
+ * The server's cache key for a source's read. A GitHub source is its slug, the local repo (two registered repos may share a URL, and a read's rows carry the repo name) and what shapes the rows (scope, project board,
  * column mapping); a Jira source is its project, filter and site, so every repo that names the same project and filter
  * shares one read (`boardSources` has already grouped them).
  */
 export function sourceKey(s: BoardSource): string {
   const shape = (v: unknown) => new Bun.CryptoHasher("sha1").update(JSON.stringify(v ?? null)).digest("hex").slice(0, 10);
   return s.kind === "github"
-    ? `board:gh:${s.slug}:${shape([s.scope, s.project, s.columns])}`
+    ? `board:gh:${s.slug}:${s.repo}:${shape([s.scope, s.project, s.columns])}`
     : `board:jira:${s.project}:${shape([s.filter, s.site])}`;
 }
 

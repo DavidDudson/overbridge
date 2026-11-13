@@ -13,8 +13,8 @@ import { metaDir } from "./paths";
 export const USER_TTL_MS = 60 * 60_000;
 export const MERGE_SETTINGS_TTL_MS = 60 * 60_000;
 
-/** Entries older than this are dropped on write. */
-const KEEP_MS = 7 * 24 * 60 * 60_000;
+/** Entries older than this are dropped on write. Long, so a repo's last-good merge settings still back a failed fetch. */
+const KEEP_MS = 90 * 24 * 60 * 60_000;
 
 type Entry = { value: string; at: number };
 const file = () => join(metaDir(), "values.json");
