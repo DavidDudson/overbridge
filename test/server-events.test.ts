@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseSse, subscribeEvents } from "../src/events-client";
 import { createHandler } from "../src/server";
-import { changedFrame, createEvents, HEARTBEAT_FRAME } from "../src/server-events";
+import { changedFrame, createEvents } from "../src/server-events";
 import { overbridgeVersion } from "../src/version";
 import { shouldPoll } from "../src/zellij-view";
 
@@ -33,8 +33,6 @@ describe("createEvents", () => {
     hub.publish("k");
     expect(got).toEqual([changedFrame("k")]);
     expect(hub.count).toBe(1);
-    hub.heartbeat();
-    expect(got.at(-1)).toBe(HEARTBEAT_FRAME);
   });
 });
 
@@ -138,7 +136,10 @@ describe("GET /events", () => {
     expect(idle.idleForMs()).toBe(0);
     await res.body!.cancel();
     expect(idle.subscribers()).toBe(0);
-    expect(idle.idleForMs()).toBe(20 * 60_000);
+    // idle counts from the stream closing, not from when it opened
+    expect(idle.idleForMs()).toBe(0);
+    t += 60_000;
+    expect(idle.idleForMs()).toBe(60_000);
   });
 
   test("closeStreams ends the stream so the pane sees the server go and reconnects when one returns", async () => {
@@ -151,6 +152,15 @@ describe("GET /events", () => {
     expect(await until(() => states.filter(Boolean).length >= 2)).toBe(true);
     sub.stop();
     expect(sub.live()).toBe(false);
+  });
+
+  test("streams do not accumulate: a dropped one leaves the set", async () => {
+    for (let i = 0; i < 3; i++) {
+      const res = await h.handle(new Request("http://x/events"));
+      await res.body!.cancel();
+    }
+    expect(h.subscribers()).toBe(0);
+    expect(h.streamCount()).toBe(0);
   });
 
   test("no server: not live, and no throw", async () => {

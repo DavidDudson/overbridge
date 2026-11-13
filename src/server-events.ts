@@ -31,15 +31,6 @@ export function createEvents() {
         }
       }
     },
-    heartbeat(): void {
-      for (const send of [...subscribers]) {
-        try {
-          send(HEARTBEAT_FRAME);
-        } catch {
-          subscribers.delete(send);
-        }
-      }
-    },
     get count(): number {
       return subscribers.size;
     },

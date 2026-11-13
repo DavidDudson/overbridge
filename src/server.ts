@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { NAME_RE, metaDir } from "./paths";
 import { pidAlive } from "./proc";
 import { Cache, errorText } from "./server-cache";
-import { CONNECTED_FRAME, createEvents, HEARTBEAT_MS } from "./server-events";
+import { CONNECTED_FRAME, createEvents, HEARTBEAT_FRAME, HEARTBEAT_MS } from "./server-events";
 import { CLIENT_START_HEADER, pidFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
 import { defaultSweepDeps, staleCandidates, sweepMerged } from "./merge-sweep";
 import { createSweeper } from "./server-sweep";
@@ -101,21 +101,31 @@ export function createHandler(deps: HandlerDeps) {
       start(controller) {
         const send = (frame: string) => controller.enqueue(enc.encode(frame));
         const unsubscribe = events.subscribe(send);
-        const beat = setInterval(() => events.heartbeat(), HEARTBEAT_MS);
-        const end = () => {
-          clearInterval(beat);
-          unsubscribe();
-          streams.delete(end);
-        };
-        cleanup = end;
-        streams.add(() => {
+        // each stream pings only itself; a failed write means the client is gone
+        const beat = setInterval(() => {
+          try {
+            send(HEARTBEAT_FRAME);
+          } catch {
+            end();
+          }
+        }, HEARTBEAT_MS);
+        const close = () => {
           end();
           try {
             controller.close();
           } catch {
             // already closed by the client
           }
-        });
+        };
+        function end() {
+          clearInterval(beat);
+          unsubscribe();
+          streams.delete(close);
+          // idle exit counts from the last stream closing, not from when it opened hours ago
+          lastRequestAt = now();
+        }
+        cleanup = end;
+        streams.add(close);
         send(CONNECTED_FRAME);
       },
       cancel() {
@@ -211,6 +221,7 @@ export function createHandler(deps: HandlerDeps) {
     /** Zero while a pane holds an event stream: the server stays up as long as someone is watching. */
     idleForMs: () => (events.count > 0 ? 0 : now() - lastRequestAt),
     subscribers: () => events.count,
+    streamCount: () => streams.size,
     /** Publish a change from outside the routes (the sweep, tests). */
     publish: (key: string) => events.publish(key),
     /** End every event stream, so a client reconnects to whichever server runs next. */
