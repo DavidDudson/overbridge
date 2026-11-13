@@ -29,13 +29,14 @@ function read(): Record<string, Entry> {
 
 /**
  * The value for `key`: the stored one while it is under `ttlMs` old, else `fetch()`'s result, stored. A failed fetch
- * (undefined) serves the last stored value of any age, so an outage never blanks it; with none, undefined.
+ * (undefined) serves the last stored value of any age, so an outage never blanks it; with none, undefined. `staleOnError: false`
+ * is for a caller that must not act on an old value.
  */
-export function cachedValue(key: string, ttlMs: number, fetch: () => string | undefined, now = Date.now()): string | undefined {
+export function cachedValue(key: string, ttlMs: number, fetch: () => string | undefined, now = Date.now(), staleOnError = true): string | undefined {
   const entry = read()[key];
   if (entry && now - entry.at < ttlMs) return entry.value;
   const value = fetch();
-  if (value === undefined) return entry?.value;
+  if (value === undefined) return staleOnError ? entry?.value : undefined;
   try {
     // entries long past any TTL (a signed-out account's `gh:user:<stamp>`) are dropped as the file is rewritten
     const kept = Object.fromEntries(Object.entries(read()).filter(([, e]) => now - e.at < KEEP_MS));

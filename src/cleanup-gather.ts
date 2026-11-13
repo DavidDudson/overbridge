@@ -13,6 +13,7 @@ import { barePath, worktreePath, wsDir } from "./paths";
 import { providerFor } from "./pm";
 import type { Provider } from "./pm/provider";
 import { loadRepoConfig } from "./project-config";
+import { cachedValue } from "./value-cache";
 import { localStacks, stackOf } from "./stack";
 import { type Claim, isRemoving, readState, type State, TASK_BRANCH_PREFIX } from "./state";
 import { errorMessage, log, naturalSort, type RunResult, run } from "./util";
@@ -32,8 +33,35 @@ export interface GatherDeps {
   strayFiles: (ws: string, repos: readonly string[]) => string[];
 }
 
+/** A PR fact read by the scan stays valid this long, so a scan right after the sweep reuses what it read. */
+export const PR_FACT_TTL_MS = 60_000;
+
+/** The `gh` reads that name a PR's state; nothing else is cached (git facts always come straight from git). */
+const isPrRead = (cmd: string[]) => cmd[0] === "gh" && ((cmd[1] === "pr" && (cmd[2] === "view" || cmd[2] === "list")) || (cmd[1] === "api" && /\/commits\/[^/]+\/pulls$/.test(cmd[2] ?? "")));
+
+/** `run`, with a PR read answered from `values.json` while it is under the TTL. A failed read is never cached or served stale. */
+export function cachedExec(exec: (cmd: string[], cwd: string) => RunResult, now: () => number = Date.now): (cmd: string[], cwd: string) => RunResult {
+  return (cmd, cwd) => {
+    if (!isPrRead(cmd)) return exec(cmd, cwd);
+    let failed: RunResult | undefined;
+    const out = cachedValue(
+      `scan:${cwd}:${cmd.join(" ")}`,
+      PR_FACT_TTL_MS,
+      () => {
+        const r = exec(cmd, cwd);
+        if (r.ok) return r.stdout;
+        failed = r;
+        return undefined;
+      },
+      now(),
+      false,
+    );
+    return out !== undefined ? { ok: true, code: 0, stdout: out, stderr: "" } : (failed ?? exec(cmd, cwd));
+  };
+}
+
 const defaultDeps = (): GatherDeps => ({
-  exec: (cmd, cwd) => run(cmd, { cwd }),
+  exec: cachedExec((cmd, cwd) => run(cmd, { cwd })),
   provider: (repo, wt) => {
     try {
       const pm = loadRepoConfig(wt, repo).projectManagement;

@@ -3,7 +3,10 @@ import { NAME_RE, metaDir } from "./paths";
 import { pidAlive } from "./proc";
 import { Cache, errorText } from "./server-cache";
 import { CLIENT_START_HEADER, pidFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
+import { defaultSweepDeps, staleCandidates, sweepMerged } from "./merge-sweep";
+import { createSweeper } from "./server-sweep";
 import { readState } from "./state";
+import { claimSweep } from "./sweep-trigger";
 import { type PrefetchedPrs, readTopCache, type TopCache } from "./top";
 import { PrBatcher } from "./pr-batch";
 import { createWorklistRefresher } from "./server-worklist";
@@ -26,6 +29,8 @@ export const TOP_STALE_MS = 10 * 60_000;
 /** The perf views are cheap to build, so they are rebuilt often; a stale set is served while one builds. */
 export const PERF_TTL_MS = 5_000;
 export const PERF_STALE_MS = 60_000;
+/** How often the server checks whether the sweep is due. */
+export const SWEEP_TICK_MS = 5_000;
 export const IDLE_EXIT_MS = 10 * 60_000;
 /** Refreshes running at once: each runs `gh` calls of its own. */
 export const MAX_REFRESHES = 4;
@@ -45,6 +50,9 @@ export interface HandlerDeps {
   prBatch?: () => unknown;
   prBusy?: () => boolean;
   worklistBusy?: () => boolean;
+  /** The sweep timer's counters; present when the server runs the merged-PR sweep. `GET /sweep` answers 404 without it. */
+  sweepStats?: () => unknown;
+  sweepBusy?: () => boolean;
   /** Called when a client of another version, started after this server, calls: finish what is running, then exit. */
   onVersionMismatch: () => void;
   /** Where a failed refresh is reported; the server's own stdio is ignored. */
@@ -64,6 +72,17 @@ export function createHandler(deps: HandlerDeps) {
   let lastRequestAt = now();
   let draining = false;
 
+  /** One workspace's top refresh through the shared cache: single flight, TTL, backoff, the in-flight cap. */
+  function refreshWs(ws: string, force: boolean) {
+    return cache.get(`top:${ws}`, () => deps.refreshTop(ws, { force }), {
+      ttlMs: TOP_TTL_MS,
+      staleMs: TOP_STALE_MS,
+      force,
+      // a cache file older than the TTL (rewritten, deleted or never written) is refreshed even when the entry is young
+      expired: now() - deps.cacheFileAt(ws) >= TOP_TTL_MS,
+    });
+  }
+
   async function handle(req: Request): Promise<Response> {
     lastRequestAt = now();
     const url = new URL(req.url);
@@ -78,7 +97,11 @@ export function createHandler(deps: HandlerDeps) {
       return json(409, { error: "version mismatch", server: deps.version, client: theirs });
     }
     if (req.method === "GET" && url.pathname === "/status") {
-      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, ...cache.stats(), perf: perf.stats(), ...(deps.prBatch ? { prBatch: deps.prBatch() } : {}), ...(deps.worklistStats ? { worklist: deps.worklistStats() } : {}) });
+      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, ...cache.stats(), perf: perf.stats(), ...(deps.prBatch ? { prBatch: deps.prBatch() } : {}), ...(deps.worklistStats ? { worklist: deps.worklistStats() } : {}), ...(deps.sweepStats ? { sweep: deps.sweepStats() } : {}) });
+    }
+    if (req.method === "GET" && url.pathname === "/sweep" && deps.sweepStats) {
+      // a sidebar asks this to learn the server runs the sweep, so it skips its own
+      return json(200, { owner: true, ...(deps.sweepStats() as object) });
     }
     if (req.method === "POST" && url.pathname === "/refresh/perf") {
       const got = perf.get("perf", () => deps.refreshPerf(), { ttlMs: PERF_TTL_MS, staleMs: PERF_STALE_MS, force: url.searchParams.get("force") === "1", swr: true });
@@ -110,13 +133,7 @@ export function createHandler(deps: HandlerDeps) {
       }
       if (!NAME_RE.test(ws) || !deps.workspaceExists(ws)) return json(404, { error: `no workspace ${ws}` });
       const force = url.searchParams.get("force") === "1";
-      const got = cache.get(`top:${ws}`, () => deps.refreshTop(ws, { force }), {
-        ttlMs: TOP_TTL_MS,
-        staleMs: TOP_STALE_MS,
-        force,
-        // a cache file older than the TTL (rewritten, deleted or never written) is refreshed even when the entry is young
-        expired: now() - deps.cacheFileAt(ws) >= TOP_TTL_MS,
-      });
+      const got = refreshWs(ws, force);
       if (url.searchParams.get("async") === "1") {
         got.catch(() => undefined);
         return json(202, { queued: ws });
@@ -133,9 +150,11 @@ export function createHandler(deps: HandlerDeps) {
 
   return {
     handle,
+    /** Refresh `ws` as the sweep does: through the cache, so a pane's refresh and the sweep's share one fetch. */
+    refresh: (ws: string) => refreshWs(ws, false),
     stats: () => cache.stats(),
     idleForMs: () => now() - lastRequestAt,
-    busy: () => cache.busy || perf.busy || (deps.prBusy?.() ?? false) || (deps.worklistBusy?.() ?? false),
+    busy: () => cache.busy || perf.busy || (deps.prBusy?.() ?? false) || (deps.worklistBusy?.() ?? false) || (deps.sweepBusy?.() ?? false),
   };
 }
 
@@ -205,7 +224,26 @@ export async function serve(): Promise<void> {
     read: (source) => workerCall("./server-worklist-worker.ts", { kind: "read", source }, 60_000),
     finish: (notes, read) => finishWorklist(notes, read),
   });
+  let refreshForSweep: (ws: string) => Promise<unknown> = () => Promise.resolve();
+  const sweeper = createSweeper({
+    claim: claimSweep,
+    stale: staleCandidates,
+    refresh: (ws) => refreshForSweep(ws),
+    sweep: (failed) =>
+      sweepMerged({
+        ...defaultSweepDeps(),
+        // a workspace whose refresh failed keeps; the sweep never judges it from an old cache
+        refresh: (ws) => {
+          const e = failed.get(ws);
+          if (e) throw e;
+        },
+      }),
+    now: Date.now,
+    log,
+  });
   const handler = createHandler({
+    sweepStats: () => sweeper.stats(),
+    sweepBusy: () => sweeper.busy,
     refreshWorklist: async (force) => {
       const r = await worklist.refresh(force);
       // a failed planning job serves the last timestamp with `error`; the file was not rebuilt, so the route must not answer 200
@@ -224,6 +262,7 @@ export async function serve(): Promise<void> {
     version: overbridgeVersion(),
     onVersionMismatch: () => void shutdown(),
   });
+  refreshForSweep = handler.refresh;
   const old = process.umask(0o177);
   // a refresh outlasts Bun's 10 s default idle timeout, so each request opts out of it
   const server = Bun.serve({
@@ -253,6 +292,8 @@ export async function serve(): Promise<void> {
   }
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
+  // sidebars ask `GET /sweep` and skip their own, so this is the one sweep; `claimSweep` keeps it to one per MERGE_SWEEP_MS
+  setInterval(() => void sweeper.tick(), SWEEP_TICK_MS);
   setInterval(() => {
     if (handler.idleForMs() >= IDLE_EXIT_MS && !handler.busy()) void shutdown();
   }, 30_000);

@@ -14,7 +14,8 @@ import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
 import { ensureOrchestrationTabs } from "./orchestration-keep";
 import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-history";
 import { isIceboxed, isRemoving, isWorkspaceState, RemovalBlock, readState, type Removing, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
-import { claimSweep, startSweep } from "./sweep-trigger";
+import { serverOwnsSweep } from "./server-client";
+import { claimSweep, createSweepTrigger, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache, readTopCacheChecked, sidebarLabel, type TopCache } from "./top";
 import { defaultMux, type Mux } from "./mux";
@@ -691,7 +692,7 @@ export async function sidebar(wsOpt?: string) {
     tabOrder: () => readView().order,
     // a user layout decides its own tabs, so only the generated one gets its orchestration tabs back
     keepOrchestration: (order) => { if (!userLayout) ensureOrchestrationTabs(order); },
-    sweep: () => { if (claimSweep()) startSweep(); },
+    sweep: createSweepTrigger({ serverOwns: () => serverOwnsSweep(), claim: claimSweep, start: startSweep, now: Date.now }),
     readState: tryReadState,
     entries,
     reap: createReaper(),

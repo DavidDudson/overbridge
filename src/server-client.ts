@@ -61,3 +61,13 @@ export async function serverRefreshWorklist(o: { force?: boolean; sock?: string;
     return undefined;
   }
 }
+
+/**
+ * Whether the server runs the merged-PR sweep on its own timer. Asking also starts a server that is down (throttled), and counts as
+ * a request, so the server stays up while a sidebar is open. False means the sidebar sweeps itself.
+ */
+export async function serverOwnsSweep(o: { sock?: string; start?: boolean } = {}): Promise<boolean> {
+  const r = await call("GET", "/sweep", { timeoutMs: 5_000, ...(o.sock ? { sock: o.sock } : {}) });
+  if (!r && o.start !== false) startServer();
+  return r?.status === 200;
+}
