@@ -77,6 +77,13 @@ describe("createSweeper", () => {
     expect(s.busy).toBe(false);
   });
 
+  test("a claim that throws is recorded and does not reject", async () => {
+    const s = createSweeper(deps({ claim: () => { throw new Error("state.json: bad"); } }));
+    expect(await s.tick()).toBe(false);
+    expect(s.stats().lastError).toBe("state.json: bad");
+    expect(s.busy).toBe(false);
+  });
+
   test("a sweep that throws is recorded and the next one runs", async () => {
     const logged: string[] = [];
     let boom = true;

@@ -262,7 +262,11 @@ export async function serve(): Promise<void> {
     version: overbridgeVersion(),
     onVersionMismatch: () => void shutdown(),
   });
-  refreshForSweep = handler.refresh;
+  refreshForSweep = async (ws) => {
+    const got = await handler.refresh(ws);
+    // a stale value served over a failed refresh is a failure here: the sweep must not judge that workspace from it
+    if (got.error) throw new Error(got.error);
+  };
   const old = process.umask(0o177);
   // a refresh outlasts Bun's 10 s default idle timeout, so each request opts out of it
   const server = Bun.serve({
@@ -293,7 +297,9 @@ export async function serve(): Promise<void> {
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
   // sidebars ask `GET /sweep` and skip their own, so this is the one sweep; `claimSweep` keeps it to one per MERGE_SWEEP_MS
-  setInterval(() => void sweeper.tick(), SWEEP_TICK_MS);
+  setInterval(() => {
+    if (!exiting) void sweeper.tick();
+  }, SWEEP_TICK_MS);
   setInterval(() => {
     if (handler.idleForMs() >= IDLE_EXIT_MS && !handler.busy()) void shutdown();
   }, 30_000);
