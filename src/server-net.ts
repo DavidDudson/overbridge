@@ -23,6 +23,8 @@ export const serverDisabled = (): boolean => !!process.env.OVERBRIDGE_NO_SERVER;
 
 const metaOf = () => join(root(), ".overbridge");
 export const pidFile = () => join(metaOf(), "server.pid");
+/** Written by `overbridge server stop`, so the watchdog does not bring back a server the user stopped. */
+export const stoppingFile = () => join(metaOf(), "server.stopping");
 
 /** `<meta>/server.sock`, or a short path under the runtime dir when that would not fit. */
 export function socketPath(rootDir: string = root()): string {

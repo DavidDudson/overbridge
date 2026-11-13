@@ -179,6 +179,13 @@ export class PrBatcher {
     this.wanted.set(repo, want);
     for (const n of numbers) want.add(n);
     const key = `gh:prs:${repo}`;
+    // paused by a rate limit: serve the last reply without a fetch, so the pause counts as no failure and leaves no backoff behind. A forced read (the user's `r`) goes through.
+    const paused = o.force ? undefined : this.paused();
+    if (paused) {
+      const held = this.cache.peek(key);
+      if (held === undefined) throw new Error(paused);
+      return { prs: held, error: paused };
+    }
     const opts = { ttlMs: PR_TTL_MS, staleMs: PR_STALE_MS, force: o.force === true };
     let got = await this.cache.get(key, () => this.fetch(repo), opts);
     // a PR opened since the reply was read is not in it: read again once
@@ -193,8 +200,6 @@ export class PrBatcher {
   }
 
   private async fetch(repo: string): Promise<Record<number, PrView | null | undefined>> {
-    const paused = this.paused();
-    if (paused) throw new Error(paused);
     // the window: refreshes that start together all add their PRs before the one call reads the set
     await this.sleep(this.windowMs);
     const [owner, name] = repo.split("/");

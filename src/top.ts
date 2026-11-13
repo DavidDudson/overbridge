@@ -316,11 +316,6 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   const provider = deps.provider ?? providerFor;
   const exec = deps.exec ?? defaultExec;
   const old = readTopCache(ws);
-  if (deps.paused) {
-    const held: TopCache = { ...old, message: deps.paused, at: Date.now() };
-    writeTopCache(ws, held);
-    return held;
-  }
   const claims = Object.entries(getWorkspace(readState(), ws).repos);
   const links: TopLink[] = [];
   const problems: string[] = [];
@@ -373,7 +368,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       const got = "prs" in batched ? batched.prs[n] : undefined;
       return got === null ? undefined : (got ?? parsePrView(exec(prViewCommand(n), dir)));
     };
-    if (claim.pr !== undefined) {
+    // while gh is paused the PR facts are the last ones read (below), so no PR is looked at
+    if (claim.pr !== undefined && !deps.paused) {
       if (batched && "prs" in batched && batched.error) problems.push(`${repo}: ${batched.error}`);
       const view = viewOf(claim.pr);
       if (view?.url) {
@@ -420,17 +416,22 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     // keep the previous values when this run found nothing, so the panel never goes blank on an outage
     ...(headline ?? old.headline ? { headline: headline ?? old.headline } : {}),
     ...(itemTitle ?? old.title ? { title: itemTitle ?? old.title } : {}),
-    links: itemLink || links.length ? [...(itemLink ? [itemLink] : []), ...links] : old.links,
-    // released repos hold no branch, so only claimed branches need an open PR
-    // an open PR somewhere, and every other claim already merged: a merged branch is finished, not a reason to keep the workspace
-    prsOpen: claimed > 0 && openPrs > 0 && openPrs + mergedPrs === claimed,
-    ...(claimed > 0 && openPrs === claimed && draftPrs === claimed ? { draftOnly: true } : {}),
-    ...(prActiveAt !== undefined ? { prActiveAt } : {}),
-    // a claim with no PR, a closed PR or an unreadable one leaves this unset, so the workspace stays
-    ...(claimed > 0 && Object.keys(mergedHeads).length === claimed ? { merged: mergedHeads } : {}),
+    links: deps.paused ? (old.links.length ? old.links : itemLink ? [itemLink] : []) : itemLink || links.length ? [...(itemLink ? [itemLink] : []), ...links] : old.links,
+    ...(deps.paused
+      ? // the PR facts are the last ones read: gh was not asked
+        { prsOpen: old.prsOpen, ...(old.draftOnly ? { draftOnly: true as const } : {}), ...(old.prActiveAt !== undefined ? { prActiveAt: old.prActiveAt } : {}), ...(old.merged ? { merged: old.merged } : {}) }
+      : {
+          // released repos hold no branch, so only claimed branches need an open PR
+          // an open PR somewhere, and every other claim already merged: a merged branch is finished, not a reason to keep the workspace
+          prsOpen: claimed > 0 && openPrs > 0 && openPrs + mergedPrs === claimed,
+          ...(claimed > 0 && openPrs === claimed && draftPrs === claimed ? { draftOnly: true as const } : {}),
+          ...(prActiveAt !== undefined ? { prActiveAt } : {}),
+          // a claim with no PR, a closed PR or an unreadable one leaves this unset, so the workspace stays
+          ...(claimed > 0 && Object.keys(mergedHeads).length === claimed ? { merged: mergedHeads } : {}),
+        }),
     branches: Object.fromEntries(claims.flatMap(([repo, c]) => (c.branch ? [[repo, c.branch] as const] : []))),
     ...(Object.keys(buttonStates).length ? { buttons: buttonStates } : {}),
-    ...(problems.length ? { message: problems.join("; ") } : {}),
+    ...(deps.paused || problems.length ? { message: [...(deps.paused ? [deps.paused] : []), ...problems].join("; ") } : {}),
     at: Date.now(),
   };
   writeTopCache(ws, cache);

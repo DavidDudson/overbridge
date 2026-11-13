@@ -89,6 +89,11 @@ export class Cache<T> {
     this.onError = o.onError ?? (() => undefined);
   }
 
+  /** The value held for `key` whatever its age, without fetching or counting a hit; undefined when there is none. */
+  peek(key: string): T | undefined {
+    return this.entries.get(key)?.value;
+  }
+
   /** Whether any fetch is running or queued. */
   get busy(): boolean {
     return this.active > 0 || this.waiting.length > 0;

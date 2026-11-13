@@ -27,6 +27,8 @@ export interface WatchdogOptions {
   restart: string[];
   hungMs?: number;
   checkMs?: number;
+  /** A file that exists while the user is stopping the server: a hang then ends in a kill and no replacement. */
+  stopMarker?: string;
   /** Tests turn the heartbeat off to simulate a hang. */
   heartbeat?: boolean;
 }
@@ -38,7 +40,7 @@ export function startWatchdog(o: WatchdogOptions): () => void {
   const timer = o.heartbeat === false ? undefined : setInterval(() => (beat[0] = Date.now()), BEAT_MS);
   timer?.unref();
   const worker = new Worker(new URL("./server-watchdog-worker.ts", import.meta.url).href);
-  worker.postMessage({ beat, pid: o.pid ?? process.pid, restart: o.restart, hungMs: o.hungMs ?? HUNG_MS, checkMs: o.checkMs ?? CHECK_MS });
+  worker.postMessage({ beat, pid: o.pid ?? process.pid, restart: o.restart, stopMarker: o.stopMarker, hungMs: o.hungMs ?? HUNG_MS, checkMs: o.checkMs ?? CHECK_MS });
   return () => {
     if (timer) clearInterval(timer);
     worker.terminate();

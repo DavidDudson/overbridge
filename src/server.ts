@@ -3,7 +3,7 @@ import { NAME_RE, metaDir, selfCommand } from "./paths";
 import { pidAlive } from "./proc";
 import { Cache, errorText } from "./server-cache";
 import { CONNECTED_FRAME, createEvents, HEARTBEAT_FRAME, HEARTBEAT_MS } from "./server-events";
-import { CLIENT_START_HEADER, pidFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
+import { CLIENT_START_HEADER, pidFile, stoppingFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
 import { defaultSweepDeps, staleCandidates, sweepMerged } from "./merge-sweep";
 import { ghResetLookup, RateGate } from "./rate-limit";
 import { startWatchdog } from "./server-watchdog";
@@ -293,6 +293,8 @@ export async function serve(): Promise<void> {
   }
   const sock = socketPath();
   rmSync(sock, { force: true });
+  // a stop that is over (this is a new server) must not stop the watchdog from restarting this one
+  rmSync(stoppingFile(), { force: true });
   let exiting = false;
   // a rate-limit reply pauses every gh key until GitHub's reset: they serve what they hold and say why
   const gate = new RateGate({ lookupReset: ghResetLookup, log });
@@ -308,6 +310,7 @@ export async function serve(): Promise<void> {
     plan: () => workerCall("./server-worklist-worker.ts", { kind: "plan" }),
     read: async (source) => {
       const paused = source.kind === "github" ? gate.message() : undefined;
+      // (a forced worklist refresh reads through the cache's own force and is not special-cased: boards fail soft)
       if (paused) throw new Error(paused);
       try {
         return await workerCall("./server-worklist-worker.ts", { kind: "read", source }, 60_000);
@@ -348,10 +351,8 @@ export async function serve(): Promise<void> {
     worklistBusy: () => worklist.busy,
     rateStats: () => gate.stats(),
     refreshTop: async (ws, o) => {
-      const built = await refreshInWorker(ws, await prefetchFor(ws, batcher, o), 120_000, gate.message());
-      // `refreshTop` reports a failed `gh` call on the message row rather than throwing
-      if (built.message) gate.observe(built.message);
-      return built;
+      // a forced refresh (the user's `r`) goes past the pause
+      return refreshInWorker(ws, await prefetchFor(ws, batcher, o), 120_000, o?.force ? undefined : gate.message());
     },
     prBatch: () => batcher.stats(),
     prBusy: () => batcher.busy,
@@ -384,7 +385,7 @@ export async function serve(): Promise<void> {
   }
   log(`serving on ${sock}`);
   // a hung server answers nothing and cannot notice: a watchdog thread kills it and starts a replacement
-  const stopWatchdog = startWatchdog({ restart: ["sh", "-c", 'sleep 1; exec "$@"', "sh", ...selfCommand(), "serve"] });
+  const stopWatchdog = startWatchdog({ stopMarker: stoppingFile(), restart: ["sh", "-c", 'sleep 1; exec "$@"', "sh", ...selfCommand(), "serve"] });
 
   async function shutdown() {
     if (exiting) return;

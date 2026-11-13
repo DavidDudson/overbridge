@@ -1,6 +1,6 @@
-import { readFileSync, rmSync } from "node:fs";
-import { pidAlive } from "./proc";
-import { call, pidFile, socketPath, spawnServer } from "./server-net";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { pidAlive, readProc } from "./proc";
+import { call, pidFile, socketPath, spawnServer, stoppingFile } from "./server-net";
 import { OverbridgeError } from "./util";
 
 /** `overbridge server status|stop|restart`: look at, stop and restart the long-running server. */
@@ -78,7 +78,8 @@ export function formatStatus(s: ServerStatus, now: number = Date.now()): string 
 
 /** Ask the running server for its status; undefined when none answers. */
 export async function readStatus(sock?: string): Promise<ServerStatus | undefined> {
-  const r = await call("GET", "/status", { timeoutMs: 3_000, ...(sock ? { sock } : {}) });
+  // no version: a server of another version still answers, and this look must never make it drain
+  const r = await call("GET", "/status", { timeoutMs: 3_000, version: "", ...(sock ? { sock } : {}) });
   if (!r || r.status !== 200) return undefined;
   try {
     return JSON.parse(r.body) as ServerStatus;
@@ -87,42 +88,78 @@ export async function readStatus(sock?: string): Promise<ServerStatus | undefine
   }
 }
 
-function serverPid(): number | undefined {
+function pidFromFile(): number | undefined {
   try {
     const pid = Number(readFileSync(pidFile(), "utf8").trim());
-    return Number.isInteger(pid) && pid > 0 && pidAlive(pid) ? pid : undefined;
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
   } catch {
     return undefined;
   }
 }
 
+/** Looks like a process this tool starts: a pid file outlives a crash, and the OS may hand its pid to anything. */
+const looksLikeServer = (pid: number): boolean => /bun|overbridge|node/i.test(readProc(pid)?.comm ?? "");
+
+/**
+ * The server to act on. One that answers names its own pid, which is the only pid fully trusted. Failing that, the pid file's
+ * process counts only while it is alive and looks like ours (a hung server answers nothing); anything else is a stale file.
+ */
+async function findServer(): Promise<number | undefined> {
+  const status = await readStatus();
+  if (status?.pid !== undefined) return status.pid;
+  const pid = pidFromFile();
+  return pid !== undefined && pidAlive(pid) && looksLikeServer(pid) ? pid : undefined;
+}
+
+const signal = (pid: number, sig: NodeJS.Signals): boolean => {
+  try {
+    process.kill(pid, sig);
+    return true;
+  } catch {
+    // gone between the look and the signal (ESRCH), or not ours to signal (EPERM)
+    return false;
+  }
+};
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const clearFiles = () => {
+  rmSync(pidFile(), { force: true });
+  rmSync(socketPath(), { force: true });
+};
 
 /**
  * Stop the server: SIGTERM, which lets it finish what runs, then wait. After `graceMs` a server that has not gone (a hung one)
- * is killed when `escalate` is set; otherwise this reports that it did not stop. Returns whether it is gone.
+ * is killed when `escalate` is set; otherwise this reports that it did not stop. Returns whether it is gone. While it runs a
+ * marker tells the watchdog not to bring the server back.
  */
 export async function stopServer(o: { graceMs?: number; escalate?: boolean; say?: (msg: string) => void } = {}): Promise<boolean> {
   const say = o.say ?? (() => undefined);
-  const pid = serverPid();
+  const pid = await findServer();
   if (pid === undefined) {
-    // nothing alive: clear what a crash left behind so the next start is clean
-    rmSync(pidFile(), { force: true });
-    rmSync(socketPath(), { force: true });
+    // nothing of ours alive: clear what a crash left behind so the next start is clean
+    clearFiles();
     return true;
   }
-  process.kill(pid, "SIGTERM");
-  const end = Date.now() + (o.graceMs ?? 15_000);
-  while (Date.now() < end && pidAlive(pid)) await sleep(100);
-  if (pidAlive(pid)) {
-    if (!o.escalate) return false;
-    say(`server ${pid} did not exit; killing it`);
-    process.kill(pid, "SIGKILL");
-    while (pidAlive(pid)) await sleep(50);
-    rmSync(pidFile(), { force: true });
-    rmSync(socketPath(), { force: true });
+  writeFileSync(stoppingFile(), String(pid));
+  try {
+    signal(pid, "SIGTERM");
+    const end = Date.now() + (o.graceMs ?? 15_000);
+    while (Date.now() < end && pidAlive(pid)) await sleep(100);
+    if (pidAlive(pid)) {
+      if (!o.escalate) return false;
+      say(`server ${pid} did not exit; killing it`);
+      signal(pid, "SIGKILL");
+      const killEnd = Date.now() + 5_000;
+      while (Date.now() < killEnd && pidAlive(pid)) await sleep(50);
+      if (pidAlive(pid)) return false;
+      clearFiles();
+    }
+    return true;
+  } finally {
+    // gone, or still up and no longer being stopped: either way the watchdog may act again
+    rmSync(stoppingFile(), { force: true });
   }
-  return true;
 }
 
 /** Start the server (past the start throttle) and wait until it answers. */
@@ -152,7 +189,7 @@ export async function serverCommand(args: string[], out: (text: string) => void 
       return 0;
     }
     case "stop": {
-      const wasUp = serverPid() !== undefined;
+      const wasUp = (await findServer()) !== undefined;
       if (!(await stopServer({ escalate: force, say: out }))) {
         out("server did not stop in time; it may be busy. `overbridge server stop --force` kills it");
         return 1;

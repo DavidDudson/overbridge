@@ -777,9 +777,10 @@ still read `top/<ws>.json`, so the server is a faster writer, not a dependency f
   exits (`--force` kills it); `overbridge server restart` stops it and starts a new one.
 - **Rate limit.** A `gh` failure that reads as a GitHub rate limit pauses every `gh` key until GitHub's reset time
   (read with `gh api rate_limit`, five minutes when it cannot be read). Paused keys serve what they hold and the top
-  panel's message row says `GitHub rate limit reached: gh calls paused until …`. `status` shows the pause.
+  panel's message row says `GitHub rate limit reached: gh calls paused until …`. `status` shows the pause; `r` (a forced
+  refresh) goes past it. The pause is not counted as a failure, so no backoff outlasts the reset.
 - **Watchdog.** A worker thread restarts a server whose main thread has not beaten for 30 s (a hang): it starts a
-  replacement, then kills the hung process. A suspended machine is not a hang: a check that runs late is skipped.
+  replacement, then kills the hung process (`server stop` marks a stop so it is not undone). A suspended machine is not a hang: a check that runs late is skipped.
 - **Events.** `GET /events` is a Server-Sent Events stream of changed keys. Panes redraw on it and a hidden pane stops
   polling while it is open; down, the polls and file watches run as before. Idle exit waits while a stream is open.
 - `curl --unix-socket <meta>/server.sock http://x/status` is the same data over HTTP.

@@ -245,14 +245,15 @@ describe("refreshTop", () => {
     expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("MERGED", { isDraft: true }) }).draftOnly).toBeUndefined();
   });
 
-  test("while gh is paused by a rate limit, no gh call is made, the old values stay and the message row says why", () => {
+  test("while gh is paused by a rate limit, no PR is read, the last PR facts stay and the message row says why", () => {
     const first = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", {}) });
     const notice = "GitHub rate limit reached: gh calls paused until 14:32:10, showing cached data";
-    let calls = 0;
-    const paused = refreshTop("w1", { provider: () => (calls++, fakeProvider(items)), exec: () => (calls++, undefined), paused: notice });
-    expect(calls).toBe(0);
+    const reads: string[][] = [];
+    const paused = refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => (reads.push(cmd), undefined), paused: notice });
+    expect(reads.filter((c) => c[0] === "gh")).toEqual([]);
     expect(paused.message).toBe(notice);
     expect(paused.links).toEqual(first.links);
+    expect(paused.prsOpen).toBe(first.prsOpen);
     expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", {}) }).message).toBeUndefined();
   });
 

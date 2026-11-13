@@ -6,7 +6,8 @@ import { PrBatcher } from "../src/pr-batch";
 import { DEFAULT_PAUSE_MS, isRateLimited, MAX_PAUSE_MS, MIN_PAUSE_MS, RateGate } from "../src/rate-limit";
 import { createHandler } from "../src/server";
 import { Cache } from "../src/server-cache";
-import { formatStatus, keyRows, type ServerStatus } from "../src/server-cmd";
+import { formatStatus, keyRows, readStatus, type ServerStatus, stopServer } from "../src/server-cmd";
+import { pidFile, stoppingFile } from "../src/server-net";
 import { startWatchdog, watchdogVerdict } from "../src/server-watchdog";
 
 const settle = async () => {
@@ -89,22 +90,34 @@ describe("rate limit gate", () => {
     expect(hit.prs[1]).toBeTruthy();
     expect(gate.message()).toContain("paused");
 
-    // paused: more refreshes, forced ones too, make no gh call and still serve the last reply, naming the pause
+    // paused: more refreshes make no gh call, serve the last reply and name the pause. The pause is no failure, so it leaves no backoff
     t += 5_000;
-    for (const force of [false, true, true]) {
-      const got = await batcher.get("o/r", [1], { force });
-      // an unforced call is answered from the error backoff (the failure's own text); a forced one reaches the pause
-      expect(got.error).toMatch(force ? /GitHub rate limit reached/ : /rate limit/);
+    for (let i = 0; i < 3; i++) {
+      const got = await batcher.get("o/r", [1]);
+      expect(got.error).toContain("GitHub rate limit reached");
       expect(got.prs[1]).toBeTruthy();
     }
     expect(calls).toBe(2);
+    expect(batcher.stats().cache.keys["gh:prs:o/r"]!.failures).toBe(1);
 
     // past the reset gh is called again
     limited = false;
     t += DEFAULT_PAUSE_MS + 1;
-    const after = await batcher.get("o/r", [1], { force: true });
+    t += 60_000;
+    const after = await batcher.get("o/r", [1]);
     expect(calls).toBe(3);
     expect(after.error).toBeUndefined();
+  });
+
+  test("a forced read (the user's r) goes past the pause", async () => {
+    let calls = 0;
+    const gate = new RateGate({ now: () => 0 });
+    gate.observe("API rate limit exceeded");
+    const batcher = new PrBatcher({ sleep: async () => undefined, paused: () => gate.message(), run: async () => (calls++, { stdout: "", stderr: "boom", code: 1 }) });
+    await expect(batcher.get("o/r", [1])).rejects.toThrow("GitHub rate limit reached");
+    expect(calls).toBe(0);
+    await expect(batcher.get("o/r", [1], { force: true })).rejects.toThrow();
+    expect(calls).toBe(1);
   });
 });
 
@@ -245,5 +258,60 @@ describe("overbridge server", () => {
       await cli(root, "stop", "--force");
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("server stop and status are safe", () => {
+  const withRoot = async (fn: (root: string) => Promise<void>) => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "ob-srvsafe-")));
+    const saved = process.env.OVERBRIDGE_ROOT;
+    process.env.OVERBRIDGE_ROOT = root;
+    mkdirSync(join(root, ".overbridge"), { recursive: true });
+    try {
+      await fn(root);
+    } finally {
+      saved === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = saved);
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  test("a stale pid file whose pid belongs to another program is cleared, and that program is left alone", async () => {
+    await withRoot(async () => {
+      const stranger = Bun.spawn({ cmd: ["sleep", "60"], stdout: "ignore", stderr: "ignore" });
+      writeFileSync(pidFile(), String(stranger.pid));
+      expect(await stopServer({ graceMs: 100, escalate: true })).toBe(true);
+      expect(stranger.exitCode).toBeNull();
+      expect(existsSync(pidFile())).toBe(false);
+      expect(existsSync(stoppingFile())).toBe(false);
+      stranger.kill();
+    });
+  });
+
+  test("status reads a server of another version and does not make it drain", async () => {
+    await withRoot(async (root) => {
+      const sock = join(root, "s.sock");
+      let drained = false;
+      const h = createHandler({ refreshTop: async () => ({}) as never, refreshPerf: async () => 0, workspaceExists: () => true, cacheFileAt: () => 0, version: "some-other-version", onVersionMismatch: () => (drained = true) });
+      const server = Bun.serve({ unix: sock, fetch: (req) => h.handle(req) });
+      const status = await readStatus(sock);
+      await server.stop(true);
+      expect(status?.version).toBe("some-other-version");
+      expect(drained).toBe(false);
+    });
+  });
+
+  test("a hung server that is being stopped is killed and left down by the watchdog", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "ob-wd2-")));
+    const marker = join(dir, "stopping");
+    const restarted = join(dir, "restarted");
+    writeFileSync(marker, "1");
+    const victim = Bun.spawn({ cmd: ["sleep", "60"], stdout: "ignore", stderr: "ignore" });
+    const stop = startWatchdog({ pid: victim.pid, restart: ["touch", restarted], stopMarker: marker, hungMs: 300, checkMs: 50, heartbeat: false });
+    await Promise.race([victim.exited, Bun.sleep(5_000)]);
+    expect(victim.signalCode).toBe("SIGKILL");
+    await Bun.sleep(150);
+    expect(existsSync(restarted)).toBe(false);
+    stop();
+    rmSync(dir, { recursive: true, force: true });
   });
 });
