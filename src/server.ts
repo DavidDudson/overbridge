@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { NAME_RE, metaDir } from "./paths";
 import { pidAlive } from "./proc";
 import { Cache, errorText } from "./server-cache";
+import { CONNECTED_FRAME, createEvents, HEARTBEAT_MS } from "./server-events";
 import { CLIENT_START_HEADER, pidFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
 import { defaultSweepDeps, staleCandidates, sweepMerged } from "./merge-sweep";
 import { createSweeper } from "./server-sweep";
@@ -68,19 +69,60 @@ export function createHandler(deps: HandlerDeps) {
   const report = deps.log ?? (() => undefined);
   const cache = new Cache<TopCache>({ maxInFlight: MAX_REFRESHES, now, onError: (key, e) => report(`${key}: ${e.message}`) });
   const perf = new Cache<number>({ maxInFlight: 1, now, onError: (key, e) => report(`${key}: ${e.message}`) });
+  const events = createEvents();
+  /** Ends each open event stream; a stream the client drops removes itself. */
+  const streams = new Set<() => void>();
+  let lastWorklistAt = 0;
   const startedAt = now();
   let lastRequestAt = now();
   let draining = false;
 
   /** One workspace's top refresh through the shared cache: single flight, TTL, backoff, the in-flight cap. */
   function refreshWs(ws: string, force: boolean) {
-    return cache.get(`top:${ws}`, () => deps.refreshTop(ws, { force }), {
+    return cache.get(`top:${ws}`, async () => {
+      const built = await deps.refreshTop(ws, { force });
+      // the cache file is written by now, so a pane that reads it on this event sees the new value
+      events.publish(`top:${ws}`);
+      return built;
+    }, {
       ttlMs: TOP_TTL_MS,
       staleMs: TOP_STALE_MS,
       force,
       // a cache file older than the TTL (rewritten, deleted or never written) is refreshed even when the entry is young
       expired: now() - deps.cacheFileAt(ws) >= TOP_TTL_MS,
     });
+  }
+
+  /** `GET /events`: a stream that stays open, with a heartbeat so both ends can tell the other is gone. */
+  function eventStream(): Response {
+    const enc = new TextEncoder();
+    let cleanup = () => {};
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const send = (frame: string) => controller.enqueue(enc.encode(frame));
+        const unsubscribe = events.subscribe(send);
+        const beat = setInterval(() => events.heartbeat(), HEARTBEAT_MS);
+        const end = () => {
+          clearInterval(beat);
+          unsubscribe();
+          streams.delete(end);
+        };
+        cleanup = end;
+        streams.add(() => {
+          end();
+          try {
+            controller.close();
+          } catch {
+            // already closed by the client
+          }
+        });
+        send(CONNECTED_FRAME);
+      },
+      cancel() {
+        cleanup();
+      },
+    });
+    return new Response(body, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" } });
   }
 
   async function handle(req: Request): Promise<Response> {
@@ -97,14 +139,21 @@ export function createHandler(deps: HandlerDeps) {
       return json(409, { error: "version mismatch", server: deps.version, client: theirs });
     }
     if (req.method === "GET" && url.pathname === "/status") {
-      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, ...cache.stats(), perf: perf.stats(), ...(deps.prBatch ? { prBatch: deps.prBatch() } : {}), ...(deps.worklistStats ? { worklist: deps.worklistStats() } : {}), ...(deps.sweepStats ? { sweep: deps.sweepStats() } : {}) });
+      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, subscribers: events.count, ...cache.stats(), perf: perf.stats(), ...(deps.prBatch ? { prBatch: deps.prBatch() } : {}), ...(deps.worklistStats ? { worklist: deps.worklistStats() } : {}), ...(deps.sweepStats ? { sweep: deps.sweepStats() } : {}) });
+    }
+    if (req.method === "GET" && url.pathname === "/events") {
+      return eventStream();
     }
     if (req.method === "GET" && url.pathname === "/sweep" && deps.sweepStats) {
       // a sidebar asks this to learn the server runs the sweep, so it skips its own
       return json(200, { owner: true, ...(deps.sweepStats() as object) });
     }
     if (req.method === "POST" && url.pathname === "/refresh/perf") {
-      const got = perf.get("perf", () => deps.refreshPerf(), { ttlMs: PERF_TTL_MS, staleMs: PERF_STALE_MS, force: url.searchParams.get("force") === "1", swr: true });
+      const got = perf.get("perf", async () => {
+        const at = await deps.refreshPerf();
+        events.publish("perf");
+        return at;
+      }, { ttlMs: PERF_TTL_MS, staleMs: PERF_STALE_MS, force: url.searchParams.get("force") === "1", swr: true });
       if (url.searchParams.get("async") === "1") {
         got.catch(() => undefined);
         return json(202, { queued: "perf" });
@@ -118,7 +167,13 @@ export function createHandler(deps: HandlerDeps) {
     }
     if (req.method === "POST" && url.pathname === "/refresh/worklist" && deps.refreshWorklist) {
       try {
-        return json(200, { served: await deps.refreshWorklist(url.searchParams.get("force") === "1") });
+        const at = await deps.refreshWorklist(url.searchParams.get("force") === "1");
+        // the worklist refresher serves its own cache, so only a new build is a change
+        if (at !== lastWorklistAt) {
+          lastWorklistAt = at;
+          events.publish("worklist");
+        }
+        return json(200, { served: at });
       } catch (e) {
         return json(502, { error: errorText(e) });
       }
@@ -153,7 +208,13 @@ export function createHandler(deps: HandlerDeps) {
     /** Refresh `ws` as the sweep does: through the cache, so a pane's refresh and the sweep's share one fetch. */
     refresh: (ws: string) => refreshWs(ws, false),
     stats: () => cache.stats(),
-    idleForMs: () => now() - lastRequestAt,
+    /** Zero while a pane holds an event stream: the server stays up as long as someone is watching. */
+    idleForMs: () => (events.count > 0 ? 0 : now() - lastRequestAt),
+    subscribers: () => events.count,
+    /** Publish a change from outside the routes (the sweep, tests). */
+    publish: (key: string) => events.publish(key),
+    /** End every event stream, so a client reconnects to whichever server runs next. */
+    closeStreams: () => [...streams].forEach((close) => close()),
     busy: () => cache.busy || perf.busy || (deps.prBusy?.() ?? false) || (deps.worklistBusy?.() ?? false) || (deps.sweepBusy?.() ?? false),
   };
 }
@@ -289,6 +350,7 @@ export async function serve(): Promise<void> {
     exiting = true;
     // finish what runs, then go: the next client call starts the new version
     while (handler.busy()) await Bun.sleep(100);
+    handler.closeStreams();
     await server.stop();
     rmSync(sock, { force: true });
     rmSync(pid, { force: true });

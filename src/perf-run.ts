@@ -3,6 +3,7 @@ import { activeMs, checkTotals, duration, pct, rankedRepos, topGroups, WINDOWS, 
 import { computePerf, loadPerf, type PerfViews, readPerfCache } from "./perf-cache";
 import { serverRefreshPerf } from "./server-client";
 import { PERF_TAB } from "./sidebar";
+import { subscribeEvents } from "./events-client";
 import { createPainter, readView, shouldPoll } from "./zellij-view";
 import { bold, boxBottom, boxRow, boxTop, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN } from "./term";
 
@@ -171,8 +172,24 @@ export async function perfPane() {
     draw();
   });
   // a hidden tab reloads only now and then (shouldPoll), and an unchanged frame is not written
+  // a `perf` event means the server wrote perf.json: read it at once (no new rebuild), and a hidden tab stops polling
+  const showCached = () => {
+    const cached = readPerfCache();
+    if (!cached) return;
+    views = cached;
+    list = rows();
+    draw();
+  };
+  const events = subscribeEvents({
+    onChange: (key) => {
+      if (key === "perf") showCached();
+    },
+    onConnection: (up) => {
+      if (up) showCached();
+    },
+  });
   setInterval(() => {
-    if (shouldPoll(PERF_TAB, readView(), reloadedAtMs, Date.now())) void reload(false);
+    if (shouldPoll(PERF_TAB, readView(), reloadedAtMs, Date.now(), events.live())) void reload(false);
   }, PERF_REFRESH_MS);
   draw();
   await new Promise(() => {});

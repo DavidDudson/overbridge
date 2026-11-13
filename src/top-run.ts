@@ -9,6 +9,7 @@ import { mergePr, setReady } from "./pr-actions";
 import { ALT_COMMANDS, type ActDeps, activate, applyOptimistic, type PrChange, type Button, CLEANUP_ARM_MS, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
 import { ENTER_SCREEN, LEAVE_SCREEN } from "./term";
 import { log, spawnCwd } from "./util";
+import { subscribeEvents } from "./events-client";
 import { createPainter, isFocused, readView, shouldPoll } from "./zellij-view";
 
 const POLL_MS = 2_000;
@@ -113,6 +114,7 @@ export async function topPanel(wsOpt?: string) {
 
   let lastReloadAtMs = 0;
   let lastRefreshAtMs = 0;
+  let liveEvents = () => false;
   const reload = async () => {
     lastReloadAtMs = Date.now();
     snap = await snapshotTop(ws);
@@ -208,12 +210,23 @@ export async function topPanel(wsOpt?: string) {
     const nowMs = Date.now();
     if (isFocused(ws, view) && nowMs - lastRefreshAtMs >= REFRESH_MS) {
       refresh();
-    } else if (shouldPoll(ws, view, lastReloadAtMs, nowMs)) {
+    } else if (shouldPoll(ws, view, lastReloadAtMs, nowMs, liveEvents())) {
       void reload();
     }
   };
   const poll = setInterval(tick, POLL_MS);
+  // the server says when this workspace's cache changed, so the panel reloads at once and a hidden one stops polling
+  const events = subscribeEvents({
+    onChange: (key) => {
+      if (key === `top:${ws}`) void reload();
+    },
+    onConnection: (up) => {
+      if (up) void reload();
+    },
+  });
+  liveEvents = events.live;
   refresh();
   await done;
   clearInterval(poll);
+  events.stop();
 }

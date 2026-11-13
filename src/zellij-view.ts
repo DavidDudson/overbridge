@@ -100,9 +100,13 @@ export function readView(deps: ViewDeps = {}): ZellijView {
 /** True when `tab` is the focused tab, or when zellij could not say, so a pane never goes quiet by mistake. */
 export const isFocused = (tab: string, view: ZellijView): boolean => view.focused === undefined || view.focused === tab;
 
-/** Whether a poll tick should do its full work: always on the focused tab, every `HIDDEN_POLL_MS` on a hidden one. */
-export const shouldPoll = (tab: string, view: ZellijView, lastPollAtMs: number, nowMs: number): boolean =>
-  isFocused(tab, view) || nowMs - lastPollAtMs >= HIDDEN_POLL_MS;
+/**
+ * Whether a poll tick should do its full work: always on the focused tab, every `HIDDEN_POLL_MS` on a hidden one. A hidden
+ * pane that holds a live event stream (`live`) does not poll at all: the server tells it what changed, and the first tick
+ * after its tab is focused catches up on anything it ignored.
+ */
+export const shouldPoll = (tab: string, view: ZellijView, lastPollAtMs: number, nowMs: number, live = false): boolean =>
+  isFocused(tab, view) || (!live && nowMs - lastPollAtMs >= HIDDEN_POLL_MS);
 
 /** A writer that skips a frame identical to the last one written. `invalidate` forces the next write. */
 export function createPainter(write: (text: string) => void) {
