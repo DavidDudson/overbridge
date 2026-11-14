@@ -71,6 +71,9 @@ describe("bash", () => {
     "gs modify",
     "gh stack link 1 2",
     "gh stack switch",
+    'gh stack "link" 1 2',
+    "gh stack 'unstack'",
+    "gh stack $sub",
   ])("blocks: %s", (cmd) => {
     expect(check(bash(cmd), ctx)).toBeDefined();
   });
