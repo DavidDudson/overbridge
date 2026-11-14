@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { metaDir } from "./paths";
@@ -11,6 +12,9 @@ import { metaDir } from "./paths";
 
 export const USER_TTL_MS = 60 * 60_000;
 export const MERGE_SETTINGS_TTL_MS = 60 * 60_000;
+
+/** Entries older than this are dropped on write. Long, so a repo's last-good merge settings still back a failed fetch. */
+const KEEP_MS = 90 * 24 * 60 * 60_000;
 
 type Entry = { value: string; at: number };
 const file = () => join(metaDir(), "values.json");
@@ -33,9 +37,12 @@ export function cachedValue(key: string, ttlMs: number, fetch: () => string | un
   const value = fetch();
   if (value === undefined) return entry?.value;
   try {
-    const entries = { ...read(), [key]: { value, at: now } };
+    // entries long past any TTL (a signed-out account's `gh:user:<stamp>`) are dropped as the file is rewritten
+    const kept = Object.fromEntries(Object.entries(read()).filter(([, e]) => now - e.at < KEEP_MS));
+    const entries = { ...kept, [key]: { value, at: now } };
     mkdirSync(metaDir(), { recursive: true });
-    const tmp = `${file()}.${process.pid}.tmp`;
+    // server workers share a pid, so the temp name needs more than that
+    const tmp = `${file()}.${process.pid}.${randomUUID()}.tmp`;
     writeFileSync(tmp, JSON.stringify(entries, null, 2) + "\n");
     renameSync(tmp, file());
   } catch {

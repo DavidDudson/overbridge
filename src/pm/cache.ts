@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { metaDir } from "../paths";
@@ -40,7 +41,7 @@ export function refreshTitle(provider: Provider, project: string, id: string, o:
   const entries = read();
   entries[keyOf(provider, project, id)] = { title, at: now };
   mkdirSync(metaDir(), { recursive: true });
-  const tmp = `${file()}.${process.pid}.tmp`;
+  const tmp = `${file()}.${process.pid}.${randomUUID()}.tmp`;
   writeFileSync(tmp, JSON.stringify(entries, null, 2) + "\n");
   renameSync(tmp, file());
   return title;

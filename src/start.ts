@@ -14,16 +14,10 @@ import { openTab, TabFocus } from "./tab";
 import { cover, hasGhStack, localStacks } from "./stack";
 import { type Claim, claimOwner, isIceboxed, isRemoving, isTaskClaim, readState, type State, TASK_BRANCH_PREFIX } from "./state";
 import { fail, log, must, run } from "./util";
+import { committedConfig } from "./committed-config";
 
-/**
- * The repo's `overbridge.yml` as committed on its default branch, so no worktree has to exist yet, with
- * the root config's layers applied.
- */
-export function committedConfig(spec: RepoSpec): ProjectConfig {
-  const file = `${spec.name}:${CONFIG_FILE}`;
-  const r = run(["git", "-C", barePath(spec.name), "show", `origin/${git.defaultBranch(spec)}:${CONFIG_FILE}`]);
-  return resolveConfig(r.ok ? parseYaml(r.stdout, file) : undefined, spec.name, file);
-}
+export { committedConfig };
+
 
 function providerForRepo(spec: RepoSpec): Provider {
   const pm = committedConfig(spec).projectManagement;

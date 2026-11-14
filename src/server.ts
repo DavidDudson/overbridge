@@ -6,6 +6,8 @@ import { CLIENT_START_HEADER, pidFile, socketPath, takePidFile, VERSION_HEADER }
 import { readState } from "./state";
 import { type PrefetchedPrs, readTopCache, type TopCache } from "./top";
 import { PrBatcher } from "./pr-batch";
+import { createWorklistRefresher } from "./server-worklist";
+import { finishWorklist } from "./worklist-data";
 import { cachedClaimedPrs, prefetchFor } from "./server-prs";
 import { log } from "./util";
 import { overbridgeVersion } from "./version";
@@ -32,6 +34,9 @@ export interface HandlerDeps {
   refreshTop: (ws: string, o?: { force?: boolean }) => Promise<TopCache>;
   /** Build every perf view and write `perf.json`; resolves with when it was built (a cached value cannot be undefined). */
   refreshPerf: () => Promise<number>;
+  /** Refresh the work list (`worklist.json`); resolves with when. Absent: the route answers 404 and the pane runs a child. */
+  refreshWorklist?: (force: boolean) => Promise<number>;
+  worklistStats?: () => unknown;
   workspaceExists: (ws: string) => boolean;
   /** When `ws`'s top cache file was last written (ms since epoch), 0 when it has none. */
   cacheFileAt: (ws: string) => number;
@@ -39,6 +44,7 @@ export interface HandlerDeps {
   /** What the PR batcher has done, for `/status`. */
   prBatch?: () => unknown;
   prBusy?: () => boolean;
+  worklistBusy?: () => boolean;
   /** Called when a client of another version, started after this server, calls: finish what is running, then exit. */
   onVersionMismatch: () => void;
   /** Where a failed refresh is reported; the server's own stdio is ignored. */
@@ -72,7 +78,7 @@ export function createHandler(deps: HandlerDeps) {
       return json(409, { error: "version mismatch", server: deps.version, client: theirs });
     }
     if (req.method === "GET" && url.pathname === "/status") {
-      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, ...cache.stats(), perf: perf.stats(), ...(deps.prBatch ? { prBatch: deps.prBatch() } : {}) });
+      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, ...cache.stats(), perf: perf.stats(), ...(deps.prBatch ? { prBatch: deps.prBatch() } : {}), ...(deps.worklistStats ? { worklist: deps.worklistStats() } : {}) });
     }
     if (req.method === "POST" && url.pathname === "/refresh/perf") {
       const got = perf.get("perf", () => deps.refreshPerf(), { ttlMs: PERF_TTL_MS, staleMs: PERF_STALE_MS, force: url.searchParams.get("force") === "1", swr: true });
@@ -83,6 +89,13 @@ export function createHandler(deps: HandlerDeps) {
       try {
         const { served, error } = await got;
         return json(200, { served, ...(error ? { error } : {}) });
+      } catch (e) {
+        return json(502, { error: errorText(e) });
+      }
+    }
+    if (req.method === "POST" && url.pathname === "/refresh/worklist" && deps.refreshWorklist) {
+      try {
+        return json(200, { served: await deps.refreshWorklist(url.searchParams.get("force") === "1") });
       } catch (e) {
         return json(502, { error: errorText(e) });
       }
@@ -122,59 +135,58 @@ export function createHandler(deps: HandlerDeps) {
     handle,
     stats: () => cache.stats(),
     idleForMs: () => now() - lastRequestAt,
-    busy: () => cache.busy || perf.busy || (deps.prBusy?.() ?? false),
+    busy: () => cache.busy || perf.busy || (deps.prBusy?.() ?? false) || (deps.worklistBusy?.() ?? false),
   };
 }
 
-/** Run `refreshTop` in a worker thread, so the server stays responsive while `gh` runs. */
-export function refreshInWorker(ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000): Promise<TopCache> {
+interface WorkerReply {
+  ok: boolean;
+  value?: unknown;
+  cache?: TopCache;
+  at?: number;
+  error?: string;
+}
+
+/**
+ * One job in a worker thread of `file`: resolves with `pick` of its reply, or rejects with the error text it sent, with
+ * `fallback` when it sent none, or on timeout (`label` names the job). The worker is gone by the time this settles.
+ */
+function workerJob<T>(file: string, message: unknown, o: { timeoutMs: number; label: string; fallback: string; pick: (r: WorkerReply) => T | undefined }): Promise<T> {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./server-worker.ts", import.meta.url).href);
+    const worker = new Worker(new URL(file, import.meta.url).href);
     const timer = setTimeout(() => {
       worker.terminate();
-      reject(new Error(`refresh of ${ws} timed out`));
-    }, timeoutMs);
+      reject(new Error(`${o.label} timed out`));
+    }, o.timeoutMs);
     const finish = () => {
       clearTimeout(timer);
       worker.terminate();
     };
-    worker.onmessage = (e: MessageEvent<{ ok: boolean; cache?: TopCache; error?: string }>) => {
+    worker.onmessage = (e: MessageEvent<WorkerReply>) => {
       finish();
-      if (e.data.ok && e.data.cache) resolve(e.data.cache);
-      else reject(new Error(e.data.error ?? "refresh failed"));
+      const picked = e.data.ok ? o.pick(e.data) : undefined;
+      if (picked !== undefined) resolve(picked);
+      else reject(new Error(e.data.error ?? o.fallback));
     };
     worker.onerror = (e) => {
       finish();
       reject(new Error(e.message));
     };
-    worker.postMessage({ ws, prefetched });
+    worker.postMessage(message);
   });
 }
 
+/** Run `refreshTop` in a worker thread, so the server stays responsive while `gh` runs. */
+export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000): Promise<TopCache> =>
+  workerJob("./server-worker.ts", { ws, prefetched }, { timeoutMs, label: `refresh of ${ws}`, fallback: "refresh failed", pick: (r) => r.cache });
+
 /** Build the perf views in a worker thread: it reads and folds every workspace's history, which must not stall the server. Resolves with when they were built. */
-export function refreshPerfInWorker(timeoutMs = 30_000): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./server-perf-worker.ts", import.meta.url).href);
-    const timer = setTimeout(() => {
-      worker.terminate();
-      reject(new Error("perf refresh timed out"));
-    }, timeoutMs);
-    const finish = () => {
-      clearTimeout(timer);
-      worker.terminate();
-    };
-    worker.onmessage = (e: MessageEvent<{ ok: boolean; at?: number; error?: string }>) => {
-      finish();
-      if (e.data.ok && e.data.at !== undefined) resolve(e.data.at);
-      else reject(new Error(e.data.error ?? "perf refresh failed"));
-    };
-    worker.onerror = (e) => {
-      finish();
-      reject(new Error(e.message));
-    };
-    worker.postMessage({});
-  });
-}
+export const refreshPerfInWorker = (timeoutMs = 30_000): Promise<number> =>
+  workerJob("./server-perf-worker.ts", {}, { timeoutMs, label: "perf refresh", fallback: "perf refresh failed", pick: (r) => r.at });
+
+/** One job in a worker thread of `file`: its `{ok, value}` reply, or a rejection with the error text or on timeout. */
+export const workerCall = <T>(file: string, message: unknown, timeoutMs = 120_000): Promise<T> =>
+  workerJob(file, message, { timeoutMs, label: file, fallback: "job failed", pick: (r) => r.value as T | undefined });
 
 /** `overbridge serve`: runs until idle, killed or a client of another version calls. */
 export async function serve(): Promise<void> {
@@ -188,7 +200,20 @@ export async function serve(): Promise<void> {
   rmSync(sock, { force: true });
   let exiting = false;
   const batcher = new PrBatcher({ claimed: cachedClaimedPrs(CLAIMED_TTL_MS), onError: (key, e) => log(`${key}: ${e.message}`) });
+  const worklist = createWorklistRefresher({
+    plan: () => workerCall("./server-worklist-worker.ts", { kind: "plan" }),
+    read: (source) => workerCall("./server-worklist-worker.ts", { kind: "read", source }, 60_000),
+    finish: (notes, read) => finishWorklist(notes, read),
+  });
   const handler = createHandler({
+    refreshWorklist: async (force) => {
+      const r = await worklist.refresh(force);
+      // a failed planning job serves the last timestamp with `error`; the file was not rebuilt, so the route must not answer 200
+      if (r.error) throw new Error(r.error);
+      return r.value;
+    },
+    worklistStats: () => worklist.stats(),
+    worklistBusy: () => worklist.busy,
     refreshTop: async (ws, o) => refreshInWorker(ws, await prefetchFor(ws, batcher, o)),
     prBatch: () => batcher.stats(),
     prBusy: () => batcher.busy,

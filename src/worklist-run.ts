@@ -1,158 +1,15 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { loadRepos } from "./config";
-import { metaDir, selfCommand } from "./paths";
-import { githubRows, parseProject, projectRows, slugFromUrl, type ProjectBoard, type WorklistScope } from "./pm/board-github";
-import { jiraRows } from "./pm/board-jira";
+import { selfCommand } from "./paths";
 import { detailLines, filterRanked } from "./pm/worklist-filter";
 import { keyOf, rank, type Ranked, type WorkRow, type WorkStatus } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
-import type { ProjectManagement } from "./project-config";
-import { committedConfig } from "./start";
+import { serverRefreshWorklist } from "./server-client";
+import { readWorklist, WORKLIST_REFRESH_MS, type WorklistCache } from "./worklist-data";
+export * from "./worklist-data";
 import { spawnCwd } from "./util";
 import { bold, boxBottom, boxRow, boxTop, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN, type Color } from "./term";
 
 /** Rows the frame uses besides the item rows: top border, header, reasons, legend, bottom border. */
 const CHROME = 5;
-
-/** The panel is a prototype (spike #108): one list, refreshed by a child process, never fetched while drawing. */
-export const WORKLIST_REFRESH_MS = 60_000;
-
-export interface WorklistCache {
-  at: number;
-  rows: WorkRow[];
-  /** One line per repo or Jira project that could not be read. */
-  notes: string[];
-}
-
-const cacheFile = () => join(metaDir(), "worklist.json");
-
-export function readWorklist(): WorklistCache {
-  try {
-    return JSON.parse(readFileSync(cacheFile(), "utf8"));
-  } catch {
-    return { at: 0, rows: [], notes: [] };
-  }
-}
-
-function writeWorklist(cache: WorklistCache) {
-  mkdirSync(metaDir(), { recursive: true });
-  const tmp = `${cacheFile()}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(cache, null, 2) + "\n");
-  renameSync(tmp, cacheFile());
-}
-
-/** One board read: a GitHub repo, or a Jira project shared by every repo that names it. */
-export type BoardSource =
-  | { kind: "github"; repo: string; slug: string; columns?: Record<string, WorkStatus>; scope?: WorklistScope; project?: ProjectBoard }
-  | { kind: "jira"; project: string; repos: string[]; filter?: string; site?: string };
-
-export interface RepoBoard {
-  repo: string;
-  url: string;
-  pm?: ProjectManagement;
-  /** `board.columns`, when the repo sets any. */
-  columns?: Record<string, WorkStatus>;
-}
-
-/**
- * The reads a refresh makes. Repos on the same Jira project and filter share one read, so a ticket is listed once
- * however many repos it could land in.
- */
-export function boardSources(repos: readonly RepoBoard[]): { sources: BoardSource[]; notes: string[] } {
-  const withPm = repos.filter((r): r is RepoBoard & { pm: ProjectManagement } => r.pm !== undefined);
-  const github = withPm
-    .filter((r) => r.pm.name === "github")
-    .map((r) => ({ r, slug: slugFromUrl(r.url) ?? (/^[\w.-]+\/[\w.-]+$/.test(r.pm.project) ? r.pm.project : undefined) }));
-  const jiraRepos = withPm.filter((r) => r.pm.name === "jira");
-  const jiraGroups = Map.groupBy(jiraRepos, (r) => JSON.stringify([r.pm.project.toUpperCase(), r.pm.worklistJql ?? null, r.pm.url ?? null]));
-  const jira = [...jiraGroups.values()].map((group): BoardSource => {
-    const pm = group[0]!.pm;
-    return {
-      kind: "jira",
-      project: pm.project.toUpperCase(),
-      repos: group.map((r) => r.repo),
-      ...(pm.worklistJql !== undefined ? { filter: pm.worklistJql } : {}),
-      ...(pm.url ? { site: pm.url } : {}),
-    };
-  });
-  return {
-    sources: [
-      ...github.flatMap(({ r, slug }): BoardSource[] => {
-        if (!slug) return [];
-        const project = r.pm.worklistProject ? parseProject(r.pm.worklistProject, slug.split("/")[0], r.pm.worklistStatuses) : undefined;
-        return [
-          {
-            kind: "github",
-            repo: r.repo,
-            slug,
-            ...(r.columns && Object.keys(r.columns).length ? { columns: r.columns } : {}),
-            ...(r.pm.worklistScope ? { scope: r.pm.worklistScope } : {}),
-            ...(project ? { project } : {}),
-          },
-        ];
-      }),
-      ...jira,
-    ],
-    notes: [
-      ...github.filter((g) => !g.slug).map(({ r }) => `${r.repo}: cannot tell the GitHub repo from ${r.url}`),
-      ...github.filter((g) => g.slug && g.r.pm.worklistProject && !parseProject(g.r.pm.worklistProject, g.slug.split("/")[0])).map(({ r }) => `${r.repo}: bad worklist-project ${r.pm.worklistProject}`),
-    ],
-  };
-}
-
-export interface BoardReaders {
-  github: (slug: string, repo: string, opts?: { columns?: Record<string, WorkStatus>; scope?: WorklistScope; project?: ProjectBoard }) => WorkRow[];
-  jira: (project: string, repos: string[], opts: { filter?: string; site?: string }) => WorkRow[];
-}
-
-const defaultReaders: BoardReaders = {
-  github: (slug, repo, opts) => (opts?.project ? projectRows(opts.project, slug, repo, undefined, opts.columns) : githubRows(slug, repo, undefined, opts?.columns, opts?.scope)),
-  jira: (project, repos, opts) => jiraRows(project, repos, opts),
-};
-
-const sourceName = (s: BoardSource) => (s.kind === "github" ? s.repo : s.project);
-
-/** Read every source. A source that fails adds a note and does not stop the rest. */
-export function readBoards(sources: readonly BoardSource[], readers: BoardReaders = defaultReaders): { rows: WorkRow[]; notes: string[]; failedRepos: string[] } {
-  const results = sources.map((s): { rows: WorkRow[]; notes: string[]; failedRepos: string[] } => {
-    try {
-      const rows = s.kind === "github" ? readers.github(s.slug, s.repo, { ...(s.columns ? { columns: s.columns } : {}), ...(s.scope ? { scope: s.scope } : {}), ...(s.project ? { project: s.project } : {}) }) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
-      return { rows, notes: [], failedRepos: [] };
-    } catch (e) {
-      return { rows: [], notes: [`${sourceName(s)}: ${(e as Error).message.split("\n")[0]}`], failedRepos: s.kind === "github" ? [s.repo] : s.repos };
-    }
-  });
-  return { rows: results.flatMap((r) => r.rows), notes: results.flatMap((r) => r.notes), failedRepos: results.flatMap((r) => r.failedRepos) };
-}
-
-/**
- * The rows to cache after a refresh: the fresh ones, plus the last good rows of every repo whose read failed,
- * so a rate limit or an outage never empties the panel. Fresh rows win on a repeated key.
- */
-export function keepLastGood(previous: readonly WorkRow[], fresh: readonly WorkRow[], failedRepos: readonly string[]): WorkRow[] {
-  const failed = new Set(failedRepos);
-  const have = new Set(fresh.map((r) => keyOf(r)));
-  return [...fresh, ...previous.filter((r) => failed.has(r.repo) && !have.has(keyOf(r)))];
-}
-
-/** Read every registered repo's board into the cache. A repo whose config cannot be read adds a note. */
-export function refreshWorklist(now = Date.now()): WorklistCache {
-  const configs = Object.values(loadRepos()).map((spec): RepoBoard | string => {
-    try {
-      const config = committedConfig(spec);
-      const pm = config.projectManagement;
-      return { repo: spec.name, url: spec.url, ...(pm ? { pm } : {}), columns: config.boardColumns };
-    } catch (e) {
-      return `${spec.name}: ${(e as Error).message.split("\n")[0]}`;
-    }
-  });
-  const planned = boardSources(configs.filter((c): c is RepoBoard => typeof c !== "string"));
-  const read = readBoards(planned.sources);
-  const cache = { at: now, rows: keepLastGood(readWorklist().rows, read.rows, read.failedRepos), notes: [...configs.filter((c): c is string => typeof c === "string"), ...planned.notes, ...read.notes] };
-  writeWorklist(cache);
-  return cache;
-}
 
 /** The list `overbridge worklist show` prints for a Claude: one ranked row per line, then the repos that could not be read. */
 export function showWorklist(cache: WorklistCache): string[] {
@@ -176,6 +33,11 @@ const spawnRefresh: RefreshSpawner = async (cmd) => {
 };
 
 /** Runs `overbridge worklist refresh` in a child, so the pane keeps drawing and taking keys while the boards are read. */
+/** Refresh through the server when one answers, else in a child. The server reads each board once per window however many callers ask. */
+export async function refreshWorklistAny(o: { force?: boolean } = {}, server: (o: { force?: boolean }) => Promise<RefreshResult | undefined> = serverRefreshWorklist, child: () => Promise<RefreshResult> = refreshInChild): Promise<RefreshResult> {
+  return (await server(o)) ?? (await child());
+}
+
 export async function refreshInChild(spawn: RefreshSpawner = spawnRefresh, self: string[] = selfCommand()): Promise<RefreshResult> {
   const { code, stderr } = await spawn([...self, "worklist", "refresh"]);
   const firstLine = stderr.split("\n").find((l) => l.trim())?.trim();
@@ -259,13 +121,13 @@ export async function worklistPane() {
   /** When the last refresh started, so a failing one waits a full interval before the next try. */
   let refreshStartedAtMs = 0;
 
-  const refresh = () => {
+  const refresh = (force = false) => {
     if (busy) return;
     busy = true;
     refreshStartedAtMs = Date.now();
     message = "refreshing…";
     draw();
-    void refreshInChild().then((result) => {
+    void refreshWorklistAny({ force }).then((result) => {
       cache = readWorklist();
       message = result.ok ? "" : `error: ${result.error}`;
       busy = false;
@@ -334,7 +196,7 @@ export async function worklistPane() {
       if (input.key === "q" || input.key === "ctrl-c") quit();
       else if (input.key === "j" || input.key === "down") selected = Math.min(list.length - 1, selected + 1);
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
-      else if (input.key === "r") refresh();
+      else if (input.key === "r") refresh(true);
       else if (input.key === "/") typing = true;
       else if (input.key === "escape" && filter) filter = "";
       else if ((input.key === "enter" || input.key === "l" || input.key === "right") && list[selected]) detail = list[selected];
