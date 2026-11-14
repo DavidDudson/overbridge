@@ -3,7 +3,7 @@
  * All work happens in a workspace, so everything outside an allow list is blocked, failing closed: an unknown
  * tool, command or shell construct is refused.
  */
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename as pathBasename, dirname as pathDirname, join as pathJoin, resolve } from "node:path";
 import type { HookInput } from "./guard";
@@ -371,10 +371,22 @@ function segmentReason(words: readonly string[]): string | undefined {
 
 const FILE_WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit"]);
 
+function existsAsLink(p: string): boolean {
+  try {
+    return lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 function real(p: string): string {
   try {
     return realpathSync(p);
   } catch {
+    // a dangling symlink exists but resolves nowhere: its parent says nothing about where a write would land
+    if (existsAsLink(p)) {
+      return "/dev/null/dangling-symlink";
+    }
     try {
       return pathJoin(realpathSync(pathDirname(p)), pathBasename(p));
     } catch {

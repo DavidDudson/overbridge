@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { orchestrationPlansDir } from "../src/paths";
@@ -57,6 +57,13 @@ describe("orchestrator: plan-mode plans", () => {
     expect(checkOrchestrator(tool("Write", { file_path: join(plans, "..", "..", "..", "ws1", "x.ts") }))).toContain(START_HINT);
     expect(checkOrchestrator(tool("Write", { file_path: "/home/u/.claude/plans/p.md" }))).toContain(START_HINT);
     expect(checkOrchestrator(tool("Write", {}))).toContain(START_HINT);
+  });
+
+  test("blocks a dangling symlink in the plans folder that points outside it", () => {
+    mkdirSync(orchestrationPlansDir(), { recursive: true });
+    const link = join(orchestrationPlansDir(), "dangling.md");
+    symlinkSync(join(tmp, "missing", "elsewhere.md"), link);
+    expect(checkOrchestrator(tool("Write", { file_path: link }))).toContain(START_HINT);
   });
 
   test("NotebookEdit stays blocked even there", () => {
