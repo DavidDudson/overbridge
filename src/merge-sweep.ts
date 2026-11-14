@@ -63,7 +63,7 @@ export interface SweepDeps {
   now: number;
 }
 
-const defaultSweepDeps = (): SweepDeps => ({
+export const defaultSweepDeps = (): SweepDeps => ({
   refresh: (ws) => {
     refreshTop(ws);
   },
