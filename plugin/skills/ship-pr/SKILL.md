@@ -6,7 +6,7 @@ requires: gh-stack
 
 # Ship a PR from a workspace
 
-> Prerequisites: the `gh-stack` skill (run `overbridge prereqs` first; if it fails, stop and tell the user to install it) and, unless `overbridge config get review.ship-pr` prints `false`, the `overbridge-review` plugin for `mob-review`. If the plugin is missing, stop and tell the user to install it or set `review.ship-pr: false` in `overbridge.yml`.
+> Prerequisites: the `gh-stack` skill (run `overbridge prereqs` first; if it fails, stop and tell the user to install it) and, unless From the repo directory, `overbridge config get review.ship-pr` prints `false`, the `overbridge-review` plugin for `mob-review`. If the plugin is missing, stop and tell the user to install it or set `review.ship-pr: false` in `overbridge.yml`.
 
 Commit the work, push the branch, open a PR with the shared body template, get the build green and the review feedback resolved. Everything runs from the repo directory inside the workspace, on the branch the workspace has claimed.
 
@@ -180,24 +180,29 @@ Required. Run it once the PR is open and step 10 is green, before any bot review
 
 `overbridge config get review.ship-pr` prints `false` when the repo turned the step off: skip this step, say so in the final summary, and go to step 12. Anything else (it prints `true` by default) means run it.
 
-1. Invoke `mob-review` (from the `overbridge-review` plugin) on the branch. Its own clean-thread check still applies. It applies its small clear-cut fixes on your own branch and pushes them when the branch has a PR. A stacked PR is reviewed per layer.
+1. Invoke `mob-review` (from the `overbridge-review` plugin) on the branch. Skip its clean-thread prompt (Step 0) and proceed without asking: this run is unattended. It applies its small clear-cut fixes on your own branch (report-only on someone else's, so nothing is pushed) and pushes them when the branch has a PR; on a stack, push with `gh stack push` (run the lower-branch checks first), never a plain `git push`. A stacked PR is reviewed per layer.
 2. Anything it leaves at `change-requested` is a stop: fix it, or accept it with a stated reason.
-3. If it pushed, go back to step 10 and wait for a green build again. Then continue.
+3. If it pushed, redo step 10 for the new head and wait for a green build, then go straight to step 12. Do not run mob-review a second time.
 
 ## 12. Request Copilot and CodeRabbit, wait, then resolve feedback
 
 **Copilot.** The reviewer is the bot `copilot-pull-request-reviewer[bot]`; `--reviewer` does not accept it, so use the REST API:
-   ```sh
-   read -r owner repo <<<"$(gh repo view --json owner,name --jq '.owner.login + " " + .name')"
-   pr=$(gh pr view --json number --jq '.number')
-   gh api -X POST "repos/$owner/$repo/pulls/$pr/requested_reviewers" -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
-   ```
-   A 404 or "Reviews may only be requested from collaborators" means Copilot review is not enabled for the repo: note it and carry on. An account out of Copilot premium requests gets a 201 and no review: if the PR timeline shows no `review_requested` event for `Copilot` after the request, say the quota may be spent and skip the wait below.
+
+```sh
+read -r owner repo <<<"$(gh repo view --json owner,name --jq '.owner.login + " " + .name')"
+pr=$(gh pr view --json number --jq '.number')
+gh api -X POST "repos/$owner/$repo/pulls/$pr/requested_reviewers" -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
+```
+
+A 404 or "Reviews may only be requested from collaborators" means Copilot review is not enabled for the repo: note it and carry on. An account out of Copilot premium requests gets a 201 and no review: if the PR timeline shows no `review_requested` event for `Copilot` after the request, say the quota may be spent and skip the wait below.
+
 **CodeRabbit, when the repo uses CodeRabbit.** CodeRabbit skips draft PRs on its own, so a draft gets no review unless asked. The repo uses it when it has a `.coderabbit.yaml` or `.coderabbit.yml`, or a `coderabbitai` comment or check shows up on the PR within about a minute of opening it. Unless that config sets `drafts: true` under `reviews.auto_review` (then it reviews drafts itself), ask for the review with a comment:
-   ```sh
-   gh pr comment "$pr" --body "@coderabbitai review"
-   ```
-   Do it again after every later push to a draft PR: its pushes are not reviewed automatically either. If CodeRabbit answers that it is rate limited (a comment containing `rate limited by coderabbit.ai`, which says when it is back), note it and skip its wait below; that is quota, not a failure.
+
+```sh
+gh pr comment "$pr" --body "@coderabbitai review"
+```
+
+Do it again after every later push to a draft PR: its pushes are not reviewed automatically either. If CodeRabbit answers that it is rate limited (a comment containing `rate limited by coderabbit.ai`, which says when it is back), note it and skip its wait below; that is quota, not a failure.
 
 Then record in the report: Copilot and CodeRabbit reviews requested (or why not).
 
@@ -354,7 +359,7 @@ Turn one big branch into a stack of smaller PRs, one slice per layer. This rewri
 
 ## Rules
 
-- **Always run `mob-review` (step 11) after the PR is open and the build is green, and apply its fixes before requesting Copilot or CodeRabbit.** Only `review.ship-pr: false` in `overbridge.yml` skips it.
+- **Always run `mob-review` (step 11) after the PR is open and the build is green, and apply its fixes before requesting Copilot or CodeRabbit.** Only `review.ship-pr: false` in `overbridge.yml` skips it. On someone else's branch it reports and fixes nothing.
 - **Draft PRs, and request a Copilot review and, where the repo uses CodeRabbit, a CodeRabbit review** (by comment, since it skips drafts) on every PR. Only open one ready when the user says so.
 - **Attribution**: end commits and PR bodies with exactly the attribution lines the session's instructions specify, and add none if none are specified. Never invent one. Always commit with the user's git identity.
 - **Always use `TEMPLATE.md`** for the PR body, unless the repo's `CLAUDE.md` says otherwise. Tick the checkboxes that match the real changes.
