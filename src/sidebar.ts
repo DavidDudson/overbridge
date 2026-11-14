@@ -14,6 +14,7 @@ import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
 import { ensureOrchestrationTabs } from "./orchestration-keep";
 import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-history";
 import { isIceboxed, isRemoving, isWorkspaceState, RemovalBlock, readState, type Removing, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
+import { subscribeEvents } from "./events-client";
 import { serverOwnsSweep } from "./server-client";
 import { claimSweep, createSweepTrigger, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
@@ -803,6 +804,7 @@ export async function sidebar(wsOpt?: string) {
   await new Promise<void>((resolve) => {
     const quit = () => {
       clearInterval(timer);
+      events.stop();
       hold("");
       stopWatch();
       process.stdout.write(LEAVE_SCREEN);
@@ -862,6 +864,15 @@ export async function sidebar(wsOpt?: string) {
       draw();
     });
     // a hidden tab's sidebar gathers only every HIDDEN_POLL_MS, and catches up on the first tick after its tab is focused
+    // the server's event stream redraws as soon as a top cache changes. It does not let a hidden sidebar stop polling (unlike the top and perf panes): the gather also runs the reaper, reopens orchestration tabs and starts the sweep fallback, and no event wakes those
+    const events = subscribeEvents({
+      onChange: (key) => {
+        if (key.startsWith("top:") || key === "worklist") tick();
+      },
+      onConnection: (live) => {
+        if (live) tick();
+      },
+    });
     const tick = () => {
       if (shouldPoll(self, readView(), lastGatherAtMs, Date.now())) {
         draw();

@@ -1,3 +1,4 @@
+import { subscribeEvents } from "./events-client";
 import { selfCommand } from "./paths";
 import { detailLines, filterRanked } from "./pm/worklist-filter";
 import { keyOf, rank, type Ranked, type WorkRow, type WorkStatus } from "./pm/worklist";
@@ -217,10 +218,20 @@ export async function worklistPane() {
   setInterval(() => {
     if (Date.now() - Math.max(cache.at, refreshStartedAtMs) >= WORKLIST_REFRESH_MS) refresh();
   }, 1000);
-  setInterval(() => {
+  const pickUp = () => {
     cache = readWorklist().at > cache.at ? readWorklist() : cache;
     draw();
-  }, 5000);
+  };
+  // the server says when the list was rebuilt, so the pane shows it at once; the 5 s read stays as the fallback
+  subscribeEvents({
+    onChange: (key) => {
+      if (key === "worklist") pickUp();
+    },
+    onConnection: (up) => {
+      if (up) pickUp();
+    },
+  });
+  setInterval(pickUp, 5000);
   draw();
   if (cache.at === 0) refresh();
   await new Promise(() => {});
