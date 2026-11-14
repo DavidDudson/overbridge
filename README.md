@@ -20,8 +20,8 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   move within the claim, and `overbridge pr` moves the claim to the current layer.
 - **Bound Claude.** Every workspace gets a generated `.claude/settings.json` with a
   `overbridge guard` PreToolUse hook: no file access in other workspaces, no writes outside
-  its own, no raw `git switch`/`checkout <branch>`/`gh pr checkout`/`gh stack checkout`/
-  `gh stack trunk`/`git worktree`,
+  its own, no raw `git switch`/`checkout <branch>`/`gh pr checkout`/`git worktree`,
+  and only `gh stack init/add/up/down/top/bottom/push/submit/rebase/sync/view` (an allow list),
   no workspace admin commands.
 - **Trusted folders.** overbridge marks each workspace folder it creates as trusted in Claude's `~/.claude.json`
   (`$CLAUDE_CONFIG_DIR/.claude.json` when set), so a session started there skips the "trust this folder" prompt.

@@ -308,7 +308,8 @@ export function status(all: boolean, json: boolean) {
   const stackCell = (r: (typeof rows)[number]) => {
     if (!r.stack) return "";
     const at = r.stack.layers.findIndex((l) => l.branch === r.head);
-    return `${r.stack.number ? `#${r.stack.number}` : "local"} ${at < 0 ? "-" : at + 1}/${r.stack.layers.length}`;
+    const prs = r.stack.layers.map((l) => (l.pr ? `#${l.pr}` : "-")).join(" ");
+    return `${r.stack.number ? `#${r.stack.number}` : "local"} ${at < 0 ? "-" : at + 1}/${r.stack.layers.length} (${prs})`;
   };
   table(
     ["ws", "repo", "claim", "pr", "head", "stack", ""],

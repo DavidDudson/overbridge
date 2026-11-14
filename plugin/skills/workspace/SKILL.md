@@ -68,9 +68,11 @@ gh stack submit --auto           # push + open/update every PR
 overbridge pr <repo>                     # claim follows HEAD to the current layer, records its PR
 ```
 
-`gh stack checkout` and `gh stack trunk` are blocked: the first bypasses claims, the
-second puts the workspace on the shared default branch. Use the `gh-stack` skill for
-everything else (non-interactive flags, rebase/conflict flow, merge).
+Only `init`, `add`, `up`, `down`, `top`, `bottom`, `push`, `submit`, `rebase`, `sync` and `view` run here.
+The guard blocks the rest: `checkout` bypasses claims, `trunk` puts the workspace on the shared
+default branch, and `unstack`, `modify`, `link`, `merge` and `switch` rewrite stacks across
+workspaces or are interactive. Ask the user for those (Merge is a top-panel action). Use the
+`gh-stack` skill for non-interactive flags and the rebase/conflict flow.
 
 ## One workspace per item
 

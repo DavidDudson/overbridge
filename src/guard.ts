@@ -44,6 +44,12 @@ const BASH_RULES: [RegExp, string][] = [
     new RegExp(GH_STACK + String.raw`trunk\b`),
     "the trunk is shared across workspaces; stay on stack layers (`gh stack bottom`) or `overbridge release <repo>`",
   ],
+  [
+    // Allow list: every other subcommand (unstack, modify, link, merge, switch...) rewrites or deletes stacks
+    // across workspaces, or is interactive. Flags (`--version`, `--help`) pass.
+    new RegExp(GH_STACK + String.raw`(?!(?:init|add|up|down|top|bottom|push|submit|rebase|sync|view)\b)[a-z]`),
+    "only `gh stack init/add/up/down/top/bottom/push/submit/rebase/sync/view` are allowed here; ask the user to run other stack commands",
+  ],
   [new RegExp(GIT + String.raw`worktree\b`), "worktrees are managed by overbridge; ask the user"],
   [new RegExp(CMD + String.raw`(?:overbridge|ws)\s+(?:new|rm|up|claude|init|layout|spinup)\b`),"workspace admin commands are for the user, not a workspace Claude"],
 ];
