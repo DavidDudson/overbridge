@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { currentWorkspace, envVar, metaDir, root } from "../src/paths";
+import { currentWorkspace, envVar, metaDir, realPath, root, UNRESOLVABLE } from "../src/paths";
 
 const KEYS = ["OVERBRIDGE_ROOT", "WS_ROOT", "OVERBRIDGE_NAME", "WS_NAME"];
 let saved: Record<string, string | undefined>;
@@ -69,5 +69,29 @@ describe("symlinked root", () => {
   test("a root that does not exist yet is returned as given", () => {
     process.env.OVERBRIDGE_ROOT = join(tmp, "missing");
     expect(root()).toBe(join(tmp, "missing"));
+  });
+});
+
+describe("realPath", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-realpath-")));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  test("keeps a missing tail below the deepest existing ancestor", () => {
+    expect(realPath(join(dir, "a", "b", "c.md"))).toBe(join(dir, "a", "b", "c.md"));
+  });
+
+  test("resolves a symlinked directory above a missing tail", () => {
+    mkdirSync(join(dir, "target"));
+    symlinkSync(join(dir, "target"), join(dir, "link"));
+    expect(realPath(join(dir, "link", "a", "b.md"))).toBe(join(dir, "target", "a", "b.md"));
+  });
+
+  test("is unresolvable through a dangling symlink, as the leaf or an ancestor", () => {
+    symlinkSync(join(dir, "missing"), join(dir, "dangling"));
+    expect(realPath(join(dir, "dangling"))).toBe(UNRESOLVABLE);
+    expect(realPath(join(dir, "dangling", "x.md"))).toBe(UNRESOLVABLE);
   });
 });

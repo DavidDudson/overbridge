@@ -16,6 +16,18 @@ describe("file tools", () => {
     expect(check(tool("Read", { file_path: "/w/ws1/other/y" }), ctx)).toBeUndefined();
   });
 
+  test("allows plan-mode plans in the workspace folder, outside every repo worktree", () => {
+    expect(check(tool("Write", { file_path: "/w/ws1/plans/shiny-plan.md" }), ctx)).toBeUndefined();
+    expect(check(tool("Edit", { file_path: "/w/ws1/plans/shiny-plan.md" }), ctx)).toBeUndefined();
+    expect(check(tool("Write", { file_path: "../plans/p.md" }), ctx)).toBeUndefined();
+  });
+
+  test("blocks the default plans folder and the workspace's generated config", () => {
+    expect(check(tool("Write", { file_path: "/home/u/.claude/plans/p.md" }), ctx)).toContain("outside workspace ws1");
+    expect(check(tool("Write", { file_path: "/w/ws2/plans/p.md" }), ctx)).toContain("outside workspace ws1");
+    expect(check(tool("Write", { file_path: "/w/ws1/.claude/plans/p.md" }), ctx)).toContain("managed by overbridge");
+  });
+
   test("blocks other workspaces", () => {
     expect(check(tool("Read", { file_path: "/w/ws2/app/x.ts" }), ctx)).toContain("outside workspace ws1");
     expect(check(tool("Grep", { path: "../../ws2" }), ctx)).toBeDefined();

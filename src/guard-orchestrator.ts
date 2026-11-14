@@ -3,7 +3,10 @@
  * All work happens in a workspace, so everything outside an allow list is blocked, failing closed: an unknown
  * tool, command or shell construct is refused.
  */
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import type { HookInput } from "./guard";
+import { isInside, orchestrationPlansDir, realPath } from "./paths";
 
 export const START_HINT =
   'All work happens in a workspace: start one with `overbridge start <repo> <id> --prompt "<the request>"`, or ' +
@@ -365,6 +368,17 @@ function segmentReason(words: readonly string[]): string | undefined {
   return bad ? blocked(`\`${cmd} ${bad}\``) : undefined;
 }
 
+const FILE_WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit"]);
+
+function writesPlan(input: HookInput): boolean {
+  const target = input.tool_input?.file_path;
+  if (typeof target !== "string" || target === "") {
+    return false;
+  }
+  const expanded = target === "~" || target.startsWith("~/") ? join(homedir(), target.slice(1)) : target;
+  return isInside(realPath(resolve(input.cwd ?? "/", expanded)), realPath(orchestrationPlansDir()));
+}
+
 /** Returns a reason to block the orchestrator's tool call, or undefined to allow it. */
 export function checkOrchestrator(input: HookInput): string | undefined {
   const tool = input.tool_name ?? "";
@@ -374,6 +388,9 @@ export function checkOrchestrator(input: HookInput): string | undefined {
       return split.reason;
     }
     return split.segments.map(segmentReason).find((r) => r !== undefined);
+  }
+  if (FILE_WRITE_TOOLS.has(tool) && writesPlan(input)) {
+    return undefined;
   }
   if (ALLOWED_TOOLS.has(tool) || MCP_READ.test(tool)) {
     return undefined;

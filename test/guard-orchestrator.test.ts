@@ -1,4 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { orchestrationPlansDir } from "../src/paths";
 import { guardReason, type HookInput } from "../src/guard";
 import { checkOrchestrator, splitCommand, START_HINT } from "../src/guard-orchestrator";
 
@@ -27,6 +31,83 @@ describe("orchestrator: file and other tools", () => {
   test("fails closed on a tool it does not know", () => {
     expect(checkOrchestrator(tool("SomeNewTool"))).toBeDefined();
     expect(checkOrchestrator({ cwd: "/w" })).toBeDefined();
+  });
+});
+
+describe("orchestrator: plan-mode plans", () => {
+  let tmp: string;
+  const saved = process.env.OVERBRIDGE_ROOT;
+  beforeAll(() => {
+    tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-orch-plans-")));
+    process.env.OVERBRIDGE_ROOT = tmp;
+  });
+  afterAll(() => {
+    if (saved === undefined) delete process.env.OVERBRIDGE_ROOT;
+    else process.env.OVERBRIDGE_ROOT = saved;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test.each(["Write", "Edit", "MultiEdit"])("allows %s inside its plans folder", (name) => {
+    expect(checkOrchestrator(tool(name, { file_path: join(orchestrationPlansDir(), "p.md") }))).toBeUndefined();
+  });
+
+  test("blocks a write that escapes the plans folder, by `..` or another path", () => {
+    const plans = orchestrationPlansDir();
+    expect(checkOrchestrator(tool("Write", { file_path: join(plans, "..", "x.md") }))).toContain(START_HINT);
+    expect(checkOrchestrator(tool("Write", { file_path: join(plans, "..", "..", "..", "ws1", "x.ts") }))).toContain(START_HINT);
+    expect(checkOrchestrator(tool("Write", { file_path: "/home/u/.claude/plans/p.md" }))).toContain(START_HINT);
+    expect(checkOrchestrator(tool("Write", {}))).toContain(START_HINT);
+  });
+
+  test("blocks sibling folders that only share the plans folder's name as a prefix", () => {
+    const plans = orchestrationPlansDir();
+    expect(checkOrchestrator(tool("Write", { file_path: join(`${plans}-evil`, "x.md") }))).toContain(START_HINT);
+    expect(checkOrchestrator(tool("Write", { file_path: join(dirname(plans), "other", "x.md") }))).toContain(START_HINT);
+  });
+
+  test("resolves `~` and a path relative to the cwd", () => {
+    const plans = orchestrationPlansDir();
+    expect(checkOrchestrator({ cwd: plans, tool_name: "Write", tool_input: { file_path: "p.md" } })).toBeUndefined();
+    expect(checkOrchestrator({ cwd: plans, tool_name: "Write", tool_input: { file_path: "../p.md" } })).toContain(START_HINT);
+    expect(checkOrchestrator({ cwd: plans, tool_name: "Write", tool_input: { file_path: "~/p.md" } })).toContain(START_HINT);
+  });
+
+  describe("symlinks in the plans folder", () => {
+    const plans = () => orchestrationPlansDir();
+    beforeAll(() => mkdirSync(plans(), { recursive: true }));
+
+    test("blocks a link to an existing file outside", () => {
+      writeFileSync(join(tmp, "outside.md"), "");
+      symlinkSync(join(tmp, "outside.md"), join(plans(), "live.md"));
+      expect(checkOrchestrator(tool("Write", { file_path: join(plans(), "live.md") }))).toContain(START_HINT);
+    });
+
+    test("blocks a dangling link to a missing file outside", () => {
+      symlinkSync(join(tmp, "missing", "elsewhere.md"), join(plans(), "dangling.md"));
+      expect(checkOrchestrator(tool("Write", { file_path: join(plans(), "dangling.md") }))).toContain(START_HINT);
+    });
+
+    test("blocks a new file under a link to a directory outside", () => {
+      mkdirSync(join(tmp, "outdir"));
+      symlinkSync(join(tmp, "outdir"), join(plans(), "sub"));
+      expect(checkOrchestrator(tool("Write", { file_path: join(plans(), "sub", "new.md") }))).toContain(START_HINT);
+      expect(checkOrchestrator(tool("Write", { file_path: join(plans(), "sub", "a", "b.md") }))).toContain(START_HINT);
+    });
+
+    test("blocks a path below a dangling directory link", () => {
+      symlinkSync(join(tmp, "nowhere"), join(plans(), "dangling-dir"));
+      expect(checkOrchestrator(tool("Write", { file_path: join(plans(), "dangling-dir", "x.md") }))).toContain(START_HINT);
+    });
+
+    test("allows a link that stays inside the plans folder", () => {
+      writeFileSync(join(plans(), "real.md"), "");
+      symlinkSync(join(plans(), "real.md"), join(plans(), "alias.md"));
+      expect(checkOrchestrator(tool("Write", { file_path: join(plans(), "alias.md") }))).toBeUndefined();
+    });
+  });
+
+  test("NotebookEdit stays blocked even there", () => {
+    expect(checkOrchestrator(tool("NotebookEdit", { file_path: join(orchestrationPlansDir(), "p.ipynb") }))).toContain(START_HINT);
   });
 });
 

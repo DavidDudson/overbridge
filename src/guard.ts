@@ -6,11 +6,10 @@
  *
  * Exit 2 blocks the tool call and shows stderr to Claude.
  */
-import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { checkOrchestrator } from "./guard-orchestrator";
-import { currentWorkspace, isInside, ORCHESTRATION_ENV, root } from "./paths";
+import { currentWorkspace, isInside, ORCHESTRATION_ENV, realPath, root } from "./paths";
 import { type GuardConfig, loadRootLayers } from "./project-config";
 
 export type HookInput = { cwd?: string; tool_name?: string; tool_input?: Record<string, unknown> };
@@ -57,28 +56,16 @@ const BASH_RULES: [RegExp, string][] = [
 // Absolute, home-relative or parent-relative path tokens in a shell command.
 const PATH_TOKEN = /(?:^|[\s=:'"(<>])((?:~|\.\.|\/)[^\s'";|&()<>]*)/g;
 
-function real(p: string): string {
-  try {
-    return realpathSync(p);
-  } catch {
-    try {
-      return join(realpathSync(dirname(p)), basename(p));
-    } catch {
-      return p;
-    }
-  }
-}
-
 /** Returns a reason to block the call, or undefined to allow it. */
 export function check(input: HookInput, ctx: GuardCtx): string | undefined {
-  const rootPath = real(ctx.root);
-  const wsPath = real(join(ctx.root, ctx.ws));
+  const rootPath = realPath(ctx.root);
+  const wsPath = realPath(join(ctx.root, ctx.ws));
   const cwd = input.cwd ?? wsPath;
   const tool = input.tool_name ?? "";
   const ti = input.tool_input ?? {};
 
   const expand = (p: string) =>
-    real(resolve(cwd, p === "~" || p.startsWith("~/") ? join(ctx.home, p.slice(1)) : p));
+    realPath(resolve(cwd, p === "~" || p.startsWith("~/") ? join(ctx.home, p.slice(1)) : p));
   const readable = (ctx.extra?.readPaths ?? []).map(expand);
   // Under the root but outside this workspace. `read-paths` only ever relaxes reads, never writes.
   const foreign = (abs: string) =>
