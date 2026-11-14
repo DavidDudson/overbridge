@@ -13,7 +13,7 @@ start-item (incl. scope gate) → plan → implement → commit → self-review 
 ```
 
 This skill chains other skills and adds the glue. It does not redo their steps: invoke `start-item`
-and `ship-pr` (and `mob-review` when the `overbridge-review` plugin is installed).
+and `ship-pr` (and `mob-review` when the `overbridge-review` plugin is installed; `ship-pr` itself needs that plugin unless `review.ship-pr` is `false`).
 
 ## Arguments
 
@@ -62,7 +62,7 @@ for the PR body's summary, and for the check in step 3 that the work has not out
 Commit the change (Conventional Commits, `Refs <id>` in the body, no secrets) but do not push yet.
 Review sees only committed work.
 
-If the `mob-review` skill is available, run it on the branch against the default branch. It fixes
+`ship-pr` runs `mob-review` on the open PR as a required step (unless `review.ship-pr` is `false`), so a pre-push panel run is optional here. If the `mob-review` skill is available and you want an early pass, run it on the branch against the default branch. It fixes
 the small clear-cut findings on your own branch. Anything left at `change-requested` is a stop: fix
 it now, or accept it with a stated reason, with the user. If `mob-review` is not installed, read your
 own diff once for correctness, tests and leftovers before moving on.

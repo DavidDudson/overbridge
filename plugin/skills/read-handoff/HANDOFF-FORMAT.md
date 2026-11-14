@@ -15,7 +15,7 @@ Write for a reader who has none of this conversation. Give facts the reader can 
 ```markdown
 # Handoff: <item id or PR title> <goal in one line>
 
-Next: <the first action, as a skill name or command, such as `ship-pr --with-review`>
+Next: <the first action, as a skill name or command, such as `ship-pr`>
 Reason: context | manual | icebox
 Workspace: <name>
 

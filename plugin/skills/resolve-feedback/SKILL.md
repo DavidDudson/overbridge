@@ -143,7 +143,7 @@ Pushing fixes can raise new bot comments, so after a push check whether another 
   draft, ask for the review: `gh pr comment <n> --body "@coderabbitai review"`. On a ready PR it reviews each
   push on its own. A rate-limit reply (`rate limited by coderabbit.ai`, which says when it is back) is quota,
   not a failure: report it and carry on.
-- **Wait for it.** Poll the reviews and the `CodeRabbit` check (see `ship-pr` step 11) until a review newer than
+- **Wait for it.** Poll the reviews and the `CodeRabbit` check (see `ship-pr` step 12) until a review newer than
   the push lands, as for Copilot.
 - **Repeat steps 1 to 3** on the threads it opens, until no bot thread is left unresolved and no review is in
   flight. At most three rounds, then say what is left in the summary.

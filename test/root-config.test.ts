@@ -138,6 +138,12 @@ describe("resolveConfig", () => {
     expect(config.ide).toBeUndefined();
   });
 
+  test("review.ship-pr set in the root defaults survives a repo file with its own review block", () => {
+    writeRoot("defaults:\n  review: { ship-pr: false }\nrepos:\n  other:\n    review: { ship-pr: true }\n");
+    expect(loadRepoConfig(worktree("ws1", "app", "review:\n  exclude: [pr-size]\n")).review.shipPr).toBe(false);
+    expect(loadRepoConfig(worktree("ws2", "other", "review:\n  exclude: [pr-size]\n")).review.shipPr).toBe(true);
+  });
+
   test("outside a workspace only the defaults apply", () => {
     writeRoot("defaults:\n  ide: zed\nrepos:\n  app:\n    ide: webstorm\n");
     const outside = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-outside-")));

@@ -129,6 +129,8 @@ export interface ReviewConfig {
   exclude: string[];
   /** Repo-relative directory of repo-local personas. */
   localDir: string;
+  /** Whether `ship-pr` runs `mob-review` on the open PR before requesting bot reviews. Default true. */
+  shipPr: boolean;
 }
 
 export const WORK_STATUSES = ["todo", "in-progress", "blocked", "done"] as const satisfies readonly WorkStatus[];
@@ -166,7 +168,7 @@ export const defaultConfig = (): ProjectConfig => ({
   boardColumns: {},
   apps: [],
   commands: {},
-  review: { exclude: [], localDir: DEFAULT_PERSONA_DIR },
+  review: { exclude: [], localDir: DEFAULT_PERSONA_DIR, shipPr: true },
   checkQueue: defaultCheckQueue(),
   icebox: { prune: [] },
   buttons: [],
@@ -176,7 +178,7 @@ const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", 
 const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
 const ICEBOX_KEYS = ["prune", "idle-days"];
-const REVIEW_KEYS = ["personas", "exclude", "local-dir"];
+const REVIEW_KEYS = ["personas", "exclude", "local-dir", "ship-pr"];
 const BOARD_KEYS = ["columns"];
 const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql", "worklist-scope", "worklist-project", "worklist-statuses"];
 const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "ready", "open", "when"];
@@ -535,6 +537,10 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       if (personas) config.review.personas = personas;
       config.review.exclude = p.stringList(review, "exclude", "review") ?? [];
       config.review.localDir = p.string(review, "local-dir", "review", false) ?? DEFAULT_PERSONA_DIR;
+      const shipPr = review["ship-pr"];
+      if (shipPr === undefined || shipPr === null) config.review.shipPr = true;
+      else if (typeof shipPr !== "boolean") p.add("review.ship-pr", "expected true or false");
+      else config.review.shipPr = shipPr;
     }
   }
 

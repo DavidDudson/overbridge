@@ -111,7 +111,8 @@
       "properties": {
         "personas": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "exclude": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "local-dir": { "type": "string", "minLength": 1 }
+        "local-dir": { "type": "string", "minLength": 1 },
+        "ship-pr": { "type": "boolean", "description": "Run mob-review inside ship-pr, after the build is green and before Copilot/CodeRabbit are requested. Default true." }
       }
     },
     "ide": { "enum": ["vscode", "zed", "webstorm"] },
