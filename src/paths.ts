@@ -52,6 +52,8 @@ export function metaDir(): string {
   if (!existsSync(dir) && existsSync(legacy)) renameSync(legacy, dir);
   return dir;
 }
+/** Where an orchestration tab's plan-mode plans go: it has no workspace folder, so they live in the meta dir. */
+export const orchestrationPlansDir = () => join(metaDir(), "orchestration", "plans");
 export const reposFile = () => join(root(), "repos.toml");
 export const barePath = (repo: string) => join(root(), ".bare", `${repo}.git`);
 /** `gh repo list` cache; outside OVERBRIDGE_ROOT so workspace Claudes may read it. */

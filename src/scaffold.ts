@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { ghReposCache, metaDir, ORCHESTRATION_ENV, root, selfCommand, worktreePath, wsDir } from "./paths";
+import { ghReposCache, metaDir, ORCHESTRATION_ENV, orchestrationPlansDir, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { pluginSettings } from "./plugins";
 import { loadRepoConfig } from "./project-config";
 import { getWorkspace, readState } from "./state";
@@ -87,7 +87,10 @@ export function scaffoldOrchestration(tab: string): string {
     env: { [ORCHESTRATION_ENV]: tab, OVERBRIDGE_ROOT: root(), OVERBRIDGE_NAME: "" },
     hooks: agentStateHooks(),
     ...pluginSettings(),
+    // plan-mode plans stay in the meta dir: `~/.claude/plans` is outside what the orchestrator guard lets it write
+    plansDirectory: orchestrationPlansDir(),
   };
+  mkdirSync(orchestrationPlansDir(), { recursive: true });
   writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
   return file;
 }

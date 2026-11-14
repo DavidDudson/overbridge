@@ -663,7 +663,8 @@ not scroll. It has one tab, `@root`, which runs Claude in the overbridge root (`
 agent-state hooks and a guard through `claude --settings <meta>/orchestration/@root.settings.json`, and gets
 a brief through `--append-system-prompt`. The guard lets it read anything, run read-only `git` and `gh`
 commands, check status, and start or remove workspaces. It blocks file edits, branch changes, commits,
-pushes, and changes to PRs and issues, and its message tells Claude to start a workspace instead. When you
+pushes, and changes to PRs and issues, and its message tells Claude to start a workspace instead. The one file
+write it allows is a plan-mode plan: `plansDirectory` in its settings is `<meta>/orchestration/plans`. When you
 ask it for a task, it runs `overbridge start` with your request as `--prompt`, and the new workspace's
 Claude does the work. When you ask it to pick up, fix or resolve a PR (`pickup #127`, "there's a conflict
 on PR 127"), it first checks `overbridge status --all` for a workspace that already claims the PR's head

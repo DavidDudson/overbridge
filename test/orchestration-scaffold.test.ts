@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { orchestrationArgs } from "../src/commands";
@@ -30,6 +30,14 @@ describe("orchestration tab scaffolding", () => {
     expect(preToolUse).toHaveLength(1);
     expect(preToolUse[0].matcher).toBe("*");
     expect(preToolUse[0].hooks.map((h: { command: string }) => h.command).join(" ")).toMatch(/ guard .* hook$/);
+  });
+
+  test("its plans are written to the meta dir, which exists and is stable across runs", () => {
+    const first = readFileSync(scaffoldOrchestration("@root"), "utf8");
+    const settings = JSON.parse(first);
+    expect(settings.plansDirectory).toBe(join(tmp, ".overbridge", "orchestration", "plans"));
+    expect(existsSync(settings.plansDirectory)).toBe(true);
+    expect(readFileSync(scaffoldOrchestration("@root"), "utf8")).toBe(first);
   });
 
   test("its brief tells it to start a workspace with the user's request for every task", () => {
