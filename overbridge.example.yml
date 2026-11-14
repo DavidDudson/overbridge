@@ -49,6 +49,7 @@ review:
   # personas: [security, code-quality]  # default: auto-select by diff signals
   # exclude: [pr-size]                  # skipped after selection; default: none
   local-dir: .overbridge/personas       # repo-local personas; this is the default
+  # ship-pr: false                      # skip the mob-review step in ship-pr; default true
 
 # The repo's dev shell: agents, skills and terminals run commands in it (`overbridge shell <repo> -- <cmd>`).
 # A plain string is a command prefix; the command to run is appended.

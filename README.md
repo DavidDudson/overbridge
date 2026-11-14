@@ -166,7 +166,7 @@ Run `overbridge help` for every command.
 ## Claude Code plugin
 
 `plugin/` ships skills: `workspace`, `ship-pr` (commit, PR, stacked PRs and splitting a branch into a stack,
-green build, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
+green build, mob-review panel and fixes, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
 `scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`), `read-handoff` (continue from a handoff file after `/clear`), `perf-recommend` (read the performance history and rank where to get time back) and `whip` (from the
 orchestration tab: find every workspace with work still outstanding, such as a draft PR, a conflict with main,
 review feedback, a red build, uncommitted or unpushed work or an item not yet shipped, and message its Claude a
@@ -315,6 +315,7 @@ review:
   personas: [security, code-quality]   # optional; default is auto-select by diff signals
   exclude: [pr-size]                   # skipped after selection
   local-dir: .overbridge/personas      # repo-local personas (this is the default)
+  ship-pr: true                        # ship-pr runs mob-review before requesting bot reviews (this is the default)
 ide: vscode           # vscode | zed | webstorm
 ```
 
@@ -401,6 +402,7 @@ it has run, and who is waiting.
 | `review.personas` | auto | reviewer personas to run; unset selects by diff signals |
 | `review.exclude` | `[]` | personas to skip, applied after selection |
 | `review.local-dir` | `.overbridge/personas` | repo-local personas, relative to the repo root |
+| `review.ship-pr` | `true` | `ship-pr` runs `mob-review` on the open PR once the build is green and applies its fixes before requesting Copilot and CodeRabbit. `false` skips that step |
 | `ide` | `$OVERBRIDGE_IDE`, then `$EDITOR` | `vscode`, `zed` or `webstorm`; the top panel's editor button opens the workspace folder. Unset, the button runs `$OVERBRIDGE_IDE` (an ide name or a command) or else `$EDITOR`; set those per user, not in the repo file. GUI editors only, as it is launched detached |
 
 Providers shell out to `gh` (GitHub) and `jira` ([jira-cli](https://github.com/ankitpokhrel/jira-cli), Jira), so there

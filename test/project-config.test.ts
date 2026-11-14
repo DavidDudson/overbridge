@@ -90,7 +90,13 @@ review:
   local-dir: .review
 `);
     expect(c.commands).toEqual({ test: "pnpm test", format: "pnpm format" });
-    expect(c.review).toEqual({ personas: ["security", "naming"], exclude: ["pr-size"], localDir: ".review" });
+    expect(c.review).toEqual({ personas: ["security", "naming"], exclude: ["pr-size"], localDir: ".review", shipPr: true });
+  });
+
+  test("review.ship-pr defaults on, can be turned off, and must be a boolean", () => {
+    expect(parseConfig("commands: {}").review.shipPr).toBe(true);
+    expect(parseConfig("review:\n  ship-pr: false\n").review.shipPr).toBe(false);
+    expect(() => parseConfig("review:\n  ship-pr: maybe\n")).toThrow("review.ship-pr: expected true or false");
   });
 
   test("icebox.prune lists repo-relative paths and defaults to none", () => {
@@ -113,7 +119,7 @@ review:
   });
 
   test("review defaults: auto-select personas, no excludes, standard local dir", () => {
-    expect(parseConfig("review: {}").review).toEqual({ exclude: [], localDir: ".overbridge/personas" });
+    expect(parseConfig("review: {}").review).toEqual({ exclude: [], localDir: ".overbridge/personas", shipPr: true });
   });
 
   test("validates commands and review", () => {
@@ -162,6 +168,7 @@ describe("getConfigValue", () => {
     expect(getConfigValue(c, "project-management.name")).toBe("github");
     expect(getConfigValue(c, "review.local-dir")).toBe(".overbridge/personas");
     expect(getConfigValue(c, "review.exclude")).toEqual([]);
+    expect(getConfigValue(c, "review.ship-pr")).toBe(true);
   });
   test("unset or missing paths are undefined", () => {
     expect(getConfigValue(c, "commands.build")).toBeUndefined();
