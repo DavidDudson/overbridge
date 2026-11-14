@@ -7,7 +7,7 @@ import { readState } from "./state";
 import { type PrefetchedPrs, readTopCache, type TopCache } from "./top";
 import { PrBatcher } from "./pr-batch";
 import { createWorklistRefresher } from "./server-worklist";
-import { finishWorklist } from "./worklist-run";
+import { finishWorklist } from "./worklist-data";
 import { cachedClaimedPrs, prefetchFor } from "./server-prs";
 import { log } from "./util";
 import { overbridgeVersion } from "./version";
@@ -139,72 +139,34 @@ export function createHandler(deps: HandlerDeps) {
   };
 }
 
-/** Run `refreshTop` in a worker thread, so the server stays responsive while `gh` runs. */
-export function refreshInWorker(ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000): Promise<TopCache> {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./server-worker.ts", import.meta.url).href);
-    const timer = setTimeout(() => {
-      worker.terminate();
-      reject(new Error(`refresh of ${ws} timed out`));
-    }, timeoutMs);
-    const finish = () => {
-      clearTimeout(timer);
-      worker.terminate();
-    };
-    worker.onmessage = (e: MessageEvent<{ ok: boolean; cache?: TopCache; error?: string }>) => {
-      finish();
-      if (e.data.ok && e.data.cache) resolve(e.data.cache);
-      else reject(new Error(e.data.error ?? "refresh failed"));
-    };
-    worker.onerror = (e) => {
-      finish();
-      reject(new Error(e.message));
-    };
-    worker.postMessage({ ws, prefetched });
-  });
+interface WorkerReply {
+  ok: boolean;
+  value?: unknown;
+  cache?: TopCache;
+  at?: number;
+  error?: string;
 }
 
-/** Build the perf views in a worker thread: it reads and folds every workspace's history, which must not stall the server. Resolves with when they were built. */
-export function refreshPerfInWorker(timeoutMs = 30_000): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./server-perf-worker.ts", import.meta.url).href);
-    const timer = setTimeout(() => {
-      worker.terminate();
-      reject(new Error("perf refresh timed out"));
-    }, timeoutMs);
-    const finish = () => {
-      clearTimeout(timer);
-      worker.terminate();
-    };
-    worker.onmessage = (e: MessageEvent<{ ok: boolean; at?: number; error?: string }>) => {
-      finish();
-      if (e.data.ok && e.data.at !== undefined) resolve(e.data.at);
-      else reject(new Error(e.data.error ?? "perf refresh failed"));
-    };
-    worker.onerror = (e) => {
-      finish();
-      reject(new Error(e.message));
-    };
-    worker.postMessage({});
-  });
-}
-
-/** One job in a worker thread of `file`: its `{ok, value}` reply, or a rejection with the error text or on timeout. */
-export function workerCall<T>(file: string, message: unknown, timeoutMs = 120_000): Promise<T> {
+/**
+ * One job in a worker thread of `file`: resolves with `pick` of its reply, or rejects with the error text it sent, with
+ * `fallback` when it sent none, or on timeout (`label` names the job). The worker is gone by the time this settles.
+ */
+function workerJob<T>(file: string, message: unknown, o: { timeoutMs: number; label: string; fallback: string; pick: (r: WorkerReply) => T | undefined }): Promise<T> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL(file, import.meta.url).href);
     const timer = setTimeout(() => {
       worker.terminate();
-      reject(new Error(`${file} timed out`));
-    }, timeoutMs);
+      reject(new Error(`${o.label} timed out`));
+    }, o.timeoutMs);
     const finish = () => {
       clearTimeout(timer);
       worker.terminate();
     };
-    worker.onmessage = (e: MessageEvent<{ ok: boolean; value?: T; error?: string }>) => {
+    worker.onmessage = (e: MessageEvent<WorkerReply>) => {
       finish();
-      if (e.data.ok) resolve(e.data.value as T);
-      else reject(new Error(e.data.error ?? "job failed"));
+      const picked = e.data.ok ? o.pick(e.data) : undefined;
+      if (picked !== undefined) resolve(picked);
+      else reject(new Error(e.data.error ?? o.fallback));
     };
     worker.onerror = (e) => {
       finish();
@@ -213,6 +175,18 @@ export function workerCall<T>(file: string, message: unknown, timeoutMs = 120_00
     worker.postMessage(message);
   });
 }
+
+/** Run `refreshTop` in a worker thread, so the server stays responsive while `gh` runs. */
+export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000): Promise<TopCache> =>
+  workerJob("./server-worker.ts", { ws, prefetched }, { timeoutMs, label: `refresh of ${ws}`, fallback: "refresh failed", pick: (r) => r.cache });
+
+/** Build the perf views in a worker thread: it reads and folds every workspace's history, which must not stall the server. Resolves with when they were built. */
+export const refreshPerfInWorker = (timeoutMs = 30_000): Promise<number> =>
+  workerJob("./server-perf-worker.ts", {}, { timeoutMs, label: "perf refresh", fallback: "perf refresh failed", pick: (r) => r.at });
+
+/** One job in a worker thread of `file`: its `{ok, value}` reply, or a rejection with the error text or on timeout. */
+export const workerCall = <T>(file: string, message: unknown, timeoutMs = 120_000): Promise<T> =>
+  workerJob(file, message, { timeoutMs, label: file, fallback: "job failed", pick: (r) => r.value as T | undefined });
 
 /** `overbridge serve`: runs until idle, killed or a client of another version calls. */
 export async function serve(): Promise<void> {

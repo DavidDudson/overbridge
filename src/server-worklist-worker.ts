@@ -1,5 +1,5 @@
 import { errorText } from "./server-cache";
-import { type BoardSource, planWorklist, readSource } from "./worklist-run";
+import { type BoardSource, planWorklist, readSource } from "./worklist-data";
 
 /** One work-list job off the server's main thread: plan the reads (git shows) or run one board read (`gh`/`jira`). */
 declare const self: Worker;

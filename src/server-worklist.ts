@@ -1,5 +1,5 @@
 import { Cache, errorText, type CacheStats } from "./server-cache";
-import { type BoardSource, mergeReads, type SourceRead, sourceKey, WORKLIST_REFRESH_MS } from "./worklist-run";
+import { type BoardSource, mergeReads, type SourceRead, sourceKey, WORKLIST_REFRESH_MS } from "./worklist-data";
 
 /**
  * The work list refreshed from the server: one read per board per window, however many panes ask, with the cache keys
