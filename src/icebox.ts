@@ -13,7 +13,7 @@ import { entries } from "./sidebar";
 import { scaffold } from "./scaffold";
 import { type DroppedRepo, getWorkspace, isIceboxed, isRemoving, readState, withState } from "./state";
 import { runHooks } from "./hooks";
-import { openTab, TabFocus } from "./tab";
+import { requireTab, TabFocus } from "./tab";
 import { errorMessage, fail, log, run } from "./util";
 
 /** The first message of a thawed agent: its resumed conversation reads the handoff `icebox` wrote. */
@@ -232,7 +232,7 @@ export interface ThawDeps {
   open: (ws: string, prompt: string) => void;
 }
 
-const defaultThawDeps = (): ThawDeps => ({ open: (ws, prompt) => openTab(ws, prompt, TabFocus.Foreground, undefined, true) });
+const defaultThawDeps = (): ThawDeps => ({ open: (ws, prompt) => requireTab(ws, prompt, TabFocus.Foreground, undefined, true) });
 
 /** Refuses with the reason, staying iceboxed, when a dropped worktree's folder is taken or its branch cannot be checked out. */
 export function thaw(ws: string, deps: ThawDeps = defaultThawDeps()): void {

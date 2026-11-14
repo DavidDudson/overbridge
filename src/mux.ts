@@ -99,7 +99,15 @@ export interface ZellijOptions {
 export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): Mux {
   const env = opts.env ?? process.env;
   const meta = opts.metaDir ?? metaDir;
-  const act = (...args: string[]) => exec(opts.session === undefined ? ["zellij", "action", ...args] : ["zellij", "--session", opts.session, "action", ...args]);
+  const actIn = (session: string | undefined, args: string[]) => exec(session === undefined ? ["zellij", "action", ...args] : ["zellij", "--session", session, "action", ...args]);
+  // "There is no active session!" can be a transient miss (a busy server) while this pane's own session is alive,
+  // so ask for that session by name before giving up
+  const act = (...args: string[]) => {
+    const r = actIn(opts.session, args);
+    const own = env.ZELLIJ_SESSION_NAME;
+    if (r.ok || opts.session !== undefined || !own || !/no active session/i.test(`${r.stderr ?? ""}${r.stdout}`)) return r;
+    return actIn(own, args);
+  };
   const target = (id: string) => `terminal_${id}`;
   const tabs = () => {
     const r = act("query-tab-names");

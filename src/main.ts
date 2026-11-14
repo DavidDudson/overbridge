@@ -322,8 +322,11 @@ async function main(argv: string[]): Promise<number> {
       break;
     }
     case "up": {
-      const { values } = opts(rest, { fresh: { type: "boolean" } });
-      cmd.up(!!values.fresh);
+      const { values, positionals } = opts(rest, { fresh: { type: "boolean" } });
+      if (positionals.length > 1 || (positionals.length === 1 && values.fresh)) throw new OverbridgeError("usage: overbridge up [--fresh] | overbridge up <name>");
+      // inside the session `up` cannot attach, so a name opens (or shows) that workspace's tab
+      if (positionals.length === 1) showTab(cmd.requireWs(positionals[0]!));
+      else cmd.up(!!values.fresh);
       break;
     }
     case "spinup":

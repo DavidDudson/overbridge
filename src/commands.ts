@@ -11,7 +11,7 @@ import { barePath, currentWorkspace, isInside, metaDir, NAME_RE, ORCHESTRATION_E
 import { runHooks } from "./hooks";
 import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, workspaceSettingsPath } from "./scaffold";
 import { defaultMux, layoutPath, type Mux, MuxKind, tmuxConfPath } from "./mux";
-import { openTab, TabFocus } from "./tab";
+import { requireTab, TabFocus } from "./tab";
 import { runCheck } from "./check-queue";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
@@ -63,7 +63,7 @@ export function sync() {
 export function newWorkspace(name: string | undefined, repos: string[], mux?: Mux) {
   if (!name) fail("usage: overbridge new <name> [-r repo]... (name it for its work item, e.g. ENG-123 or gh-app-12)");
   createWorkspace(name, repos);
-  openTab(name, undefined, TabFocus.Background, mux);
+  requireTab(name, undefined, TabFocus.Background, mux);
   console.log(name);
 }
 
@@ -345,7 +345,7 @@ export function layout(mux: Mux = defaultMux()) {
 }
 
 export function up(fresh: boolean, mux: Mux = defaultMux()) {
-  if (mux.inSession()) fail(`already inside ${mux.kind}; detach first`);
+  if (mux.inSession()) fail(`already inside ${mux.kind}; detach first, or open one workspace's tab with \`overbridge up <name>\``);
   const names = workspaceNames();
   names.forEach(scaffold);
   const session = sessionName();

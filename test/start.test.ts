@@ -8,11 +8,12 @@ import { localStacks } from "../src/stack";
 import { showTab, start, startStack, startTask } from "../src/start";
 import { readState, withState } from "../src/state";
 import { zellijMux } from "../src/mux";
-import { openTab, TabFocus } from "../src/tab";
+import { openTab, requireTab, TabFocus, tabRetry } from "../src/tab";
 import type { RunResult } from "../src/util";
 import { fakeProvider } from "./helpers/fake-provider";
 
 let tmp: string;
+tabRetry.sleep = () => {};
 const saved = { ...process.env };
 
 const sh = (cmd: string[], cwd: string) => {
@@ -224,10 +225,71 @@ describe("start inside zellij", () => {
     expect(z.actions()).toEqual(["current-tab-info", "new-tab"]);
   });
 
-  test("a tab that fails to open does not move focus", () => {
+  test("a tab that never opens is tried three times and does not move focus", () => {
     const z = fakeZellij("mine", false);
-    openTab("ws-b", undefined, TabFocus.Background, z.mux);
-    expect(z.actions()).toEqual(["current-tab-info", "new-tab"]);
+    const r = openTab("ws-b", undefined, TabFocus.Background, z.mux);
+    expect(r.ok).toBe(false);
+    expect(z.actions().filter((a) => a === "new-tab")).toHaveLength(3);
+    expect(z.actions()).not.toContain("go-to-tab-name");
+  });
+});
+
+describe("a tab that fails to open", () => {
+  const delays = [...tabRetry.delaysMs];
+  const sleeps: number[] = [];
+  beforeAll(() => {
+    process.env.ZELLIJ = "0";
+    // a real session name would make a failed action retry with `--session`, which shifts the argv the fake reads
+    delete process.env.ZELLIJ_SESSION_NAME;
+    tabRetry.sleep = (ms) => void sleeps.push(ms);
+  });
+  beforeEach(() => {
+    sleeps.length = 0;
+  });
+  afterAll(() => {
+    process.env.ZELLIJ = "";
+    tabRetry.delaysMs = delays;
+  });
+
+  /** A zellij whose `new-tab` fails for the first `failures` calls with zellij's own no-session message. */
+  const flaky = (failures: number, tabsAfterFailure: string[] = []) => {
+    let opens = 0;
+    const calls: string[][] = [];
+    const exec = (cmd: string[]): RunResult => {
+      calls.push(cmd);
+      const action = cmd[2];
+      if (action === "new-tab" && opens++ < failures) return { ok: false, code: 1, stdout: "", stderr: "There is no active session!" };
+      if (action === "query-tab-names") return { ok: true, code: 0, stdout: (opens > 0 ? tabsAfterFailure : []).join("\n"), stderr: "" };
+      return { ok: true, code: 0, stdout: action === "current-tab-info" ? "name: mine" : "", stderr: "" };
+    };
+    return { calls, mux: zellijMux(exec), newTabs: () => calls.filter((c) => c[2] === "new-tab").length };
+  };
+
+  test("is retried and opens once the session answers", () => {
+    const z = flaky(1);
+    expect(openTab("ws-a", undefined, TabFocus.Background, z.mux).ok).toBe(true);
+    expect(z.newTabs()).toBe(2);
+    expect(sleeps).toEqual([250]);
+  });
+
+  test("is not opened twice when the failed call had made the tab", () => {
+    const z = flaky(1, ["mine", "ws-a"]);
+    expect(openTab("ws-a", undefined, TabFocus.Background, z.mux).ok).toBe(true);
+    expect(z.newTabs()).toBe(1);
+  });
+
+  test("start fails after the last retry, keeps the workspace and names the command that opens its tab", () => {
+    const z = flaky(99);
+    expect(() => start("app", "20", "do it", { provider: fakeProvider([{ id: "20", title: "Background", url: "" }]), mux: z.mux, plugins: noProblems })).toThrow(
+      /gh-app-20 exists but its tab did not open.*overbridge tab gh-app-20 --prompt 'do it'/s,
+    );
+    expect(z.newTabs()).toBe(3);
+    expect(readState().workspaces["gh-app-20"]).toBeDefined();
+  });
+
+  test("a thawed workspace's recovery command leaves out the resume prompt", () => {
+    const z = flaky(99);
+    expect(() => requireTab("ws-a", "read the handoff", TabFocus.Foreground, z.mux, true)).toThrow(/Open it with: overbridge tab ws-a$/);
   });
 });
 
