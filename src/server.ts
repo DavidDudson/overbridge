@@ -1,10 +1,12 @@
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
-import { NAME_RE, metaDir } from "./paths";
+import { NAME_RE, metaDir, selfCommand } from "./paths";
 import { pidAlive } from "./proc";
 import { Cache, errorText } from "./server-cache";
 import { CONNECTED_FRAME, createEvents, HEARTBEAT_FRAME, HEARTBEAT_MS } from "./server-events";
-import { CLIENT_START_HEADER, pidFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
+import { CLIENT_START_HEADER, pidFile, stoppingFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
 import { defaultSweepDeps, staleCandidates, sweepMerged } from "./merge-sweep";
+import { ghResetLookup, RateGate } from "./rate-limit";
+import { startWatchdog } from "./server-watchdog";
 import { createSweeper } from "./server-sweep";
 import { readState } from "./state";
 import { claimSweep } from "./sweep-trigger";
@@ -51,6 +53,8 @@ export interface HandlerDeps {
   prBatch?: () => unknown;
   prBusy?: () => boolean;
   worklistBusy?: () => boolean;
+  /** The rate-limit gate's state for `/status`. */
+  rateStats?: () => unknown;
   /** The sweep timer's counters; present when the server runs the merged-PR sweep. `GET /sweep` answers 404 without it. */
   sweepStats?: () => unknown;
   sweepBusy?: () => boolean;
@@ -149,7 +153,7 @@ export function createHandler(deps: HandlerDeps) {
       return json(409, { error: "version mismatch", server: deps.version, client: theirs });
     }
     if (req.method === "GET" && url.pathname === "/status") {
-      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, subscribers: events.count, ...cache.stats(), perf: perf.stats(), ...(deps.prBatch ? { prBatch: deps.prBatch() } : {}), ...(deps.worklistStats ? { worklist: deps.worklistStats() } : {}), ...(deps.sweepStats ? { sweep: deps.sweepStats() } : {}) });
+      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, subscribers: events.count, ...cache.stats(), perf: perf.stats(), ...(deps.prBatch ? { prBatch: deps.prBatch() } : {}), ...(deps.worklistStats ? { worklist: deps.worklistStats() } : {}), ...(deps.sweepStats ? { sweep: deps.sweepStats() } : {}), ...(deps.rateStats ? { rateLimit: deps.rateStats() } : {}) });
     }
     if (req.method === "GET" && url.pathname === "/events") {
       return eventStream();
@@ -235,6 +239,8 @@ interface WorkerReply {
   value?: unknown;
   cache?: TopCache;
   at?: number;
+  /** A rate-limit failure seen inside the job. */
+  limited?: string;
   error?: string;
 }
 
@@ -268,8 +274,16 @@ function workerJob<T>(file: string, message: unknown, o: { timeoutMs: number; la
 }
 
 /** Run `refreshTop` in a worker thread, so the server stays responsive while `gh` runs. */
-export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000): Promise<TopCache> =>
-  workerJob("./server-worker.ts", { ws, prefetched }, { timeoutMs, label: `refresh of ${ws}`, fallback: "refresh failed", pick: (r) => r.cache });
+export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000, paused?: string, onLimited?: (text: string) => void): Promise<TopCache> =>
+  workerJob("./server-worker.ts", { ws, prefetched, ...(paused ? { paused } : {}) }, {
+    timeoutMs,
+    label: `refresh of ${ws}`,
+    fallback: "refresh failed",
+    pick: (r) => {
+      if (r.limited) onLimited?.(r.limited);
+      return r.cache;
+    },
+  });
 
 /** Build the perf views in a worker thread: it reads and folds every workspace's history, which must not stall the server. Resolves with when they were built. */
 export const refreshPerfInWorker = (timeoutMs = 30_000): Promise<number> =>
@@ -289,11 +303,33 @@ export async function serve(): Promise<void> {
   }
   const sock = socketPath();
   rmSync(sock, { force: true });
+  // a stop that is over (this is a new server) must not stop the watchdog from restarting this one
+  rmSync(stoppingFile(), { force: true });
   let exiting = false;
-  const batcher = new PrBatcher({ claimed: cachedClaimedPrs(CLAIMED_TTL_MS), onError: (key, e) => log(`${key}: ${e.message}`) });
+  // a rate-limit reply pauses every gh key until GitHub's reset: they serve what they hold and say why
+  const gate = new RateGate({ lookupReset: ghResetLookup, log });
+  const batcher = new PrBatcher({
+    claimed: cachedClaimedPrs(CLAIMED_TTL_MS),
+    paused: () => gate.message(),
+    onError: (key, e) => {
+      gate.observe(e.message);
+      log(`${key}: ${e.message}`);
+    },
+  });
+  // set while a forced worklist refresh that the gate let through is running: its board reads call `gh` despite the pause
+  let worklistForced = false;
   const worklist = createWorklistRefresher({
     plan: () => workerCall("./server-worklist-worker.ts", { kind: "plan" }),
-    read: (source) => workerCall("./server-worklist-worker.ts", { kind: "read", source }, 60_000),
+    read: async (source) => {
+      const paused = source.kind === "github" && !worklistForced ? gate.message() : undefined;
+      if (paused) throw new Error(paused);
+      try {
+        return await workerCall("./server-worklist-worker.ts", { kind: "read", source }, 60_000);
+      } catch (e) {
+        if (source.kind === "github") gate.observe(e instanceof Error ? e.message : String(e));
+        throw e;
+      }
+    },
     finish: (notes, read) => finishWorklist(notes, read),
   });
   let refreshForSweep: (ws: string) => Promise<unknown> = () => Promise.resolve();
@@ -317,14 +353,25 @@ export async function serve(): Promise<void> {
     sweepStats: () => sweeper.stats(),
     sweepBusy: () => sweeper.busy,
     refreshWorklist: async (force) => {
-      const r = await worklist.refresh(force);
+      worklistForced = force && gate.allowForced();
+      let r;
+      try {
+        r = await worklist.refresh(force);
+      } finally {
+        worklistForced = false;
+      }
       // a failed planning job serves the last timestamp with `error`; the file was not rebuilt, so the route must not answer 200
       if (r.error) throw new Error(r.error);
       return r.value;
     },
     worklistStats: () => worklist.stats(),
     worklistBusy: () => worklist.busy,
-    refreshTop: async (ws, o) => refreshInWorker(ws, await prefetchFor(ws, batcher, o)),
+    rateStats: () => gate.stats(),
+    refreshTop: async (ws, o) => {
+      // a forced refresh (the user's `r`) goes past a pause once, to learn whether the limit is still on; every call that sees one feeds the gate
+      const forced = o?.force === true && gate.allowForced();
+      return refreshInWorker(ws, await prefetchFor(ws, batcher, { force: forced }), 120_000, forced ? undefined : gate.message(), (text) => void gate.observe(text));
+    },
     prBatch: () => batcher.stats(),
     prBusy: () => batcher.busy,
     refreshPerf: refreshPerfInWorker,
@@ -355,12 +402,15 @@ export async function serve(): Promise<void> {
     // the socket is already 0600 from the umask set before Bun.serve
   }
   log(`serving on ${sock}`);
+  // a hung server answers nothing and cannot notice: a watchdog thread kills it and starts a replacement
+  const stopWatchdog = startWatchdog({ stopMarker: stoppingFile(), restart: ["sh", "-c", 'sleep 1; exec "$@"', "sh", ...selfCommand(), "serve"] });
 
   async function shutdown() {
     if (exiting) return;
     exiting = true;
     // finish what runs, then go: the next client call starts the new version
     while (handler.busy()) await Bun.sleep(100);
+    stopWatchdog();
     handler.closeStreams();
     await server.stop();
     rmSync(sock, { force: true });

@@ -130,7 +130,7 @@ describe("errors", () => {
       .catch(() => undefined);
     tick(200);
     expect((await cache.get("k", async () => 3, opts)).value).toBe(3);
-    expect(cache.stats().keys.k).toEqual({ atMs: 2_200, failures: 0 });
+    expect(cache.stats().keys.k).toMatchObject({ atMs: 2_200, failures: 0 });
   });
 });
 

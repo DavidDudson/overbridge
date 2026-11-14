@@ -47,6 +47,9 @@ Setup
   overbridge serve                              the one long-running process that owns network refreshes and the shared
                                         cache; panels and hooks start it on demand, it exits when idle, and each
                                         refresh falls back to a child process when it is down
+  overbridge server status [--json]             what the server is doing: uptime, per-key hits, misses, in flight, last error
+  overbridge server stop [--force]              stop it (it finishes what runs first; --force kills it)
+  overbridge server restart                     stop it and start a fresh one
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
   overbridge worklist [refresh|show]            work list pane (the @work tab); refresh reads every board into its cache; show prints it
@@ -246,6 +249,10 @@ async function main(argv: string[]): Promise<number> {
       else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh|sweep] [--ws name]");
       else await topPanel(values.ws);
       break;
+    }
+    case "server": {
+      const { serverCommand } = await import("./server-cmd");
+      return serverCommand(rest);
     }
     case "serve": {
       opts(rest, {});

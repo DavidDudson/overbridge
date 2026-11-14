@@ -23,6 +23,8 @@ export const serverDisabled = (): boolean => !!process.env.OVERBRIDGE_NO_SERVER;
 
 const metaOf = () => join(root(), ".overbridge");
 export const pidFile = () => join(metaOf(), "server.pid");
+/** Written by `overbridge server stop`, so the watchdog does not bring back a server the user stopped. */
+export const stoppingFile = () => join(metaOf(), "server.stopping");
 
 /** `<meta>/server.sock`, or a short path under the runtime dir when that would not fit. */
 export function socketPath(rootDir: string = root()): string {
@@ -102,6 +104,11 @@ export function startServer(spawn: (cmd: string[]) => void = defaultSpawn, now =
   } catch {
     return false;
   }
+}
+
+/** Start `overbridge serve` detached now, past the start throttle: `overbridge server restart` is the user asking. */
+export function spawnServer(): void {
+  defaultSpawn([...selfCommand(), "serve"]);
 }
 
 function defaultSpawn(cmd: string[]) {

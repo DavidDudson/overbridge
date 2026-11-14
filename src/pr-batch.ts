@@ -128,6 +128,8 @@ export interface PrBatcherOptions {
   /** Every PR claimed in `repo` (`owner/name`), which a call fetches along with the ones asked for: one call fills the repo. */
   claimed?: (repo: string) => number[];
   windowMs?: number;
+  /** Why `gh` is paused (a rate limit), or undefined; a paused fetch fails without calling `gh`. */
+  paused?: () => string | undefined;
   perQuery?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -147,12 +149,14 @@ export class PrBatcher {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly windowMs: number;
   private readonly perQuery: number;
+  private readonly paused: () => string | undefined;
   private readonly claimed: (repo: string) => number[];
 
   constructor(o: PrBatcherOptions = {}) {
     this.run = o.run ?? ghRun;
     this.claimed = o.claimed ?? (() => []);
     this.windowMs = o.windowMs ?? BATCH_WINDOW_MS;
+    this.paused = o.paused ?? (() => undefined);
     this.perQuery = o.perQuery ?? PRS_PER_QUERY;
     this.sleep = o.sleep ?? ((ms) => Bun.sleep(ms));
     this.cache = new Cache({ maxInFlight: 2, ...(o.now ? { now: o.now } : {}), ...(o.onError ? { onError: o.onError } : {}) });
@@ -175,6 +179,13 @@ export class PrBatcher {
     this.wanted.set(repo, want);
     for (const n of numbers) want.add(n);
     const key = `gh:prs:${repo}`;
+    // paused by a rate limit: serve the last reply without a fetch, so the pause counts as no failure and leaves no backoff behind. A forced read (the user's `r`) goes through.
+    const paused = o.force ? undefined : this.paused();
+    if (paused) {
+      const held = this.cache.peek(key);
+      if (held === undefined) throw new Error(paused);
+      return { prs: held, error: paused };
+    }
     const opts = { ttlMs: PR_TTL_MS, staleMs: PR_STALE_MS, force: o.force === true };
     let got = await this.cache.get(key, () => this.fetch(repo), opts);
     // a PR opened since the reply was read is not in it: read again once
