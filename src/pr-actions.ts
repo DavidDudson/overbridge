@@ -13,6 +13,9 @@ export interface PrTarget {
   stack: number[];
 }
 
+/** What `gh pr merge` says when the method it was given is not allowed on the repo. */
+const METHOD_REFUSED = /(merge commits?|squash(?: merges?)?|rebase(?: merges?)?).*(not allowed|disabled)|not allowed/i;
+
 const failure = (r: RunResult) => r.stderr.split("\n")[0] || r.stdout.split("\n")[0] || `exit ${r.code}`;
 
 /**
@@ -64,8 +67,9 @@ export function mergePr(target: PrTarget, exec: Exec = defaultExec, repoSlug: (d
   if (!flag) return `PR #${target.number}: could not tell which merge method the repo allows`;
   const merge = (f: string) => exec(["gh", "pr", "merge", String(target.number), f], target.dir);
   let r = merge(flag);
-  if (!r.ok && slug) {
-    // the cached settings may be out of date (an admin turned a method off): read them again and retry once with a different method
+  if (!r.ok && slug && METHOD_REFUSED.test(r.stderr + r.stdout)) {
+    // GitHub refused the method itself, so the cached settings may be out of date (an admin turned one off): read them again and retry once with a different method.
+    // Any other refusal (failing checks, a conflict, branch protection) says nothing about the settings, so it costs no extra call.
     const fresh = flagFrom(cachedValue(key, 0, read));
     if (fresh && fresh !== flag) r = merge(fresh);
   }

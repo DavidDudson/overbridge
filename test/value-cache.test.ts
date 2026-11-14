@@ -77,6 +77,16 @@ describe("mergePr settings", () => {
     expect(mergePr({ dir: "/a", number: 2, stack: [] }, exec, () => "o/x")).toBe("merged PR #2");
     expect(merges).toEqual(["--squash", "--squash", "--merge"]);
   });
+
+  test("a merge refused for another reason does not re-read the settings", () => {
+    const calls: string[] = [];
+    const exec = (cmd: string[]): RunResult => {
+      calls.push(cmd[1]!);
+      return cmd[1] === "repo" ? ok('{"squashMergeAllowed":true}') : { ok: false, code: 1, stdout: "", stderr: "Pull request is not mergeable: required checks have not passed" };
+    };
+    expect(mergePr({ dir: "/a", number: 1, stack: [] }, exec, () => "o/y")).toContain("not mergeable");
+    expect(calls.filter((c) => c === "repo")).toHaveLength(1);
+  });
 });
 
 describe("ghAccountStamp", () => {
