@@ -13,7 +13,7 @@ start-item (incl. scope gate) → plan → implement → commit → self-review 
 ```
 
 This skill chains other skills and adds the glue. It does not redo their steps: invoke `start-item`
-and `ship-pr` (and `mob-review` when the `overbridge-review` plugin is installed).
+and `ship-pr` (and `mob-review` when the `overbridge-review` plugin is installed; `ship-pr` itself needs that plugin unless `review.ship-pr` is `false`).
 
 ## Arguments
 

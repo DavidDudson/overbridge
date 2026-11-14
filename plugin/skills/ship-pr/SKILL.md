@@ -178,7 +178,7 @@ The PR isn't done until CI passes. The push already happened, so CI is running.
 
 Required. Run it once the PR is open and step 10 is green, before any bot review is requested, so the bots see the branch after the panel's fixes.
 
-`overbridge config get review.ship-pr` prints `false` when the repo turned the step off: skip this step, say so in the final summary, and go to step 12. Any other output (including nothing) means run it.
+`overbridge config get review.ship-pr` prints `false` when the repo turned the step off: skip this step, say so in the final summary, and go to step 12. Anything else (it prints `true` by default) means run it.
 
 1. Invoke `mob-review` (from the `overbridge-review` plugin) on the branch. Its own clean-thread check still applies. It applies its small clear-cut fixes on your own branch and pushes them when the branch has a PR. A stacked PR is reviewed per layer.
 2. Anything it leaves at `change-requested` is a stop: fix it, or accept it with a stated reason.
