@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildBatchQuery, type GhRun, mapPr, parseBatch, PrBatcher } from "../src/pr-batch";
-import { ownerRepo } from "../src/server-prs";
+import { ownerRepo } from "../src/repo-slug";
 import { withState } from "../src/state";
 import { cachedClaimedPrs, claimedPrs, prefetchFor } from "../src/server-prs";
 import { refreshTop } from "../src/top";

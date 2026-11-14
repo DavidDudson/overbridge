@@ -24,12 +24,21 @@ export function cachedTitle(provider: Provider, project: string, id: string): st
   return read()[keyOf(provider, project, id)]?.title;
 }
 
-/** Fetch `id`'s title and store it. Keeps the old title when the fetch yields nothing. */
-export function refreshTitle(provider: Provider, project: string, id: string): string | undefined {
+/** A title is refetched when its stored one is older than this: an item is renamed rarely, a refresh runs every minute. */
+export const TITLE_TTL_MS = 10 * 60_000;
+
+/**
+ * Fetch `id`'s title and store it, unless the stored one is under `ttlMs` old (then the network is not touched). Keeps
+ * the old title when the fetch yields nothing.
+ */
+export function refreshTitle(provider: Provider, project: string, id: string, o: { ttlMs?: number; now?: number } = {}): string | undefined {
+  const now = o.now ?? Date.now();
+  const stored = read()[keyOf(provider, project, id)];
+  if (stored && o.ttlMs !== undefined && now - stored.at < o.ttlMs) return stored.title;
   const title = provider.title(id);
   if (title === undefined) return cachedTitle(provider, project, id);
   const entries = read();
-  entries[keyOf(provider, project, id)] = { title, at: Date.now() };
+  entries[keyOf(provider, project, id)] = { title, at: now };
   mkdirSync(metaDir(), { recursive: true });
   const tmp = `${file()}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(entries, null, 2) + "\n");

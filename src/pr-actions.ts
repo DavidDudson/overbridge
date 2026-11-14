@@ -1,3 +1,5 @@
+import { slugOfDir } from "./repo-slug";
+import { MERGE_SETTINGS_TTL_MS, cachedValue } from "./value-cache";
 import { run, type RunResult } from "./util";
 
 type Exec = (cmd: string[], cwd: string) => RunResult;
@@ -10,6 +12,9 @@ export interface PrTarget {
   /** Every PR of the stack the PR belongs to, bottom first; empty when it is not stacked. */
   stack: number[];
 }
+
+/** What `gh pr merge` says when the method it was given is not allowed on the repo. */
+const METHOD_REFUSED = /(merge commits?|squash(?: merges?)?|rebase(?: merges?)?).*(not allowed|disabled)|not allowed/i;
 
 const failure = (r: RunResult) => r.stderr.split("\n")[0] || r.stdout.split("\n")[0] || `exit ${r.code}`;
 
@@ -39,19 +44,34 @@ export function mergeFlag(allowed: { squashMergeAllowed?: boolean; mergeCommitAl
  * Merge the PR, or the whole stack when it has one (GitHub's atomic stack merge; it refuses unless every layer can merge).
  * The branch is left alone: workspaces hold claims on it.
  */
-export function mergePr(target: PrTarget, exec: Exec = defaultExec): string {
+export function mergePr(target: PrTarget, exec: Exec = defaultExec, repoSlug: (dir: string) => string | undefined = slugOfDir): string {
   if (target.stack.length > 1) {
     const r = exec(["gh", "stack", "merge", "--yes"], target.dir);
     return r.ok ? `merged a stack of ${target.stack.length} PRs` : `stack merge failed: ${failure(r)}`;
   }
-  const info = exec(["gh", "repo", "view", "--json", "squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed"], target.dir);
-  let flag: string | undefined;
-  try {
-    flag = mergeFlag(JSON.parse(info.stdout));
-  } catch {
-    flag = undefined;
-  }
+  // the repo's merge settings change rarely: one read per TTL for every workspace of the repo
+  const read = () => {
+    const info = exec(["gh", "repo", "view", "--json", "squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed"], target.dir);
+    return info.ok ? info.stdout : undefined;
+  };
+  const slug = repoSlug(target.dir);
+  const key = `gh:repo:${slug}:merge-settings`;
+  const flagFrom = (settings: string | undefined): string | undefined => {
+    try {
+      return settings === undefined ? undefined : mergeFlag(JSON.parse(settings));
+    } catch {
+      return undefined;
+    }
+  };
+  const flag = flagFrom(slug ? cachedValue(key, MERGE_SETTINGS_TTL_MS, read) : read());
   if (!flag) return `PR #${target.number}: could not tell which merge method the repo allows`;
-  const r = exec(["gh", "pr", "merge", String(target.number), flag], target.dir);
+  const merge = (f: string) => exec(["gh", "pr", "merge", String(target.number), f], target.dir);
+  let r = merge(flag);
+  if (!r.ok && slug && METHOD_REFUSED.test(r.stderr + r.stdout)) {
+    // GitHub refused the method itself, so the cached settings may be out of date (an admin turned one off): read them again and retry once with a different method.
+    // Any other refusal (failing checks, a conflict, branch protection) says nothing about the settings, so it costs no extra call.
+    const fresh = flagFrom(cachedValue(key, 0, read));
+    if (fresh && fresh !== flag) r = merge(fresh);
+  }
   return r.ok ? `merged PR #${target.number}` : `PR #${target.number}: ${failure(r)}`;
 }
