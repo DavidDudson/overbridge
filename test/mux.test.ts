@@ -154,6 +154,31 @@ describe("tmuxMux argv", () => {
     expect(t.calls).toHaveLength(1);
   });
 
+  test("zellij asks for the pane's own session by name when an action finds no active session", () => {
+    const t = recorder((cmd) => (cmd[1] === "action" ? { ok: false, stdout: "", stderr: "There is no active session!" } : ok()));
+    const z = zellijMux(t.exec, { env: { ZELLIJ: "0", ZELLIJ_SESSION_NAME: "s" } });
+    expect(z.goToTab("w").ok).toBe(true);
+    expect(t.calls).toEqual([
+      ["zellij", "action", "go-to-tab-name", "w"],
+      ["zellij", "--session", "s", "action", "go-to-tab-name", "w"],
+    ]);
+  });
+
+  test("zellij reports the first error when asking by name fails too", () => {
+    const t = recorder((cmd) => ({ ok: false, stdout: "", stderr: cmd[1] === "--session" ? "stale session" : "There is no active session!" }));
+    const z = zellijMux(t.exec, { env: { ZELLIJ: "0", ZELLIJ_SESSION_NAME: "gone" } });
+    expect(z.goToTab("w")).toEqual({ ok: false, error: "There is no active session!" });
+  });
+
+  test("zellij does not retry other failures, or with no session name to ask for", () => {
+    const other = recorder(() => ({ ok: false, stdout: "", stderr: "boom" }));
+    zellijMux(other.exec, { env: { ZELLIJ: "0", ZELLIJ_SESSION_NAME: "s" } }).goToTab("w");
+    expect(other.calls).toHaveLength(1);
+    const unnamed = recorder(() => ({ ok: false, stdout: "", stderr: "There is no active session!" }));
+    zellijMux(unnamed.exec, { env: { ZELLIJ: "0" } }).goToTab("w");
+    expect(unnamed.calls).toHaveLength(1);
+  });
+
   test("sessions are named exactly, and `create` starts the server with the generated config", () => {
     const t = mux();
     expect(t.mux.attachCommand("s")).toEqual(["tmux", "attach-session", "-t", "=s"]);

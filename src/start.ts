@@ -10,7 +10,7 @@ import { CONFIG_FILE, type ProjectConfig, parseYaml, ROOT_CONFIG_FILE, resolveCo
 import { scaffold } from "./scaffold";
 import { switchTab } from "./sidebar";
 import { defaultMux, type Mux } from "./mux";
-import { openTab, TabFocus } from "./tab";
+import { requireTab, TabFocus } from "./tab";
 import { cover, hasGhStack, localStacks } from "./stack";
 import { type Claim, claimOwner, isIceboxed, isRemoving, isTaskClaim, readState, type State, TASK_BRANCH_PREFIX } from "./state";
 import { fail, log, must, run } from "./util";
@@ -35,7 +35,7 @@ type TabPrompt = { prompt?: string; defaultPrompt?: string };
 export function showTab(ws: string, prompts: TabPrompt = {}, mux: Mux = defaultMux()) {
   if (isIceboxed(readState().workspaces[ws])) {
     // an iceboxed workspace has no tab and its agent has a handoff to read, so asking for it thaws it
-    thaw(ws, { open: (name, prompt) => openTab(name, prompt, TabFocus.Foreground, mux, true) });
+    thaw(ws, { open: (name, prompt) => requireTab(name, prompt, TabFocus.Foreground, mux, true) });
     return;
   }
   if (mux.inSession() && mux.tabs().includes(ws)) {
@@ -45,7 +45,7 @@ export function showTab(ws: string, prompts: TabPrompt = {}, mux: Mux = defaultM
     }
     return;
   }
-  openTab(ws, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Foreground, mux);
+  requireTab(ws, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Foreground, mux);
 }
 
 /** What `start` may inject: the provider, the multiplexer, the plugin check, and `--here`. */
@@ -248,6 +248,6 @@ function openWorkspace(name: string, repo: string, branch: string, prompts: TabP
     throw e;
   }
   scaffold(name);
-  openTab(name, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Background, mux);
+  requireTab(name, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Background, mux);
   console.log(name);
 }

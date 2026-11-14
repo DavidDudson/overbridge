@@ -8,10 +8,10 @@ import { isOrchestrationTab, orchestrationRemoveMessage } from "./orchestration"
 import { metaDir, root, selfCommand } from "./paths";
 import { defaultMux, type Mux } from "./mux";
 import { entries, switchTab } from "./sidebar";
-import { openTab } from "./tab";
+import { openTab, tabCommand } from "./tab";
 import { getWorkspace, isRemoving, readState, withState } from "./state";
 import { cleanable, noUnsavedWork, readTopCache, refreshTop, sidebarLabel, snapshotTop } from "./top";
-import { fail } from "./util";
+import { fail, log } from "./util";
 
 /** The internal `rm` flag that runs `finishRemoval` in the detached worker. */
 export const FINISH_FLAG = "background-finish";
@@ -169,6 +169,19 @@ function restore(ws: string, error: string) {
     return true;
   });
   if (kept && defaultMux().inSession()) {
-    openTab(ws);
+    // best effort: a failure here must not mask the removal error already recorded. This runs in a detached
+    // worker whose log nobody reads, so the recovery command goes on the card with the error
+    if (!openTab(ws).ok) {
+      const hint = `${ws} has no tab; open it with: ${tabCommand(ws)}`;
+      log(hint);
+      try {
+        withState((s) => {
+          const w = s.workspaces[ws];
+          if (w) s.workspaces[ws] = { ...w, removeError: `${error} (${hint})` };
+        });
+      } catch (e) {
+        log(`could not record the recovery hint: ${(e as Error).message}`);
+      }
+    }
   }
 }

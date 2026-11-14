@@ -10,6 +10,7 @@ import { item } from "./item";
 import { go, GO_USAGE } from "./go";
 import { historyStore } from "./history";
 import { repoLines, repoSummaries, summaries, summaryLines } from "./history-report";
+import { defaultMux } from "./mux";
 import { next } from "./next";
 import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
@@ -322,8 +323,14 @@ async function main(argv: string[]): Promise<number> {
       break;
     }
     case "up": {
-      const { values } = opts(rest, { fresh: { type: "boolean" } });
-      cmd.up(!!values.fresh);
+      const { values, positionals } = opts(rest, { fresh: { type: "boolean" } });
+      if (positionals.length > 1 || (positionals.length === 1 && values.fresh)) throw new OverbridgeError("usage: overbridge up [--fresh] | overbridge up <name>");
+      // inside the session `up` cannot attach, so a name opens (or shows) that workspace's tab
+      if (positionals.length === 1) {
+        if (!defaultMux().inSession()) throw new OverbridgeError("overbridge up <name> adds a tab to the running session, so run it inside zellij; `overbridge up` starts one");
+        showTab(cmd.requireWs(positionals[0]!));
+      }
+      else cmd.up(!!values.fresh);
       break;
     }
     case "spinup":
