@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { buildBatchQuery, type GhRun, mapPr, parseBatch, PrBatcher } from "../src/pr-batch";
 import { ownerRepo } from "../src/server-prs";
 import { withState } from "../src/state";
-import { claimedPrs, prefetchFor } from "../src/server-prs";
+import { cachedClaimedPrs, claimedPrs, prefetchFor } from "../src/server-prs";
 import { refreshTop } from "../src/top";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -261,6 +261,20 @@ describe("prefetchFor and claimedPrs", () => {
 
   test("claimedPrs is the union across workspaces, with every layer of a stack, and skips non-GitHub repos and iceboxed workspaces", () => {
     expect(claimedPrs("o/r").sort((a, b) => a - b)).toEqual([3, 7, 8, 9]);
+  });
+
+  test("cachedClaimedPrs reads state once per ttl for every repo, then again once it is old", () => {
+    let t = 0;
+    const get = cachedClaimedPrs(1000, () => t);
+    expect(get("o/r").sort((a, b) => a - b)).toEqual([3, 7, 8, 9]);
+    withState((s) => {
+      s.workspaces.w2!.repos.gh = { branch: "feat", pr: 4 };
+    });
+    t = 999;
+    expect(get("o/r")).toContain(3);
+    expect(get("o/none")).toEqual([]);
+    t = 1000;
+    expect(get("o/r")).toContain(4);
   });
 
   test("prefetchFor leaves a non-GitHub repo out, passes force, and turns a failure into that repo's error", async () => {

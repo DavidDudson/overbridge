@@ -6,7 +6,7 @@ import { CLIENT_START_HEADER, pidFile, socketPath, takePidFile, VERSION_HEADER }
 import { readState } from "./state";
 import { type PrefetchedPrs, readTopCache, type TopCache } from "./top";
 import { PrBatcher } from "./pr-batch";
-import { claimedPrs, prefetchFor } from "./server-prs";
+import { cachedClaimedPrs, prefetchFor } from "./server-prs";
 import { log } from "./util";
 import { overbridgeVersion } from "./version";
 
@@ -15,6 +15,9 @@ import { overbridgeVersion } from "./version";
  * a unix socket. Panes still read the cache files; the server is a faster, coordinated writer of them. It keeps no
  * durable state, so a crash, kill or upgrade loses nothing that one refresh does not rebuild.
  */
+
+/** How old the claimed-PR list the batcher adds to each query may be: state and stack catalogs are read once per this. */
+export const CLAIMED_TTL_MS = 5_000;
 
 export const TOP_TTL_MS = 60_000;
 export const TOP_STALE_MS = 10 * 60_000;
@@ -184,7 +187,7 @@ export async function serve(): Promise<void> {
   const sock = socketPath();
   rmSync(sock, { force: true });
   let exiting = false;
-  const batcher = new PrBatcher({ claimed: claimedPrs, onError: (key, e) => log(`${key}: ${e.message}`) });
+  const batcher = new PrBatcher({ claimed: cachedClaimedPrs(CLAIMED_TTL_MS), onError: (key, e) => log(`${key}: ${e.message}`) });
   const handler = createHandler({
     refreshTop: async (ws, o) => refreshInWorker(ws, await prefetchFor(ws, batcher, o)),
     prBatch: () => batcher.stats(),

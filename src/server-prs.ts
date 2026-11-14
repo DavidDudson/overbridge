@@ -33,9 +33,9 @@ function repoOf(repo: string): string | undefined {
   }
 }
 
-/** Every claimed PR in every workspace, grouped by `owner/name`: what one call per repo reads. */
-export function claimedPrs(repoFullName: string): number[] {
-  const out = new Set<number>();
+/** Every claimed PR in every workspace, by `owner/name`: what one call per repo reads. */
+function claimedByRepo(): Map<string, Set<number>> {
+  const out = new Map<string, Set<number>>();
   const state = readState();
   const catalogs = new Map<string, ReturnType<typeof localStacks>>();
   const stacks = (repo: string) => catalogs.get(repo) ?? catalogs.set(repo, safeStacks(repo)).get(repo)!;
@@ -43,10 +43,32 @@ export function claimedPrs(repoFullName: string): number[] {
     // an iceboxed workspace has no tab and no panel to draw, so its PRs are not worth the query's points
     if (isIceboxed(state.workspaces[ws])) continue;
     for (const [repo, c] of Object.entries(getWorkspace(state, ws).repos)) {
-      if (c.pr !== undefined && repoOf(repo) === repoFullName) for (const n of claimPrs(repo, c.branch, c.pr, stacks(repo))) out.add(n);
+      const full = c.pr === undefined ? undefined : repoOf(repo);
+      if (full === undefined || c.pr === undefined) continue;
+      const set = out.get(full) ?? out.set(full, new Set()).get(full)!;
+      for (const n of claimPrs(repo, c.branch, c.pr, stacks(repo))) set.add(n);
     }
   }
-  return [...out];
+  return out;
+}
+
+/** Every claimed PR in `repoFullName`, read fresh from state. */
+export const claimedPrs = (repoFullName: string): number[] => [...(claimedByRepo().get(repoFullName) ?? [])];
+
+/**
+ * `claimedPrs` that reads state and the stack catalogs once per `ttlMs` for every repo together. The server's batcher asks
+ * once per repo per window on its main thread, so this keeps that blocking work to one pass however many repos there are.
+ */
+export function cachedClaimedPrs(ttlMs: number, now: () => number = Date.now): (repoFullName: string) => number[] {
+  let at = -Infinity;
+  let all = new Map<string, Set<number>>();
+  return (repoFullName) => {
+    if (now() - at >= ttlMs) {
+      all = claimedByRepo();
+      at = now();
+    }
+    return [...(all.get(repoFullName) ?? [])];
+  };
 }
 
 /**
