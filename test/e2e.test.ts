@@ -82,6 +82,8 @@ describe("workflow", () => {
     expect(copy.hooks).toEqual(settings.hooks);
     expect(copy.env).toEqual(settings.env);
     expect(copy.plansDirectory).toBe(join(root, "ws1", "plans"));
+    // plans sit beside the repo worktrees, never inside one, so they can't dirty git
+    expect(existsSync(join(root, "ws1", "app", "plans"))).toBe(false);
     expect(settings.permissions.allow).toContain("Bash(gh pr ready:*)");
     expect(settings.permissions.allow).toContain("Bash(gh stack push:*)");
     expect(settings.permissions.allow).not.toContain("Bash(gh pr merge:*)");

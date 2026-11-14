@@ -3,7 +3,11 @@
  * All work happens in a workspace, so everything outside an allow list is blocked, failing closed: an unknown
  * tool, command or shell construct is refused.
  */
+import { lstatSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename as pathBasename, dirname as pathDirname, join as pathJoin, resolve } from "node:path";
 import type { HookInput } from "./guard";
+import { isInside, orchestrationPlansDir } from "./paths";
 
 export const START_HINT =
   'All work happens in a workspace: start one with `overbridge start <repo> <id> --prompt "<the request>"`, or ' +
@@ -365,6 +369,42 @@ function segmentReason(words: readonly string[]): string | undefined {
   return bad ? blocked(`\`${cmd} ${bad}\``) : undefined;
 }
 
+const FILE_WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit"]);
+
+function existsAsLink(p: string): boolean {
+  try {
+    return lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+function real(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    // a dangling symlink exists but resolves nowhere: its parent says nothing about where a write would land
+    if (existsAsLink(p)) {
+      return "/dev/null/dangling-symlink";
+    }
+    try {
+      return pathJoin(realpathSync(pathDirname(p)), pathBasename(p));
+    } catch {
+      return p;
+    }
+  }
+}
+
+/** Whether a file tool's target is inside the folder plan mode writes the orchestrator's plans to. */
+function writesPlan(input: HookInput): boolean {
+  const target = input.tool_input?.file_path;
+  if (typeof target !== "string" || target === "") {
+    return false;
+  }
+  const abs = resolve(input.cwd ?? "/", target === "~" || target.startsWith("~/") ? pathJoin(homedir(), target.slice(1)) : target);
+  return isInside(real(abs), real(orchestrationPlansDir()));
+}
+
 /** Returns a reason to block the orchestrator's tool call, or undefined to allow it. */
 export function checkOrchestrator(input: HookInput): string | undefined {
   const tool = input.tool_name ?? "";
@@ -374,6 +414,9 @@ export function checkOrchestrator(input: HookInput): string | undefined {
       return split.reason;
     }
     return split.segments.map(segmentReason).find((r) => r !== undefined);
+  }
+  if (FILE_WRITE_TOOLS.has(tool) && writesPlan(input)) {
+    return undefined;
   }
   if (ALLOWED_TOOLS.has(tool) || MCP_READ.test(tool)) {
     return undefined;

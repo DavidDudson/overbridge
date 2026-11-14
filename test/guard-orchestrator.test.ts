@@ -1,4 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { orchestrationPlansDir } from "../src/paths";
 import { guardReason, type HookInput } from "../src/guard";
 import { checkOrchestrator, splitCommand, START_HINT } from "../src/guard-orchestrator";
 
@@ -27,6 +31,43 @@ describe("orchestrator: file and other tools", () => {
   test("fails closed on a tool it does not know", () => {
     expect(checkOrchestrator(tool("SomeNewTool"))).toBeDefined();
     expect(checkOrchestrator({ cwd: "/w" })).toBeDefined();
+  });
+});
+
+describe("orchestrator: plan-mode plans", () => {
+  let tmp: string;
+  const saved = process.env.OVERBRIDGE_ROOT;
+  beforeAll(() => {
+    tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-orch-plans-")));
+    process.env.OVERBRIDGE_ROOT = tmp;
+  });
+  afterAll(() => {
+    if (saved === undefined) delete process.env.OVERBRIDGE_ROOT;
+    else process.env.OVERBRIDGE_ROOT = saved;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test.each(["Write", "Edit", "MultiEdit"])("allows %s inside its plans folder", (name) => {
+    expect(checkOrchestrator(tool(name, { file_path: join(orchestrationPlansDir(), "p.md") }))).toBeUndefined();
+  });
+
+  test("blocks a write that escapes the plans folder, by `..` or another path", () => {
+    const plans = orchestrationPlansDir();
+    expect(checkOrchestrator(tool("Write", { file_path: join(plans, "..", "x.md") }))).toContain(START_HINT);
+    expect(checkOrchestrator(tool("Write", { file_path: join(plans, "..", "..", "..", "ws1", "x.ts") }))).toContain(START_HINT);
+    expect(checkOrchestrator(tool("Write", { file_path: "/home/u/.claude/plans/p.md" }))).toContain(START_HINT);
+    expect(checkOrchestrator(tool("Write", {}))).toContain(START_HINT);
+  });
+
+  test("blocks a dangling symlink in the plans folder that points outside it", () => {
+    mkdirSync(orchestrationPlansDir(), { recursive: true });
+    const link = join(orchestrationPlansDir(), "dangling.md");
+    symlinkSync(join(tmp, "missing", "elsewhere.md"), link);
+    expect(checkOrchestrator(tool("Write", { file_path: link }))).toContain(START_HINT);
+  });
+
+  test("NotebookEdit stays blocked even there", () => {
+    expect(checkOrchestrator(tool("NotebookEdit", { file_path: join(orchestrationPlansDir(), "p.ipynb") }))).toContain(START_HINT);
   });
 });
 
