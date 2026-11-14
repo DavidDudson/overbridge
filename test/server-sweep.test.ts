@@ -128,10 +128,11 @@ describe("createSweepTrigger", () => {
   };
   const settle = () => new Promise((r) => setTimeout(r, 0));
 
-  test("the first poll sweeps itself, since the server has not answered yet", () => {
+  test("before the server has answered a poll does nothing, so it cannot start a sweep the server would batch", () => {
     const { t, trigger } = make(async () => true);
     trigger();
-    expect(t.starts).toBe(1);
+    expect(t.claims).toBe(0);
+    expect(t.starts).toBe(0);
   });
 
   test("once the server answers it owns the sweep, and the sidebar never claims or spawns", async () => {
@@ -141,8 +142,8 @@ describe("createSweepTrigger", () => {
     t.now = 1000;
     trigger();
     trigger();
-    expect(t.claims).toBe(1);
-    expect(t.starts).toBe(1);
+    expect(t.claims).toBe(0);
+    expect(t.starts).toBe(0);
   });
 
   test("with the server down the sidebar falls back to claim and spawn on every turn", async () => {
@@ -150,6 +151,7 @@ describe("createSweepTrigger", () => {
     trigger();
     await settle();
     t.now = 1000;
+    trigger();
     trigger();
     expect(t.starts).toBe(2);
   });
@@ -162,7 +164,7 @@ describe("createSweepTrigger", () => {
     await settle();
     t.now = 1;
     trigger();
-    expect(t.starts).toBe(2);
+    expect(t.starts).toBe(1);
   });
 
   test("asks the server at most once per check interval", async () => {
@@ -205,7 +207,7 @@ describe("cachedExec", () => {
   test("a PR read is made once per TTL, per command and directory", () => {
     let calls = 0;
     let t = 0;
-    const exec = cachedExec(() => (calls++, ok("{}")), () => t);
+    const exec = cachedExec(() => (calls++, ok("{}")), () => t, new Map());
     exec(view, "/a");
     exec(view, "/a");
     expect(calls).toBe(1);
@@ -229,7 +231,7 @@ describe("cachedExec", () => {
   test("a failed read is returned as the failure, never cached, and never answered from an old success", () => {
     let t = 0;
     let next: RunResult = ok("old");
-    const exec = cachedExec(() => next, () => t);
+    const exec = cachedExec(() => next, () => t, new Map());
     expect(exec(view, "/a").stdout).toBe("old");
     t = PR_FACT_TTL_MS + 1;
     next = fail;
@@ -239,9 +241,21 @@ describe("cachedExec", () => {
 
   test("the PR commits lookup is cached too", () => {
     let calls = 0;
-    const exec = cachedExec(() => (calls++, ok("[]")));
+    const exec = cachedExec(() => (calls++, ok("[]")), Date.now, new Map());
     exec(["gh", "api", "repos/{owner}/{repo}/commits/abc/pulls"], "/a");
     exec(["gh", "api", "repos/{owner}/{repo}/commits/abc/pulls"], "/a");
     expect(calls).toBe(1);
+  });
+
+  test("expired reads are dropped as new ones are stored", () => {
+    let t = 0;
+    const store = new Map<string, { at: number; stdout: string }>();
+    const exec = cachedExec(() => ok("{}"), () => t, store);
+    exec(view, "/a");
+    exec(view, "/b");
+    expect(store.size).toBe(2);
+    t = PR_FACT_TTL_MS;
+    exec(view, "/c");
+    expect([...store.keys()].map((k) => k.split("\0")[0])).toEqual(["/c"]);
   });
 });

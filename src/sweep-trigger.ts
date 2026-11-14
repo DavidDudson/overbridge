@@ -42,11 +42,12 @@ export interface SweepTriggerDeps {
 
 /**
  * The sidebar's sweep turn. While the server runs the sweep on its timer the sidebar does nothing; with the server down it
- * falls back to `claimSweep` and a detached `top sweep`. The server's answer is asked for at most every `SERVER_CHECK_MS`
+ * falls back to `claimSweep` and a detached `top sweep`, once it has been seen to be down (before its first answer a poll does nothing). The server's answer is asked for at most every `SERVER_CHECK_MS`
  * and read on the next poll, so a poll never waits on a socket.
  */
 export function createSweepTrigger(deps: SweepTriggerDeps): () => void {
-  let owned = false;
+  // unknown until the first answer: a poll before it must not start a child sweep that the server would have run batched
+  let owned: boolean | undefined;
   let checkedAt = -Infinity;
   let checking = false;
   return () => {
@@ -66,6 +67,6 @@ export function createSweepTrigger(deps: SweepTriggerDeps): () => void {
           checking = false;
         });
     }
-    if (!owned && deps.claim(now)) deps.start();
+    if (owned === false && deps.claim(now)) deps.start();
   };
 }
