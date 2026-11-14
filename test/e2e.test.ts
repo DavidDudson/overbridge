@@ -90,7 +90,7 @@ describe("workflow", () => {
     expect(marketplace.source).toBe("directory");
     expect(existsSync(join(marketplace.path, ".claude-plugin", "marketplace.json"))).toBe(true);
     expect(settings.enabledPlugins).toEqual({ "overbridge@overbridge": true, "overbridge-review@overbridge": true });
-    for (const event of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "PreCompact", "Stop", "SessionEnd"]) {
+    for (const event of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "PermissionRequest", "SubagentStart", "SubagentStop", "PreCompact", "Stop", "SessionEnd"]) {
       expect(settings.hooks[event][0].hooks[0].command).toMatch(/ hook$/);
     }
   });

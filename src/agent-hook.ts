@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type AgentState, agentStatePath, CONTINUING_END_REASONS, readAgentState } from "./agent-state";
+import { type AgentState, agentStatePath, CONTINUING_END_REASONS, clearSubagent, clearSubagents, markSubagent, readAgentState } from "./agent-state";
 import { backgroundShells } from "./bg-tasks";
 import { claudeRecord, type HookPayload, type HistoryStore, historyStore } from "./history";
 import { envVar, ORCHESTRATION_ENV, root, selfCommand, silenceLegacyWarnings } from "./paths";
@@ -18,7 +18,10 @@ export const EVENT_STATE: Record<string, AgentState> = {
   SessionStart: "idle",
   UserPromptSubmit: "busy",
   PostToolUse: "busy",
+  // a denied or failed tool never reaches PostToolUse; the turn carries on, so a prompt on it is over
+  PostToolUseFailure: "busy",
   Notification: "waiting",
+  PermissionRequest: "waiting",
   Stop: "done",
   SessionEnd: "end",
 };
@@ -28,13 +31,31 @@ export const EVENT_STATE: Record<string, AgentState> = {
  * `empty`, and Claude's later idle notification must not turn that into `waiting`: nobody is being waited on.
  * A session ended by `/clear` or `/resume` records nothing, because the next SessionStart follows at once.
  */
-export function nextState(event: string, source: string | undefined, current: AgentState | undefined, endReason?: string): AgentState | undefined {
+export function nextState(
+  event: string,
+  source: string | undefined,
+  current: AgentState | undefined,
+  endReason?: string,
+  note?: { type?: string | undefined; message?: string | undefined },
+): AgentState | undefined {
   if (event === "SessionStart") return source === "resume" || source === "compact" ? "idle" : "empty";
   if (event === "SessionEnd" && endReason !== undefined && CONTINUING_END_REASONS.includes(endReason)) {
     return undefined;
   }
-  if (event === "Notification" && current === "empty") return undefined;
+  if (event === "Notification") return current === "empty" || !blocking(note) ? undefined : "waiting";
   return EVENT_STATE[event];
+}
+
+/** Notification types that block Claude until the user answers. Others (idle prompt, auth success) are news, not a wait. */
+export const BLOCKING_NOTIFICATIONS: readonly string[] = ["permission_prompt", "elicitation_dialog"];
+
+/** Claude's idle reminder, sent about a minute after a turn ends: nothing is waiting on the user. */
+const IDLE_MESSAGE = /waiting for your input/i;
+
+/** Whether a notification means Claude is blocked on the user. A Claude too old to send a type is judged by its message. */
+export function blocking(note: { type?: string | undefined; message?: string | undefined } | undefined): boolean {
+  if (note?.type !== undefined) return BLOCKING_NOTIFICATIONS.includes(note.type);
+  return !(note?.message !== undefined && IDLE_MESSAGE.test(note.message));
 }
 
 /** Told to a session that stopped right after an automatic compaction. */
@@ -141,7 +162,15 @@ export async function hookMain(): Promise<number> {
     // an orchestration tab has no top panel, so it records state but never refreshes a top cache
     const ws = workspace || process.env[ORCHESTRATION_ENV];
     if (!ws) return 0;
-    const input = JSON.parse(await Bun.stdin.text()) as HookPayload & { source?: string; reason?: string; trigger?: string; stop_hook_active?: boolean };
+    const input = JSON.parse(await Bun.stdin.text()) as HookPayload & {
+      source?: string;
+      reason?: string;
+      trigger?: string;
+      stop_hook_active?: boolean;
+      notification_type?: string;
+      message?: string;
+      agent_id?: string;
+    };
     const meta = join(root(), ".overbridge");
     const event = input.hook_event_name ?? "";
     if (event === "PreCompact" && input.trigger === "auto") markCompact(meta, ws);
@@ -154,7 +183,13 @@ export async function hookMain(): Promise<number> {
     }
     // after the compact restart above: a Stop the hook blocks does not end the turn
     recordHistory(ws, input);
-    const state = nextState(event, input.source, event === "Notification" ? readAgentState(ws) : undefined, input.reason);
+    if (event === "SubagentStart") markSubagent(meta, ws, input.agent_id ?? "");
+    else if (event === "SubagentStop") clearSubagent(meta, ws, input.agent_id ?? "");
+    else if (event === "SessionStart" || event === "SessionEnd") clearSubagents(meta, ws);
+    const state = nextState(event, input.source, event === "Notification" ? readAgentState(ws) : undefined, input.reason, {
+      type: input.notification_type,
+      message: input.message,
+    });
     if (state) recordState(meta, ws, state, Date.now(), state === "done" ? backgroundShells() : [], state === "end" ? input.reason : undefined);
     // the server decides whether a refresh is due; with none answering the hook refreshes on its own
     if (workspace && cacheStale(meta, workspace) && !(await notifyRefresh(workspace)) && claimRefresh(meta, workspace)) startRefresh(workspace);
