@@ -253,6 +253,9 @@ describe("nextState", () => {
   test("the idle notification does not turn empty into waiting", () => {
     expect(nextState("Notification", undefined, "empty")).toBeUndefined();
     expect(nextState("Notification", undefined, "busy")).toBe("waiting");
+    expect(nextState("UserPromptSubmit", undefined, "empty")).toBe("busy");
+  });
+  test("a permission request waits and a failed tool carries on", () => {
     expect(nextState("PermissionRequest", undefined, "busy")).toBe("waiting");
     expect(nextState("PostToolUseFailure", undefined, "waiting")).toBe("busy");
     expect(nextState("UserPromptSubmit", undefined, "empty")).toBe("busy");

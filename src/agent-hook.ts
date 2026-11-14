@@ -26,23 +26,41 @@ export const EVENT_STATE: Record<string, AgentState> = {
   SessionEnd: "end",
 };
 
+/** What a Notification hook payload says about why it fired. */
+export interface NotificationInfo {
+  type?: string | undefined;
+  message?: string | undefined;
+}
+
+/** The JSON Claude writes to a hook's stdin: the fields this hook reads. */
+type HookInput = HookPayload & {
+  source?: string;
+  reason?: string;
+  trigger?: string;
+  stop_hook_active?: boolean;
+  notification_type?: string;
+  message?: string;
+  agent_id?: string;
+};
+
 /**
  * The state a hook event records, given the session's current state. A session just started or cleared is
  * `empty`, and Claude's later idle notification must not turn that into `waiting`: nobody is being waited on.
  * A session ended by `/clear` or `/resume` records nothing, because the next SessionStart follows at once.
+ * A Notification records `waiting` only when it blocks on the user (`isBlockingNotification`); the idle reminder and the like record nothing.
  */
 export function nextState(
   event: string,
   source: string | undefined,
   current: AgentState | undefined,
   endReason?: string,
-  note?: { type?: string | undefined; message?: string | undefined },
+  note?: NotificationInfo,
 ): AgentState | undefined {
   if (event === "SessionStart") return source === "resume" || source === "compact" ? "idle" : "empty";
   if (event === "SessionEnd" && endReason !== undefined && CONTINUING_END_REASONS.includes(endReason)) {
     return undefined;
   }
-  if (event === "Notification") return current === "empty" || !blocking(note) ? undefined : "waiting";
+  if (event === "Notification") return current === "empty" || !isBlockingNotification(note) ? undefined : "waiting";
   return EVENT_STATE[event];
 }
 
@@ -53,7 +71,7 @@ export const BLOCKING_NOTIFICATIONS: readonly string[] = ["permission_prompt", "
 const IDLE_MESSAGE = /waiting for your input/i;
 
 /** Whether a notification means Claude is blocked on the user. A Claude too old to send a type is judged by its message. */
-export function blocking(note: { type?: string | undefined; message?: string | undefined } | undefined): boolean {
+export function isBlockingNotification(note: NotificationInfo | undefined): boolean {
   if (note?.type !== undefined) return BLOCKING_NOTIFICATIONS.includes(note.type);
   return !(note?.message !== undefined && IDLE_MESSAGE.test(note.message));
 }
@@ -162,15 +180,7 @@ export async function hookMain(): Promise<number> {
     // an orchestration tab has no top panel, so it records state but never refreshes a top cache
     const ws = workspace || process.env[ORCHESTRATION_ENV];
     if (!ws) return 0;
-    const input = JSON.parse(await Bun.stdin.text()) as HookPayload & {
-      source?: string;
-      reason?: string;
-      trigger?: string;
-      stop_hook_active?: boolean;
-      notification_type?: string;
-      message?: string;
-      agent_id?: string;
-    };
+    const input: HookInput = JSON.parse(await Bun.stdin.text());
     const meta = join(root(), ".overbridge");
     const event = input.hook_event_name ?? "";
     if (event === "PreCompact" && input.trigger === "auto") markCompact(meta, ws);
@@ -183,9 +193,15 @@ export async function hookMain(): Promise<number> {
     }
     // after the compact restart above: a Stop the hook blocks does not end the turn
     recordHistory(ws, input);
-    if (event === "SubagentStart") markSubagent(meta, ws, input.agent_id ?? "");
-    else if (event === "SubagentStop") clearSubagent(meta, ws, input.agent_id ?? "");
-    else if (event === "SessionStart" || event === "SessionEnd") clearSubagents(meta, ws);
+    try {
+      // a compaction or resume keeps the session, and so its subagents; no id means no marker to tell apart
+      const continuing = event === "SessionStart" ? input.source === "resume" || input.source === "compact" : input.reason !== undefined && CONTINUING_END_REASONS.includes(input.reason);
+      if (event === "SubagentStart" && input.agent_id) markSubagent(meta, ws, input.agent_id);
+      else if (event === "SubagentStop" && input.agent_id) clearSubagent(meta, ws, input.agent_id);
+      else if ((event === "SessionStart" || event === "SessionEnd") && !continuing) clearSubagents(meta, ws);
+    } catch {
+      // subagent bookkeeping is best effort: it must not cost the state record below
+    }
     const state = nextState(event, input.source, event === "Notification" ? readAgentState(ws) : undefined, input.reason, {
       type: input.notification_type,
       message: input.message,

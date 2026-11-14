@@ -91,9 +91,15 @@ export const clearSubagents = (meta: string, ws: string) => rmSync(subagentDir(m
 
 /** How many subagents of `ws` are running, ignoring leaked markers. */
 export function runningSubagents(meta: string, ws: string, now = Date.now()): number {
+  const dir = subagentDir(meta, ws);
   try {
-    const dir = subagentDir(meta, ws);
-    return readdirSync(dir).filter((f) => now - statSync(join(dir, f)).mtimeMs < SUBAGENT_MAX_MS).length;
+    return readdirSync(dir).filter((f) => {
+      try {
+        return now - statSync(join(dir, f)).mtimeMs < SUBAGENT_MAX_MS;
+      } catch {
+        return false; // its SubagentStop removed it while we listed
+      }
+    }).length;
   } catch {
     return 0;
   }
@@ -112,12 +118,12 @@ function readAgentRecord(ws: string, now: number, alive: (pid: number) => boolea
     if (!known) {
       return undefined;
     }
-    const subagents = runningSubagents(metaDir(), ws, now) > 0;
+    const hasSubagents = runningSubagents(metaDir(), ws, now) > 0;
     // a subagent can run for longer than a turn goes without a tool call, so it keeps `busy` alive
-    if (typeof at === "number" && now - at > STALE_MS[known] && !(known === "busy" && subagents)) {
+    if (typeof at === "number" && now - at > STALE_MS[known] && !(known === "busy" && hasSubagents)) {
       return undefined;
     }
-    if (known === "done" && (subagents || (Array.isArray(bg) && bg.some((p) => typeof p === "number" && alive(p))))) {
+    if (known === "done" && (hasSubagents || (Array.isArray(bg) && bg.some((p) => typeof p === "number" && alive(p))))) {
       return { state: "bg" };
     }
     return typeof reason === "string" ? { state: known, reason } : { state: known };
