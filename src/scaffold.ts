@@ -87,7 +87,6 @@ export function scaffoldOrchestration(tab: string): string {
     env: { [ORCHESTRATION_ENV]: tab, OVERBRIDGE_ROOT: root(), OVERBRIDGE_NAME: "" },
     hooks: agentStateHooks(),
     ...pluginSettings(),
-    // plan-mode plans stay in the meta dir: `~/.claude/plans` is outside what the orchestrator guard lets it write
     plansDirectory: orchestrationPlansDir(),
   };
   mkdirSync(orchestrationPlansDir(), { recursive: true });

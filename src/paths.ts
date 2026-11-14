@@ -1,6 +1,6 @@
-import { existsSync, realpathSync, renameSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -69,6 +69,42 @@ export const worktreePath = (ws: string, repo: string) => join(wsDir(ws), repo);
 export function isInside(child: string, parent: string): boolean {
   const rel = relative(parent, child);
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/** What `realPath` returns for a path it cannot resolve: inside no folder, so no containment check passes it. */
+export const UNRESOLVABLE = "/dev/null/unresolvable";
+
+function isSymlink(p: string): boolean {
+  try {
+    return lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `p` with every symlink resolved, for a path that may not exist yet: the deepest existing ancestor is resolved
+ * and the missing tail re-appended. A dangling symlink on the way is `UNRESOLVABLE`, since where a write through it
+ * lands is unknown.
+ */
+export function realPath(p: string): string {
+  const tail: string[] = [];
+  let cur = p;
+  for (;;) {
+    try {
+      return join(realpathSync(cur), ...[...tail].reverse());
+    } catch {
+      if (isSymlink(cur)) {
+        return UNRESOLVABLE;
+      }
+    }
+    const parent = dirname(cur);
+    if (parent === cur) {
+      return UNRESOLVABLE;
+    }
+    tail.push(basename(cur));
+    cur = parent;
+  }
 }
 
 /** Workspace name containing `dir`, if any. */
