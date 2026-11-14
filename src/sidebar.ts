@@ -864,7 +864,7 @@ export async function sidebar(wsOpt?: string) {
       draw();
     });
     // a hidden tab's sidebar gathers only every HIDDEN_POLL_MS, and catches up on the first tick after its tab is focused
-    // the server's event stream redraws as soon as a top cache changes and lets a hidden sidebar stop polling; without it every poll and watch below runs as before
+    // the server's event stream redraws as soon as a top cache changes. It does not let a hidden sidebar stop polling (unlike the top and perf panes): the gather also runs the reaper, reopens orchestration tabs and starts the sweep fallback, and no event wakes those
     const events = subscribeEvents({
       onChange: (key) => {
         if (key.startsWith("top:") || key === "worklist") tick();
@@ -874,7 +874,7 @@ export async function sidebar(wsOpt?: string) {
       },
     });
     const tick = () => {
-      if (shouldPoll(self, readView(), lastGatherAtMs, Date.now(), events.live())) {
+      if (shouldPoll(self, readView(), lastGatherAtMs, Date.now())) {
         draw();
       }
     };
