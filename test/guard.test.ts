@@ -74,6 +74,10 @@ describe("bash", () => {
     'gh stack "link" 1 2',
     "gh stack 'unstack'",
     "gh stack $sub",
+    "gh stack -R owner/repo unstack",
+    "gh stack --repo x merge",
+    "gs --foo link 1 2",
+    "gh stack --foo checkout 42",
   ])("blocks: %s", (cmd) => {
     expect(check(bash(cmd), ctx)).toBeDefined();
   });
@@ -107,6 +111,9 @@ describe("bash", () => {
     "gh stack view --json",
     "gs push",
     "gh stack --version",
+    "gh stack -h",
+    "gh stack --help",
+    "gh stack --foo sync",
     "gh stack sync",
     "git commit -m 'gh stack checkout docs'",
   ])("allows: %s", (cmd) => {

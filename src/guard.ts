@@ -46,8 +46,8 @@ const BASH_RULES: [RegExp, string][] = [
   ],
   [
     // Allow list: every other subcommand (unstack, modify, link, merge, switch...) rewrites or deletes stacks
-    // across workspaces, or is interactive. Flags (`--version`, `--help`) pass; a quoted or expanded word (`"link"`, `$x`) is not a known subcommand, so it is blocked.
-    new RegExp(GH_STACK + String.raw`(?!(?:init|add|up|down|top|bottom|push|submit|rebase|sync|view)\b)[^\s-]`),
+    // across workspaces, or is interactive. Leading flags are skipped, so `-R x unstack` cannot hide the subcommand (a flag value then reads as an unknown word and blocks); a bare flag (`--version`, `--help`) passes; a quoted or expanded word (`"link"`, `$x`) is not a known subcommand, so it is blocked.
+    new RegExp(GH_STACK + String.raw`(?:-\S*\s+)*(?!(?:init|add|up|down|top|bottom|push|submit|rebase|sync|view)\b)[^\s-]`),
     "only `gh stack init/add/up/down/top/bottom/push/submit/rebase/sync/view` are allowed here; ask the user to run other stack commands",
   ],
   [new RegExp(GIT + String.raw`worktree\b`), "worktrees are managed by overbridge; ask the user"],
