@@ -641,7 +641,7 @@ The `perf-recommend` skill reads this history and recommends where to get time b
 ### Tab sidebar
 
 `overbridge sidebar` is the pane down the left of every tab. It lists each workspace with
-its agent state emoji (🆕 empty: just started or cleared, 💤 idle, 🔄 busy, ✅ done, ⏳ done but background tasks still running, ❓ waiting for you, ❌ ended, `·` unknown)
+its agent state emoji (🆕 empty: just started or cleared, 💤 idle, 🔄 busy, ✅ done, ⏳ done but background shells or subagents still running, ❓ blocked on you (a permission prompt or question), ❌ ended, `·` unknown)
 and its item title when cached (no id, no conventional-commit prefix; the workspace name until then), with its number in tab order (`⌥1` to `⌥9`, then `10` and up). Each tab runs its own copy and marks its own tab.
 Up/Down or `j`/`k` step to the neighbouring tab, a click picks a row, and a tab's number jumps to it.
 A digit that could start a two-digit number waits 0.6 s for a second one, so with 14 tabs `1` then `2`
@@ -723,8 +723,8 @@ name, `$OVERBRIDGE_SESSION` or `workspaces`.
 #### Agent state
 
 Each workspace's `.claude/settings.json` registers `overbridge hook` for `SessionStart`,
-`UserPromptSubmit`, `PostToolUse`, `Notification`, `PreCompact`, `Stop` and `SessionEnd`, next to the guard.
-It records `empty` (a session just started or cleared; Claude's later idle notification does not turn it into `waiting`, and the workspace becomes a Cleanup candidate if nothing is uncommitted or unpushed), `idle`, `busy`, `waiting`, `done` or `end` (with Claude's SessionEnd `reason`; `/clear` and `/resume` record nothing) in `<meta>/agent/<ws>.json`. On `Stop` it also records the pids of shells still running under the session (background tasks); `done` reads as `bg` while any is alive. Plan-mode plans are written to `<ws>/plans/` (`plansDirectory` in the generated settings), not `~/.claude/plans`.
+`UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `PermissionRequest`, `SubagentStart`, `SubagentStop`, `PreCompact`, `Stop` and `SessionEnd`, next to the guard.
+It records `empty` (a session just started or cleared; Claude's later idle notification does not turn it into `waiting`, and the workspace becomes a Cleanup candidate if nothing is uncommitted or unpushed), `idle`, `busy`, `waiting` (a permission request or a `permission_prompt`/`elicitation_dialog` notification only: the idle reminder Claude sends a minute after a turn is ignored), `done` or `end` (with Claude's SessionEnd `reason`; `/clear` and `/resume` record nothing) in `<meta>/agent/<ws>.json`. On `Stop` it also records the pids of shells still running under the session (background tasks); `done` reads as `bg` while any is alive, or while a subagent is running (`SubagentStart`/`SubagentStop` keep a marker per subagent in `<meta>/agent/<ws>.sub/`; a running subagent also keeps a quiet `busy` from going stale). Plan-mode plans are written to `<ws>/plans/` (`plansDirectory` in the generated settings), not `~/.claude/plans`.
 The root tab's Claude records its state the same way, under its tab name (`<meta>/agent/@root.json`).
 The hook
 never blocks or fails the agent and loads none of the rest of the CLI. A `busy` state with no

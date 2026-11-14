@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { metaDir } from "./paths";
 import { pidAlive } from "./proc";
@@ -69,6 +69,42 @@ export const agentStateFile = (ws: string) => agentStatePath(metaDir(), ws);
 
 export { pidAlive };
 
+/** A subagent marker older than this is a leak (its Stop never came) and no longer counts as running. */
+export const SUBAGENT_MAX_MS = 6 * 3600_000;
+
+/** `<meta>/agent/<ws>.sub/`: one empty file per running subagent, written by the SubagentStart/Stop hooks. */
+export const subagentDir = (meta: string, ws: string) => join(meta, "agent", `${ws}.sub`);
+
+const markerName = (id: string) => id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 100) || "_";
+
+/** Note that subagent `id` started running for `ws`. */
+export function markSubagent(meta: string, ws: string, id: string) {
+  mkdirSync(subagentDir(meta, ws), { recursive: true });
+  writeFileSync(join(subagentDir(meta, ws), markerName(id)), "");
+}
+
+/** Note that subagent `id` finished. */
+export const clearSubagent = (meta: string, ws: string, id: string) => rmSync(join(subagentDir(meta, ws), markerName(id)), { force: true });
+
+/** Forget every subagent of `ws` (a session started or ended). */
+export const clearSubagents = (meta: string, ws: string) => rmSync(subagentDir(meta, ws), { recursive: true, force: true });
+
+/** How many subagents of `ws` are running, ignoring leaked markers. */
+export function runningSubagents(meta: string, ws: string, now = Date.now()): number {
+  const dir = subagentDir(meta, ws);
+  try {
+    return readdirSync(dir).filter((f) => {
+      try {
+        return now - statSync(join(dir, f)).mtimeMs < SUBAGENT_MAX_MS;
+      } catch {
+        return false; // its SubagentStop removed it while we listed
+      }
+    }).length;
+  } catch {
+    return 0;
+  }
+}
+
 interface AgentRecord {
   state: AgentState;
   /** The SessionEnd reason, recorded with `end` only. */
@@ -82,10 +118,12 @@ function readAgentRecord(ws: string, now: number, alive: (pid: number) => boolea
     if (!known) {
       return undefined;
     }
-    if (typeof at === "number" && now - at > STALE_MS[known]) {
+    const hasSubagents = runningSubagents(metaDir(), ws, now) > 0;
+    // a subagent can run for longer than a turn goes without a tool call, so it keeps `busy` alive
+    if (typeof at === "number" && now - at > STALE_MS[known] && !(known === "busy" && hasSubagents)) {
       return undefined;
     }
-    if (known === "done" && Array.isArray(bg) && bg.some((p) => typeof p === "number" && alive(p))) {
+    if (known === "done" && (hasSubagents || (Array.isArray(bg) && bg.some((p) => typeof p === "number" && alive(p))))) {
       return { state: "bg" };
     }
     return typeof reason === "string" ? { state: known, reason } : { state: known };

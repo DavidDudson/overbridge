@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentStateFile, EndReason, readAgentState } from "../src/agent-state";
+import { agentStateFile, agentStatePath, clearSubagent, clearSubagents, EndReason, markSubagent, readAgentState, runningSubagents, STALE_MS, SUBAGENT_MAX_MS } from "../src/agent-state";
 import { clearCompact, COMPACT_MARKER_MS, markCompact, nextState, recordState, takeCompactRestart } from "../src/agent-hook";
 import { limitColor, limitRows, readLimits, timeLeft, WEEK_SECS } from "../src/limits";
 import { landingTab, pickNext } from "../src/next";
@@ -194,6 +194,55 @@ describe("pane toggles", () => {
   });
 });
 
+describe("notification types", () => {
+  test("only a blocking notification is waiting", () => {
+    expect(nextState("Notification", undefined, "busy", undefined, { type: "permission_prompt" })).toBe("waiting");
+    expect(nextState("Notification", undefined, "busy", undefined, { type: "elicitation_dialog" })).toBe("waiting");
+    expect(nextState("Notification", undefined, "done", undefined, { type: "idle_prompt" })).toBeUndefined();
+    expect(nextState("Notification", undefined, "bg", undefined, { type: "auth_success" })).toBeUndefined();
+  });
+
+  test("a Claude that sends no type is judged by its idle message", () => {
+    expect(nextState("Notification", undefined, "done", undefined, { message: "Claude is waiting for your input" })).toBeUndefined();
+    expect(nextState("Notification", undefined, "busy", undefined, { message: "Claude needs your permission to use Bash" })).toBe("waiting");
+  });
+});
+
+describe("subagents", () => {
+  const dir = mkdtempSync(join(tmpdir(), "overbridge-sub-"));
+  const meta2 = join(dir, ".overbridge");
+  const save = process.env.OVERBRIDGE_ROOT;
+  beforeEach(() => {
+    process.env.OVERBRIDGE_ROOT = dir;
+    mkdirSync(join(meta2, "agent"), { recursive: true });
+  });
+  afterEach(() => {
+    save === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = save);
+    clearSubagents(meta2, "w1");
+  });
+  const put = (state: string, at: number) => writeFileSync(agentStatePath(meta2, "w1"), JSON.stringify({ state, at }));
+
+  test("done reads as bg while a subagent runs, and as done after it stops", () => {
+    put("done", Date.now());
+    markSubagent(meta2, "w1", "a1");
+    expect(readAgentState("w1")).toBe("bg");
+    clearSubagent(meta2, "w1", "a1");
+    expect(readAgentState("w1")).toBe("done");
+  });
+
+  test("a running subagent keeps a quiet busy turn from going stale", () => {
+    put("busy", Date.now() - STALE_MS.busy - 1000);
+    expect(readAgentState("w1")).toBeUndefined();
+    markSubagent(meta2, "w1", "a1");
+    expect(readAgentState("w1")).toBe("busy");
+  });
+
+  test("a leaked marker stops counting", () => {
+    markSubagent(meta2, "w1", "a1");
+    expect(runningSubagents(meta2, "w1", Date.now() + SUBAGENT_MAX_MS + 1)).toBe(0);
+  });
+});
+
 describe("nextState", () => {
   test("a started or cleared session is empty; resume and compact are idle", () => {
     expect(nextState("SessionStart", "clear", undefined)).toBe("empty");
@@ -204,6 +253,11 @@ describe("nextState", () => {
   test("the idle notification does not turn empty into waiting", () => {
     expect(nextState("Notification", undefined, "empty")).toBeUndefined();
     expect(nextState("Notification", undefined, "busy")).toBe("waiting");
+    expect(nextState("UserPromptSubmit", undefined, "empty")).toBe("busy");
+  });
+  test("a permission request waits and a failed tool carries on", () => {
+    expect(nextState("PermissionRequest", undefined, "busy")).toBe("waiting");
+    expect(nextState("PostToolUseFailure", undefined, "waiting")).toBe("busy");
     expect(nextState("UserPromptSubmit", undefined, "empty")).toBe("busy");
   });
   test("a session ended by /clear or /resume records nothing; any other end is end", () => {

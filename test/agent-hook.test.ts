@@ -188,6 +188,33 @@ describe("overbridge hook", () => {
     });
   });
 
+  test("the idle notification leaves done alone; a permission prompt waits", () => {
+    hook(JSON.stringify({ hook_event_name: "Stop" }), "w1");
+    hook(JSON.stringify({ hook_event_name: "Notification", notification_type: "idle_prompt", message: "Claude is waiting for your input" }), "w1");
+    expect(stateOf("w1").state).toBe("done");
+    hook(JSON.stringify({ hook_event_name: "Notification", notification_type: "permission_prompt" }), "w1");
+    expect(stateOf("w1").state).toBe("waiting");
+  });
+
+  test("subagent start and stop turn done into bg and back; a session boundary clears them", () => {
+    hook(JSON.stringify({ hook_event_name: "Stop" }), "w1");
+    hook(JSON.stringify({ hook_event_name: "SubagentStart", agent_id: "a1" }), "w1");
+    expect(readAgentState("w1")).toBe("bg");
+    hook(JSON.stringify({ hook_event_name: "SubagentStop", agent_id: "a1" }), "w1");
+    expect(readAgentState("w1")).toBe("done");
+    hook(JSON.stringify({ hook_event_name: "SubagentStart", agent_id: "a2" }), "w1");
+    hook(JSON.stringify({ hook_event_name: "SessionEnd", reason: EndReason.Other }), "w1");
+    expect(existsSync(join(meta, "agent", "w1.sub"))).toBe(false);
+  });
+
+  test("a compaction keeps running subagents; a fresh start clears them", () => {
+    hook(JSON.stringify({ hook_event_name: "SubagentStart", agent_id: "a1" }), "w1");
+    hook(JSON.stringify({ hook_event_name: "SessionStart", source: "compact" }), "w1");
+    expect(existsSync(join(meta, "agent", "w1.sub", "a1"))).toBe(true);
+    hook(JSON.stringify({ hook_event_name: "SessionStart", source: "startup" }), "w1");
+    expect(existsSync(join(meta, "agent", "w1.sub"))).toBe(false);
+  });
+
   test("bad input never fails the agent", () => {
     const r = hook("not json", "w1");
     expect(r.code).toBe(0);

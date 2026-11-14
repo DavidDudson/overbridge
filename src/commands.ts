@@ -7,6 +7,7 @@ import { agentDirOf, chooseLayout, userLayoutPath } from "./layout";
 import { isOrchestrationTab, orchestrationRemoveMessage, type OrchestrationTab } from "./orchestration";
 import { isOrphan, strayFiles, worktreesIn } from "./orphan";
 import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
+import { clearSubagents } from "./agent-state";
 import { barePath, currentWorkspace, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, sessionName, worktreePath, wsDir } from "./paths";
 import { runHooks } from "./hooks";
 import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, workspaceSettingsPath } from "./scaffold";
@@ -151,6 +152,7 @@ export function removeWorkspace(ws: string, force: boolean) {
 function removeFolder(ws: string) {
   untrustFolder(wsDir(ws));
   rmSync(wsDir(ws), { recursive: true, force: true });
+  clearSubagents(metaDir(), ws);
   [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`)].forEach((f) =>
     rmSync(join(metaDir(), f), { force: true }),
   );
