@@ -36,6 +36,22 @@ describe("rate limit gate", () => {
     expect(gate.stats().paused).toBe(false);
   });
 
+  test("a forced refresh is let through once per pause, and always outside one", () => {
+    let t = 0;
+    const gate = new RateGate({ now: () => t });
+    expect(gate.allowForced()).toBe(true);
+    expect(gate.allowForced()).toBe(true);
+    gate.observe("API rate limit exceeded");
+    expect(gate.allowForced()).toBe(true);
+    expect(gate.allowForced()).toBe(false);
+    expect(gate.allowForced()).toBe(false);
+    t += DEFAULT_PAUSE_MS;
+    expect(gate.allowForced()).toBe(true);
+    gate.observe("API rate limit exceeded");
+    expect(gate.allowForced()).toBe(true);
+    expect(gate.allowForced()).toBe(false);
+  });
+
   test("a reset that is too near is stretched, one too far is cut, an unreadable one keeps the default", async () => {
     const at = async (reset: number | undefined) => {
       const gate = new RateGate({ now: () => 0, lookupReset: async () => reset });

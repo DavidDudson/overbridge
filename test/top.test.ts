@@ -257,6 +257,17 @@ describe("refreshTop", () => {
     expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", {}) }).message).toBeUndefined();
   });
 
+  test("while gh is paused the cache keeps the branches its PR facts were built for, so a claim that moved still drops them", () => {
+    const first = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("MERGED", {}) });
+    expect(first.branches).toEqual({ r: "feat/12-dark-mode" });
+    withState((s) => {
+      s.workspaces.w1!.repos.r = { branch: "feat/13-other", pr: 4 };
+    });
+    const paused = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => undefined, paused: "paused" });
+    expect(paused.branches).toEqual({ r: "feat/12-dark-mode" });
+    expect(claimedCache("w1", paused).merged).toBeUndefined();
+  });
+
   test("caches the headline, the item link and the PR link", () => {
     const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", { title: "" }) });
     expect(cache.headline).toBe("12 Add dark mode");

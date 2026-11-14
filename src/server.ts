@@ -239,6 +239,8 @@ interface WorkerReply {
   value?: unknown;
   cache?: TopCache;
   at?: number;
+  /** A rate-limit failure seen inside the job. */
+  limited?: string;
   error?: string;
 }
 
@@ -272,8 +274,16 @@ function workerJob<T>(file: string, message: unknown, o: { timeoutMs: number; la
 }
 
 /** Run `refreshTop` in a worker thread, so the server stays responsive while `gh` runs. */
-export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000, paused?: string): Promise<TopCache> =>
-  workerJob("./server-worker.ts", { ws, prefetched, ...(paused ? { paused } : {}) }, { timeoutMs, label: `refresh of ${ws}`, fallback: "refresh failed", pick: (r) => r.cache });
+export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000, paused?: string, onLimited?: (text: string) => void): Promise<TopCache> =>
+  workerJob("./server-worker.ts", { ws, prefetched, ...(paused ? { paused } : {}) }, {
+    timeoutMs,
+    label: `refresh of ${ws}`,
+    fallback: "refresh failed",
+    pick: (r) => {
+      if (r.limited) onLimited?.(r.limited);
+      return r.cache;
+    },
+  });
 
 /** Build the perf views in a worker thread: it reads and folds every workspace's history, which must not stall the server. Resolves with when they were built. */
 export const refreshPerfInWorker = (timeoutMs = 30_000): Promise<number> =>
@@ -306,11 +316,12 @@ export async function serve(): Promise<void> {
       log(`${key}: ${e.message}`);
     },
   });
+  // set while a forced worklist refresh that the gate let through is running: its board reads call `gh` despite the pause
+  let worklistForced = false;
   const worklist = createWorklistRefresher({
     plan: () => workerCall("./server-worklist-worker.ts", { kind: "plan" }),
     read: async (source) => {
-      const paused = source.kind === "github" ? gate.message() : undefined;
-      // (a forced worklist refresh reads through the cache's own force and is not special-cased: boards fail soft)
+      const paused = source.kind === "github" && !worklistForced ? gate.message() : undefined;
       if (paused) throw new Error(paused);
       try {
         return await workerCall("./server-worklist-worker.ts", { kind: "read", source }, 60_000);
@@ -342,7 +353,13 @@ export async function serve(): Promise<void> {
     sweepStats: () => sweeper.stats(),
     sweepBusy: () => sweeper.busy,
     refreshWorklist: async (force) => {
-      const r = await worklist.refresh(force);
+      worklistForced = force && gate.allowForced();
+      let r;
+      try {
+        r = await worklist.refresh(force);
+      } finally {
+        worklistForced = false;
+      }
       // a failed planning job serves the last timestamp with `error`; the file was not rebuilt, so the route must not answer 200
       if (r.error) throw new Error(r.error);
       return r.value;
@@ -351,8 +368,9 @@ export async function serve(): Promise<void> {
     worklistBusy: () => worklist.busy,
     rateStats: () => gate.stats(),
     refreshTop: async (ws, o) => {
-      // a forced refresh (the user's `r`) goes past the pause
-      return refreshInWorker(ws, await prefetchFor(ws, batcher, o), 120_000, o?.force ? undefined : gate.message());
+      // a forced refresh (the user's `r`) goes past a pause once, to learn whether the limit is still on; every call that sees one feeds the gate
+      const forced = o?.force === true && gate.allowForced();
+      return refreshInWorker(ws, await prefetchFor(ws, batcher, { force: forced }), 120_000, forced ? undefined : gate.message(), (text) => void gate.observe(text));
     },
     prBatch: () => batcher.stats(),
     prBusy: () => batcher.busy,

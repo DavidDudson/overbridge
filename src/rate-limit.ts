@@ -38,6 +38,8 @@ const clock = (ms: number) => new Date(ms).toLocaleTimeString("en-GB");
 export class RateGate {
   private untilMs = 0;
   private trips = 0;
+  /** The pause (its trip number) a forced refresh has already been let through. */
+  private forcedIn = 0;
   private readonly now: () => number;
   private readonly lookupReset: () => Promise<number | undefined>;
   private readonly log: (msg: string) => void;
@@ -52,6 +54,18 @@ export class RateGate {
   message(): string | undefined {
     const now = this.now();
     return now < this.untilMs ? `GitHub rate limit reached: gh calls paused until ${clock(this.untilMs)}, showing cached data` : undefined;
+  }
+
+  /**
+   * Whether a forced refresh (the user's `r`) may call `gh` now. Always, outside a pause. Inside one, the first only: it
+   * tells whether the limit is really still on, and if it is the failure moves nothing, so holding `r` cannot keep calling
+   * into the limit.
+   */
+  allowForced(): boolean {
+    if (this.message() === undefined) return true;
+    if (this.forcedIn === this.trips) return false;
+    this.forcedIn = this.trips;
+    return true;
   }
 
   /**

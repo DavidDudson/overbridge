@@ -300,12 +300,9 @@ export interface RefreshDeps {
   exec?: (cmd: string[], cwd: string) => string | undefined;
   /** `gh` is paused (a GitHub rate limit): make no call, keep the last values and put this on the message row. */
   paused?: string;
+  /** Told the stderr of every failed command that `exec` ran by default, so a caller can see a rate limit that the `undefined` result hides. */
+  onFailure?: (cmd: string[], stderr: string) => void;
 }
-
-const defaultExec = (cmd: string[], cwd: string) => {
-  const r = run(cmd, { cwd });
-  return r.ok && r.stdout ? r.stdout : undefined;
-};
 
 /**
  * Rebuild the cache for `ws`: the work item its branches name (headline and link) and a
@@ -314,7 +311,13 @@ const defaultExec = (cmd: string[], cwd: string) => {
  */
 export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   const provider = deps.provider ?? providerFor;
-  const exec = deps.exec ?? defaultExec;
+  const exec =
+    deps.exec ??
+    ((cmd: string[], cwd: string) => {
+      const r = run(cmd, { cwd });
+      if (!r.ok) deps.onFailure?.(cmd, r.stderr);
+      return r.ok && r.stdout ? r.stdout : undefined;
+    });
   const old = readTopCache(ws);
   const claims = Object.entries(getWorkspace(readState(), ws).repos);
   const links: TopLink[] = [];
@@ -429,7 +432,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
           // a claim with no PR, a closed PR or an unreadable one leaves this unset, so the workspace stays
           ...(claimed > 0 && Object.keys(mergedHeads).length === claimed ? { merged: mergedHeads } : {}),
         }),
-    branches: Object.fromEntries(claims.flatMap(([repo, c]) => (c.branch ? [[repo, c.branch] as const] : []))),
+    // while paused `merged` and `prsOpen` are the old ones, so they stay tied to the branches they were built for: a claim that moved meanwhile must still invalidate them (`claimedCache`)
+    branches: deps.paused && old.branches ? old.branches : Object.fromEntries(claims.flatMap(([repo, c]) => (c.branch ? [[repo, c.branch] as const] : []))),
     ...(Object.keys(buttonStates).length ? { buttons: buttonStates } : {}),
     ...(deps.paused || problems.length ? { message: [...(deps.paused ? [deps.paused] : []), ...problems].join("; ") } : {}),
     at: Date.now(),
