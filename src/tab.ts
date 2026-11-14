@@ -44,9 +44,10 @@ export function openTab(ws: string, prompt?: string, focus: TabFocus = TabFocus.
 export const tabCommand = (ws: string, prompt?: string) => `overbridge tab ${shellQuote(ws)}${prompt ? ` --prompt ${shellQuote(prompt)}` : ""}`;
 
 /** `openTab`, but a tab that never opened fails the command, naming the one that recovers it. */
-export function requireTab(ws: string, prompt?: string, focus: TabFocus = TabFocus.Background, mux: Mux = defaultMux(), resume = false) {
-  const r = openTab(ws, prompt, focus, mux, resume);
+export function requireTab(...args: Parameters<typeof openTab>) {
+  const [ws, prompt] = args;
+  const r = openTab(...args);
   if (!r.ok) {
-    fail(`${ws} exists but its tab did not open (${r.error ?? "no reason given"}). Open it with: ${tabCommand(ws, resume ? undefined : prompt)}`);
+    fail(`${ws} exists but its tab did not open (${r.error ?? "no reason given"}). Open it with: ${tabCommand(ws, prompt)}`);
   }
 }

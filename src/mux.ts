@@ -104,9 +104,11 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
   // so ask for that session by name before giving up
   const act = (...args: string[]) => {
     const r = actIn(opts.session, args);
-    const own = env.ZELLIJ_SESSION_NAME;
-    if (r.ok || opts.session !== undefined || !own || !/no active session/i.test(`${r.stderr ?? ""}${r.stdout}`)) return r;
-    return actIn(own, args);
+    const ownSession = env.ZELLIJ_SESSION_NAME;
+    if (r.ok || opts.session !== undefined || !ownSession || !/no active session/i.test(`${r.stderr ?? ""}${r.stdout}`)) return r;
+    // a stale name fails differently; report the first error, the one that says what went wrong
+    const byName = actIn(ownSession, args);
+    return byName.ok ? byName : r;
   };
   const target = (id: string) => `terminal_${id}`;
   const tabs = () => {

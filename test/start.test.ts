@@ -236,6 +236,8 @@ describe("start inside zellij", () => {
 
 describe("a tab that fails to open", () => {
   const delays = [...tabRetry.delaysMs];
+  const sleep = tabRetry.sleep;
+  const sessionName = process.env.ZELLIJ_SESSION_NAME;
   const sleeps: number[] = [];
   beforeAll(() => {
     process.env.ZELLIJ = "0";
@@ -248,7 +250,9 @@ describe("a tab that fails to open", () => {
   });
   afterAll(() => {
     process.env.ZELLIJ = "";
+    if (sessionName !== undefined) process.env.ZELLIJ_SESSION_NAME = sessionName;
     tabRetry.delaysMs = delays;
+    tabRetry.sleep = sleep;
   });
 
   /** A zellij whose `new-tab` fails for the first `failures` calls with zellij's own no-session message. */
@@ -287,9 +291,9 @@ describe("a tab that fails to open", () => {
     expect(readState().workspaces["gh-app-20"]).toBeDefined();
   });
 
-  test("a thawed workspace's recovery command leaves out the resume prompt", () => {
+  test("a thawed workspace's recovery command carries the handoff prompt, since the workspace is no longer iceboxed", () => {
     const z = flaky(99);
-    expect(() => requireTab("ws-a", "read the handoff", TabFocus.Foreground, z.mux, true)).toThrow(/Open it with: overbridge tab ws-a$/);
+    expect(() => requireTab("ws-a", "/read-handoff", TabFocus.Foreground, z.mux, true)).toThrow(/Open it with: overbridge tab ws-a --prompt \/read-handoff$/);
   });
 });
 
