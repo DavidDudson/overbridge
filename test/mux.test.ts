@@ -103,6 +103,18 @@ describe("tmuxMux argv", () => {
     expect(t.calls.at(-1)).toEqual(["tmux", "kill-window", "-t", "@2"]);
   });
 
+  test("goes to a tab and focuses its pane in one tmux call, so the screen repaints once", () => {
+    const t = mux((cmd) => (cmd[1] === "list-windows" ? ok(windows) : ok()));
+    expect(t.mux.goToTab("w1", "%7").ok).toBe(true);
+    expect(t.calls.at(-1)).toEqual(["tmux", "select-window", "-t", "@1", ";", "select-pane", "-t", "%7"]);
+  });
+
+  test("a stale pane id still leaves you on the tab", () => {
+    const t = mux((cmd) => (cmd[1] === "list-windows" ? ok(windows) : cmd.includes("select-pane") ? { ok: false, stdout: "", stderr: "can't find pane" } : ok()));
+    expect(t.mux.goToTab("w1", "%9").ok).toBe(true);
+    expect(t.calls.at(-1)).toEqual(["tmux", "select-window", "-t", "@1"]);
+  });
+
   test("reads tabs and panes from -F formats, not from text output", () => {
     const t = mux((cmd) => (cmd[1] === "list-windows" ? ok(windows) : ok("%1|||w1|||w1 · claude|||0\n%2|||w1|||w1 · terminal|||1\n")));
     expect(t.mux.tabs()).toEqual(["@root", "w1", "w2"]);
