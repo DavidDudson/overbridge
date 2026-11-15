@@ -488,7 +488,7 @@ export function noUnsavedWork(ws: string, cache: Pick<TopCache, "merged"> = clai
 }
 
 /**
- * No repo in `ws` holds uncommitted changes, and each merged repo's HEAD is its PR's head commit. A squash merge keeps the branch's commits off every remote branch, so
+ * No repo in `ws` holds uncommitted changes, and each merged repo's HEAD is contained in its PR's head commit (`git.containedInPrHead`). A squash merge keeps the branch's commits off every remote branch, so
  * comparing with the PR head is what tells pushed-and-merged from local work. A repo with no merged PR (released) falls back to the unpushed check.
  */
 export function mergedClean(ws: string, heads: Record<string, string>): boolean {
@@ -501,7 +501,7 @@ export function mergedClean(ws: string, heads: Record<string, string>): boolean 
       return false;
     }
     const head = heads[repo];
-    return head === undefined ? !git.hasUnpushed(wt) : git.headSha(wt) === head;
+    return head === undefined ? !git.hasUnpushed(wt) : git.containedInPrHead(wt, head);
   });
 }
 
