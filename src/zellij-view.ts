@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isJsonNumber, isJsonObject, isJsonString, type JsonValue, parseJson } from "./json";
 import { metaDir } from "./paths";
 import { defaultMux, type Mux } from "./mux";
 
@@ -40,21 +41,21 @@ const ageMs = (path: string, nowMs: number): number => {
   }
 };
 
-const isView = (v: unknown): v is ZellijView => {
-  if (typeof v !== "object" || v === null) {
-    return false;
-  }
+/** The view a file holds, or undefined when it is not one. */
+const parseView = (parsed: JsonValue): ZellijView | undefined => {
+  if (!isJsonObject(parsed)) return undefined;
+  const { order, atMs, focused } = parsed;
 
-  const r = v as Record<string, unknown>;
+  if (!Array.isArray(order) || !order.every(isJsonString) || !isJsonNumber(atMs)) return undefined;
 
-  return Array.isArray(r.order) && r.order.every((t) => typeof t === "string") && typeof r.atMs === "number" && (r.focused === undefined || typeof r.focused === "string");
+  if (focused === undefined) return { order, atMs };
+
+  return isJsonString(focused) ? { order, atMs, focused } : undefined;
 };
 
 function readCached(dir: string): ZellijView | undefined {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(viewPath(dir), "utf8"));
-
-    return isView(parsed) ? parsed : undefined;
+    return parseView(parseJson(readFileSync(viewPath(dir), "utf8")));
   } catch {
     return undefined;
   }
@@ -100,7 +101,9 @@ export function readView(deps: ViewDeps = {}): ZellijView {
 
     const mux = deps.mux ?? defaultMux();
     const focused = mux.currentTab();
-    const view: ZellijView = { order: mux.tabs(), ...(focused === undefined ? {} : { focused }), atMs: nowMs };
+    const view: ZellijView = { order: mux.tabs(), atMs: nowMs };
+
+    if (focused !== undefined) view.focused = focused;
     writeView(dir, view);
 
     return view;

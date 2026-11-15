@@ -65,8 +65,8 @@ export interface CacheStats {
   keys: Record<string, { atMs?: number; hits: number; misses: number; inFlight: boolean; failures: number; error?: string; lastError?: string; lastErrorAtMs?: number; retryAtMs?: number }>;
 }
 
-export const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-const asError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
+export const errorText = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
+const asError = (cause: unknown): Error => (cause instanceof Error ? cause : new Error(String(cause)));
 
 export class Cache<T> {
   private entries = new Map<string, Entry<T>>();
@@ -118,10 +118,10 @@ export class Cache<T> {
     return e;
   }
 
-  private staleOrThrow(e: Entry<T>, err: unknown): Got<T> {
-    if (e.value === undefined) throw asError(err);
+  private staleOrThrow(e: Entry<T>, cause: unknown): Got<T> {
+    if (e.value === undefined) throw asError(cause);
 
-    return { value: e.value, served: "stale", error: errorText(err) };
+    return { value: e.value, served: "stale", error: errorText(cause) };
   }
 
   async get(key: string, fetch: () => Promise<T>, o: GetOptions): Promise<Got<T>> {
@@ -171,8 +171,8 @@ export class Cache<T> {
 
     try {
       return { value: await flight, served: "fresh" };
-    } catch (err) {
-      return this.staleOrThrow(e, err);
+    } catch (cause) {
+      return this.staleOrThrow(e, cause);
     }
   }
 
@@ -199,8 +199,8 @@ export class Cache<T> {
 
     try {
       return { value: await next, served: "fresh" };
-    } catch (err) {
-      return this.staleOrThrow(e, err);
+    } catch (cause) {
+      return this.staleOrThrow(e, cause);
     }
   }
 
@@ -208,16 +208,24 @@ export class Cache<T> {
     const keys: CacheStats["keys"] = {};
 
     for (const [k, e] of this.entries) {
-      keys[k] = {
-        ...(e.atMs === undefined ? {} : { atMs: e.atMs }),
+      const stat: CacheStats["keys"][string] = {
         hits: e.hits,
         misses: e.misses,
         inFlight: e.flight !== undefined,
         failures: e.failures,
-        ...(e.error ? { error: e.error } : {}),
-        ...(e.lastError ? { lastError: e.lastError, lastErrorAtMs: e.lastErrorAtMs } : {}),
-        ...(e.retryAtMs > this.now() ? { retryAtMs: e.retryAtMs } : {}),
       };
+
+      if (e.atMs !== undefined) stat.atMs = e.atMs;
+
+      if (e.error) stat.error = e.error;
+
+      if (e.lastError) {
+        stat.lastError = e.lastError;
+        stat.lastErrorAtMs = e.lastErrorAtMs;
+      }
+
+      if (e.retryAtMs > this.now()) stat.retryAtMs = e.retryAtMs;
+      keys[k] = stat;
     }
 
     return { ...this.counters, inFlight: this.active, queued: this.waiting.length, keys };
@@ -238,15 +246,15 @@ export class Cache<T> {
 
         return value;
       },
-      (err: unknown) => {
+      (cause: unknown) => {
         e.failures++;
-        e.error = errorText(err);
+        e.error = errorText(cause);
         e.lastError = e.error;
         e.lastErrorAtMs = this.now();
         e.retryAtMs = this.now() + Math.min(this.backoffBaseMs * 2 ** (e.failures - 1), this.backoffMaxMs);
         e.flight = undefined;
-        this.onError(key, asError(err));
-        throw err;
+        this.onError(key, asError(cause));
+        throw cause;
       },
     );
 

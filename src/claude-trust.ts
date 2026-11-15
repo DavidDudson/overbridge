@@ -2,11 +2,13 @@ import { existsSync, readFileSync, realpathSync, renameSync, writeFileSync } fro
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isInside, root } from "./paths";
-import { fail, isRecord, log } from "./util";
+import { type JsonObject, isJsonObject, objectField, parseJson } from "./json";
+import { fail, log } from "./util";
 
-type Project = Record<string, unknown>;
+/** The folders Claude knows, by path; each value is that folder's own settings object. */
+type Projects = JsonObject;
 
-type ClaudeConfig = { projects?: Record<string, Project> } & Record<string, unknown>;
+type ClaudeConfig = JsonObject;
 
 const TRUST_KEY = "hasTrustDialogAccepted";
 
@@ -32,10 +34,10 @@ function readConfig(file: string): ClaudeConfig | undefined {
   }
 
   try {
-    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+    const parsed = parseJson(readFileSync(file, "utf8"));
 
-    if (isRecord(parsed)) {
-      return parsed as ClaudeConfig;
+    if (isJsonObject(parsed)) {
+      return parsed;
     }
   } catch {
     // reported below
@@ -53,7 +55,7 @@ function writeConfig(file: string, config: ClaudeConfig) {
   renameSync(tmp, file);
 }
 
-function updateProjects(dir: string, change: (projects: Record<string, Project>, path: string) => Record<string, Project>) {
+function updateProjects(dir: string, change: (projects: Projects, path: string) => Projects) {
   const path = ownedFolder(dir);
   const file = claudeConfigPath();
   const config = readConfig(file);
@@ -62,7 +64,7 @@ function updateProjects(dir: string, change: (projects: Record<string, Project>,
     return;
   }
 
-  const projects = config.projects ?? {};
+  const projects = objectField(config, "projects") ?? {};
   const next = change(projects, path);
 
   if (next !== projects) {
@@ -73,13 +75,13 @@ function updateProjects(dir: string, change: (projects: Record<string, Project>,
 /** Mark workspace folder `dir` as trusted in Claude, so a session started there skips the trust prompt. */
 export const trustFolder = (dir: string) =>
   updateProjects(dir, (projects, path) =>
-    projects[path]?.[TRUST_KEY] === true ? projects : { ...projects, [path]: { ...projects[path], [TRUST_KEY]: true } },
+    objectField(projects, path)?.[TRUST_KEY] === true ? projects : { ...projects, [path]: { ...objectField(projects, path), [TRUST_KEY]: true } },
   );
 
 /** Drop the trust overbridge recorded for workspace folder `dir`, and the folder's entry once nothing else is in it. */
 export const untrustFolder = (dir: string) =>
   updateProjects(dir, (projects, path) => {
-    const entry = projects[path];
+    const entry = objectField(projects, path);
 
     if (!entry || !(TRUST_KEY in entry)) {
       return projects;

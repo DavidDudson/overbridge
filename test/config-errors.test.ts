@@ -2,13 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseConfig } from "../src/project-config";
+import { errorMessage } from "../src/util";
 
 /** The message `parseConfig` throws for `yaml`, without the file-name header. */
 function problems(yaml: string): string[] {
   try {
     parseConfig(yaml, "f.yml");
   } catch (e) {
-    return (e as Error).message
+    return errorMessage(e)
       .split("\n")
       .map((l) => l.trim())
       .filter((l) => l && l !== "f.yml:");

@@ -1,6 +1,6 @@
 default: check
 
-check: typecheck test
+check: lint typecheck test
 
 test:
     bun test

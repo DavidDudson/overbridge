@@ -9,10 +9,11 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { checkOrchestrator } from "./guard-orchestrator";
+import { type JsonObject, stringField } from "./json";
 import { currentWorkspace, isInside, ORCHESTRATION_ENV, realPath, root } from "./paths";
 import { type GuardConfig, loadRootLayers } from "./project-config";
 
-export type HookInput = { cwd?: string; tool_name?: string; tool_input?: Record<string, unknown> };
+export type HookInput = { cwd?: string; tool_name?: string; tool_input?: JsonObject };
 
 /** `extra` is the root config's `guard` block: more paths to read and more commands to block. */
 export type GuardCtx = { root: string; ws: string; home: string; extra?: GuardConfig };
@@ -77,9 +78,15 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
     isInside(abs, rootPath) && !isInside(abs, wsPath) && !readable.some((dir) => isInside(abs, dir));
 
   if (WRITE_TOOLS.has(tool) || READ_TOOLS.has(tool)) {
-    const paths = PATH_KEYS.map((k) => ti[k]).filter((v): v is string => typeof v === "string" && v !== "");
+    const paths = PATH_KEYS.flatMap((k) => {
+      const value = stringField(ti, k);
 
-    if (tool === "Glob" && typeof ti.pattern === "string" && /^[~/]/.test(ti.pattern)) paths.push(ti.pattern);
+      return value ? [value] : [];
+    });
+
+    const pattern = stringField(ti, "pattern");
+
+    if (tool === "Glob" && pattern && /^[~/]/.test(pattern)) paths.push(pattern);
 
     for (const p of paths) {
       const abs = expand(p);

@@ -9,6 +9,12 @@ import { Cache } from "../src/server-cache";
 import { formatStatus, keyRows, readStatus, type ServerStatus, stopServer } from "../src/server-cmd";
 import { pidFile, stoppingFile } from "../src/server-net";
 import { startWatchdog, watchdogVerdict } from "../src/server-watchdog";
+import type { TopCache } from "../src/top";
+
+/** A `refreshTop` for handlers whose tests never ask for a refresh. */
+const neverRefreshed = async (): Promise<TopCache> => {
+  throw new Error("refreshTop was not expected to run");
+};
 
 const settle = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -209,8 +215,8 @@ describe("server status", () => {
   });
 
   test("GET /status carries the rate limit and the keys", async () => {
-    const h = createHandler({ refreshTop: async () => ({}) as never, refreshPerf: async () => 0, workspaceExists: () => true, cacheFileAt: () => 0, version: "v", onVersionMismatch: () => undefined, rateStats: () => ({ paused: false, trips: 0 }) });
-    const body = (await (await h.handle(new Request("http://x/status"))).json()) as ServerStatus;
+    const h = createHandler({ refreshTop: neverRefreshed, refreshPerf: async () => 0, workspaceExists: () => true, cacheFileAt: () => 0, version: "v", onVersionMismatch: () => undefined, rateStats: () => ({ paused: false, trips: 0 }) });
+    const body: ServerStatus = JSON.parse(await (await h.handle(new Request("http://x/status"))).text());
     expect(body.rateLimit).toEqual({ paused: false, trips: 0 });
     expect(body.keys).toEqual({});
   });
@@ -320,7 +326,7 @@ describe("server stop and status are safe", () => {
     await withRoot(async (root) => {
       const sock = join(root, "s.sock");
       let drained = false;
-      const h = createHandler({ refreshTop: async () => ({}) as never, refreshPerf: async () => 0, workspaceExists: () => true, cacheFileAt: () => 0, version: "some-other-version", onVersionMismatch: () => (drained = true) });
+      const h = createHandler({ refreshTop: neverRefreshed, refreshPerf: async () => 0, workspaceExists: () => true, cacheFileAt: () => 0, version: "some-other-version", onVersionMismatch: () => (drained = true) });
       const server = Bun.serve({ unix: sock, fetch: (req) => h.handle(req) });
       const status = await readStatus(sock);
       await server.stop(true);

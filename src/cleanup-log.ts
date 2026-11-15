@@ -1,7 +1,7 @@
 import { type State, withState } from "./state";
 import { MERGE_SWEEP_MS } from "./sweep-trigger";
 import { type Color, colorize, fit } from "./term";
-import { isRecord } from "./util";
+import { isJsonNumber, isJsonObject, isJsonString, type JsonValue } from "./json";
 
 /** How a finished workspace removal ended. */
 export const CleanupOutcome = { Removed: "removed", Failed: "failed" } as const;
@@ -14,14 +14,14 @@ export const CleanupCause = { Cleanup: "cleanup", Merged: "merged", SessionEnded
 export type CleanupCause = (typeof CleanupCause)[keyof typeof CleanupCause];
 
 /** One finished removal, kept in state so every sidebar can list it. */
-export interface CleanupRecord {
+export type CleanupRecord = {
   ws: string;
   /** The sidebar label the workspace had, since its top cache goes with it. */
   label: string;
   atMs: number;
   outcome: CleanupOutcome;
   cause: CleanupCause;
-}
+};
 
 /** A removal still in flight. */
 export interface CleanupInFlight {
@@ -50,10 +50,10 @@ export const secondsToCheck = (sweepAt: number | undefined, now: number, interva
   Math.max(0, Math.ceil((intervalMs - (now - (sweepAt ?? 0))) / 1000));
 
 /** Whether a record from state has the fields a row needs; a hand edit or a half-written file can leave one without. */
-export const isCleanupRecord = (r: unknown): r is CleanupRecord => isRecord(r) && typeof r.label === "string" && typeof r.atMs === "number" && Number.isFinite(r.atMs);
+export const isCleanupRecord = (r: unknown): r is CleanupRecord => isJsonObject(r) && isJsonString(r.label) && isJsonNumber(r.atMs);
 
 /** The usable records of `State.cleanups` as read from disk; every consumer of that field goes through here. */
-export const cleanupRecords = (log: unknown): CleanupRecord[] => (Array.isArray(log) ? log : []).filter(isCleanupRecord);
+export const cleanupRecords = (log: JsonValue | undefined): CleanupRecord[] => (Array.isArray(log) ? log : []).filter(isCleanupRecord);
 
 const rowStyle = (r: CleanupRecord): { glyph: string; word: string; color: Color } =>
   r.outcome === CleanupOutcome.Failed ? { glyph: "✗", word: "failed", color: "red" } : { glyph: "🧹", word: "removed", color: "grey" };

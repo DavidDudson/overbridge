@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { isJsonString } from "../src/json";
 import { type BoardItem, BoardStatus, explain, normalizeStatus, rank, Readiness, readiness, recommend, renderBoard, RULES, streams } from "../src/pm/board";
 import { Screen } from "./helpers/screen";
 
@@ -154,7 +155,7 @@ describe("determinism", () => {
       for (const rule of RULES) {
         const [ka, kb] = [rule.key(a), rule.key(b)];
 
-        if (ka !== kb) return typeof ka === "string" && typeof kb === "string" ? ka.localeCompare(kb, undefined, { numeric: true }) : ka < kb ? -1 : 1;
+        if (ka !== kb) return isJsonString(ka) && isJsonString(kb) ? ka.localeCompare(kb, undefined, { numeric: true }) : ka < kb ? -1 : 1;
       }
 
       return 0;

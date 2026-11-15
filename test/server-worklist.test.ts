@@ -4,9 +4,16 @@ import { createWorklistRefresher } from "../src/server-worklist";
 import type { WorkRow } from "../src/pm/worklist";
 import { type BoardSource, boardSources, refreshWorklistAny, sourceKey, type SourceRead } from "../src/worklist-run";
 
-const row = (repo: string, id: string): WorkRow => ({ repo, id, title: `t${id}`, url: "u", status: "todo", labels: [], blockedBy: [], updatedAt: "2026-01-01T00:00:00Z" }) as WorkRow;
+const row = (repo: string, id: string): WorkRow => ({ repo, id, title: `t${id}`, url: "u", status: "todo", labels: [], blockedBy: [], updatedAt: "2026-01-01T00:00:00Z" });
 const gh = (repo: string, slug = `o/${repo}`): BoardSource => ({ kind: "github", repo, slug });
-const jira = (project: string, repos: string[], filter?: string): BoardSource => ({ kind: "jira", project, repos, ...(filter ? { filter } : {}) });
+
+const jira = (project: string, repos: string[], filter?: string): BoardSource => {
+  const source: BoardSource = { kind: "jira", project, repos };
+
+  if (filter) source.filter = filter;
+
+  return source;
+};
 
 describe("sourceKey", () => {
   test("repos on one Jira project and filter share a key, a different filter or project does not", () => {

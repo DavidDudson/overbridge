@@ -61,7 +61,7 @@ export function pickRepo(key: string, repos: readonly string[]): string | undefi
   return n > 0 && n <= Math.min(9, repos.length) ? repos[n - 1] : undefined;
 }
 
-const STATUS_COLOR: Record<string, Color> = { todo: "grey", "in-progress": "yellow", blocked: "red", done: "green" };
+const STATUS_COLOR: Record<WorkStatus, Color> = { todo: "grey", "in-progress": "yellow", blocked: "red", done: "green" };
 
 /**
  * The panel as screen rows: a table of ranked items with the selected row inverted, then the selected

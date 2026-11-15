@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isJsonObject, isJsonString, numberField, parseJson, type JsonObject, type JsonValue } from "./json";
 import { metaDir } from "./paths";
 
 /**
@@ -175,6 +176,10 @@ export const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 const safeName = (ws: string) => ws.replace(/[^\w@.-]/g, "_");
 
+/** A parsed line is ours when it has a numeric `at` and a known kind; the other fields come from `append`, which serialises a HistoryRecord. */
+const isHistoryRecord = (raw: JsonValue): raw is JsonObject & HistoryRecord =>
+  isJsonObject(raw) && numberField(raw, "at") !== undefined && (raw.kind === "claude" || raw.kind === "check");
+
 /** One JSON line per record in `<dir>/<ws>.jsonl`. A line is one `appendFileSync`, so concurrent writers do not interleave. */
 export function fileStore(dir: string, maxBytes = MAX_FILE_BYTES): HistoryStore {
   const file = (ws: string) => join(dir, `${safeName(ws)}.jsonl`);
@@ -184,7 +189,9 @@ export function fileStore(dir: string, maxBytes = MAX_FILE_BYTES): HistoryStore 
       if (!line) return [];
 
       try {
-        return [JSON.parse(line) as HistoryRecord];
+        const raw = parseJson(line);
+
+        return isHistoryRecord(raw) ? [raw] : [];
       } catch {
         return [];
       }
@@ -231,7 +238,7 @@ export interface HookPayload {
   hook_event_name?: string;
   tool_name?: string;
   tool_use_id?: string;
-  tool_input?: { command?: unknown };
+  tool_input?: JsonObject;
 }
 
 /** The record for a Claude hook payload, or undefined for an event that is not recorded. */
@@ -240,16 +247,32 @@ export function claudeRecord(input: HookPayload, at = Date.now()): ClaudeRecord 
 
   if (!event) return undefined;
   const tool = event === "PreToolUse" || event === "PostToolUse" || event === "PostToolUseFailure" ? input.tool_name : undefined;
-  const command = tool === "Bash" && typeof input.tool_input?.command === "string" ? input.tool_input.command : undefined;
+  const text = input.tool_input?.command;
+  const command = tool === "Bash" && isJsonString(text) ? text : undefined;
+  const record: ClaudeRecord = { kind: "claude", at, event };
 
-  return {
-    kind: "claude",
-    at,
-    event,
-    ...(tool ? { tool } : {}),
-    ...(tool && input.tool_use_id ? { id: input.tool_use_id } : {}),
-    ...(command === undefined ? {} : { cls: classifyCommand(command) }),
-  };
+  if (tool) record.tool = tool;
+
+  if (tool && input.tool_use_id) record.id = input.tool_use_id;
+
+  if (command !== undefined) record.cls = classifyCommand(command);
+
+  return record;
+}
+
+/** A tool call that has started and not yet finished. */
+interface OpenCall {
+  at: number;
+  tool: string;
+  cls?: CommandClass;
+}
+
+function openCall(r: ClaudeRecord): OpenCall {
+  const call: OpenCall = { at: r.at, tool: r.tool ?? "?" };
+
+  if (r.cls) call.cls = r.cls;
+
+  return call;
 }
 
 export interface Tally {
@@ -358,7 +381,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
   let turnStart: number | undefined;
   let lastStop: number | undefined;
   let notifiedAt: number | undefined;
-  const open = new Map<string, { at: number; tool: string; cls?: CommandClass }>();
+  const open = new Map<string, OpenCall>();
   // parallel tool calls overlap, so tool time is the union of the intervals, not their sum
   const spans: [number, number][] = [];
 
@@ -389,7 +412,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
         open.clear();
         break;
       case "PreToolUse":
-        if (turnStart !== undefined && r.id) open.set(r.id, { at: r.at, tool: r.tool ?? "?", ...(r.cls ? { cls: r.cls } : {}) });
+        if (turnStart !== undefined && r.id) open.set(r.id, openCall(r));
         break;
       case "Notification":
         // an idle notification after the turn ended waits on nobody

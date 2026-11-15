@@ -25,14 +25,15 @@ export const CLIENT_START_HEADER = "x-overbridge-client-start";
 export const BUILD_HEADER = "x-overbridge-build";
 
 /** The identity headers every client sends. */
-export function clientHeaders(o: { version?: string; startedAtMs?: number; buildTime?: number } = {}): Record<string, string> {
+export function clientHeaders(o: { version?: string; startedAtMs?: number; buildTime?: number } = {}) {
   const build = "buildTime" in o ? o.buildTime : overbridgeBuildTime();
 
-  return {
+  const identity = {
     [VERSION_HEADER]: o.version ?? overbridgeVersion(),
     [CLIENT_START_HEADER]: String(o.startedAtMs ?? PROCESS_START_MS),
-    ...(build === undefined ? {} : { [BUILD_HEADER]: String(build) }),
   };
+
+  return build === undefined ? identity : { ...identity, [BUILD_HEADER]: String(build) };
 }
 
 /** Set to anything non-empty to keep every caller on its own refresh and never start the server. */
@@ -62,11 +63,13 @@ export interface Reply {
   body: string;
 }
 
+export type CallOptions = { timeoutMs: number; sock?: string; version?: string; startedAtMs?: number; buildTime?: number };
+
 /**
  * One HTTP call over the server's socket. Resolves `undefined` when nothing answers (no socket, refused, timed out),
  * so the caller falls back to its local path.
  */
-export function call(method: string, path: string, o: { timeoutMs: number; sock?: string; version?: string; startedAtMs?: number; buildTime?: number }): Promise<Reply | undefined> {
+export function call(method: string, path: string, o: CallOptions): Promise<Reply | undefined> {
   if (serverDisabled()) return Promise.resolve(undefined);
 
   return new Promise((resolve) => {
@@ -149,7 +152,10 @@ function defaultSpawn(cmd: string[]) {
  * took the request (none answered, and one is being started; or it refused), so the hook refreshes on its own.
  */
 export async function notifyRefresh(ws: string, o: { sock?: string; timeoutMs?: number; start?: boolean } = {}): Promise<boolean> {
-  const r = await call("POST", `/refresh/top/${encodeURIComponent(ws)}?async=1`, { timeoutMs: o.timeoutMs ?? 500, ...(o.sock ? { sock: o.sock } : {}) });
+  const callOpts: CallOptions = { timeoutMs: o.timeoutMs ?? 500 };
+
+  if (o.sock) callOpts.sock = o.sock;
+  const r = await call("POST", `/refresh/top/${encodeURIComponent(ws)}?async=1`, callOpts);
 
   if (!r && o.start !== false) startServer();
 
@@ -166,7 +172,7 @@ export function takePidFile(file: string, alive: (pid: number) => boolean, pid =
 
       return true;
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      if (!(e instanceof Error && "code" in e && e.code === "EEXIST")) throw e;
       const holder = Number(readFileSync(file, "utf8"));
 
       // an empty file is a server that created it a moment ago and has not written its pid yet

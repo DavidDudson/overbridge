@@ -103,19 +103,22 @@ const entryFor = (tab: string, section: Section, label: string): Entry => {
   const detail = readAgentDetail(tab);
   const state = detail?.state;
 
-  return {
-    tab, section, glyph: glyphFor(state), state, label,
-    ...(detail?.since === undefined ? {} : { since: detail.since }),
-    ...(detail?.tool ? { tool: detail.tool } : {}),
-    ...(detail?.agents ? { agents: detail.agents } : {}),
-  };
+  const entry: Entry = { tab, section, glyph: glyphFor(state), state, label };
+
+  if (detail?.since !== undefined) entry.since = detail.since;
+
+  if (detail?.tool) entry.tool = detail.tool;
+
+  if (detail?.agents) entry.agents = detail.agents;
+
+  return entry;
 };
 
 /** A top cache older than this dims its card: the PR and title data on it may be out of date. */
 export const STALE_CACHE_MS = 15 * 60_000;
 
 /** Whether a cache written at `at` is stale at `now`; a cache with no time is not judged. */
-export const cacheIsStale = (at: number | undefined, now: number): boolean => typeof at === "number" && at > 0 && now - at > STALE_CACHE_MS;
+export const cacheIsStale = (at: number | undefined, now: number): boolean => at !== undefined && at > 0 && now - at > STALE_CACHE_MS;
 
 /** A card for an entry that could not be read: its label and why, no agent state. */
 const faultEntry = (tab: string, section: Section, fault: string, label = tab): Entry => ({ tab, section, glyph: UNKNOWN_GLYPH, label, fault });
@@ -136,15 +139,18 @@ const stacksOf = (cache: Pick<TopCache, "links">): NonNullable<Entry["stacks"]> 
 /** `stack 12·[13]·14`: the claimed layer in brackets, layers in order bottom to top. */
 const stackText = (s: { prs: number[]; current: number }) => `stack ${s.prs.map((n) => (n === s.current ? `[${n}]` : String(n))).join("·")}`;
 
-/** The card for workspace `ws` whose state record is `w`: a fault card when the record or its top cache is malformed. */
-function workspaceEntry(ws: string, w: unknown): Entry {
+/**
+ * The card for workspace `ws` whose state record is `w`: a fault card when the record or its top cache is malformed.
+ * `w` has the type `State` declares, but a state file can hold anything, so `workspaceFault` checks it at runtime.
+ */
+function workspaceEntry(ws: string, w: WorkspaceState): Entry {
   const recordFault = workspaceFault(w);
 
   if (recordFault !== undefined) {
     return faultEntry(ws, Section.Workspaces, recordFault);
   }
 
-  const { removeError: error, removalBlocked: blocked } = w as WorkspaceState;
+  const { removeError: error, removalBlocked: blocked } = w;
   const { cache, fault } = readTopCacheChecked(ws);
   const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
   const stacks = stacksOf(cache);
@@ -152,7 +158,25 @@ function workspaceEntry(ws: string, w: unknown): Entry {
   const task = fault ? undefined : taskStatus(cache, readPhase(ws));
   const gauge = entry.state === "busy" ? readGauge(ws) : undefined;
 
-  return { ...entry, ...(gauge ? { gauge } : {}), ...(!fault && cacheIsStale(cache.at, Date.now()) ? { stale: true } : {}), ...(task ? { task } : {}), ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}), ...(idleHint ? { idleHint } : {}) };
+  const card: Entry = { ...entry };
+
+  if (gauge) card.gauge = gauge;
+
+  if (!fault && cacheIsStale(cache.at, Date.now())) card.stale = true;
+
+  if (task) card.task = task;
+
+  if (stacks.length) card.stacks = stacks;
+
+  if (fault) card.fault = fault;
+
+  if (error) card.error = error;
+
+  if (blocked) card.blocked = blocked;
+
+  if (idleHint) card.idleHint = idleHint;
+
+  return card;
 }
 
 /** `list` with the last-turn receipt on `self`'s card, the one this pane shows selected; a busy or unreadable card has none. */
@@ -163,12 +187,12 @@ export const withReceipt = (list: Entry[], self: string, read: (ws: string) => R
     return receipt ? { ...e, receipt } : e;
   });
 
-/** `w` as the record of a workspace being removed right now, else undefined; a malformed record is never one. */
-const removingRecord = (w: unknown, now = Date.now()): (WorkspaceState & { removing: Removing }) | undefined =>
-  isWorkspaceState(w) && w.removing && isRemoving(w, now) ? (w as WorkspaceState & { removing: Removing }) : undefined;
+/** The removal in flight on `w`, else undefined; a malformed record has none. */
+const removingRecord = (w: WorkspaceState | undefined, now = Date.now()): Removing | undefined =>
+  isWorkspaceState(w) && w.removing && isRemoving(w, now) ? w.removing : undefined;
 
 /** Whether `w` is iceboxed: it has no tab, so it gets no card and no digit. A malformed record is never one. */
-const isIced = (workspaces: Record<string, unknown>, ws: string): boolean => {
+const isIced = (workspaces: State["workspaces"], ws: string): boolean => {
   try {
     const w = workspaces[ws];
 
@@ -182,7 +206,7 @@ const isIced = (workspaces: Record<string, unknown>, ws: string): boolean => {
  * Whether `workspaces[ws]` hides its workspace as being removed. Reading the record and checking its worker's pid
  * both happen inside the guard: a record that throws is a card to show, never one to hide.
  */
-const hiddenByRemoval = (workspaces: Record<string, unknown>, ws: string): boolean => {
+const hiddenByRemoval = (workspaces: State["workspaces"], ws: string): boolean => {
   try {
     return removingRecord(workspaces[ws]) !== undefined;
   } catch {
@@ -196,7 +220,7 @@ const hiddenByRemoval = (workspaces: Record<string, unknown>, ws: string): boole
  * Each card is built on its own: a workspace whose files are bad or whose readers throw gets a fault card.
  */
 export function entries(order: string[] = tabOrder(), state: State = readState()): Entry[] {
-  const workspaces: Record<string, unknown> = state.workspaces;
+  const workspaces = state.workspaces;
   const names = Object.keys(workspaces).filter((ws) => !hiddenByRemoval(workspaces, ws) && !isIced(workspaces, ws)).sort(naturalSort);
 
   const rank = (ws: string) => { const i = order.indexOf(ws);
@@ -205,7 +229,7 @@ export function entries(order: string[] = tabOrder(), state: State = readState()
 
   return [
     ...ORCHESTRATION_TABS.map((t) => guardedEntry(t.tab, Section.Orchestration, () => entryFor(t.tab, Section.Orchestration, t.label), t.label)),
-    ...names.toSorted((a, b) => rank(a) - rank(b)).map((ws) => guardedEntry(ws, Section.Workspaces, () => workspaceEntry(ws, workspaces[ws]))),
+    ...names.toSorted((a, b) => rank(a) - rank(b)).map((ws) => guardedEntry(ws, Section.Workspaces, () => workspaceEntry(ws, workspaces[ws]!))),
   ];
 }
 
@@ -250,8 +274,11 @@ export const CHROME_BOTTOM = 5;
 /** Longest a title may wrap to. */
 const MAX_TITLE_ROWS = 3;
 
+/** A status line: its words and their colour. */
+type StatusLine = { text: string; color: Color };
+
 /** The agent half of a card's status line: what Claude is doing. */
-const STATE_TEXT: Record<AgentState, { text: string; color: Color }> = {
+const STATE_TEXT: Record<AgentState, StatusLine> = {
   waiting: { text: "needs input", color: "yellow" },
   empty: { text: "empty", color: "grey" },
   done: { text: "finished", color: "green" },
@@ -264,15 +291,15 @@ const STATE_TEXT: Record<AgentState, { text: string; color: Color }> = {
 /** Shown for a workspace with no recorded agent state. */
 const NO_SESSION_TEXT = { text: "no session", color: "grey" } as const satisfies { text: string; color: Color };
 
-const BLOCK_TEXT: Record<RemovalBlock, { text: string; color: Color }> = {
+const BLOCK_TEXT: Record<RemovalBlock, StatusLine> = {
   [RemovalBlock.MergedUnsaved]: { text: "merged · unsaved work", color: "yellow" },
 };
 
-const UNSAVED_TEXT: { text: string; color: Color } = { text: "ended · unsaved work", color: "red" };
+const UNSAVED_TEXT: StatusLine = { text: "ended · unsaved work", color: "red" };
 const FAULT_COLOR: Color = "red";
 
 /** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, an icebox suggestion (unless the agent wants you), then `claude status - task status`. */
-function statusFor(e: Entry): { text: string; color: Color } | undefined {
+function statusFor(e: Entry): StatusLine | undefined {
   if (e.fault) return { text: `error: ${e.fault}`, color: FAULT_COLOR };
 
   if (e.error) return { text: `cleanup failed: ${e.error}`, color: FAULT_COLOR };
@@ -308,7 +335,7 @@ const TIMED: ReadonlySet<AgentState> = new Set<AgentState>(["busy", "waiting", "
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 /** The state's status line with its detail. Time shows from the first second while working, but only from a minute on for a wait or a finish. */
-export function stateText(e: Entry, now = Date.now()): { text: string; color: Color } {
+export function stateText(e: Entry, now = Date.now()): StatusLine {
   const { state } = e;
 
   if (!state) return { text: "", color: "grey" };
@@ -425,20 +452,24 @@ const droppedLabel = (w: WorkspaceState): string => (w.iceboxed?.dropped?.length
 
 /** Iceboxed workspaces, one dim row each under the divider; they have no tab, so no card and no digit. */
 export function icedRows(state: State, inner: number): string[] {
-  const workspaces = state.workspaces as Record<string, unknown>;
+  const workspaces = state.workspaces;
 
   return Object.keys(workspaces)
     .filter((ws) => isIced(workspaces, ws))
     .sort(naturalSort)
-    .map((ws) => dim(fit(`❄ ${ws} iceboxed${isWorkspaceState(workspaces[ws]) ? droppedLabel(workspaces[ws]) : ""}`, inner)));
+    .map((ws) => {
+      const w = workspaces[ws];
+
+      return dim(fit(`❄ ${ws} iceboxed${isWorkspaceState(w) ? droppedLabel(w) : ""}`, inner));
+    });
 }
 
 /** Workspaces being removed in the background right now, labelled as their cards were; a malformed record is skipped (its card reports it). */
 export function inFlightCleanups(state: State = readState(), now = Date.now()): CleanupInFlight[] {
-  return Object.entries(state.workspaces as Record<string, unknown>).flatMap(([ws, w]) => {
+  return Object.entries(state.workspaces).flatMap(([ws, w]) => {
     const record = removingRecord(w, now);
 
-    return record ? [{ label: sidebarLabel(ws, readTopCache(ws)), sinceMs: Date.parse(record.removing.since) }] : [];
+    return record ? [{ label: sidebarLabel(ws, readTopCache(ws)), sinceMs: Date.parse(record.since) }] : [];
   });
 }
 
@@ -517,7 +548,11 @@ export function gather(readers: SidebarReaders, inner: number, last: Model): Mod
   const status = attempt("status rows", () => readers.status(state, inner), []);
   const limits = attempt("limits", readers.limits, undefined);
 
-  return { list, status, limits, state, ...(faults[0] ? { fault: faults[0] } : {}) };
+  const model: Model = { list, status, limits, state };
+
+  if (faults[0]) model.fault = faults[0];
+
+  return model;
 }
 
 /**
@@ -705,7 +740,7 @@ export function startError(repo: string, id: string, result: Finished): string {
  * Resolves to the footer to show next: the legend on success, the error otherwise.
  */
 export async function runStart(repo: string, id: string, spawn: Spawner = spawnAsync): Promise<Footer> {
-  const result = await spawn([...selfCommand(), "start", repo, id]).catch((e: unknown): Finished => ({ code: -1, stderr: `could not run overbridge start: ${(e as Error).message}` }));
+  const result = await spawn([...selfCommand(), "start", repo, id]).catch((cause: unknown): Finished => ({ code: -1, stderr: `could not run overbridge start: ${errorMessage(cause)}` }));
 
   return result.code === 0 ? LEGEND_FOOTER : { kind: FooterKind.Error, message: startError(repo, id, result) };
 }

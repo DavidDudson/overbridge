@@ -7,6 +7,7 @@ import { handoffStamp, HandoffReason, renderHandoff } from "../src/handoff";
 import { zellijMux } from "../src/mux";
 import { icebox, type IceboxDeps, prunable, THAW_PROMPT, thaw } from "../src/icebox";
 import { entries, icedRows } from "../src/sidebar";
+import { isJsonObject, parseJson } from "../src/json";
 import { isIceboxed, readState, withState } from "../src/state";
 import { newTabKdl } from "../src/layout";
 import { showTab } from "../src/start";
@@ -33,9 +34,14 @@ const ob = (args: string[]) => sh([process.execPath, CLI, ...args], tmp);
 const ok = (stdout = ""): RunResult => ({ ok: true, code: 0, stdout, stderr: "" });
 
 /** Deps that record zellij calls and counts of what was stopped; `focused` is the tab zellij reports as current. */
+interface Stopped {
+  apps: string[];
+  checks: string[];
+}
+
 function fakeDeps(listTabs: string, focused = "") {
   const calls: string[][] = [];
-  const stopped = { apps: [] as string[], checks: [] as string[] };
+  const stopped: Stopped = { apps: [], checks: [] };
 
   const deps: IceboxDeps = {
     mux: zellijMux(
@@ -133,7 +139,8 @@ describe("icebox and thaw", () => {
   test("an iceboxed workspace has no sidebar card, only a row, and shows in status --json", () => {
     expect(entries([]).map((e) => e.tab)).not.toContain("calm");
     expect(icedRows(readState(), 40).join("\n")).toContain("calm");
-    const rows = JSON.parse(ob(["status", "--all", "--json"])) as { ws: string; iceboxed: boolean }[];
+    const parsed = parseJson(ob(["status", "--all", "--json"]));
+    const rows = Array.isArray(parsed) ? parsed.filter(isJsonObject) : [];
     expect(rows.find((r) => r.ws === "calm")?.iceboxed).toBe(true);
     expect(rows.find((r) => r.ws === "dirty")?.iceboxed).toBe(false);
   });
@@ -315,6 +322,7 @@ describe("stopChecksFor", () => {
   test("kills the running command's group and drops only that workspace's tickets", async () => {
     const dir = join(tmp, "queue");
     mkdirSync(dir, { recursive: true });
+    // SAFETY: Bun honours `detached` when spawning, but its SpawnOptions typing does not list it.
     const child = Bun.spawn(["sleep", "60"], { detached: true } as never);
     const ticket = (ws: string, extra: Partial<Ticket> = {}): Ticket => ({ pid: 999_999, ws, repo: "app", command: "x", queuedAtMs: Date.now(), ...extra });
     const mine = ticket("calm", { runPid: child.pid });

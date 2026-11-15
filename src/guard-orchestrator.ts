@@ -6,6 +6,7 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { HookInput } from "./guard";
+import { stringField } from "./json";
 import { isInside, orchestrationPlansDir, realPath } from "./paths";
 
 export const START_HINT =
@@ -45,34 +46,36 @@ const ALLOWED_TOOLS = new Set([
 const MCP_READ = /^mcp__.+__(?:get|search|list|read|fetch|view|lookup|query|find)[A-Za-z_]*$/i;
 
 /** Utilities that only read or print, each with the flags that would let it write or run a command. */
-const READ_UTILS: Record<string, readonly string[]> = {
-  ls: [],
-  eza: [],
-  tree: [],
-  cat: [],
-  bat: [],
-  head: [],
-  tail: [],
-  rg: ["--pre"],
-  grep: [],
-  wc: [],
-  jq: [],
-  pwd: [],
-  echo: [],
-  printf: [],
-  cd: [],
-  which: [],
-  file: [],
-  stat: [],
-  du: [],
-  dust: [],
-  date: [],
-  cut: [],
-  tr: [],
-  sort: ["-o", "--output"],
-  fd: ["-x", "--exec", "-X", "--exec-batch"],
-  find: ["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"],
-};
+const READ_UTILS = new Map<string, readonly string[]>(
+  Object.entries({
+    ls: [],
+    eza: [],
+    tree: [],
+    cat: [],
+    bat: [],
+    head: [],
+    tail: [],
+    rg: ["--pre"],
+    grep: [],
+    wc: [],
+    jq: [],
+    pwd: [],
+    echo: [],
+    printf: [],
+    cd: [],
+    which: [],
+    file: [],
+    stat: [],
+    du: [],
+    dust: [],
+    date: [],
+    cut: [],
+    tr: [],
+    sort: ["-o", "--output"],
+    fd: ["-x", "--exec", "-X", "--exec-batch"],
+    find: ["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"],
+  }),
+);
 
 /** `git` verbs that read. `gitVerbReason` narrows the ones that can also write. */
 const GIT_READ = new Set([
@@ -100,50 +103,54 @@ const GIT_READ = new Set([
 ]);
 
 /** `gh` command groups and their read-only subcommands. An empty list allows the whole group. */
-const GH_READ: Record<string, readonly string[]> = {
-  pr: ["list", "view", "diff", "checks", "status"],
-  issue: ["list", "view", "status"],
-  repo: ["list", "view"],
-  run: ["list", "view", "watch"],
-  workflow: ["list", "view"],
-  release: ["list", "view"],
-  search: [],
-  status: [],
-  auth: ["status"],
-  stack: ["view"],
-  api: [],
-};
+const GH_READ = new Map<string, readonly string[]>(
+  Object.entries({
+    pr: ["list", "view", "diff", "checks", "status"],
+    issue: ["list", "view", "status"],
+    repo: ["list", "view"],
+    run: ["list", "view", "watch"],
+    workflow: ["list", "view"],
+    release: ["list", "view"],
+    search: [],
+    status: [],
+    auth: ["status"],
+    stack: ["view"],
+    api: [],
+  }),
+);
 
 /**
  * `overbridge` subcommands for reading and for managing workspaces. Ones that change a branch, PR or item
  * (`checkout`, `pr`, `item create|edit`) belong to a workspace.
  */
-const OVERBRIDGE_ALLOWED: Record<string, readonly string[]> = {
-  status: [],
-  ahead: [],
-  whoami: [],
-  next: [],
-  start: [],
-  rm: [],
-  icebox: [],
-  thaw: [],
-  cleanup: [],
-  release: [],
-  up: [],
-  layout: [],
-  sync: [],
-  diff: [],
-  help: [],
-  "--help": [],
-  "-h": [],
-  version: [],
-  "--version": [],
-  repo: ["ls", "add"],
-  item: ["view", "from-branch", "branch", "assigned"],
-  config: ["get", "check", "show"],
-  ext: [],
-  worklist: ["show"],
-};
+const OVERBRIDGE_ALLOWED = new Map<string, readonly string[]>(
+  Object.entries({
+    status: [],
+    ahead: [],
+    whoami: [],
+    next: [],
+    start: [],
+    rm: [],
+    icebox: [],
+    thaw: [],
+    cleanup: [],
+    release: [],
+    up: [],
+    layout: [],
+    sync: [],
+    diff: [],
+    help: [],
+    "--help": [],
+    "-h": [],
+    version: [],
+    "--version": [],
+    repo: ["ls", "add"],
+    item: ["view", "from-branch", "branch", "assigned"],
+    config: ["get", "check", "show"],
+    ext: [],
+    worklist: ["show"],
+  }),
+);
 
 /** Redirections that cannot write a file: to another descriptor or to /dev/null. */
 const SAFE_REDIRECT = /^>>?\s*(?:&\d|\/dev\/null(?![^\s;&|]))/;
@@ -267,7 +274,10 @@ const basename = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const hasPositional = (args: readonly string[]) => args.some((a) => !a.startsWith("-"));
 
 /** Index of the verb after git's global options, or a reason when an option could run something. */
-function gitVerbIndex(args: readonly string[]): number | string {
+/** Where the verb sits in `git`'s arguments, or why a leading option is refused. */
+type GitVerbPosition = { at: number } | { refusal: string };
+
+function gitVerbIndex(args: readonly string[]): GitVerbPosition {
   // `-c key=value` can define an alias that runs any command, so only options that pick a directory pass
   const withValue = new Set(["-C", "--git-dir", "--work-tree"]);
   const alone = /^(?:--no-pager|--git-dir=.+|--work-tree=.+)$/;
@@ -281,11 +291,11 @@ function gitVerbIndex(args: readonly string[]): number | string {
     } else if (alone.test(a)) {
       i += 1;
     } else {
-      return blocked(`\`git ${a}\``);
+      return { refusal: blocked(`\`git ${a}\``) };
     }
   }
 
-  return i;
+  return { at: i };
 }
 
 function gitVerbReason(verb: string, rest: readonly string[]): string | undefined {
@@ -323,12 +333,13 @@ function gitVerbReason(verb: string, rest: readonly string[]): string | undefine
 }
 
 function gitReason(args: readonly string[]): string | undefined {
-  const at = gitVerbIndex(args);
+  const position = gitVerbIndex(args);
 
-  if (typeof at === "string") {
-    return at;
+  if ("refusal" in position) {
+    return position.refusal;
   }
 
+  const { at } = position;
   const verb = args[at];
 
   if (!verb || !GIT_READ.has(verb)) {
@@ -360,7 +371,7 @@ function ghReason(args: readonly string[]): string | undefined {
     return ghApiReason(args.slice(1));
   }
 
-  const subs = group === undefined ? undefined : GH_READ[group];
+  const subs = group === undefined ? undefined : GH_READ.get(group);
 
   if (!subs || (subs.length && !subs.includes(sub ?? ""))) {
     return blocked(`\`gh ${args.slice(0, 2).join(" ")}\``);
@@ -371,7 +382,7 @@ function ghReason(args: readonly string[]): string | undefined {
 
 function overbridgeReason(args: readonly string[]): string | undefined {
   const [sub, action] = args;
-  const actions = sub === undefined ? undefined : OVERBRIDGE_ALLOWED[sub];
+  const actions = sub === undefined ? undefined : OVERBRIDGE_ALLOWED.get(sub);
 
   if (!actions || (actions.length && !actions.includes(action ?? ""))) {
     return blocked(`\`overbridge ${args.slice(0, 2).join(" ")}\``.trim());
@@ -407,7 +418,7 @@ function segmentReason(words: readonly string[]): string | undefined {
     return overbridgeReason(args);
   }
 
-  const flags = READ_UTILS[cmd];
+  const flags = READ_UTILS.get(cmd);
 
   if (!flags) {
     return blocked(`\`${cmd}\``);
@@ -421,9 +432,9 @@ function segmentReason(words: readonly string[]): string | undefined {
 const FILE_WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit"]);
 
 function writesPlan(input: HookInput): boolean {
-  const target = input.tool_input?.file_path;
+  const target = input.tool_input ? stringField(input.tool_input, "file_path") : undefined;
 
-  if (typeof target !== "string" || target === "") {
+  if (!target) {
     return false;
   }
 

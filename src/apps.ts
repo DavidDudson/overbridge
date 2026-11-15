@@ -46,13 +46,17 @@ export function readRecord(ws: string, repo: string, id: string): AppRecord | un
   if (!existsSync(path)) return;
 
   try {
-    const raw = JSON.parse(readFileSync(path, "utf8")) as Partial<AppRecord>;
+    const raw: Partial<AppRecord> = JSON.parse(readFileSync(path, "utf8"));
     const { pid = 0, port } = raw;
 
     // pid 0 or 1 would make a group signal hit this process's own group, or init
     if (!Number.isInteger(pid) || pid <= 1) return;
 
-    return { pid, ...(typeof port === "number" ? { port } : {}), startedAtMs: raw.startedAtMs ?? 0 };
+    const record: AppRecord = { pid, startedAtMs: raw.startedAtMs ?? 0 };
+
+    if (port !== undefined && Number.isFinite(port)) record.port = port;
+
+    return record;
   } catch {
     return;
   }
@@ -168,7 +172,10 @@ export function startApp(ws: string, repo: string, spec: AppSpec, repoDir: strin
     });
 
     proc.unref();
-    const record: AppRecord = { pid: proc.pid, ...(port !== undefined ? { port } : {}), startedAtMs: Date.now() };
+    const record: AppRecord = { pid: proc.pid, startedAtMs: Date.now() };
+
+    if (port !== undefined) record.port = port;
+
     writeFileSync(recordPath(ws, repo, spec.id), JSON.stringify(record) + "\n");
 
     return record;

@@ -12,7 +12,7 @@ import { switchTab } from "./sidebar";
 import { defaultMux, type Mux } from "./mux";
 import { requireTab, TabFocus } from "./tab";
 import { cover, hasGhStack, localStacks } from "./stack";
-import { type Claim, claimOwner, isIceboxed, isRemoving, isTaskClaim, readState, type State, TASK_BRANCH_PREFIX } from "./state";
+import { type Claim, claimOwner, isIceboxed, isRemoving, isTaskClaim, readState, type ReboundFrom, type State, TASK_BRANCH_PREFIX } from "./state";
 import { fail, log, must, run } from "./util";
 import { committedConfig } from "./committed-config";
 
@@ -107,6 +107,12 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
  * holds everything it had (`git branch -d` refuses otherwise, and the branch is kept). Any other claim must be
  * clean, since the item's branch then starts from the default branch and nothing carries over.
  */
+/** What `checkout` is told about a re-bind: the base to carry work from and where the claim came from. */
+interface CheckoutOptions {
+  base?: string;
+  reboundFrom?: ReboundFrom;
+}
+
 function rebind(ws: string, repo: string, id: string, branch: string, claim: Claim, prompt?: string) {
   const wt = worktreePath(ws, repo);
   const old = claim.branch;
@@ -116,8 +122,21 @@ function rebind(ws: string, repo: string, id: string, branch: string, claim: Cla
     fail(`${ws}/${repo} has uncommitted changes or unpushed commits${old ? ` on ${old}` : ""}; commit and push them, or run without --here`);
   }
 
-  const reboundFrom = old ? { branch: old, ...(claim.pr !== undefined ? { pr: claim.pr } : {}) } : undefined;
-  checkout([repo, branch], ws, { ...(task ? { base: "HEAD" } : {}), ...(reboundFrom ? { reboundFrom } : {}) });
+  let reboundFrom: ReboundFrom | undefined;
+
+  if (old) {
+    reboundFrom = { branch: old };
+
+    if (claim.pr !== undefined) reboundFrom.pr = claim.pr;
+  }
+
+  const checkoutOpts: CheckoutOptions = {};
+
+  if (task) checkoutOpts.base = "HEAD";
+
+  if (reboundFrom) checkoutOpts.reboundFrom = reboundFrom;
+
+  checkout([repo, branch], ws, checkoutOpts);
 
   if (task && old) {
     if (run(["git", "-C", wt, "branch", "-d", old]).ok) log(`deleted ${old}`);
