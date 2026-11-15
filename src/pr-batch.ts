@@ -15,7 +15,7 @@ export const BATCH_WINDOW_MS = 250;
 export const PR_TTL_MS = 60_000;
 export const PR_STALE_MS = 10 * 60_000;
 
-export const FRAGMENT = `fragment F on PullRequest{url title isDraft updatedAt state headRefOid mergeable mergeStateStatus
+export const PR_FRAGMENT = `fragment F on PullRequest{url title isDraft updatedAt state headRefOid mergeable mergeStateStatus
 reviewRequests(first:20){pageInfo{hasNextPage} nodes{requestedReviewer{__typename ...on User{login} ...on Bot{login} ...on Team{name}}}}
 latestReviews(first:20){pageInfo{hasNextPage} nodes{author{login} state submittedAt url}}
 comments(last:100){pageInfo{hasPreviousPage} nodes{author{login} body createdAt url}}
@@ -26,7 +26,7 @@ commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){pageInfo{hasN
 export function buildBatchQuery(numbers: number[]): string {
   const aliases = numbers.map((n) => `p${n}:pullRequest(number:${n}){...F}`).join(" ");
 
-  return `query($owner:String!,$name:String!){rateLimit{cost remaining resetAt} repository(owner:$owner,name:$name){${aliases}}} ${FRAGMENT}`;
+  return `query($owner:String!,$name:String!){rateLimit{cost remaining resetAt} repository(owner:$owner,name:$name){${aliases}}} ${PR_FRAGMENT}`;
 }
 
 /** The objects in a GraphQL connection's `nodes`; a null node (a deleted user's) is skipped. */

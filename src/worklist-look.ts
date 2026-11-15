@@ -1,16 +1,11 @@
 import { spinner } from "./anim";
 import { HEALTH_LOOK, type HealthInput, type PrHealth } from "./pr-look";
 import type { Ranked } from "./pm/worklist";
-import type { Color } from "./term";
 
-/**
- * How a work item looks in the list and the sidebar. It reuses the PR health looks, so one colour means one thing in
- * every tab: red needs you (blocked), yellow is moving, green is ready to start, grey is waiting.
- */
+// Reuses the PR health looks so one colour means one thing in every tab.
 
 type Item = Pick<Ranked, "status" | "ready">;
 
-/** The health a work item maps to. A blocked item is red; one in progress is yellow; a ready one green; the rest grey. */
 export function workHealth(r: Item): PrHealth {
   if (r.status === "blocked") return "changes";
 
@@ -29,10 +24,10 @@ export function workInput(r: Item): HealthInput {
 }
 
 /** The status glyph and colour: a spinner turns on an item in progress, so the list shows what is moving. */
-export function statusGlyph(r: Item, nowMs: number): { icon: string; color: Color } {
+export function statusGlyph(r: Item, nowMs: number) {
   const look = HEALTH_LOOK[workHealth(r)];
 
-  return r.status === "in-progress" ? { icon: spinner(nowMs), color: look.color } : { icon: look.icon, color: look.color };
+  return { icon: r.status === "in-progress" ? spinner(nowMs) : look.icon, color: look.color };
 }
 
 /** Whether any row moves, so the pane redraws on a short tick. */

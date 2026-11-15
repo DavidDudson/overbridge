@@ -26,11 +26,10 @@ export interface WorklistCache {
 }
 
 export const worklistPath = () => join(metaDir(), "worklist.json");
-const cacheFile = worklistPath;
 
 export function readWorklist(): WorklistCache {
   try {
-    return JSON.parse(readFileSync(cacheFile(), "utf8"));
+    return JSON.parse(readFileSync(worklistPath(), "utf8"));
   } catch {
     return { at: 0, rows: [], notes: [] };
   }
@@ -38,9 +37,9 @@ export function readWorklist(): WorklistCache {
 
 function writeWorklist(cache: WorklistCache) {
   mkdirSync(metaDir(), { recursive: true });
-  const tmp = `${cacheFile()}.${process.pid}.tmp`;
+  const tmp = `${worklistPath()}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(cache, null, 2) + "\n");
-  renameSync(tmp, cacheFile());
+  renameSync(tmp, worklistPath());
 }
 
 /** One board read: a GitHub repo, or a Jira project shared by every repo that names it. */
@@ -222,11 +221,8 @@ export function keepLastGood(previous: readonly WorkRow[], fresh: readonly WorkR
   return [...fresh, ...previous.filter((r) => failed.has(r.repo) && !have.has(keyOf(r)))];
 }
 
-/**
- * Keep the GitHub boards owned by one of `orgs` (case-insensitive); no orgs keeps every source. Jira sources have no
- * GitHub owner, so they stay.
- */
-export function filterOrgs(sources: readonly BoardSource[], orgs: readonly string[]): BoardSource[] {
+/** Keep GitHub boards owned by one of `orgs` (any case); no orgs keeps all. Jira sources have no GitHub owner, so they always stay. */
+export function filterBoardsByOrg(sources: readonly BoardSource[], orgs: readonly string[]): BoardSource[] {
   if (orgs.length === 0) return [...sources];
   const owners = new Set(orgs.map((o) => o.toLowerCase()));
 
@@ -253,7 +249,7 @@ export function planWorklist(): WorklistPlan {
 
   const planned = boardSources(boards);
 
-  return { sources: filterOrgs(planned.sources, loadRootLayers().githubOrgs), notes: [...notes, ...planned.notes] };
+  return { sources: filterBoardsByOrg(planned.sources, loadRootLayers().githubOrgs), notes: [...notes, ...planned.notes] };
 }
 
 /** Write the cache from a plan's notes and what its reads returned, keeping the last good rows of a failed repo. */

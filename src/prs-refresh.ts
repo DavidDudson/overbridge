@@ -1,15 +1,17 @@
-import { FRAGMENT, mapPr } from "./pr-batch";
-import { ciFromRollup, type CiState } from "./pr-look";
+import { isJsonObject, type JsonObject, type JsonValue, numberField, objectField, parseJson, stringField } from "./json";
+import { mapPr, PR_FRAGMENT } from "./pr-batch";
+import { ciFromRollup } from "./pr-look";
 import type { PrRow } from "./pr-rows";
 import { reviewerStatuses } from "./reviewers";
+import { stripControl } from "./term";
 import type { RunResult } from "./util";
 
-/**
- * The My PRs list's data: one GraphQL search for the PRs you opened, carrying what the table shows (merge state, checks,
- * review decision, Copilot and CodeRabbit). It reuses the batch fragment, so a PR reads the same here as in a workspace card.
- */
+// Reuses the batch fragment, so a PR reads the same here as in a workspace card.
 
-const QUERY = `query($q:String!){search(query:$q,type:ISSUE,first:50){nodes{...on PullRequest{...F number author{login} reviewDecision repository{nameWithOwner}}}}} ${FRAGMENT}`;
+/** The most PRs one read returns: GraphQL's page limit, which keeps the old list's ceiling. */
+const PAGE = 100;
+
+const QUERY = `query($q:String!){search(query:$q,type:ISSUE,first:${PAGE}){nodes{...on PullRequest{...F number author{login} reviewDecision repository{nameWithOwner} commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}} ${PR_FRAGMENT}`;
 
 /** The search string: your open PRs, narrowed to `orgs` when any are set. */
 export const searchQuery = (orgs: readonly string[]): string => ["is:pr", "is:open", "author:@me", ...orgs.map((o) => `user:${o}`), "sort:updated-desc"].join(" ");
@@ -17,53 +19,69 @@ export const searchQuery = (orgs: readonly string[]): string => ["is:pr", "is:op
 /** The `gh api graphql` command for the list. */
 export const graphqlCommand = (orgs: readonly string[]): string[] => ["gh", "api", "graphql", "-f", `query=${QUERY}`, "-f", `q=${searchQuery(orgs)}`];
 
-const FAILED = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]);
-const PENDING = new Set(["PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"]);
+/** GitHub's own rollup state for the PR's last commit, so it matches the Reviews tab and counts every check. */
+function rollupState(node: JsonObject): string | undefined {
+  const commits = objectField(node, "commits");
+  const last = Array.isArray(commits?.nodes) ? commits.nodes[0] : undefined;
+  const commit = isJsonObject(last) ? objectField(last, "commit") : undefined;
+  const rollup = commit ? objectField(commit, "statusCheckRollup") : undefined;
 
-/** Checks as one state: any failure wins, then any still running; no checks is `none`. */
-export function ciOf(checks: readonly { status?: string; conclusion?: string; state?: string }[] | undefined): CiState {
-  if (!checks?.length) return "none";
+  return rollup ? stringField(rollup, "state") : undefined;
+}
 
-  if (checks.some((c) => FAILED.has(c.conclusion ?? "") || FAILED.has(c.state ?? ""))) return ciFromRollup("FAILURE");
+/** The first error GitHub reported, if any. */
+function firstError(body: JsonValue): string | undefined {
+  const errors = isJsonObject(body) ? body.errors : undefined;
+  const first = Array.isArray(errors) ? errors[0] : undefined;
 
-  if (checks.some((c) => PENDING.has(c.status ?? "") && !c.conclusion) || checks.some((c) => PENDING.has(c.state ?? ""))) return ciFromRollup("PENDING");
+  return isJsonObject(first) ? stringField(first, "message") : undefined;
+}
 
-  return ciFromRollup("SUCCESS");
+/** One search node as a row; a node with no URL (GitHub returned it null or as another type) has none. */
+function rowOf(node: JsonObject): PrRow[] {
+  const url = stringField(node, "url");
+  const number = numberField(node, "number");
+
+  if (url === undefined || number === undefined) return [];
+
+  const view = mapPr(node);
+
+  const row: PrRow = {
+    repo: stripControl(stringField(objectField(node, "repository") ?? {}, "nameWithOwner") ?? ""),
+    number,
+    title: stripControl(stringField(node, "title") ?? ""),
+    url,
+    author: stripControl(stringField(objectField(node, "author") ?? {}, "login") ?? ""),
+    draft: node.isDraft === true,
+    updatedAt: stringField(node, "updatedAt") ?? "",
+    ci: ciFromRollup(rollupState(node)),
+    decision: stringField(node, "reviewDecision") ?? "",
+    bots: reviewerStatuses(view, url),
+  };
+
+  const mergeable = stringField(node, "mergeable");
+
+  if (mergeable !== undefined) row.mergeable = mergeable;
+
+  return [row];
 }
 
 /** Rows from the search reply. A reply with no `data.search` is a failure of the whole call. */
 export function rowsFromGraphql(out: string): PrRow[] {
-  let body: any;
+  let body: JsonValue;
 
   try {
-    body = JSON.parse(out);
+    body = parseJson(out);
   } catch {
     throw new Error("GitHub reply was not JSON");
   }
 
-  const nodes = body?.data?.search?.nodes;
+  const data = isJsonObject(body) ? objectField(body, "data") : undefined;
+  const nodes = data ? objectField(data, "search")?.nodes : undefined;
 
-  if (!Array.isArray(nodes)) throw new Error(body?.errors?.[0]?.message ?? "GitHub reply had no search results");
+  if (!Array.isArray(nodes)) throw new Error(firstError(body) ?? "GitHub reply had no search results");
 
-  return nodes
-    .filter((n: any) => n?.url)
-    .map((n: any): PrRow => {
-      const view = mapPr(n);
-
-      return {
-        repo: n.repository?.nameWithOwner ?? "",
-        number: n.number,
-        title: n.title,
-        url: n.url,
-        author: n.author?.login ?? "",
-        draft: n.isDraft === true,
-        updatedAt: n.updatedAt,
-        mergeable: n.mergeable,
-        ci: ciOf(view.statusCheckRollup),
-        decision: n.reviewDecision ?? "",
-        bots: reviewerStatuses(view, n.url),
-      };
-    });
+  return nodes.filter((n): n is JsonObject => isJsonObject(n)).flatMap(rowOf);
 }
 
 /** Read the list. Throws with `gh`'s message when the call fails with no data. */
@@ -74,7 +92,9 @@ export function readMyPrs(orgs: readonly string[], runner: (cmd: string[]) => Ru
   try {
     return rowsFromGraphql(r.stdout);
   } catch (e) {
-    if (!r.ok && r.stderr.trim()) throw new Error(`gh api graphql failed: ${r.stderr.trim().split("\n")[0]}`);
-    throw e;
+    if (r.ok) throw e;
+    const line = (r.stderr || r.stdout).trim().split("\n")[0];
+
+    throw new Error(`gh api graphql failed: ${line || `exit ${r.code}`}`);
   }
 }

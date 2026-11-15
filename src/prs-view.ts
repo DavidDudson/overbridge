@@ -2,7 +2,7 @@ import { alternate } from "./anim";
 import { ciLook, conflictLook, HEALTH_LOOK, healthOf } from "./pr-look";
 import { age, CHROME, type PrRow, type ViewState } from "./pr-rows";
 import { REVIEWER_LOOK, type ReviewerStatus } from "./reviewers";
-import { bold, boxBottom, boxRow, boxTop, colorize, dim, fit, inverse, textWidth } from "./term";
+import { bold, boxBottom, boxRow, boxTop, cell, colorize, dim, fit, inverse } from "./term";
 
 /** How one PR list draws itself. `order` is the rows in cursor order, which is how the pane indexes them. */
 export interface PrView {
@@ -14,9 +14,6 @@ export interface PrView {
 
 const EMPTY = "no open PRs of yours";
 const LEGEND = "j/k move   o open in browser   r refresh   q quit";
-
-/** `s` padded with spaces to `w` columns by display width, so emoji cells line up. */
-const cell = (s: string, w: number) => s + " ".repeat(Math.max(0, w - textWidth(s)));
 
 const isConflict = (r: PrRow) => r.mergeable === "CONFLICTING";
 
