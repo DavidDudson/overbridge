@@ -3,6 +3,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
 import { configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, rootConfigPath } from "./project-config";
+import { aheadRows } from "./ahead";
+import { clearPhase, parseLayer, PHASES, writePhase } from "./task-status";
 import { agentDirOf, chooseLayout, userLayoutPath } from "./layout";
 import { isOrchestrationTab, orchestrationRemoveMessage, type OrchestrationTab } from "./orchestration";
 import { isOrphan, strayFiles, worktreesIn } from "./orphan";
@@ -148,12 +150,12 @@ export function removeWorkspace(ws: string, force: boolean) {
   log(`removed ${ws}`);
 }
 
-/** Delete `ws`'s folder and its per-workspace files outside it: top cache, agent state, sidebar pane, tab layout. */
+/** Delete `ws`'s folder and its per-workspace files outside it: top cache, agent state, phase, sidebar pane, tab layout. */
 function removeFolder(ws: string) {
   untrustFolder(wsDir(ws));
   rmSync(wsDir(ws), { recursive: true, force: true });
   clearSubagents(metaDir(), ws);
-  [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`)].forEach((f) =>
+  [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("phase", `${ws}.json`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`)].forEach((f) =>
     rmSync(join(metaDir(), f), { force: true }),
   );
 }
@@ -381,6 +383,9 @@ export function spinup(mux: Mux = defaultMux()) {
   up(true, mux);
 }
 
+/** A workspace Claude's argv: `--name <ws>` names the session after its workspace so `ListAgents` and `SendMessage` reach it by that name. */
+export const workspaceClaudeArgs = (ws: string, settings: string, extra: readonly string[]) => ["claude", "--settings", settings, "--name", ws, ...extra];
+
 /**
  * Launch the agent in `agentDir` (the repo folder, so its `overbridge.yml` is found; see `layout.ts`). With
  * exactly one repo that declares a dev shell it starts inside it; with several it starts plain and the workspace
@@ -396,7 +401,7 @@ export function claude(ws: string, extra: string[]) {
   const [only] = repos;
   const spec = repos.length === 1 && only ? loadRepoConfig(worktreePath(ws, only), only).shell : undefined;
   const settings = cwd === wsDir(ws) ? scaffoldPlugins() : workspaceSettingsPath(ws);
-  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, ["claude", "--settings", settings, ...extra], cwd);
+  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, workspaceClaudeArgs(ws, settings, extra), cwd);
   mkdirSync(dirname(agentShellFile(ws)), { recursive: true });
   if (spec && only) writeFileSync(agentShellFile(ws), only);
   else rmSync(agentShellFile(ws), { force: true });
@@ -476,6 +481,29 @@ export async function check(repoArg: string | undefined, cmd: string[], wsOpt?: 
   const { config, inv } = inRepoShell(ws, repo, cmd);
   const settings = timeoutSeconds === undefined ? config.checkQueue : { ...config.checkQueue, timeoutSeconds };
   return runCheck(inv, { ws, repo, command: cmd.map(shellQuote).join(" ") }, settings);
+}
+
+/** `overbridge ahead`: the workspaces whose branch is ahead of the default branch. */
+export function ahead(json: boolean) {
+  const rows = aheadRows();
+  if (json) return console.log(JSON.stringify(rows, null, 2));
+  if (!rows.length) return console.log("no workspace is ahead of its default branch");
+  table(
+    ["ws", "repo", "branch", "ahead", "behind", "pr", "last commit", ""],
+    rows.map((r) => [r.ws, r.repo, r.branch, String(r.ahead), String(r.behind), r.pr ? `#${r.pr}` : "", r.lastCommit.slice(0, 10), r.dirty ? "dirty" : ""]),
+  );
+}
+
+/** `overbridge phase <phase> [--stack n/m]`: record this workspace's phase before its PR exists; `--clear` forgets it. */
+export function phase(args: string[], stack: string | undefined, clear: boolean) {
+  const ws = requireWs();
+  if (clear) return clearPhase(ws);
+  const [name, ...extra] = args;
+  const known = PHASES.find((p) => p === name);
+  if (!known || extra.length) fail(`usage: overbridge phase <${PHASES.join("|")}> [--stack n/m] | --clear`);
+  const layer = stack === undefined ? undefined : (parseLayer(stack) ?? fail("--stack takes the layer and the stack size, like 2/3"));
+  if (layer && known !== "implement") fail("--stack only applies to the implement phase");
+  writePhase(ws, known, layer);
 }
 
 export function whoami() {

@@ -99,6 +99,6 @@ describe("the card", () => {
   });
 
   test("a card that wants you shows that first", () => {
-    expect(text(card({ state: "waiting", idleHint: "draft PRs idle 10d · icebox?" }))).toContain("needs your input");
+    expect(text(card({ state: "waiting", idleHint: "draft PRs idle 10d · icebox?" }))).toContain("needs input");
   });
 });

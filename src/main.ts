@@ -103,6 +103,10 @@ Workspaces
   overbridge thaw <name>                        reopen an iceboxed workspace's tab, its agent resuming and
                                         reading the handoff; recreates dropped worktrees on their branches
   overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty and iceboxed state
+  overbridge ahead [--json]                     workspaces whose branch holds commits main lacks (count, how far main
+                                        moved, subjects, the Claude session name to message); the revisit skill reads it
+  overbridge phase <plan|implement|mob-review> [--stack n/m] | --clear
+                                        record where this workspace's work is, for the sidebar's task status
   overbridge whoami                             workspace for the current dir/session
   overbridge prereqs                            exit 1 unless the skills overbridge's skills depend on (gh-stack)
                                         are installed
@@ -295,6 +299,17 @@ async function main(argv: string[]): Promise<number> {
     case "st": {
       const { values } = opts(rest, { all: { type: "boolean", short: "a" }, json: { type: "boolean" } });
       cmd.status(!!values.all, !!values.json);
+      break;
+    }
+    case "ahead": {
+      const { values, positionals } = opts(rest, { json: { type: "boolean" } });
+      if (positionals.length) throw new OverbridgeError("usage: overbridge ahead [--json]");
+      cmd.ahead(!!values.json);
+      break;
+    }
+    case "phase": {
+      const { values, positionals } = opts(rest, { stack: { type: "string" }, clear: { type: "boolean" } });
+      cmd.phase(positionals, values.stack, !!values.clear);
       break;
     }
     case "whoami":

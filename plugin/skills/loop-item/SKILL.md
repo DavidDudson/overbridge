@@ -32,10 +32,14 @@ A `task/` claim with no PR re-binds to the item (`start-item` step 4); do not op
 
 ## 2. Plan (no stop)
 
+Run `overbridge phase plan` (the sidebar's task status reads it until a PR exists).
+
 The plan from step 1 is your own working order, not a gate. Go straight on to implementing. Keep it
 for the PR body's summary, and for the check in step 3 that the work has not outgrown it.
 
 ## 3. Implement
+
+Run `overbridge phase implement` (`overbridge phase implement --stack <n>/<m>` for layer n of an m-layer stack).
 
 - Follow the plan's order, riskiest first.
 - Write tests as the plan's test approach says. If that changes while you work, tell the user.
@@ -58,6 +62,8 @@ for the PR body's summary, and for the check in step 3 that the work has not out
   user and wait.
 
 ## 4. Commit, then self-review
+
+Run `overbridge phase mob-review` before an early panel run.
 
 Commit the change (Conventional Commits, `Refs <id>` in the body, no secrets) but do not push yet.
 Review sees only committed work.

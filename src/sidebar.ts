@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userLayoutPath } from "./layout";
 import { join } from "node:path";
+import { readPhase, taskStatus } from "./task-status";
 import { ATTENTION, type AgentState, glyphFor, readAgentState, UNKNOWN_GLYPH } from "./agent-state";
 import { iceboxHint } from "./icebox-suggest";
 import { createReaper, type ReapResult } from "./auto-remove";
@@ -72,6 +73,8 @@ export interface Entry {
   stacks?: { prs: number[]; current: number }[];
   /** This entry could not be read: a bad cache or state record, or a reader that threw. Replaces the status line. */
   fault?: string;
+  /** Where the work is in its lifecycle (`draft PR`, `implement (stack 2/3)`, ...): the second half of the status line. */
+  task?: string;
   /** Its draft PRs have sat idle past `icebox.idle-days`: a suggestion to icebox it, never done automatically. */
   idleHint?: string;
 }
@@ -115,7 +118,8 @@ function workspaceEntry(ws: string, w: unknown): Entry {
   const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
   const stacks = stacksOf(cache);
   const idleHint = fault ? undefined : iceboxHint(ws, cache);
-  return { ...entry, ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}), ...(idleHint ? { idleHint } : {}) };
+  const task = fault ? undefined : taskStatus(cache, readPhase(ws));
+  return { ...entry, ...(task ? { task } : {}), ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}), ...(idleHint ? { idleHint } : {}) };
 }
 
 /** `w` as the record of a workspace being removed right now, else undefined; a malformed record is never one. */
@@ -195,15 +199,19 @@ export const CHROME_BOTTOM = 5;
 /** Longest a title may wrap to. */
 const MAX_TITLE_ROWS = 3;
 
+/** The agent half of a card's status line: what Claude is doing. */
 const STATE_TEXT: Record<AgentState, { text: string; color: Color }> = {
-  waiting: { text: "needs your input", color: "yellow" },
-  empty: { text: "empty · can clean up", color: "grey" },
+  waiting: { text: "needs input", color: "yellow" },
+  empty: { text: "empty", color: "grey" },
   done: { text: "finished", color: "green" },
-  bg: { text: "finished · tasks running", color: "cyan" },
+  bg: { text: "background tasks", color: "cyan" },
   busy: { text: "working", color: "blue" },
   idle: { text: "idle", color: "grey" },
   end: { text: "ended", color: "red" },
 };
+
+/** Shown for a workspace with no recorded agent state. */
+const NO_SESSION_TEXT = { text: "no session", color: "grey" } as const satisfies { text: string; color: Color };
 
 const BLOCK_TEXT: Record<RemovalBlock, { text: string; color: Color }> = {
   [RemovalBlock.MergedUnsaved]: { text: "merged · unsaved work", color: "yellow" },
@@ -211,14 +219,17 @@ const BLOCK_TEXT: Record<RemovalBlock, { text: string; color: Color }> = {
 const UNSAVED_TEXT: { text: string; color: Color } = { text: "ended · unsaved work", color: "red" };
 const FAULT_COLOR: Color = "red";
 
-/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, an icebox suggestion (unless the agent wants you), then the agent state. */
+/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, an icebox suggestion (unless the agent wants you), then `claude status - task status`. */
 function statusFor(e: Entry): { text: string; color: Color } | undefined {
   if (e.fault) return { text: `error: ${e.fault}`, color: FAULT_COLOR };
   if (e.error) return { text: `cleanup failed: ${e.error}`, color: FAULT_COLOR };
   if (e.blocked) return BLOCK_TEXT[e.blocked];
   if (e.unsaved) return UNSAVED_TEXT;
   if (e.idleHint && !(e.state && ATTENTION.includes(e.state))) return { text: e.idleHint, color: "cyan" };
-  return e.state ? STATE_TEXT[e.state] : undefined;
+  // an orchestration tab has no task, so no suffix
+  const claude = e.state ? STATE_TEXT[e.state] : e.task ? NO_SESSION_TEXT : undefined;
+  if (!claude) return undefined;
+  return e.task ? { text: `${claude.text} - ${e.task}`, color: claude.color } : claude;
 }
 
 /** `text` broken at spaces into lines of at most `width` columns; an over-long word is split. */

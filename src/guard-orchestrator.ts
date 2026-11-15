@@ -120,6 +120,7 @@ const GH_READ: Record<string, readonly string[]> = {
  */
 const OVERBRIDGE_ALLOWED: Record<string, readonly string[]> = {
   status: [],
+  ahead: [],
   whoami: [],
   next: [],
   start: [],
