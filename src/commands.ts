@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
@@ -369,7 +369,20 @@ export function up(fresh: boolean, mux: Mux = defaultMux()) {
     exists = false;
   }
   if (exists) log(`attaching to ${session} (use \`overbridge up --fresh\` to rebuild the layout)`);
+  recordLaunch(mux.kind, session, exists ? "attach" : fresh ? "fresh" : "create");
   process.exit(exec(exists ? mux.attachCommand(session) : mux.createCommand(session, file)));
+}
+
+/**
+ * One line per launch in `launch.log`, so a session that vanished and came back shows when it was relaunched and by
+ * what. A failed write must never stop the launch.
+ */
+function recordLaunch(kind: MuxKind, session: string, action: "attach" | "create" | "fresh") {
+  try {
+    appendFileSync(join(metaDir(), "launch.log"), `${new Date().toISOString()} ${kind} ${session} ${action} pid=${process.pid} ppid=${process.ppid}\n`);
+  } catch {
+    // diagnostics only
+  }
 }
 
 /** Name of the empty workspace `spinup` creates when there are none. */
