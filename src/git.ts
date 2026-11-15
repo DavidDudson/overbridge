@@ -91,6 +91,19 @@ export function isDirty(wt: string): boolean {
 }
 
 /**
+ * True when every commit on HEAD is already in `prHead` (a merged PR's head commit): HEAD is `prHead` or an ancestor of it. A commit past the PR head, even an empty one, is unsaved work.
+ * A squash merge leaves no remote branch holding the commits, but the PR head may have moved past a local HEAD (a bot push, "update branch").
+ * Fetches `prHead` from origin when the object is missing. Fails safe: any git error is false.
+ */
+export function containedInPrHead(wt: string, prHead: string): boolean {
+  if (!existsSync(wt)) return true;
+  if (!run(["git", "-C", wt, "cat-file", "-e", `${prHead}^{commit}`]).ok) {
+    if (!run(["git", "-C", wt, "fetch", "--quiet", "origin", prHead]).ok) return false;
+  }
+  return run(["git", "-C", wt, "merge-base", "--is-ancestor", "HEAD", prHead]).ok;
+}
+
+/**
  * True when HEAD holds commits no remote branch has. Fails safe: a missing worktree is not
  * unpushed (nothing to lose), but any git error counts as unpushed.
  */
