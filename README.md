@@ -712,8 +712,15 @@ The width (default 60) comes from the global config:
 ```toml
 # repos.toml
 [sidebar]
-width = 60    # 12 to 200
+width = 60                # 12 to 200
+motion = "while-active"   # or "off"
 ```
+
+With `motion = "while-active"` (the default) a card's 🔄 becomes a clock hand turning a quarter each second, only
+while its agent is working. It is computed from the clock when the frame is drawn, so it adds no polling, timer or file read: it moves at the
+sidebar's existing redraw rate (once a second on the focused tab, slower on hidden ones), and the sidebar still writes only
+frames that changed. `off` keeps the glyph still. The setting is read when the pane starts; a bad value shows in the footer
+and the glyph stays still.
 
 `s` opens a one-line prompt at the foot of the sidebar. Type `<repo> <id>`, such as `overbridge 79` or
 `web-monorepo ENG-123`. If the tab's workspace holds one repo, the id alone is enough; otherwise the prompt asks for

@@ -8,6 +8,8 @@ import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
 import { type CleanupInFlight, cleanupRecords, cleanupRows } from "./cleanup-log";
+import { Motion, sidebarMotion } from "./config";
+import { animate } from "./sidebar-motion";
 import { metaDir, selfCommand } from "./paths";
 import { type Limits, limitRows, readLimits } from "./limits";
 import { next } from "./next";
@@ -790,6 +792,15 @@ export async function sidebar(wsOpt?: string) {
   };
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
   const painter = createPainter((text) => process.stdout.write(text));
+  // a bad `[sidebar] motion` must not end the pane: run still and say why in the footer until the next key press
+  const motion = (() => {
+    try {
+      return sidebarMotion();
+    } catch (e) {
+      inputFault = errorMessage(e);
+      return Motion.Off;
+    }
+  })();
   let lastGatherAtMs = 0;
   /** Gather, then paint; neither may end the pane, so a failure is named in the footer and the next poll tries again. */
   const draw = () => {
@@ -802,7 +813,8 @@ export async function sidebar(wsOpt?: string) {
       last = { ...last, fault: `sidebar: ${errorMessage(e)}` };
     }
     try {
-      const { list, status } = last;
+      const { status } = last;
+      const list = animate(last.list, Date.now(), motion);
       const current = Math.max(0, list.findIndex((e) => e.tab === self));
       const heights = entryHeights(list, width);
       const pinned = pinnedCount(list);
