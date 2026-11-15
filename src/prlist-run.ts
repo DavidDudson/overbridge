@@ -5,6 +5,7 @@ import { metaDir, selfCommand } from "./paths";
 import { run, spawnCwd, type RunResult } from "./util";
 import { age, CHROME, type PrRow } from "./pr-rows";
 import { prsView } from "./prs-view";
+import { readMyPrs } from "./prs-refresh";
 import { reviewsView } from "./reviews-view";
 import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN } from "./term";
 
@@ -81,6 +82,7 @@ type Runner = (cmd: string[]) => RunResult;
 
 /** Read one list. Throws with `gh`'s message when the search fails. */
 export function readPrs(kind: PrListKind, orgs: readonly string[], runner: Runner = run): PrRow[] {
+  if (kind === "prs") return readMyPrs(orgs, runner);
   const r = runner(searchCommand(kind, orgs));
 
   if (!r.ok) throw new Error(`gh search prs failed: ${(r.stderr || r.stdout).trim().split("\n")[0]}`);

@@ -14,7 +14,7 @@ export const BATCH_WINDOW_MS = 250;
 export const PR_TTL_MS = 60_000;
 export const PR_STALE_MS = 10 * 60_000;
 
-const FRAGMENT = `fragment F on PullRequest{url title isDraft updatedAt state headRefOid mergeable mergeStateStatus
+export const FRAGMENT = `fragment F on PullRequest{url title isDraft updatedAt state headRefOid mergeable mergeStateStatus
 reviewRequests(first:20){pageInfo{hasNextPage} nodes{requestedReviewer{__typename ...on User{login} ...on Bot{login} ...on Team{name}}}}
 latestReviews(first:20){pageInfo{hasNextPage} nodes{author{login} state submittedAt url}}
 comments(last:100){pageInfo{hasPreviousPage} nodes{author{login} body createdAt url}}
