@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { readPhase, taskStatus } from "./task-status";
 import { ATTENTION, type AgentState, glyphFor, readAgentDetail, UNKNOWN_GLYPH } from "./agent-state";
 import { iceboxHint } from "./icebox-suggest";
-import { sidebarLayout } from "./config";
-import { type CardView, cardPlan, contextLegend, detailRows, isCompact, isExpanded, promptWithHint, recentTools } from "./sidebar-card";
+import { type SidebarLayout, sidebarLayout } from "./config";
+import { type CardView, cardPlan, contextLegend, detailRows, isExpanded, promptWithHint, viewFor } from "./sidebar-card";
+import { recentToolCalls } from "./history-tail";
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
@@ -138,7 +139,7 @@ const stacksOf = (cache: Pick<TopCache, "links">): NonNullable<Entry["stacks"]> 
   cache.links.flatMap((l) => (l.pr && l.pr.stack.length > 1 && l.pr.claimed !== false ? [{ prs: l.pr.stack, current: l.pr.number }] : []));
 
 /** The claimed PRs in `cache` with their state. */
-const prsOf = (cache: Pick<TopCache, "links">): NonNullable<Entry["prs"]> =>
+export const prsOf = (cache: Pick<TopCache, "links">): NonNullable<Entry["prs"]> =>
   cache.links.flatMap((l) => (l.pr && l.pr.claimed !== false ? [{ number: l.pr.number, status: l.status ?? "unknown" }] : []));
 
 /** `stack 12·[13]·14`: the claimed layer in brackets, layers in order bottom to top. */
@@ -396,11 +397,14 @@ export const entryHeights = (list: Entry[], width: number, view: CardView = {}) 
 
 /** The expanded card: the whole title, the state, the PR and CI rows and the last tool calls. */
 function expandedLines(e: Entry, index: number, selected: boolean, inner: number, view: CardView): string[] {
-  const { tools = [], now = 0 } = view.expanded ?? {};
+  const { toolCalls = [], now = 0 } = view.expanded ?? {};
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
   const status = statusFor(e);
-  const rows = [...titleRows(e, index, inner, EXPANDED_TITLE_ROWS), ...(status ? [`${indent}${status.text}`] : []), ...detailRows(e, tools, now).map((r) => `${indent}${r}`)].map((r) => fit(r, inner));
-  return selected ? rows.map(inverse) : rows;
+  const titles = titleRows(e, index, inner, EXPANDED_TITLE_ROWS).map((r) => fit(r, inner));
+  const statusRow = status ? [fit(`${indent}${status.text}`, inner)] : [];
+  const details = detailRows(e, toolCalls, now).map((r) => fit(`${indent}${r}`, inner));
+  if (selected) return [...titles, ...statusRow, ...details].map(inverse);
+  return [...titles, ...statusRow.map((r) => colorize(r, status!.color)), ...details];
 }
 
 /** Narrowest text a status row keeps when a gauge shares it. */
@@ -414,7 +418,7 @@ const gaugeFor = (e: Entry): string | undefined =>
 const statusRow = (text: string, gauge: string | undefined, inner: number): string =>
   gauge && inner > textWidth(gauge) + MIN_STATUS_COLS ? `${fit(text, inner - textWidth(gauge) - 1)} ${gauge}` : fit(text, inner);
 
-/** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line. */
+/** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line; `view` can make it compact or the expanded card. */
 export function entryLines(e: Entry, index: number, selected: boolean, inner: number, view: CardView = {}): string[] {
   if (isExpanded(e, view)) return expandedLines(e, index, selected, inner, view);
   const plan = cardPlan(e, view);
@@ -548,10 +552,12 @@ export function gather(readers: SidebarReaders, inner: number, last: Model): Mod
  * The whole sidebar as `height` rows of `width` columns. A rounded frame titled "Orchestration" holds a card per
  * orchestration tab; below it a frame titled "Workspaces" holds a card per workspace (title wraps), scrolled by
  * `offset` (an index into the workspaces), then a divider, the `queue` rows (recent cleanups, then the check queue), the usage limits and the key legend,
- * with `version` set into the bottom border. `current` indexes the whole list.
+ * with `version` set into the bottom border. `current` indexes the whole list. `view` picks compact cards and the one
+ * expanded card; the legend follows the selected entry.
  */
 export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = "", queue: string[] = [], footer: Footer = LEGEND_FOOTER, pending = "", view: CardView = {}): string[] {
   const inner = Math.max(0, width - 4);
+  const selected = list[current];
   const pinned = pinnedCount(list);
   const cards = (from: number, to: number) => list.slice(from, to).flatMap((e, i) => entryLines(e, from + i, from + i === current, inner, view));
   const pinnedFrame = pinned ? [boxTop("Orchestration", width), ...cards(0, pinned).map(boxRow), boxBottom(width)] : [];
@@ -566,7 +572,7 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
     boxDivider(width),
     ...queue.map(boxRow),
     ...limitRows(limits, inner, now).map(boxRow),
-    boxRow(footerRow(footer, inner, contextLegend(list[current], legend(list.length, pending), view.expanded?.tab === list[current]?.tab, pending))),
+    boxRow(footerRow(footer, inner, pending ? legend(list.length, pending) : contextLegend(selected, legend(list.length), selected !== undefined && isExpanded(selected, view)))),
     boxBottom(width, version, "grey"),
   ];
 }
@@ -621,7 +627,10 @@ export function footerRow(footer: Footer, inner: number, legendText = legend(0))
     case FooterKind.Legend:
       return dim(fit(legendText, inner));
     case FooterKind.Prompt:
-      return promptWithHint(`${promptLabel(footer.prompt)}${footer.prompt.text}█`, inner) ?? fitTail(`${promptLabel(footer.prompt)}${footer.prompt.text}█`, inner);
+    {
+      const typed = `${promptLabel(footer.prompt)}${footer.prompt.text}█`;
+      return promptWithHint(typed, inner) ?? fitTail(typed, inner);
+    }
     case FooterKind.Busy:
       return dim(fit(`starting ${footer.id}…`, inner));
     case FooterKind.Error:
@@ -896,7 +905,14 @@ export async function sidebar(wsOpt?: string) {
   // Read once at start, so a pane left running across an upgrade shows the version it runs.
   const version = overbridgeVersion();
   const userLayout = existsSync(userLayoutPath());
-  const layoutSetting = sidebarLayout();
+  // a bad `[sidebar] layout` must not close the pane before it can say so: fall back and show the message in the footer
+  let layoutSetting: SidebarLayout = "auto";
+  let startFault: string | undefined;
+  try {
+    layoutSetting = sidebarLayout();
+  } catch (e) {
+    startFault = errorMessage(e);
+  }
   const readers: SidebarReaders = {
     tabOrder: () => readView().order,
     // a user layout decides its own tabs, so only the generated one gets its orchestration tabs back
@@ -917,7 +933,6 @@ export async function sidebar(wsOpt?: string) {
   /** Space shows this pane's own card in full. Nothing extra is read until it is on. */
   let expanded = false;
   let view: CardView = {};
-  const viewFor = (width: number): CardView => ({ compact: isCompact(layoutSetting, width), ...(expanded ? { expanded: { tab: self, tools: recentTools(self), now: Date.now() } } : {}) });
   let digitTimer: ReturnType<typeof setTimeout> | undefined;
 
   const hold = (digit: string) => {
@@ -983,7 +998,7 @@ export async function sidebar(wsOpt?: string) {
       const { status } = last;
       const list = animate(last.list, Date.now(), motion);
       const current = Math.max(0, list.findIndex((e) => e.tab === self));
-      view = viewFor(width);
+      view = viewFor(layoutSetting, width, expanded ? self : undefined, recentToolCalls);
       const heights = entryHeights(list, width, view);
       const pinned = pinnedCount(list);
       const workspaceHeights = heights.slice(pinned);
@@ -991,7 +1006,7 @@ export async function sidebar(wsOpt?: string) {
       const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount);
       const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;
       offset = clampScroll(scrolled, workspaceHeights, rows);
-      painter.paint(frame(renderSidebar(list, current, offset, height, width, last.limits, Date.now(), version, status, footerToDraw(footer, inputFault, last.fault), pending, view), height, width));
+      painter.paint(frame(renderSidebar(list, current, offset, height, width, last.limits, Date.now(), version, status, footerToDraw(footer, inputFault, last.fault ?? startFault), pending, view), height, width));
     } catch (e) {
       painter.paint(frame([colorize(fit(`sidebar: ${errorMessage(e)}`, width), FAULT_COLOR)], height, width));
     }
@@ -1099,7 +1114,7 @@ export async function sidebar(wsOpt?: string) {
           }
           if (input.kind === "key" && input.key === " ") {
             hold("");
-            expanded = !expanded;
+            if (footer.kind === FooterKind.Legend) expanded = !expanded;
             return;
           }
           // the list on screen, so a click lands on the card the user saw

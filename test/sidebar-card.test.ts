@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sidebarLayout } from "../src/config";
 import { reposFile } from "../src/paths";
-import { type Entry, EMPTY_PROMPT, entryHeight, entryHeights, entryLines, FooterKind, legend, queueRows, renderSidebar, Section } from "../src/sidebar";
-import { COMPACT_BELOW, type CardView, contextLegend, isCompact, lastToolCalls, promptWithHint, recentTools } from "../src/sidebar-card";
+import { type Entry, EMPTY_PROMPT, prsOf, entryHeight, entryHeights, entryLines, FooterKind, legend, queueRows, renderSidebar, Section } from "../src/sidebar";
+import { COMPACT_BELOW, type CardView, contextLegend, detailRows, isCompact, needsAttention, promptWithHint, viewFor } from "../src/sidebar-card";
+import { parseToolCalls, recentToolCalls } from "../src/history-tail";
 import type { Limits } from "../src/limits";
 import { fit, textWidth } from "../src/term";
 
@@ -57,7 +58,7 @@ describe("layout", () => {
 });
 
 describe("expanded card", () => {
-  const view: CardView = { expanded: { tab: "a", now: 100_000, tools: [{ label: "Bash:test", at: 97_000 }, { label: "Edit", at: 60_000 }] } };
+  const view: CardView = { expanded: { tab: "a", now: 100_000, toolCalls: [{ label: "Bash:test", at: 97_000 }, { label: "Edit", at: 60_000 }] } };
 
   test("shows the full title, PR number, CI state and last tool calls", () => {
     const text = plain(entryLines(stacked, 0, false, 30, view).join("\n"));
@@ -71,7 +72,7 @@ describe("expanded card", () => {
 
   test("never clips a long title", () => {
     const long = entry("a", { label: Array.from({ length: 14 }, (_, i) => `word${String(i + 1).padStart(2, "0")}`).join(" ") });
-    const text = plain(entryLines(long, 0, false, 24, { expanded: { tab: "a", tools: [], now: 0 } }).join(" "));
+    const text = plain(entryLines(long, 0, false, 24, { expanded: { tab: "a", toolCalls: [], now: 0 } }).join(" "));
     expect(text).toContain("word14");
   });
 
@@ -81,7 +82,7 @@ describe("expanded card", () => {
   });
 
   test("a card with no PR or calls says so", () => {
-    const text = plain(entryLines(entry("a"), 0, false, 30, { expanded: { tab: "a", tools: [], now: 0 } }).join("\n"));
+    const text = plain(entryLines(entry("a"), 0, false, 30, { expanded: { tab: "a", toolCalls: [], now: 0 } }).join("\n"));
     expect(text).toContain("no PR yet");
     expect(text).toContain("no tool calls yet");
   });
@@ -91,11 +92,19 @@ describe("context legend", () => {
   const base = legend(3);
   test("changes with the selected card", () => {
     expect(contextLegend(entry("a"), base, false)).toEndWith("␣ more");
-    expect(contextLegend(entry("a", { error: "x" }), base, false)).toStartWith("⚠ blocked");
+    expect(contextLegend(entry("a", { error: "x" }), base, false)).toStartWith("⚠ cleanup failed");
     expect(contextLegend(entry("a", { prs: [{ number: 1, status: "mergeable" }] }), base, false)).toStartWith("✓ mergeable");
     expect(contextLegend(entry("a"), base, true)).toStartWith("␣ close");
     expect(contextLegend(undefined, base, false)).toBe(base);
-    expect(contextLegend(entry("a"), "1…", false, "1")).toBe("1…");
+    expect(plain(renderSidebar([entry("a")], 0, 0, 20, 40, undefined, 0, "", [], undefined, "1").at(-2)!)).toContain("1…");
+    expect(plain(renderSidebar([entry("a")], 0, 0, 20, 40, undefined, 0, "", [], undefined, "1").at(-2)!)).not.toContain("more");
+  });
+
+  test.each([["fault", "fault"], ["error", "cleanup failed"], ["blocked", "blocked"], ["unsaved", "unsaved"]] as const)("a card with %s says %s, and keeps its status row when compact", (flag, word) => {
+    const e = entry("a", { [flag]: flag === "blocked" ? "merged-unsaved" : flag === "unsaved" ? true : "x" } as Partial<Entry>);
+    expect(needsAttention(e)).toBe(true);
+    expect(contextLegend(e, base, false)).toStartWith(`⚠ ${word}`);
+    expect(entryHeight(e, 0, 30, { compact: true })).toBe(2);
   });
 
   test("the prompt row gets a key hint only when it fits", () => {
@@ -105,30 +114,77 @@ describe("context legend", () => {
   });
 });
 
+describe("expanded card PR and CI rows", () => {
+  const rows = (prs: Entry["prs"]) => detailRows(entry("a", { prs }), [], 0);
+  test.each([["failing", "CI failing"], ["pending", "CI running"], ["mergeable", "CI passing"], ["merged", "CI passing"]] as const)("%s shows %s", (status, ci) => {
+    expect(rows([{ number: 1, status }])).toContain(ci);
+  });
+  test("a draft, conflict or unknown PR has no CI row", () => {
+    for (const status of ["blocked", "conflict", "unknown", "closed"] as const) expect(rows([{ number: 1, status }]).some((r) => r.startsWith("CI"))).toBe(false);
+  });
+  test("a stack shows every PR and the worst CI state", () => {
+    const r = rows([{ number: 1, status: "mergeable" }, { number: 2, status: "failing" }, { number: 3, status: "pending" }]);
+    expect(r.filter((x) => x.startsWith("PR #"))).toHaveLength(3);
+    expect(r).toContain("CI failing");
+  });
+  test("unreadable tool calls are said so", () => {
+    expect(detailRows(entry("a"), undefined, 0)).toContain("tool calls unreadable");
+  });
+});
+
+describe("prsOf", () => {
+  const pr = (over: object) => ({ label: "p", url: "u", pr: { number: 5, stack: [5], ...over } });
+  test("keeps claimed PRs with their status, skips unclaimed ones and links with no PR", () => {
+    const links = [pr({ claimed: false }), { label: "item", url: "u" }, { ...pr({}), status: "mergeable" }, pr({ claimed: true })] as never;
+    expect(prsOf({ links })).toEqual([{ number: 5, status: "mergeable" }, { number: 5, status: "unknown" }]);
+  });
+});
+
+describe("viewFor", () => {
+  test("reads tool calls only for the expanded tab, and reports a failed read", () => {
+    const seen: string[] = [];
+    const read = (t: string) => (seen.push(t), [{ label: "Edit", at: 1 }]);
+    expect(viewFor("auto", 60, undefined, read)).toEqual({ compact: false });
+    expect(seen).toEqual([]);
+    expect(viewFor("auto", 30, "a", read, 5)).toEqual({ compact: true, expanded: { tab: "a", toolCalls: [{ label: "Edit", at: 1 }], now: 5 } });
+    expect(seen).toEqual(["a"]);
+    expect(viewFor("wide", 30, "a", () => { throw new Error("EACCES"); }, 5).expanded?.toolCalls).toBeUndefined();
+  });
+});
+
 describe("recent tool calls", () => {
   const line = (r: object) => JSON.stringify({ kind: "claude", ...r });
   const text = [line({ at: 1, event: "PreToolUse", tool: "Read" }), line({ at: 2, event: "PostToolUse", tool: "Read" }), line({ at: 3, event: "PreToolUse", tool: "Bash", cls: "test" }), "{cut", line({ at: 4, event: "PreToolUse", tool: "Edit" }), line({ at: 5, event: "Stop" })].join("\n");
 
   test("takes the newest PreToolUse records, newest first, skipping bad lines", () => {
-    expect(lastToolCalls(text, 3).map((c) => c.label)).toEqual(["Edit", "Bash:test", "Read"]);
-    expect(lastToolCalls(text, 1)).toHaveLength(1);
+    expect(parseToolCalls(text, 3).map((c) => c.label)).toEqual(["Edit", "Bash:test", "Read"]);
+    expect(parseToolCalls(text, 1)).toHaveLength(1);
+  });
+
+  test("control characters in a tool name never reach the terminal", () => {
+    expect(parseToolCalls(line({ at: 1, event: "PreToolUse", tool: "mcp\x1b]0;x\x07__t" }), 1)[0]!.label).toBe("mcp]0;x__t");
+  });
+
+  test("a missing file is no calls; another read failure throws", () => {
+    expect(recentToolCalls("z", 3, join(tmp, "nope"))).toEqual([]);
+    expect(() => recentToolCalls("z", 3, tmp)).toThrow();
   });
 
   test("reads the file tail and caches until the file changes", () => {
     const file = join(tmp, "h.jsonl");
     writeFileSync(file, text + "\n");
-    const first = recentTools("x", 3, file);
-    expect(recentTools("x", 3, file)).toBe(first);
+    const first = recentToolCalls("x", 3, file);
+    expect(recentToolCalls("x", 3, file)).toBe(first);
     appendFileSync(file, line({ at: 9, event: "PreToolUse", tool: "Grep" }) + "\n");
-    expect(recentTools("x", 3, file)[0]!.label).toBe("Grep");
-    expect(recentTools("x", 3, join(tmp, "missing"))).toEqual([]);
+    expect(recentToolCalls("x", 3, file)[0]!.label).toBe("Grep");
+    expect(recentToolCalls("x", 3, join(tmp, "missing"))).toEqual([]);
   });
 
   test("a long history is read from its end only", () => {
     const file = join(tmp, "big.jsonl");
     mkdirSync(tmp, { recursive: true });
     writeFileSync(file, line({ at: 1, event: "PreToolUse", tool: "Old" }) + "\n" + (line({ at: 2, event: "Stop" }) + "\n").repeat(2000) + line({ at: 3, event: "PreToolUse", tool: "New" }) + "\n");
-    expect(recentTools("y", 3, file).map((c) => c.label)).toEqual(["New"]);
+    expect(recentToolCalls("y", 3, file).map((c) => c.label)).toEqual(["New"]);
   });
 });
 
@@ -156,7 +212,7 @@ describe("no row spills past the pane", () => {
       test(`${compact ? "compact" : "wide"} at ${width} columns`, () => {
         for (const current of [0, 1, 2, 3]) {
           for (const expanded of [false, true]) {
-            const view: CardView = { compact, ...(expanded ? { expanded: { tab: list[current]!.tab, now: 10_000, tools: [{ label: "Bash:typecheck", at: 1000 }, { label: "mcp__server__a_long_tool_name", at: 2000 }] } } : {}) };
+            const view: CardView = { compact, ...(expanded ? { expanded: { tab: list[current]!.tab, now: 10_000, toolCalls: [{ label: "Bash:typecheck", at: 1000 }, { label: "mcp__server__a_long_tool_name", at: 2000 }] } } : {}) };
             for (const footer of footers) {
               const rows = renderSidebar(list, current, 0, 30, width, limits, 5e8, "v1.2.3-a-long-version", queueFor(width), footer, "", view);
               expect(rows).toHaveLength(30);

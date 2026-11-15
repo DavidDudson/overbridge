@@ -728,7 +728,7 @@ status row (a card that needs attention, such as a failed cleanup, keeps it). `w
 
 Space expands this tab's card: the whole title, its PR numbers, the CI state and the last three tool calls (read from
 the end of the history file, only while expanded). Space again collapses it. The key legend follows the selected card: it
-adds `⚠ blocked` or `✓ mergeable` where they apply, and the new-workspace prompt shows its keys when there is room.
+adds `⚠ blocked` (or `fault`, `unsaved`, `cleanup failed`) or `✓ mergeable` where they apply, and the new-workspace prompt shows its keys when there is room.
 
 `s` opens a one-line prompt at the foot of the sidebar. Type `<repo> <id>`, such as `overbridge 79` or
 `web-monorepo ENG-123`. If the tab's workspace holds one repo, the id alone is enough; otherwise the prompt asks for
