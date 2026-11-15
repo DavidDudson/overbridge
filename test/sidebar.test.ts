@@ -3,8 +3,9 @@ import { zellijMux } from "../src/mux";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentStateFile, glyphFor, readAgentState, UNKNOWN_GLYPH } from "../src/agent-state";
-import { sidebarWidth } from "../src/config";
+import { agentStateFile, GLYPHS, glyphFor, readAgentState, UNKNOWN_GLYPH } from "../src/agent-state";
+import { sidebarMotion, sidebarWidth } from "../src/config";
+import { animate, BUSY_FRAMES, busyFrame, FRAME_MS, Motion } from "../src/sidebar-motion";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
 import { bodyRowsFor, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Finished, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
@@ -487,5 +488,38 @@ describe("check queue rows", () => {
     expect(rows).toHaveLength(20);
     expect(rows.join("\n")).toContain("▶ 67 5s just test");
     expect(rows.findIndex((r) => r.includes("▶"))).toBeGreaterThan(rows.findIndex((r) => r.includes("├")));
+  });
+});
+
+describe("busy motion", () => {
+  const busy: Entry = { ...entry("b", GLYPHS.busy), state: "busy" };
+  const idle: Entry = { ...entry("i", GLYPHS.idle), state: "idle" };
+
+  test("busy frame is a pure function of the clock and as wide as the static glyph", () => {
+    expect(busyFrame(0)).toBe(BUSY_FRAMES[0]!);
+    expect(busyFrame(FRAME_MS)).toBe(BUSY_FRAMES[1]!);
+    expect(busyFrame(FRAME_MS * BUSY_FRAMES.length)).toBe(BUSY_FRAMES[0]!);
+    for (const f of BUSY_FRAMES) expect(textWidth(f)).toBe(textWidth(GLYPHS.busy));
+  });
+
+  test("while-active animates only busy cards", () => {
+    const [b, i] = animate([busy, idle], FRAME_MS, Motion.WhileActive);
+    expect(b!.glyph).toBe(BUSY_FRAMES[1]!);
+    expect(i).toBe(idle);
+  });
+
+  test("off, and a list with nothing busy, come back untouched", () => {
+    const l = [busy, idle];
+    expect(animate(l, FRAME_MS, Motion.Off)).toBe(l);
+    const quiet = [idle];
+    expect(animate(quiet, FRAME_MS, Motion.WhileActive)).toBe(quiet);
+  });
+
+  test("sidebar motion defaults, reads repos.toml and rejects nonsense", () => {
+    expect(sidebarMotion()).toBe("while-active");
+    writeFileSync(reposFile(), '[sidebar]\nmotion = "off"\n');
+    expect(sidebarMotion()).toBe("off");
+    writeFileSync(reposFile(), '[sidebar]\nmotion = "always"\n');
+    expect(() => sidebarMotion()).toThrow("sidebar.motion must be one of");
   });
 });

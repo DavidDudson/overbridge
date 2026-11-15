@@ -14,6 +14,7 @@ const HEADER = `# overbridge repo registry. Add with \`overbridge repo add <name
 #
 # [sidebar]
 # width = 60                # columns of the tab sidebar, 12 to 200
+# motion = "while-active"   # "while-active" animates the busy glyph, "off" keeps it still
 `;
 
 export function initReposFile() {
@@ -59,4 +60,18 @@ export function appendRepo(spec: RepoSpec) {
   let block = `\n[repos.${spec.name}]\nurl = ${JSON.stringify(spec.url)}\n`;
   if (spec.defaultBranch) block += `default_branch = ${JSON.stringify(spec.defaultBranch)}\n`;
   appendFileSync(reposFile(), block);
+}
+
+export const SIDEBAR_MOTIONS = ["off", "while-active"] as const;
+export type SidebarMotion = (typeof SIDEBAR_MOTIONS)[number];
+export const DEFAULT_SIDEBAR_MOTION: SidebarMotion = "while-active";
+
+/** Whether the tab sidebar animates: `[sidebar] motion` in repos.toml, else the default. Read once when the pane starts. */
+export function sidebarMotion(): SidebarMotion {
+  if (!existsSync(reposFile())) return DEFAULT_SIDEBAR_MOTION;
+  const data = Bun.TOML.parse(readFileSync(reposFile(), "utf8")) as { sidebar?: { motion?: unknown } };
+  const motion = data.sidebar?.motion;
+  if (motion === undefined) return DEFAULT_SIDEBAR_MOTION;
+  const found = SIDEBAR_MOTIONS.find((m) => m === motion);
+  return found ?? fail(`repos.toml: sidebar.motion must be one of ${SIDEBAR_MOTIONS.map((m) => `"${m}"`).join(", ")}`);
 }
