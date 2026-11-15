@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type AgentState, agentStatePath, CONTINUING_END_REASONS, clearSubagent, clearSubagents, markSubagent, readAgentState } from "./agent-state";
+import { type AgentState, agentStatePath, TOOL_NAME, CONTINUING_END_REASONS, clearSubagent, clearSubagents, markSubagent, readAgentState } from "./agent-state";
 import { backgroundShells } from "./bg-tasks";
 import { claudeRecord, type HookPayload, type HistoryStore, historyStore } from "./history";
 import { envVar, ORCHESTRATION_ENV, root, selfCommand, silenceLegacyWarnings } from "./paths";
@@ -76,6 +76,10 @@ export function isBlockingNotification(note: NotificationInfo | undefined): bool
   return !(note?.message !== undefined && IDLE_MESSAGE.test(note.message));
 }
 
+/** Permission prompts name their tool only in the message. */
+export const waitingTool = (input: { tool_name?: string; message?: string }): string | undefined =>
+  [input.tool_name, /permission to use (\S+?)\.?$/i.exec(input.message ?? "")?.[1]].find((t) => t !== undefined && TOOL_NAME.test(t));
+
 /** Told to a session that stopped right after an automatic compaction. */
 export const COMPACT_RESTART_REASON =
   "Context was auto-compacted. Continue the task you were working on from where you left off; do not start over or wait for the user.";
@@ -125,17 +129,19 @@ const ageMs = (path: string, now: number): number => {
 };
 
 /** Record `state` for `ws` unless it is the same state written moments ago. */
-export function recordState(metaDir: string, ws: string, state: AgentState, now = Date.now(), bg: number[] = [], endReason?: string) {
+export function recordState(metaDir: string, ws: string, state: AgentState, now = Date.now(), bg: number[] = [], endReason?: string, tool?: string) {
   const file = agentStatePath(metaDir, ws);
+  let since = now;
   try {
-    const old = JSON.parse(readFileSync(file, "utf8")) as { state?: string; at?: number };
+    const old = JSON.parse(readFileSync(file, "utf8")) as { state?: string; at?: number; since?: number };
+    if (old.state === state) since = old.since ?? old.at ?? now;
     if (old.state === state && bg.length === 0 && !(old as { bg?: unknown[] }).bg?.length && now - (old.at ?? 0) < REWRITE_MS) return;
   } catch {
     // none yet, or unreadable: write it
   }
   mkdirSync(join(metaDir, "agent"), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ state, at: now, ...(bg.length ? { bg } : {}), ...(endReason === undefined ? {} : { reason: endReason }) }));
+  writeFileSync(tmp, JSON.stringify({ state, at: now, since, ...(tool ? { tool } : {}), ...(bg.length ? { bg } : {}), ...(endReason === undefined ? {} : { reason: endReason }) }));
   renameSync(tmp, file);
 }
 
@@ -206,7 +212,7 @@ export async function hookMain(): Promise<number> {
       type: input.notification_type,
       message: input.message,
     });
-    if (state) recordState(meta, ws, state, Date.now(), state === "done" ? backgroundShells() : [], state === "end" ? input.reason : undefined);
+    if (state) recordState(meta, ws, state, Date.now(), state === "done" ? backgroundShells() : [], state === "end" ? input.reason : undefined, state === "waiting" ? waitingTool(input) : undefined);
     // the server decides whether a refresh is due; with none answering the hook refreshes on its own
     if (workspace && cacheStale(meta, workspace) && !(await notifyRefresh(workspace)) && claimRefresh(meta, workspace)) startRefresh(workspace);
   } catch {

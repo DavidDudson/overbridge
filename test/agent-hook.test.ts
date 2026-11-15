@@ -43,7 +43,7 @@ describe("event mapping", () => {
 describe("recordState", () => {
   test("writes state and time", () => {
     recordState(meta, "w1", "busy", 1000);
-    expect(stateOf("w1")).toEqual({ state: "busy", at: 1000 });
+    expect(stateOf("w1")).toEqual({ state: "busy", at: 1000, since: 1000 });
   });
 
   test("an unchanged state is not rewritten right away, but a change or a later call is", () => {
@@ -51,7 +51,7 @@ describe("recordState", () => {
     recordState(meta, "w1", "busy", 1500);
     expect(stateOf("w1").at).toBe(1000);
     recordState(meta, "w1", "done", 1600);
-    expect(stateOf("w1")).toEqual({ state: "done", at: 1600 });
+    expect(stateOf("w1")).toEqual({ state: "done", at: 1600, since: 1600 });
     recordState(meta, "w1", "done", 9000);
     expect(stateOf("w1").at).toBe(9000);
   });
@@ -111,7 +111,7 @@ describe("session end reasons", () => {
 
   test("recordState writes the reason with end", () => {
     recordState(meta, "w1", "end", 1000, [], EndReason.PromptInputExit);
-    expect(stateOf("w1")).toEqual({ state: "end", at: 1000, reason: EndReason.PromptInputExit });
+    expect(stateOf("w1")).toEqual({ state: "end", at: 1000, since: 1000, reason: EndReason.PromptInputExit });
   });
 });
 

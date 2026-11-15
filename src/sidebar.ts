@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { userLayoutPath } from "./layout";
 import { join } from "node:path";
 import { readPhase, taskStatus } from "./task-status";
-import { ATTENTION, type AgentState, glyphFor, readAgentState, UNKNOWN_GLYPH } from "./agent-state";
+import { ATTENTION, type AgentState, glyphFor, readAgentDetail, UNKNOWN_GLYPH } from "./agent-state";
 import { iceboxHint } from "./icebox-suggest";
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
@@ -77,6 +77,12 @@ export interface Entry {
   task?: string;
   /** Its draft PRs have sat idle past `icebox.idle-days`: a suggestion to icebox it, never done automatically. */
   idleHint?: string;
+  /** From the agent's state record (see `AgentRecord`). */
+  since?: number;
+  tool?: string;
+  agents?: number;
+  /** Its top cache is older than `STALE_CACHE_MS`: the card is dimmed. */
+  stale?: boolean;
 }
 
 export { sidebarLabel, stripConventional } from "./top";
@@ -84,9 +90,21 @@ export { sidebarLabel, stripConventional } from "./top";
 export { currentTab, tabOrder };
 
 const entryFor = (tab: string, section: Section, label: string): Entry => {
-  const state = readAgentState(tab);
-  return { tab, section, glyph: glyphFor(state), state, label };
+  const detail = readAgentDetail(tab);
+  const state = detail?.state;
+  return {
+    tab, section, glyph: glyphFor(state), state, label,
+    ...(detail?.since === undefined ? {} : { since: detail.since }),
+    ...(detail?.tool ? { tool: detail.tool } : {}),
+    ...(detail?.agents ? { agents: detail.agents } : {}),
+  };
 };
+
+/** A top cache older than this dims its card: the PR and title data on it may be out of date. */
+export const STALE_CACHE_MS = 15 * 60_000;
+
+/** Whether a cache written at `at` is stale at `now`; a cache with no time is not judged. */
+export const cacheIsStale = (at: number | undefined, now: number): boolean => typeof at === "number" && at > 0 && now - at > STALE_CACHE_MS;
 
 /** A card for an entry that could not be read: its label and why, no agent state. */
 const faultEntry = (tab: string, section: Section, fault: string, label = tab): Entry => ({ tab, section, glyph: UNKNOWN_GLYPH, label, fault });
@@ -119,7 +137,7 @@ function workspaceEntry(ws: string, w: unknown): Entry {
   const stacks = stacksOf(cache);
   const idleHint = fault ? undefined : iceboxHint(ws, cache);
   const task = fault ? undefined : taskStatus(cache, readPhase(ws));
-  return { ...entry, ...(task ? { task } : {}), ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}), ...(idleHint ? { idleHint } : {}) };
+  return { ...entry, ...(!fault && cacheIsStale(cache.at, Date.now()) ? { stale: true } : {}), ...(task ? { task } : {}), ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}), ...(idleHint ? { idleHint } : {}) };
 }
 
 /** `w` as the record of a workspace being removed right now, else undefined; a malformed record is never one. */
@@ -227,9 +245,42 @@ function statusFor(e: Entry): { text: string; color: Color } | undefined {
   if (e.unsaved) return UNSAVED_TEXT;
   if (e.idleHint && !(e.state && ATTENTION.includes(e.state))) return { text: e.idleHint, color: "cyan" };
   // an orchestration tab has no task, so no suffix
-  const claude = e.state ? STATE_TEXT[e.state] : e.task ? NO_SESSION_TEXT : undefined;
+  const claude = e.state ? stateText(e) : e.task ? NO_SESSION_TEXT : undefined;
   if (!claude) return undefined;
   return e.task ? { text: `${claude.text} - ${e.task}`, color: claude.color } : claude;
+}
+
+/** `4m12s` under ten minutes, then `12m`, then `1h05m`; `seconds: false` rounds down to whole minutes (under a minute stays in seconds). */
+export function durationText(ms: number, { seconds = true } = {}): string {
+  const secs = Math.max(0, Math.floor(ms / 1000));
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 10) return seconds ? `${mins}m${String(secs % 60).padStart(2, "0")}s` : `${mins}m`;
+  return mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, "0")}m`;
+}
+
+/** States whose elapsed time is worth showing. */
+const TIMED: ReadonlySet<AgentState> = new Set<AgentState>(["busy", "waiting", "done", "bg"]);
+
+const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+
+/** The state's status line with its detail. Time shows from the first second while working, but only from a minute on for a wait or a finish. */
+export function stateText(e: Entry, now = Date.now()): { text: string; color: Color } {
+  const { state } = e;
+  if (!state) return { text: "", color: "grey" };
+  const base = STATE_TEXT[state];
+  const head = state === "bg" && e.agents ? `finished · ${plural(e.agents, "task")} running` : base.text;
+  const ms = e.since === undefined ? undefined : now - e.since;
+  const timed = ms !== undefined && TIMED.has(state) && (state === "busy" || ms >= 60_000) ? ` ${durationText(ms, { seconds: state === "busy" })}` : "";
+  const tool = state === "waiting" && e.tool ? ` · ${e.tool}` : "";
+  const agents = state === "busy" && e.agents ? ` · ${plural(e.agents, "agent")}` : "";
+  return { text: `${head}${timed}${tool}${agents}`, color: base.color };
+}
+
+/** The Workspaces frame title: with how many agents want you (`ATTENTION` states) once any do. */
+export function workspacesTitle(list: Entry[]): string {
+  const n = list.filter((e) => e.section === Section.Workspaces && e.state && ATTENTION.includes(e.state)).length;
+  return n ? `Workspaces · ${n} need you` : "Workspaces";
 }
 
 /** `text` broken at spaces into lines of at most `width` columns; an over-long word is split. */
@@ -282,7 +333,8 @@ export function entryLines(e: Entry, index: number, selected: boolean, inner: nu
   const sub = fit(`${indent}${status?.text ?? ""}`, inner);
   const stacks = (e.stacks ?? []).map((st) => fit(`${indent}${stackText(st)}`, inner));
   if (selected) return [...titles, sub, ...stacks].map(inverse);
-  return [...titles, status ? colorize(sub, status.color) : sub, ...stacks.map(dim)];
+  const lines = [...titles, status ? colorize(sub, status.color) : sub, ...stacks.map(dim)];
+  return e.stale ? lines.map(dim) : lines;
 }
 
 const elapsed = (sinceMs: number, now: number) => {
@@ -400,7 +452,7 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
   const body = [...visible, ...Array<string>(bodyRows - visible.length).fill(" ".repeat(inner))];
   return [
     ...pinnedFrame,
-    boxTop("Workspaces", width),
+    boxTop(workspacesTitle(list), width),
     ...body.slice(0, bodyRows).map(boxRow),
     boxDivider(width),
     ...queue.map(boxRow),

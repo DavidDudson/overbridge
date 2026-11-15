@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { layoutSpecs, workspaceTabSpec } from "../src/layout";
-import { defaultMux, type MuxExec, MuxKind, muxKind, safeExec, TabFocus, tmuxMux, zellijMux } from "../src/mux";
+import { defaultMux, type MuxExec, MuxKind, muxKind, TabFocus, tmuxMux, zellijMux } from "../src/mux";
 import { layoutScript, tmuxConf, tmuxQuote } from "../src/tmux-layout";
 
 const self = ["ob"];
@@ -261,6 +261,17 @@ describe.skipIf(!Bun.which("tmux"))("tmuxMux against a real tmux", () => {
   const sleeper = ["sh", "-c", "sleep 60", "x"];
   const restore = (key: keyof typeof saved) => (saved[key] === undefined ? delete process.env[key] : (process.env[key] = saved[key]));
 
+  // Bun's spawn ignores `delete process.env.TMUX`, so the child's environment is built here, with no `$TMUX` and the private socket directory.
+  const privateExec: MuxExec = (cmd) => {
+    const { TMUX: _session, TMUX_PANE: _pane, ...env } = process.env;
+    try {
+      const p = Bun.spawnSync({ cmd, env: { ...env, TMUX_TMPDIR: tmp }, stdout: "pipe", stderr: "pipe" });
+      return { ok: p.exitCode === 0, stdout: p.stdout.toString().trim(), stderr: p.stderr.toString().trim() };
+    } catch {
+      return { ok: false, stdout: "" };
+    }
+  };
+
   beforeAll(() => {
     tmp = mkdtempSync(join(tmpdir(), "overbridge-tmux-"));
     process.env.TMUX_TMPDIR = tmp;
@@ -270,8 +281,7 @@ describe.skipIf(!Bun.which("tmux"))("tmuxMux against a real tmux", () => {
     delete process.env.TMUX_PANE;
   });
   afterAll(() => {
-    // only ever the private server: with $TMUX set the target would be someone else's
-    if (process.env.TMUX === undefined) safeExec(["tmux", "kill-server"]);
+    privateExec(["tmux", "kill-server"]);
     (Object.keys(saved) as (keyof typeof saved)[]).forEach(restore);
     rmSync(tmp, { recursive: true, force: true });
   });
@@ -282,8 +292,8 @@ describe.skipIf(!Bun.which("tmux"))("tmuxMux against a real tmux", () => {
     const names = specs.map((t) => t.name);
     const [root, work, ...rest] = names as [string, string, ...string[]];
     Bun.write(script, layoutScript("t", specs));
-    const mux = tmuxMux(safeExec, { session: "t", env: {} });
-    expect(safeExec(["tmux", "-f", "/dev/null", "start-server", ";", "source-file", script]).ok).toBe(true);
+    const mux = tmuxMux(privateExec, { session: "t", env: {} });
+    expect(privateExec(["tmux", "-f", "/dev/null", "start-server", ";", "source-file", script]).ok).toBe(true);
     expect(mux.sessionExists("t")).toBe(true);
     expect(mux.tabs()).toEqual(names);
 
