@@ -1,6 +1,7 @@
 import { GLYPHS } from "./agent-state";
 import type { Motion } from "./config";
 import { Motion as Modes } from "./config";
+import { pulseGlyph, pulses } from "./card-look";
 import type { Entry } from "./sidebar";
 
 /** A quarter turn of a clock hand per frame; every frame is two columns wide like the static glyph, so no card reflows. */
@@ -18,13 +19,30 @@ const isBusyCard = (e: Entry): boolean => e.state === "busy" && !e.fault && e.gl
 /** A card whose badge has a merge conflict, which pulses. */
 const hasConflict = (e: Entry): boolean => !e.fault && (e.badge?.icons.includes("conflict") ?? false);
 
+/** A card with a claimed PR in conflict: its chip pulses. */
+const prConflicts = (e: Entry): boolean => e.prs?.some((p) => p.status === "conflict") ?? false;
+
+/** A card whose glyph pulses: one that wants input, runs background work, or ended with unsaved work. */
+const isPulsing = (e: Entry): boolean => !e.fault && pulses(e.state, e.glyph, Boolean(e.unsaved));
+
+const moves = (e: Entry): boolean => isBusyCard(e) || hasConflict(e) || prConflicts(e) || isPulsing(e);
+
 /**
- * `list` with each busy card's glyph set to its frame at `nowMs`, and each badge with a conflict stamped with the clock
- * so it pulses. With `Motion.Off`, or nothing moving, the same array comes back.
+ * `list` with each busy card's glyph set to its frame at `nowMs`, each waiting, background or unsaved card's glyph
+ * pulsing, and each badge or PR chip with a conflict stamped with the clock so it pulses. With `Motion.Off`, or nothing
+ * moving, the same array comes back.
  */
 export function animate(list: Entry[], nowMs: number, motion: Motion): Entry[] {
-  if (motion === Modes.Off || !list.some((e) => isBusyCard(e) || hasConflict(e))) return list;
+  if (motion === Modes.Off || !list.some(moves)) return list;
   const frame = busyFrame(nowMs);
 
-  return list.map((e) => (isBusyCard(e) ? { ...e, glyph: frame } : hasConflict(e) ? { ...e, badge: { ...e.badge!, at: nowMs } } : e));
+  return list.map((e) => {
+    if (isBusyCard(e)) return prConflicts(e) ? { ...e, glyph: frame, at: nowMs } : { ...e, glyph: frame };
+
+    if (hasConflict(e)) return { ...e, badge: { ...e.badge!, at: nowMs } };
+
+    if (isPulsing(e)) return { ...e, glyph: pulseGlyph(e.state, e.glyph, Boolean(e.unsaved), nowMs), at: nowMs };
+
+    return prConflicts(e) ? { ...e, at: nowMs } : e;
+  });
 }

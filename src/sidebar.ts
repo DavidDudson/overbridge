@@ -5,6 +5,7 @@ import { readPhase, taskStatus } from "./task-status";
 import { ATTENTION, type AgentState, glyphFor, readAgentDetail, UNKNOWN_GLYPH } from "./agent-state";
 import { iceboxHint } from "./icebox-suggest";
 import { type SidebarLayout, sidebarLayout } from "./config";
+import { prHealthInput, timeTint, titleTone } from "./card-look";
 import { type CardView, cardPlan, contextLegend, detailRows, isExpanded, promptWithHint, viewFor } from "./sidebar-card";
 import { recentToolCalls } from "./history-tail";
 import { createReaper, type ReapResult } from "./auto-remove";
@@ -14,7 +15,7 @@ import { type CleanupInFlight, cleanupRecords, cleanupRows } from "./cleanup-log
 import { Motion, sidebarMotion } from "./config";
 import { animate } from "./sidebar-motion";
 import { nextSort, SORT_LABEL, type SortMode, sortBy } from "./sort-mode";
-import { badgeColor, badgeLabel, badgeText, type TabBadge } from "./tab-badge";
+import { badgeColor, badgeLabel, badgeOf, badgeText, type TabBadge } from "./tab-badge";
 import { readBadge } from "./tab-badge-read";
 import { metaDir, selfCommand } from "./paths";
 import { type Gauge, gaugeText, readGauge, readReceipt, type Receipt, receiptText } from "./gauge";
@@ -98,6 +99,8 @@ export interface Entry {
   since?: number;
   tool?: string;
   agents?: number;
+  /** The clock `animate` stamped, so a PR chip in conflict pulses; unset draws it still. */
+  at?: number;
   /** Its top cache is older than `STALE_CACHE_MS`: the card is dimmed. */
   stale?: boolean;
   /** Context window use, on a busy card. */
@@ -315,7 +318,7 @@ export const CHROME_BOTTOM = 5;
 const MAX_TITLE_ROWS = 3;
 
 /** A status line: its words and their colour. */
-type StatusLine = { text: string; color: Color };
+type StatusLine = { text: string; color: Color; tint?: { text: string; color: Color } };
 
 /** The agent half of a card's status line: what Claude is doing. */
 const STATE_TEXT: Record<AgentState, StatusLine> = {
@@ -386,7 +389,14 @@ export function stateText(e: Entry, now = Date.now()): StatusLine {
   const tool = state === "waiting" && e.tool ? ` · ${e.tool}` : "";
   const agents = state === "busy" && e.agents ? ` · ${plural(e.agents, "agent")}` : "";
 
-  return { text: `${head}${timed}${tool}${agents}`, color: base.color };
+  const tint = ms === undefined ? undefined : timeTint(state, ms);
+  const time = timed.trim();
+
+  const line: StatusLine = { text: `${head}${timed}${tool}${agents}`, color: base.color };
+
+  if (tint && tint !== base.color && time) line.tint = { text: time, color: tint };
+
+  return line;
 }
 
 /** The Workspaces frame title: with how many agents want you (`ATTENTION` states) once any do. */
@@ -467,7 +477,7 @@ function expandedLines(e: Entry, index: number, selected: boolean, inner: number
 
   if (selected) return [...titles, ...statusRow, ...details].map(inverse);
 
-  return [...titles, ...statusRow.map((r) => colorize(r, status!.color)), ...details];
+  return [...titles, ...statusRow.map((r) => paintStatus(r, status!)), ...details];
 }
 
 /** Narrowest text a status row keeps when a gauge shares it. */
@@ -477,9 +487,43 @@ const MIN_STATUS_COLS = 8;
 const gaugeFor = (e: Entry): string | undefined =>
   e.gauge && e.state === "busy" && !(e.fault || e.error || e.blocked || e.unsaved || e.idleHint) ? gaugeText(e.gauge) : undefined;
 
+/** What shares the right edge of the status row: the gauge while working, else the PR chips. */
+const edgeFor = (e: Entry): string | undefined => gaugeFor(e) ?? prChips(e);
+
 /** The status row: the text fitted to `inner`, or, with a gauge, to what is left of it so the gauge stays at the right edge. */
 const statusRow = (text: string, gauge: string | undefined, inner: number): string =>
   gauge && inner > textWidth(gauge) + MIN_STATUS_COLS ? `${fit(text, inner - textWidth(gauge) - 1)} ${gauge}` : fit(text, inner);
+
+/** `line` in the status colour, with the elapsed time in its own tint when it is still on the line after fitting. */
+function paintStatus(line: string, status: StatusLine): string {
+  const { tint } = status;
+  const at = tint ? line.indexOf(tint.text) : -1;
+
+  if (!tint || at < 0) return colorize(line, status.color);
+  const end = at + tint.text.length;
+
+  return colorize(line.slice(0, at), status.color) + colorize(tint.text, tint.color) + colorize(line.slice(end), status.color);
+}
+
+/** Widest PR chip: three icons and a `+N`. */
+const CHIP_COLS = 7;
+
+/** The claimed PRs as health icons, worst first, for the right edge of the status row: the same icons the PR tabs show. A conflict pulses once `animate` has stamped the card. */
+function prChips(e: Entry): string | undefined {
+  if (!e.prs?.length || e.badge) return undefined;
+
+  return badgeText(badgeOf(e.prs.map((p) => prHealthInput(p.status))), CHIP_COLS, e.at, e.at !== undefined);
+}
+
+/** A card has a problem when its status line is an error, a failed cleanup, a kept merge or unsaved work. */
+const hasProblem = (e: Entry): boolean => Boolean(e.fault || e.error || e.blocked || e.unsaved);
+
+/** The title rows painted by the card's tone: yellow waiting for you, green done, red problem, dim when idle. */
+function toneRows(rows: string[], e: Entry): string[] {
+  const tone = titleTone(e.state, Boolean(e.task), hasProblem(e));
+
+  return tone === undefined ? rows : rows.map((r) => (tone === "dim" ? dim(r) : colorize(r, tone)));
+}
 
 /** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line; `view` can make it compact or the expanded card. */
 export function entryLines(e: Entry, index: number, selected: boolean, inner: number, view: CardView = {}): string[] {
@@ -488,13 +532,13 @@ export function entryLines(e: Entry, index: number, selected: boolean, inner: nu
   const titles = titleRows(e, index, inner).map((l) => fit(l, inner));
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
   const status = e.badge ? { text: badgeText(e.badge, Math.max(1, inner - textWidth(indent))), color: badgeColor(e.badge) } : statusFor(e);
-  const sub = statusRow(`${indent}${status?.text ?? ""}`, gaugeFor(e), inner);
+  const sub = statusRow(`${indent}${status?.text ?? ""}`, edgeFor(e), inner);
   const stacks = (plan.stacks ? (e.stacks ?? []) : []).map((st) => fit(`${indent}${stackText(st)}`, inner));
   const receipt = plan.stacks && e.receipt ? [fit(`${indent}${receiptText(e.receipt)}`, inner)] : [];
-  const subRow = plan.status ? [status ? colorize(sub, status.color) : sub] : [];
+  const subRow = plan.status ? [status ? paintStatus(sub, status) : sub] : [];
 
   if (selected) return [...titles, ...(plan.status ? [sub] : []), ...stacks, ...receipt].map(inverse);
-  const lines = [...titles, ...subRow, ...stacks.map(dim), ...receipt.map(dim)];
+  const lines = [...toneRows(titles, e), ...subRow, ...stacks.map(dim), ...receipt.map(dim)];
 
   return e.stale ? lines.map(dim) : lines;
 }
