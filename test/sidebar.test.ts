@@ -33,7 +33,7 @@ describe("entry cards", () => {
   test("title line has key, glyph and label; status line the state; current is inverse", () => {
     const [title, sub] = entryLines({ ...entry("a", "●", "12 Add dark mode"), state: "waiting" }, 0, false, 22);
     expect(title!.trimEnd()).toBe("⌥1 ● 12 Add dark mode");
-    expect(sub!).toContain("needs your input");
+    expect(sub!).toContain("needs input");
     expect(sub!).toContain("\x1b[33m");
     expect(entryLines(entry("b"), 1, true, 12)[0]).toBe("\x1b[7m⌥2 ○ b      \x1b[0m");
   });

@@ -105,6 +105,8 @@ If the branch already exists with commits, say so and ask whether to continue on
 
 ## 5. Plan mode
 
+Run `overbridge phase plan` so the sidebar shows the workspace as planning.
+
 `ext: plan`: run `overbridge ext start-item plan` first (what the plan must cover).
 
 Enter plan mode. The plan has these sections:

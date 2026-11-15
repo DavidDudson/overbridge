@@ -103,6 +103,18 @@ describe("tmuxMux argv", () => {
     expect(t.calls.at(-1)).toEqual(["tmux", "kill-window", "-t", "@2"]);
   });
 
+  test("goes to a tab and focuses its pane in one tmux call, so the screen repaints once", () => {
+    const t = mux((cmd) => (cmd[1] === "list-windows" ? ok(windows) : ok()));
+    expect(t.mux.goToTab("w1", "%7").ok).toBe(true);
+    expect(t.calls.at(-1)).toEqual(["tmux", "select-window", "-t", "@1", ";", "select-pane", "-t", "%7"]);
+  });
+
+  test("a stale pane id still leaves you on the tab", () => {
+    const t = mux((cmd) => (cmd[1] === "list-windows" ? ok(windows) : cmd.includes("select-pane") ? { ok: false, stdout: "", stderr: "can't find pane" } : ok()));
+    expect(t.mux.goToTab("w1", "%9").ok).toBe(true);
+    expect(t.calls.at(-1)).toEqual(["tmux", "select-window", "-t", "@1"]);
+  });
+
   test("reads tabs and panes from -F formats, not from text output", () => {
     const t = mux((cmd) => (cmd[1] === "list-windows" ? ok(windows) : ok("%1|||w1|||w1 · claude|||0\n%2|||w1|||w1 · terminal|||1\n")));
     expect(t.mux.tabs()).toEqual(["@root", "w1", "w2"]);
@@ -245,16 +257,22 @@ describe("tmux layout script", () => {
 // The same operations against a real tmux server, on a private socket directory. Skipped where tmux is not installed.
 describe.skipIf(!Bun.which("tmux"))("tmuxMux against a real tmux", () => {
   let tmp: string;
-  const saved = process.env.TMUX_TMPDIR;
+  const saved = { TMUX_TMPDIR: process.env.TMUX_TMPDIR, TMUX: process.env.TMUX, TMUX_PANE: process.env.TMUX_PANE };
   const sleeper = ["sh", "-c", "sleep 60", "x"];
+  const restore = (key: keyof typeof saved) => (saved[key] === undefined ? delete process.env[key] : (process.env[key] = saved[key]));
 
   beforeAll(() => {
     tmp = mkdtempSync(join(tmpdir(), "overbridge-tmux-"));
     process.env.TMUX_TMPDIR = tmp;
+    // Inside a tmux session, $TMUX names the socket and tmux ignores TMUX_TMPDIR: every command below would run on the
+    // user's own server, and the kill-server in afterAll would end their session.
+    delete process.env.TMUX;
+    delete process.env.TMUX_PANE;
   });
   afterAll(() => {
-    safeExec(["tmux", "kill-server"]);
-    saved === undefined ? delete process.env.TMUX_TMPDIR : (process.env.TMUX_TMPDIR = saved);
+    // only ever the private server: with $TMUX set the target would be someone else's
+    if (process.env.TMUX === undefined) safeExec(["tmux", "kill-server"]);
+    (Object.keys(saved) as (keyof typeof saved)[]).forEach(restore);
     rmSync(tmp, { recursive: true, force: true });
   });
 

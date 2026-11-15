@@ -167,7 +167,7 @@ Run `overbridge help` for every command.
 
 `plugin/` ships skills: `workspace`, `ship-pr` (commit, PR, stacked PRs and splitting a branch into a stack,
 green build, mob-review panel and fixes, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
-`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`), `read-handoff` (continue from a handoff file after `/clear`), `perf-recommend` (read the performance history and rank where to get time back) and `whip` (from the
+`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`), `read-handoff` (continue from a handoff file after `/clear`), `perf-recommend` (read the performance history and rank where to get time back) `revisit` (from the orchestration tab: find workspaces whose branch is ahead of main and ask each one's Claude whether the commits are still relevant, continuing if so) and `whip` (from the
 orchestration tab: find every workspace with work still outstanding, such as a draft PR, a conflict with main,
 review feedback, a red build, uncommitted or unpushed work or an item not yet shipped, and message its Claude a
 plain "continue" naming what is left; done workspaces are skipped; it ends with a sent/skipped table and takes
@@ -643,8 +643,18 @@ The `perf-recommend` skill reads this history and recommends where to get time b
 ### Tab sidebar
 
 `overbridge sidebar` is the pane down the left of every tab. It lists each workspace with
-its agent state emoji (🆕 empty: just started or cleared, 💤 idle, 🔄 busy, ✅ done, ⏳ done but background shells or subagents still running, ❓ blocked on you (a permission prompt or question), ❌ ended, `·` unknown)
+an agent state emoji (🆕 empty: just started or cleared, 💤 idle, 🔄 busy, ✅ done, ⏳ done but background shells or subagents still running, ❓ blocked on you (a permission prompt or question), ❌ ended, `·` unknown)
 and its item title when cached (no id, no conventional-commit prefix; the workspace name until then), with its number in tab order (`⌥1` to `⌥9`, then `10` and up). Each tab runs its own copy and marks its own tab.
+Under each title a status line reads `claude status - task status`. Claude status is `empty`, `working`, `needs input`,
+`finished`, `background tasks`, `idle`, `ended` or `no session`. Task status is where the work is in its lifecycle:
+`ticket` (no item yet), `started`, `plan`, `implement` (with `(stack n/m)` on a stack), `mob review`, `draft PR`, `open PR`,
+`waiting AI review`, `review feedback`, `build failing`, `conflicts`, `mergeable`, `merged`; a stacked PR adds `(stack n/m)`.
+Once a PR exists its state decides. Before that the workspace's Claude records the phase with
+`overbridge phase <plan|implement|mob-review> [--stack n/m]` (the dev-loop skills do), stored in `<meta>/phase/<ws>.json`.
+A cleaned-up workspace has no card. Errors, failed removals, kept-by-the-sweep and unsaved-work notes replace the line.
+Each workspace's Claude session is named after it (`claude --name <ws>`), so the orchestrator's `ListAgents` and
+`SendMessage` address it by workspace name. `overbridge ahead [--json]` lists workspaces whose branch holds commits main lacks,
+and the orchestrator's `revisit` skill uses it to ask each one's Claude whether those commits are still relevant.
 Up/Down or `j`/`k` step to the neighbouring tab, a click picks a row, and a tab's number jumps to it.
 A digit that could start a two-digit number waits 0.6 s for a second one, so with 14 tabs `1` then `2`
 goes to tab 12 and `1` alone goes to tab 1. If you leave the tab some other way while a digit waits, the digit is dropped.
@@ -671,7 +681,7 @@ on PR 127"), it first checks `overbridge status --all` for a workspace that alre
 branch. If one exists, it sends that workspace's Claude `/pickup #<pr> <the rest of your request>` with
 `SendMessage` (asking to be told when it goes idle) rather than opening a duplicate workspace; only when no
 workspace holds the branch does it run `overbridge start ... --prompt '/pickup #<pr> ...'`. `/whip` there
-messages every workspace whose work is still outstanding to continue, and `/cleanup` finds the workspaces
+messages every workspace whose work is still outstanding to continue, `/revisit` asks the Claude of every workspace whose branch is ahead of main whether its commits are still relevant, and `/cleanup` finds the workspaces
 that can go (see [Claude Code plugin](#claude-code-plugin)). The Workspaces frame is below it. Keys,
 clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state

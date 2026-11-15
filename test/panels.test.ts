@@ -40,7 +40,7 @@ describe("sidebar on screen", () => {
     expect(s.line(1)).toMatch(/^│ ⌥1 ● 12 Add dark mode +│$/);
     expect(s.line(2)).toMatch(/^│ +working +│$/);
     expect(s.line(3)).toMatch(/^│ ⌥2 \? ws2 +│$/);
-    expect(s.line(4)).toMatch(/^│ +needs your input +│$/);
+    expect(s.line(4)).toMatch(/^│ +needs input +│$/);
     expect(s.inverseRows()).toEqual([3, 4]);
     expect(s.line(15)).toMatch(/^╰─+╯$/);
   });
