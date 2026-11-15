@@ -11,6 +11,7 @@ import { type CleanupInFlight, cleanupRecords, cleanupRows } from "./cleanup-log
 import { Motion, sidebarMotion } from "./config";
 import { animate } from "./sidebar-motion";
 import { metaDir, selfCommand } from "./paths";
+import { type Gauge, gaugeText, readGauge, readReceipt, type Receipt, receiptText } from "./gauge";
 import { type Limits, limitRows, readLimits } from "./limits";
 import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
@@ -85,6 +86,10 @@ export interface Entry {
   agents?: number;
   /** Its top cache is older than `STALE_CACHE_MS`: the card is dimmed. */
   stale?: boolean;
+  /** Context window use, on a busy card. */
+  gauge?: Gauge;
+  /** The last finished turn, on the selected card only. */
+  receipt?: Receipt;
 }
 
 export { sidebarLabel, stripConventional } from "./top";
@@ -139,8 +144,16 @@ function workspaceEntry(ws: string, w: unknown): Entry {
   const stacks = stacksOf(cache);
   const idleHint = fault ? undefined : iceboxHint(ws, cache);
   const task = fault ? undefined : taskStatus(cache, readPhase(ws));
-  return { ...entry, ...(!fault && cacheIsStale(cache.at, Date.now()) ? { stale: true } : {}), ...(task ? { task } : {}), ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}), ...(idleHint ? { idleHint } : {}) };
+  const gauge = entry.state === "busy" ? readGauge(ws) : undefined;
+  return { ...entry, ...(gauge ? { gauge } : {}), ...(!fault && cacheIsStale(cache.at, Date.now()) ? { stale: true } : {}), ...(task ? { task } : {}), ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}), ...(idleHint ? { idleHint } : {}) };
 }
+
+/** `list` with the last-turn receipt on `self`'s card, the one this pane shows selected; a busy or unreadable card has none. */
+export const withReceipt = (list: Entry[], self: string, read: (ws: string) => Receipt | undefined = readReceipt): Entry[] =>
+  list.map((e) => {
+    const receipt = e.tab === self && !e.fault && e.state !== "busy" ? read(e.tab) : undefined;
+    return receipt ? { ...e, receipt } : e;
+  });
 
 /** `w` as the record of a workspace being removed right now, else undefined; a malformed record is never one. */
 const removingRecord = (w: unknown, now = Date.now()): (WorkspaceState & { removing: Removing }) | undefined =>
@@ -322,20 +335,32 @@ function titleRows(e: Entry, index: number, inner: number): string[] {
 }
 
 /** Screen rows one entry takes: its wrapped title and a status line. */
-export const entryHeight = (e: Entry, index: number, inner: number) => titleRows(e, index, inner).length + 1 + (e.stacks?.length ?? 0);
+export const entryHeight = (e: Entry, index: number, inner: number) => titleRows(e, index, inner).length + 1 + (e.stacks?.length ?? 0) + (e.receipt ? 1 : 0);
 
 /** Row heights for the whole list in a pane `width` columns wide. */
 export const entryHeights = (list: Entry[], width: number) => list.map((e, i) => entryHeight(e, i, Math.max(1, width - 4)));
+
+/** Narrowest text a status row keeps when a gauge shares it. */
+const MIN_STATUS_COLS = 8;
+
+/** The gauge to show on `e`'s status line: only while the agent works and no fault, cleanup, sweep, unsaved or icebox note has the line (see `statusFor`). */
+const gaugeFor = (e: Entry): string | undefined =>
+  e.gauge && e.state === "busy" && !(e.fault || e.error || e.blocked || e.unsaved || e.idleHint) ? gaugeText(e.gauge) : undefined;
+
+/** The status row: the text fitted to `inner`, or, with a gauge, to what is left of it so the gauge stays at the right edge. */
+const statusRow = (text: string, gauge: string | undefined, inner: number): string =>
+  gauge && inner > textWidth(gauge) + MIN_STATUS_COLS ? `${fit(text, inner - textWidth(gauge) - 1)} ${gauge}` : fit(text, inner);
 
 /** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line. */
 export function entryLines(e: Entry, index: number, selected: boolean, inner: number): string[] {
   const titles = titleRows(e, index, inner).map((l) => fit(l, inner));
   const status = statusFor(e);
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
-  const sub = fit(`${indent}${status?.text ?? ""}`, inner);
+  const sub = statusRow(`${indent}${status?.text ?? ""}`, gaugeFor(e), inner);
   const stacks = (e.stacks ?? []).map((st) => fit(`${indent}${stackText(st)}`, inner));
-  if (selected) return [...titles, sub, ...stacks].map(inverse);
-  const lines = [...titles, status ? colorize(sub, status.color) : sub, ...stacks.map(dim)];
+  const receipt = e.receipt ? [fit(`${indent}${receiptText(e.receipt)}`, inner)] : [];
+  if (selected) return [...titles, sub, ...stacks, ...receipt].map(inverse);
+  const lines = [...titles, status ? colorize(sub, status.color) : sub, ...stacks.map(dim), ...receipt.map(dim)];
   return e.stale ? lines.map(dim) : lines;
 }
 
@@ -753,7 +778,7 @@ export async function sidebar(wsOpt?: string) {
     keepOrchestration: (order) => { if (!userLayout) ensureOrchestrationTabs(order); },
     sweep: createSweepTrigger({ serverOwns: () => serverOwnsSweep(), claim: claimSweep, start: startSweep, now: Date.now }),
     readState: tryReadState,
-    entries,
+    entries: (order, state) => withReceipt(entries(order, state), self),
     reap: createReaper(),
     status: (state, inner) => [...icedRows(state, inner), ...cleanupRows(inFlightCleanups(state), cleanupRecords(state.cleanups), inner, Date.now(), state.mergeSweepAt), ...queueRows(readQueue(), inner)],
     limits: readLimits,
