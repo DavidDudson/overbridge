@@ -1,7 +1,7 @@
 import { subscribeEvents } from "./events-client";
 import { selfCommand } from "./paths";
 import { detailLines, filterRanked } from "./pm/worklist-filter";
-import { keyOf, rank, type Ranked, type WorkRow, type WorkStatus } from "./pm/worklist";
+import { keyOf, rank, type Ranked, type WorkRow } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
 import { serverRefreshWorklist } from "./server-client";
 import { readWorklist, WORKLIST_REFRESH_MS, type WorklistCache } from "./worklist-data";
@@ -9,7 +9,9 @@ import { readWorklist, WORKLIST_REFRESH_MS, type WorklistCache } from "./worklis
 export * from "./worklist-data";
 
 import { spawnCwd } from "./util";
-import { bold, boxBottom, boxRow, boxTop, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN, type Color } from "./term";
+import { spinner } from "./anim";
+import { statusGlyph, workAnimated } from "./worklist-look";
+import { bold, boxBottom, boxRow, boxTop, cell, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN, stripControl } from "./term";
 
 /** Rows the frame uses besides the item rows: top border, header, reasons, legend, bottom border. */
 const CHROME = 5;
@@ -61,22 +63,22 @@ export function pickRepo(key: string, repos: readonly string[]): string | undefi
   return n > 0 && n <= Math.min(9, repos.length) ? repos[n - 1] : undefined;
 }
 
-const STATUS_COLOR: Record<WorkStatus, Color> = { todo: "grey", "in-progress": "yellow", blocked: "red", done: "green" };
-
 /**
  * The panel as screen rows: a table of ranked items with the selected row inverted, then the selected
  * row's reasons and a legend. Pure, so it is snapshot-tested.
  */
-export function renderWorklist(list: Ranked[], selected: number, offset: number, height: number, width: number, message = "", notes: string[] = [], filter = ""): string[] {
+export function renderWorklist(list: Ranked[], selected: number, offset: number, height: number, width: number, message = "", notes: string[] = [], filter = "", now = Date.now()): string[] {
   const inner = width - 4;
   const body = Math.max(1, height - CHROME);
-  const rows: string[] = [boxTop("Work", width), boxRow(dim(fit(`${"#".padEnd(3)} ${"ready".padEnd(5)} ${"stream".padEnd(6)} ${"item".padEnd(14)} title`, inner)))];
+  const rows: string[] = [boxTop("Work", width), boxRow(dim(fit(`${"".padEnd(2)} ${"#".padEnd(3)} ${"ready".padEnd(5)} ${"stream".padEnd(6)} ${"item".padEnd(14)} title`, inner)))];
   const visible = list.slice(offset, offset + body);
 
   for (const [i, r] of visible.entries()) {
-    const line = `${String(r.rank).padEnd(3)} ${(r.ready ? "yes" : r.status === "in-progress" ? "wip" : "no").padEnd(5)} ${`s${r.stream}`.padEnd(6)} ${r.key.slice(0, 14).padEnd(14)} ${r.title}`;
+    const glyph = statusGlyph(r, now);
+    const icon = cell(glyph.icon, 2);
+    const line = `${icon} ${String(r.rank).padEnd(3)} ${(r.ready ? "yes" : r.status === "in-progress" ? "wip" : "no").padEnd(5)} ${`s${r.stream}`.padEnd(6)} ${r.key.slice(0, 14).padEnd(14)} ${stripControl(r.title)}`;
     const text = fit(line, inner);
-    rows.push(boxRow(offset + i === selected ? inverse(text) : colorize(text, STATUS_COLOR[r.status] ?? "grey")));
+    rows.push(boxRow(offset + i === selected ? inverse(text) : colorize(text, glyph.color)));
   }
 
   for (let i = visible.length; i < body; i++) rows.push(boxRow(list.length === 0 && i === 0 ? dim(fit(filter ? `nothing matches /${filter}` : "nothing assigned to you", inner)) : fit("", inner)));
@@ -127,7 +129,7 @@ export async function worklistPane() {
     if (selected >= offset + body) offset = selected - body + 1;
     const width = process.stdout.columns ?? 80;
     const shown = typing ? `/${filter}▏` : "";
-    const rows = detail ? renderDetail(detail, everything(), height, width) : renderWorklist(list, selected, offset, height, width, typing ? shown : message, cache.notes, filter);
+    const rows = detail ? renderDetail(detail, everything(), height, width) : renderWorklist(list, selected, offset, height, width, typing ? shown : busy ? `${spinner(Date.now())} ${message}` : message, cache.notes, filter);
     process.stdout.write(frame(rows, height, width));
   };
 
@@ -216,7 +218,7 @@ export async function worklistPane() {
       }
 
       if (input.key === "q" || input.key === "ctrl-c") quit();
-      else if (input.key === "j" || input.key === "down") selected = Math.min(list.length - 1, selected + 1);
+      else if (input.key === "j" || input.key === "down") selected = Math.max(0, Math.min(list.length - 1, selected + 1));
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
       else if (input.key === "r") refresh(true);
       else if (input.key === "/") typing = true;
@@ -257,6 +259,10 @@ export async function worklistPane() {
     },
   });
   setInterval(pickUp, 5000);
+  // a spinner turns on every item in progress, so the pane redraws on a short tick while one is listed
+  setInterval(() => {
+    if (!detail && (busy || workAnimated(ranked()))) draw();
+  }, 200);
   draw();
 
   if (cache.at === 0) refresh();
