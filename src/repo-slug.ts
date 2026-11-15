@@ -8,5 +8,6 @@ export function ownerRepo(url: string): string | undefined {
 /** `owner/name` of the repo checked out in `dir`, from its `origin` remote (a local read, about 2 ms). */
 export function slugOfDir(dir: string): string | undefined {
   const r = run(["git", "-C", dir, "remote", "get-url", "origin"]);
+
   return r.ok ? ownerRepo(r.stdout.trim()) : undefined;
 }

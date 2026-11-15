@@ -34,12 +34,14 @@ function freePorts(n: number): number[] {
   const servers = Array.from({ length: n }, () => Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }));
   const ports = servers.map((s) => s.port);
   servers.forEach((s) => s.stop(true));
+
   return ports;
 }
 
 function start(ws: string, s: AppSpec) {
   const record = startApp(ws, "app", s, dirOf(ws));
   started.push({ ws, spec: s });
+
   return record;
 }
 
@@ -48,6 +50,7 @@ const alive = processAlive;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "overbridge-apps-"));
   process.env.OVERBRIDGE_ROOT = tmp;
+
   for (const ws of ["ws1", "ws2", "ws3"]) mkdirSync(dirOf(ws), { recursive: true });
   withState((s) => {
     for (const ws of ["ws1", "ws2", "ws3"]) s.workspaces[ws] = { created: "", repos: { app: {} } };
@@ -62,6 +65,7 @@ afterEach(() => {
       // already stopped
     }
   }
+
   savedRoot === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = savedRoot);
   rmSync(tmp, { recursive: true, force: true });
 });
@@ -155,6 +159,7 @@ describe("ports", () => {
   test("a port in use by something else is skipped", () => {
     const [a, b] = freePorts(2) as [number, number];
     const squatter = Bun.listen({ hostname: "127.0.0.1", port: a, socket: { data() {} } });
+
     try {
       expect(portFree(a)).toBe(false);
       expect(allocatePort(spec(`start: "true"\nports: [${a}, ${b}]`), "app")).toBe(b);
@@ -180,6 +185,7 @@ describe("ready checks", () => {
     start("ws1", s);
     expect(await appStatus("ws1", "app", s)).toBe(AppStatus.Starting);
     const server = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("ok") });
+
     try {
       expect(await appStatus("ws1", "app", s)).toBe(AppStatus.Running);
     } finally {
@@ -193,6 +199,7 @@ describe("ready checks", () => {
     start("ws1", s);
     expect(await appStatus("ws1", "app", s)).toBe(AppStatus.Starting);
     const server = Bun.listen({ hostname: "127.0.0.1", port, socket: { data() {} } });
+
     try {
       expect(await appStatus("ws1", "app", s)).toBe(AppStatus.Running);
     } finally {

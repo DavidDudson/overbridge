@@ -11,7 +11,9 @@ self.onmessage = (event: MessageEvent<{ beat: Float64Array; pid: number; restart
     const nowMs = Date.now();
     const verdict = watchdogVerdict({ beatMs: beat[0]!, nowMs, lastCheckMs, hungMs, checkMs });
     lastCheckMs = nowMs;
+
     if (verdict !== "hung") return;
+
     try {
       // a server the user is stopping that has hung is killed and left down
       if (stopMarker && existsSync(stopMarker)) return;

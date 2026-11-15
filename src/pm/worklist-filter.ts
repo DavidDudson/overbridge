@@ -6,15 +6,21 @@ import type { Ranked } from "./worklist";
  */
 export function matchesFilter(item: Ranked, query: string): boolean {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+
   return terms.every((term) => {
     const [field, ...rest] = term.split(":");
     const value = rest.join(":");
+
     if (rest.length > 0 && value) {
       if (field === "label") return item.labels.some((l) => l.toLowerCase().includes(value));
+
       if (field === "stream") return String(item.stream) === value.replace(/^s/, "");
+
       if (field === "status") return item.status === value;
     }
+
     if (/^s\d+$/.test(term)) return String(item.stream) === term.slice(1);
+
     return item.key.toLowerCase().includes(term) || item.title.toLowerCase().includes(term);
   });
 }
@@ -25,10 +31,13 @@ export const filterRanked = (list: readonly Ranked[], query: string): Ranked[] =
 /** The detail view of one item as plain lines: what it is, why it sits where it does, what blocks it, and where it lives. */
 export function detailLines(item: Ranked, all: readonly Ranked[]): string[] {
   const byKey = new Map(all.map((i) => [i.key, i]));
+
   const blockers = item.blockedBy.map((k) => {
     const b = byKey.get(k);
+
     return b ? `${k} ${b.title} (${b.status})` : `${k} (not on the list, assumed open)`;
   });
+
   return [
     `${item.key}  ${item.title}`,
     `status: ${item.status}   rank: ${item.rank}   stream: s${item.stream}${item.ready ? "   ready" : ""}`,

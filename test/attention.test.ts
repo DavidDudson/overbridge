@@ -36,6 +36,7 @@ describe("pickNext", () => {
     { tab: "d", state: "waiting" as const },
     { tab: "e", state: "busy" as const },
   ];
+
   test("waiting beats done beats background, cycling from the current tab", () => {
     expect(pickNext(list, "a")).toBe("b");
     expect(pickNext(list, "b")).toBe("d");
@@ -130,14 +131,19 @@ describe("pane toggles", () => {
 
   /** A pane as `zellij action list-panes --json` reports it. */
   type ZellijPane = { id: number; title: string; tab_name: string; exited?: boolean; is_plugin?: boolean };
+
   const pane = (id: number, kind: string, extra: Partial<ZellijPane> = {}): ZellijPane => ({ id, title: `w1 · ${kind}`, tab_name: "w1", ...extra });
+
   const fake = (panes: ZellijPane[]) => {
     const calls: string[][] = [];
+
     const exec = (cmd: string[]) => {
       const args = cmd.slice(2);
       calls.push(args);
+
       return { ok: true, stdout: args[0] === "list-panes" ? JSON.stringify(panes) : "terminal_9" };
     };
+
     return { calls, deps: { self: ["ob"], mux: zellijMux(exec) } };
   };
 
@@ -147,6 +153,7 @@ describe("pane toggles", () => {
       { id: "2", title: "w1 · terminal", tab: "w1", exited: true },
       { id: "3", title: "w1 · terminal", tab: "w2", exited: false },
     ];
+
     expect(findPane(panes, "w1", "claude")?.id).toBe("1");
     expect(findPane(panes, "w1", "terminal")).toBeUndefined();
     expect(findPane(panes, "w1", "diff")).toBeUndefined();

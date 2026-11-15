@@ -19,6 +19,7 @@ import {
 import { fakeProvider } from "./helpers/fake-provider";
 
 const spec = (over: Partial<ButtonSpec> = {}): ButtonSpec => ({ id: "b", label: "🎨 Chromatic", side: "right", url: "https://c/{branch}", ...over });
+
 const custom = (over: Partial<CustomButton> = {}): CustomButton => ({
   repo: "app",
   spec: spec(),
@@ -26,6 +27,7 @@ const custom = (over: Partial<CustomButton> = {}): CustomButton => ({
   env: buttonEnv("w1", "app", { branch: "feat/x y", pr: 7 }),
   ...over,
 });
+
 const snap = (customs: CustomButton[]): TopSnapshot => ({ ws: "w1", dir: "/w/w1", links: [], apps: [], custom: customs });
 
 describe("config", () => {
@@ -35,6 +37,7 @@ describe("config", () => {
     } catch (e) {
       return (e as Error).message;
     }
+
     return "";
   };
 
@@ -76,10 +79,12 @@ describe("buttons", () => {
 
   test("pressing one opens its URL or runs its command in the worktree", () => {
     const calls: string[] = [];
+
     const deps = {
       open: (u: string) => void calls.push(`open ${u}`),
       run: (cmd: string, dir: string, env: Record<string, string>) => void calls.push(`run ${cmd} in ${dir} branch=${env.OVERBRIDGE_BRANCH}`),
     } as unknown as ActDeps;
+
     activate({ label: "u", action: { kind: "custom", button: custom() } }, deps);
     activate({ label: "r", action: { kind: "custom", button: custom({ spec: spec({ url: undefined, run: "make docs" }) }) } }, deps);
     activate({ label: "s", action: { kind: "custom", button: custom({ spec: spec({ url: undefined, status: "x" }) }) } }, deps);
@@ -117,11 +122,14 @@ describe("refresh and snapshot", () => {
 
   test("refresh runs each status command with the claim's env and caches what it printed", async () => {
     const ran: string[][] = [];
+
     const exec = (cmd: string[]) => {
       if (cmd[0] !== "env") return undefined;
       ran.push(cmd);
+
       return cmd.at(-1) === "my-status" ? '{"text":"green","color":"green"}' : undefined;
     };
+
     const cache = refreshTop("w1", { provider: () => fakeProvider(), exec });
     expect(cache.buttons).toEqual({ "app/checks": { text: "green", color: "green" } });
     expect(ran[0]).toEqual(["env", "OVERBRIDGE_NAME=w1", "OVERBRIDGE_REPO=app", "OVERBRIDGE_BRANCH=feat/12-x", "OVERBRIDGE_PR=3", "sh", "-c", "my-status"]);

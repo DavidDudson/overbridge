@@ -9,6 +9,7 @@ import { readState } from "./state";
 import { layoutScript, tmuxConf } from "./tmux-layout";
 
 export { SIDEBAR_WIDTH };
+
 /** Rows the top panel takes: the frame's two borders, a row per PR (one is typical) and the row of launchers. */
 export const TOP_ROWS = 5;
 const q = (s: string) => JSON.stringify(s); // JSON strings are valid KDL strings
@@ -62,6 +63,7 @@ export interface TabSpec {
 export function workspaceTabSpec(ws: string, self: string[], opts: TabOptions = {}): TabSpec {
   const width = opts.sidebarWidth ?? SIDEBAR_WIDTH;
   const extra = [...(opts.resume ? ["--continue"] : []), ...(opts.prompt ? ["--", opts.prompt] : [])];
+
   return {
     name: ws,
     focus: opts.focus ?? false,
@@ -75,6 +77,7 @@ export function workspaceTabSpec(ws: string, self: string[], opts: TabOptions = 
 export function orchestrationTabSpec(t: OrchestrationTab, self: string[], opts: Omit<TabOptions, "prompt"> = {}): TabSpec {
   const width = opts.sidebarWidth ?? SIDEBAR_WIDTH;
   const dir = t.dir();
+
   return {
     name: t.tab,
     focus: opts.focus ?? false,
@@ -89,6 +92,7 @@ export function orchestrationTabSpec(t: OrchestrationTab, self: string[], opts: 
 
 const kdlPane = (p: PaneSpec, indent: string, focus = false): string => {
   const [cmd, ...args] = p.command;
+
   return `${indent}pane name=${q(p.name)} command=${q(cmd!)} cwd=${q(p.cwd)}${p.size === undefined ? "" : ` size=${p.size}`}${p.borderless ? " borderless=true" : ""}${focus ? " focus=true" : ""} {
 ${indent}  args ${args.map(q).join(" ")}
 ${indent}}`;
@@ -102,6 +106,7 @@ ${kdlPane(t.top, "        ")}
 ${kdlPane(t.main, "        ")}
       }`
     : kdlPane(t.main, "      ");
+
   return `  tab name=${q(t.name)}${t.focus ? " focus=true" : ""} {
     pane split_direction="vertical" {
 ${kdlPane(t.sidebar, "      ", true)}
@@ -118,9 +123,11 @@ export const orchestrationTabKdl = (t: OrchestrationTab, self: string[], opts: O
 /** The tabs of a fresh session in order: the orchestration tabs, then one per workspace. The first has focus. */
 export function layoutSpecs(workspaces: string[], self: string[], opts: LayoutOptions = {}): TabSpec[] {
   const width = opts.sidebarWidth === undefined ? {} : { sidebarWidth: opts.sidebarWidth };
+
   const orchestration = ORCHESTRATION_TABS.map((t, i) =>
     orchestrationTabSpec(t, self, { resume: opts.resume?.has(t.tab) ?? false, ...width, focus: i === 0 }),
   );
+
   return [
     ...orchestration,
     ...workspaces.map((ws, i) =>
@@ -164,6 +171,7 @@ ${orchestrationTabKdl(t, self, { ...opts, focus: true })}
 /** Zellij's config dir: `$ZELLIJ_CONFIG_DIR`, else `$XDG_CONFIG_HOME/zellij`, else `~/.config/zellij`. */
 export function zellijConfigDir(env: Record<string, string | undefined> = process.env, home = homedir()): string {
   if (env.ZELLIJ_CONFIG_DIR) return env.ZELLIJ_CONFIG_DIR;
+
   return join(env.XDG_CONFIG_HOME || join(home, ".config"), "zellij");
 }
 
@@ -175,6 +183,7 @@ export const transcriptDir = (dir: string, home = homedir()) => join(home, ".cla
 
 const hasTranscript = (dir: string, home: string) => {
   const transcripts = transcriptDir(dir, home);
+
   return existsSync(transcripts) && readdirSync(transcripts).some((f) => f.endsWith(".jsonl"));
 };
 
@@ -185,8 +194,10 @@ const hasTranscript = (dir: string, home: string) => {
  */
 export function agentDir(ws: string, repos: readonly string[], home = homedir()): string {
   const [first] = repos;
+
   if (!first) return wsDir(ws);
   const repo = worktreePath(ws, first);
+
   return !hasTranscript(repo, home) && hasTranscript(wsDir(ws), home) ? wsDir(ws) : repo;
 }
 
@@ -215,6 +226,7 @@ export function chooseLayout(workspaces: string[], self: string[], kind: MuxKind
   if (kind === "zellij" && existsSync(userPath)) return { source: "user", path: userPath };
   const agentDirs = Object.fromEntries(workspaces.map((ws) => [ws, agentDirOf(ws)]));
   const opts = { resume: resumable(workspaces, homedir(), agentDirs), sidebarWidth: sidebarWidth(), agentDirs };
+
   return kind === "tmux"
     ? { source: "generated", text: layoutScript(session, layoutSpecs(workspaces, self, opts)), conf: tmuxConf(self) }
     : { source: "generated", text: layoutKdl(workspaces, self, opts) };

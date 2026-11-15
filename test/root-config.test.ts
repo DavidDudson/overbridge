@@ -34,7 +34,9 @@ const writeRoot = (yaml: string) => writeFileSync(rootConfigPath(), yaml);
 function worktree(ws: string, repo: string, yaml?: string): string {
   const dir = join(tmp, ws, repo);
   mkdirSync(dir, { recursive: true });
+
   if (yaml !== undefined) writeFileSync(join(dir, "overbridge.yml"), yaml);
+
   return dir;
 }
 
@@ -44,6 +46,7 @@ const thrown = (fn: () => unknown): string => {
   } catch (e) {
     return (e as Error).message;
   }
+
   throw new Error("expected a throw");
 };
 
@@ -147,6 +150,7 @@ describe("resolveConfig", () => {
   test("outside a workspace only the defaults apply", () => {
     writeRoot("defaults:\n  ide: zed\nrepos:\n  app:\n    ide: webstorm\n");
     const outside = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-outside-")));
+
     try {
       expect(loadRepoConfig(join(outside, "app")).ide).toBe("zed");
     } finally {
@@ -210,12 +214,14 @@ describe("config commands", () => {
     const error = console.error;
     console.log = (...a: unknown[]) => void out.push(a.join(" "));
     console.error = (...a: unknown[]) => void out.push(a.join(" "));
+
     try {
       fn();
     } finally {
       console.log = log;
       console.error = error;
     }
+
     return out.join("\n");
   };
 
@@ -310,6 +316,7 @@ describe("guard block", () => {
 
 describe("guard hook", () => {
   const CLI = join(import.meta.dir, "..", "src", "cli.ts");
+
   const guard = (input: object) => {
     const p = Bun.spawnSync({
       cmd: [process.execPath, CLI, "guard"],
@@ -318,8 +325,10 @@ describe("guard hook", () => {
       stdout: "pipe",
       stderr: "pipe",
     });
+
     return { code: p.exitCode, err: p.stderr.toString() };
   };
+
   const call = (command: string) => ({ cwd: worktree("ws1", "app"), tool_name: "Bash", tool_input: { command } });
 
   test("applies the root config's deny rules", () => {

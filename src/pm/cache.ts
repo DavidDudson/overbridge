@@ -11,6 +11,7 @@ type Entry = { title: string; at: number };
 
 function read(): Record<string, Entry> {
   if (!existsSync(file())) return {};
+
   try {
     return JSON.parse(readFileSync(file(), "utf8"));
   } catch {
@@ -35,8 +36,10 @@ export const TITLE_TTL_MS = 10 * 60_000;
 export function refreshTitle(provider: Provider, project: string, id: string, o: { ttlMs?: number; now?: number } = {}): string | undefined {
   const now = o.now ?? Date.now();
   const stored = read()[keyOf(provider, project, id)];
+
   if (stored && o.ttlMs !== undefined && now - stored.at < o.ttlMs) return stored.title;
   const title = provider.title(id);
+
   if (title === undefined) return cachedTitle(provider, project, id);
   const entries = read();
   entries[keyOf(provider, project, id)] = { title, at: now };
@@ -44,5 +47,6 @@ export function refreshTitle(provider: Provider, project: string, id: string, o:
   const tmp = `${file()}.${process.pid}.${randomUUID()}.tmp`;
   writeFileSync(tmp, JSON.stringify(entries, null, 2) + "\n");
   renameSync(tmp, file());
+
   return title;
 }

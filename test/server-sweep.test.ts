@@ -30,6 +30,7 @@ describe("createSweeper", () => {
 
   test("refreshes the stale workspaces, then sweeps once", async () => {
     const order: string[] = [];
+
     const s = createSweeper(
       deps({
         stale: () => ["a", "b"],
@@ -37,6 +38,7 @@ describe("createSweeper", () => {
         sweep: () => (order.push("sweep"), { a: Verdict.Keep, b: Verdict.Remove }),
       }),
     );
+
     expect(await s.tick()).toBe(true);
     expect(order).toEqual(["refresh a", "refresh b", "sweep"]);
     expect(s.stats()).toMatchObject({ runs: 1, running: false, lastChecked: 2 });
@@ -44,6 +46,7 @@ describe("createSweeper", () => {
 
   test("a refresh that throws reaches the sweep as a failure, and the sweep still runs", async () => {
     let seen: ReadonlyMap<string, Error> = new Map();
+
     const s = createSweeper(
       deps({
         stale: () => ["a", "b"],
@@ -53,6 +56,7 @@ describe("createSweeper", () => {
         sweep: (failed) => ((seen = failed), {}),
       }),
     );
+
     await s.tick();
     expect([...seen.keys()]).toEqual(["a"]);
     expect(seen.get("a")?.message).toBe("gh down");
@@ -61,6 +65,7 @@ describe("createSweeper", () => {
   test("a tick during a running sweep is skipped, never stacked", async () => {
     let release = () => {};
     let claims = 0;
+
     const s = createSweeper(
       deps({
         claim: () => (claims++, true),
@@ -68,6 +73,7 @@ describe("createSweeper", () => {
         refresh: () => new Promise<void>((r) => (release = r)),
       }),
     );
+
     const first = s.tick();
     expect(s.busy).toBe(true);
     expect(await s.tick()).toBe(false);
@@ -87,7 +93,11 @@ describe("createSweeper", () => {
   test("a sweep that throws is recorded and the next one runs", async () => {
     const logged: string[] = [];
     let boom = true;
-    const s = createSweeper(deps({ log: (m) => logged.push(m), sweep: () => { if (boom) throw new Error("state unreadable"); return {}; } }));
+
+    const s = createSweeper(deps({ log: (m) => logged.push(m), sweep: () => { if (boom) throw new Error("state unreadable");
+
+ return {}; } }));
+
     await s.tick();
     expect(s.stats().lastError).toBe("state unreadable");
     expect(logged[0]).toContain("state unreadable");
@@ -118,14 +128,17 @@ describe("GET /sweep", () => {
 describe("createSweepTrigger", () => {
   const make = (owns: () => Promise<boolean>) => {
     const t = { now: 0, claims: 0, starts: 0, asks: 0 };
+
     const trigger = createSweepTrigger({
       serverOwns: () => (t.asks++, owns()),
       claim: () => (t.claims++, true),
       start: () => void t.starts++,
       now: () => t.now,
     });
+
     return { t, trigger };
   };
+
   const settle = () => new Promise((r) => setTimeout(r, 0));
 
   test("before the server has answered a poll does nothing, so it cannot start a sweep the server would batch", () => {
@@ -160,6 +173,7 @@ describe("createSweepTrigger", () => {
     const { t, trigger } = make(async () => {
       throw new Error("socket");
     });
+
     trigger();
     await settle();
     t.now = 1;

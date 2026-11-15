@@ -11,6 +11,7 @@ import { naturalSort } from "../util";
 
 /** A board column or status, normalised across providers. */
 export const BoardStatus = { Backlog: "backlog", Ready: "ready", InProgress: "in-progress", InReview: "in-review", Done: "done", Unknown: "unknown" } as const;
+
 export type BoardStatus = (typeof BoardStatus)[keyof typeof BoardStatus];
 
 /** An item as the board knows it: `WorkItem` plus what the rules need. A provider's `board()` would return these. */
@@ -53,18 +54,26 @@ const DEFAULTS: Required<BoardOptions> = { blockedLabels: ["blocked"], streamLab
 export function normalizeStatus(raw: string | undefined, map: Record<string, BoardStatus> = {}): BoardStatus {
   if (raw === undefined) return BoardStatus.Unknown;
   const mapped = map[raw] ?? Object.entries(map).find(([k]) => k.toLowerCase() === raw.toLowerCase())?.[1];
+
   if (mapped) return mapped;
   const s = raw.toLowerCase();
+
   if (/progress|doing|wip|development/.test(s)) return BoardStatus.InProgress;
+
   if (/review|qa|testing|verify/.test(s)) return BoardStatus.InReview;
+
   if (/done|closed|complete|released/.test(s)) return BoardStatus.Done;
+
   if (/ready|to ?do|selected|next/.test(s)) return BoardStatus.Ready;
+
   if (/backlog|icebox|new|open|triage/.test(s)) return BoardStatus.Backlog;
+
   return BoardStatus.Unknown;
 }
 
 /** Whether an item can be started now. */
 export const Readiness = { Ready: "ready", Active: "active", Blocked: "blocked", Done: "done" } as const;
+
 export type Readiness = (typeof Readiness)[keyof typeof Readiness];
 
 export interface Verdict {
@@ -80,17 +89,24 @@ export interface Verdict {
 export function readiness(item: BoardItem, byId: ReadonlyMap<string, BoardItem>, opts: BoardOptions = {}): Verdict {
   const { blockedLabels } = { ...DEFAULTS, ...opts };
   const because: string[] = [];
+
   if (item.status === BoardStatus.Done) return { readiness: Readiness.Done, because: ["status done"] };
+
   if (item.status === BoardStatus.InProgress || item.status === BoardStatus.InReview) {
     return { readiness: Readiness.Active, because: [`status ${item.rawStatus ?? item.status}`] };
   }
+
   const label = item.labels.find((l) => blockedLabels.some((b) => b.toLowerCase() === l.toLowerCase()));
+
   if (label) because.push(`label ${label}`);
+
   for (const id of item.blockedBy) {
     const blocker = byId.get(id);
+
     if (!blocker) because.push(`blocked by ${id} (not on the board, assumed open)`);
     else if (blocker.status !== BoardStatus.Done) because.push(`blocked by ${id} (${blocker.rawStatus ?? blocker.status})`);
   }
+
   return because.length ? { readiness: Readiness.Blocked, because } : { readiness: Readiness.Ready, because: ["no open blockers"] };
 }
 
@@ -103,40 +119,54 @@ export function streams(items: readonly BoardItem[], opts: BoardOptions = {}): M
   const { streamLabelPrefixes } = { ...DEFAULTS, ...opts };
   const ids = items.map((i) => i.id);
   const parent = new Map(ids.map((id) => [id, id]));
+
   const find = (id: string): string => {
     const p = parent.get(id) ?? id;
+
     if (p === id) return id;
     const r = find(p);
     parent.set(id, r);
+
     return r;
   };
+
   const union = (a: string, b: string) => {
     if (!parent.has(a) || !parent.has(b)) return;
     const [ra, rb] = [find(a), find(b)];
+
     if (ra !== rb) parent.set(ra, rb);
   };
+
   const streamLabel = (i: BoardItem) => i.labels.find((l) => streamLabelPrefixes.some((p) => l.toLowerCase().startsWith(p.toLowerCase())));
   const byLabel = new Map<string, string>();
+
   for (const i of items) {
     for (const b of i.blockedBy) union(i.id, b);
     const label = streamLabel(i);
+
     if (label) {
       const first = byLabel.get(label.toLowerCase());
       first === undefined ? byLabel.set(label.toLowerCase(), i.id) : union(i.id, first);
     }
   }
+
   // name each component by its label, else its lowest id
   const members = new Map<string, BoardItem[]>();
+
   for (const i of items) {
     const root = find(i.id);
     members.set(root, [...(members.get(root) ?? []), i]);
   }
+
   const out = new Map<string, string>();
+
   for (const group of members.values()) {
     const label = group.map(streamLabel).find((l) => l !== undefined);
     const name = label?.toLowerCase() ?? `#${group.map((i) => i.id).sort(naturalSort)[0]}`;
+
     for (const i of group) out.set(i.id, name);
   }
+
   return out;
 }
 
@@ -183,8 +213,10 @@ const compareKeys = (a: number | string, b: number | string) => (typeof a === "s
 function decide(a: Omit<Ranked, "rank">, b: Omit<Ranked, "rank">): { rule: number; sign: number } {
   for (const [i, rule] of RULES.entries()) {
     const sign = compareKeys(rule.key(a), rule.key(b));
+
     if (sign !== 0) return { rule: i, sign };
   }
+
   return { rule: RULES.length - 1, sign: 0 };
 }
 
@@ -194,8 +226,10 @@ export function rank(items: readonly BoardItem[], opts: BoardOptions = {}): Rank
   const open = items.filter((i) => i.status !== BoardStatus.Done);
   const stream = streams(open, opts);
   const unblocks = new Map<string, number>();
+
   for (const i of open) for (const b of i.blockedBy) unblocks.set(b, (unblocks.get(b) ?? 0) + 1);
   const rows = open.map((item): Omit<Ranked, "rank"> => ({ item, ...readiness(item, byId, opts), stream: stream.get(item.id)!, unblocks: unblocks.get(item.id) ?? 0 }));
+
   return rows.sort((a, b) => decide(a, b).sign).map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
@@ -204,6 +238,7 @@ export function explain(a: Ranked, b: Ranked): string {
   const { rule, sign } = decide(a, b);
   const r = RULES[rule]!;
   const [above, below] = sign <= 0 ? [a, b] : [b, a];
+
   return `${above.item.id} above ${below.item.id}: ${r.name} (${r.text(above)} vs ${r.text(below)})`;
 }
 
@@ -223,18 +258,24 @@ export function recommend(ranked: readonly Ranked[], freeSlots: number): Recomme
   const ready = ranked.filter((r) => r.readiness === Readiness.Ready);
   const out: Recommendation[] = [];
   const taken = new Set<string>();
+
   const pick = (r: Ranked, note: string) => {
     taken.add(r.stream);
     out.push({ item: r.item, stream: r.stream, why: [`rank ${r.rank}`, ...r.because, note] });
   };
+
   for (const r of ready) {
     if (out.length >= freeSlots) break;
+
     if (!taken.has(r.stream) && !active.has(r.stream)) pick(r, `stream ${r.stream} has nothing active`);
   }
+
   for (const r of ready) {
     if (out.length >= freeSlots) break;
+
     if (!taken.has(r.stream)) pick(r, `stream ${r.stream} already has active work; may collide`);
   }
+
   return out;
 }
 
@@ -258,6 +299,7 @@ export function renderBoard(ranked: readonly Ranked[], slots: ReadonlyMap<string
   const idWidth = Math.max(2, ...ranked.map((r) => textWidth(r.item.id)));
   const streamWidth = Math.max(6, ...ranked.map((r) => textWidth(r.stream)));
   const left = (text: string, w: number) => fit(text, w);
+
   const row = (r: Ranked) => {
     const slot = slots.get(r.item.id);
     const tail = slot ? `${slot.glyph} ${slot.ws}` : r.readiness === Readiness.Blocked ? r.because.join(", ") : `unblocks ${r.unblocks}`;
@@ -266,12 +308,15 @@ export function renderBoard(ranked: readonly Ranked[], slots: ReadonlyMap<string
     const lead = `${READINESS_MARK[r.readiness]} ${left(r.item.id, idWidth)} ${pri} ${size} `;
     const trail = ` ${left(r.stream, streamWidth)} ${tail}`;
     const titleWidth = Math.max(4, inner - textWidth(lead) - textWidth(trail));
+
     return `${lead}${fit(r.item.title, titleWidth)}${trail}`;
   };
+
   // the header's columns line up with a row's: mark (2) + space, id, pri (2), size (1), title, stream, tail
   const header = fit(`  ${left("id", idWidth)} pr sz ${left("title", Math.max(4, inner - idWidth - streamWidth - 26))} ${left("stream", streamWidth)} slot / waits on`, inner);
   const bodyRows = Math.max(0, height - 3);
   const body = ranked.slice(0, bodyRows).map((r, i) => (i === cursor ? inverse(fit(row(r), inner)) : fit(row(r), inner)));
   const padded = [...body, ...Array<string>(Math.max(0, bodyRows - body.length)).fill(" ".repeat(inner))];
+
   return [boxTop(title, width), boxRow(header), ...padded.map(boxRow), boxBottom(width, "⏎ start in a slot · o open · r refresh · / filter · b blocked", "grey")];
 }

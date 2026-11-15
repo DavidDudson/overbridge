@@ -13,6 +13,7 @@ function problems(yaml: string): string[] {
       .map((l) => l.trim())
       .filter((l) => l && l !== "f.yml:");
   }
+
   throw new Error("expected the config to be rejected");
 }
 
@@ -65,6 +66,7 @@ describe("config validation messages", () => {
       expect(out[0]).toStartWith("apps[0].id: ");
       expect(out[0]).toContain("must start with a letter or digit");
     }
+
     for (const id of ["web", "web-2", "db_1", "api.v2", "9lives"]) {
       expect(() => parseConfig(`apps:\n  - id: ${id}\n    start: x\n`, "f.yml")).not.toThrow();
     }

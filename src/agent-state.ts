@@ -8,6 +8,7 @@ import { pidAlive } from "./proc";
  * tasks recorded at the end of the turn are still running.
  */
 export const AGENT_STATES = ["empty", "idle", "busy", "done", "bg", "waiting", "end"] as const;
+
 export type AgentState = (typeof AGENT_STATES)[number];
 
 /** Why a Claude session ended: the `reason` of Claude's SessionEnd hook. */
@@ -18,6 +19,7 @@ export const EndReason = {
   PromptInputExit: "prompt_input_exit",
   Other: "other",
 } as const;
+
 export type EndReason = (typeof EndReason)[keyof typeof EndReason];
 
 /** End reasons that start another session in the same pane, so the workspace is still in use. */
@@ -92,6 +94,7 @@ export const clearSubagents = (meta: string, ws: string) => rmSync(subagentDir(m
 /** How many subagents of `ws` are running, ignoring leaked markers. */
 export function runningSubagents(meta: string, ws: string, now = Date.now()): number {
   const dir = subagentDir(meta, ws);
+
   try {
     return readdirSync(dir).filter((f) => {
       try {
@@ -125,25 +128,31 @@ function readAgentRecord(ws: string, now: number, alive: (pid: number) => boolea
   try {
     const { state, at, bg, reason, since, tool } = JSON.parse(readFileSync(agentStateFile(ws), "utf8")) as { state?: string; at?: number; bg?: unknown; reason?: unknown; since?: unknown; tool?: unknown };
     const known = AGENT_STATES.find((s) => s === state);
+
     if (!known) {
       return undefined;
     }
+
     const subagents = runningSubagents(metaDir(), ws, now);
     const hasSubagents = subagents > 0;
     const liveBg = Array.isArray(bg) ? bg.filter((p) => typeof p === "number" && alive(p)).length : 0;
     const began = typeof since === "number" ? since : typeof at === "number" ? at : undefined;
+
     const detail = {
       agents: subagents + liveBg,
       ...(began === undefined ? {} : { since: began }),
       ...(typeof tool === "string" && known === "waiting" && TOOL_NAME.test(tool) ? { tool } : {}),
     };
+
     // a subagent can run for longer than a turn goes without a tool call, so it keeps `busy` alive
     if (typeof at === "number" && now - at > STALE_MS[known] && !(known === "busy" && hasSubagents)) {
       return undefined;
     }
+
     if (known === "done" && (hasSubagents || liveBg > 0)) {
       return { state: "bg", ...detail };
     }
+
     return typeof reason === "string" ? { state: known, reason, ...detail } : { state: known, ...detail };
   } catch {
     return undefined;
@@ -163,6 +172,7 @@ export const readAgentDetail = (ws: string, now = Date.now(), alive: (pid: numbe
 /** Whether `ws`'s session ended and the user closed it on purpose (`endedForGood`). */
 export function sessionEndedForGood(ws: string, now = Date.now()): boolean {
   const record = readAgentRecord(ws, now, pidAlive);
+
   return record?.state === "end" && endedForGood(record.reason);
 }
 
@@ -172,6 +182,7 @@ export const glyphFor = (state: AgentState | undefined): string => (state ? GLYP
 export function readAgentAt(ws: string): number | undefined {
   try {
     const { at } = JSON.parse(readFileSync(agentStateFile(ws), "utf8")) as { at?: unknown };
+
     return typeof at === "number" && Number.isFinite(at) ? at : undefined;
   } catch {
     return undefined;
@@ -218,18 +229,24 @@ export function turnChange(event: string, tool: string | undefined, source: stri
 /** Apply `event` to `ws`'s turn summary. Best effort: a parallel hook may lose a count. */
 export function recordTurn(meta: string, ws: string, event: string, tool: string | undefined, source: string | undefined, now = Date.now()) {
   const change = turnChange(event, tool, source, now);
+
   if (!change) return;
   const file = turnPath(meta, ws);
+
   if (change === "reset") return rmSync(file, { force: true });
   let old: TurnSummary = {};
+
   try {
     const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+
     if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) old = parsed as TurnSummary;
   } catch {
     // none yet, or unreadable: start fresh
   }
+
   mkdirSync(join(meta, "agent"), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
+
   try {
     writeFileSync(tmp, JSON.stringify(change(old)));
     renameSync(tmp, file);

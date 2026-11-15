@@ -28,8 +28,10 @@ export const holdings = (repo: string, stacks: Stack[]) => (ws: string, c: Claim
 
 export function requireWs(explicit?: string): string {
   const ws = explicit ?? currentWorkspace();
+
   if (!ws) fail("not inside a workspace; cd into one or pass --ws <name>");
   getWorkspace(readState(), ws);
+
   return ws;
 }
 
@@ -41,6 +43,7 @@ export function init() {
 
 export function repoAdd(name: string, url: string, branch?: string) {
   if (!REPO_NAME_RE.test(name)) fail(`invalid repo name '${name}' (letters, digits, - and _)`);
+
   if (loadRepos()[name]) fail(`repo '${name}' already registered`);
   const spec = { name, url, defaultBranch: branch };
   git.ensureBare(spec);
@@ -73,8 +76,11 @@ export function newWorkspace(name: string | undefined, repos: string[], mux?: Mu
 /** Create workspace `name` holding a worktree of each of `repos`. */
 export function createWorkspace(name: string, repos: string[]) {
   const state = readState();
+
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}'`);
+
   if (state.workspaces[name] || existsSync(wsDir(name))) fail(`workspace '${name}' already exists`);
+
   for (const r of repos) getRepo(r);
   mkdirSync(wsDir(name), { recursive: true });
   trustFolder(wsDir(name));
@@ -82,14 +88,17 @@ export function createWorkspace(name: string, repos: string[]) {
     s.workspaces[name] = { created: new Date().toISOString(), repos: {} };
   });
   scaffold(name);
+
   for (const r of repos) addRepo(r, name);
 }
 
 export function addRepo(repo: string, wsOpt?: string) {
   const ws = requireWs(wsOpt);
   const spec = getRepo(repo);
+
   if (getWorkspace(readState(), ws).repos[repo]) fail(`${repo} is already in ${ws}`);
   const path = worktreePath(ws, repo);
+
   if (existsSync(path)) fail(`${path} already exists`);
   log(`adding ${repo} to ${ws}`);
   git.addWorktree(spec, path);
@@ -108,6 +117,7 @@ const agentShell = (ws: string) => (existsSync(agentShellFile(ws)) ? readFileSyn
 /** A repo added to a workspace whose agent runs inside another repo's shell: that env leaks into the agent. */
 function warnShellLeak(ws: string, added: string) {
   const inside = agentShell(ws);
+
   if (!inside || inside === added) return;
   log(
     `warning: the agent in ${ws} runs inside ${inside}'s dev shell, so that env leaks into work on ${added}. ` +
@@ -119,20 +129,29 @@ export function removeWorkspace(ws: string, force: boolean) {
   if (isOrchestrationTab(ws)) {
     fail(orchestrationRemoveMessage(ws));
   }
+
   const state = readState();
+
   if (isOrphan(ws, state)) {
     return removeOrphan(ws, force);
   }
+
   const w = getWorkspace(state, ws);
+
   if (!force) {
     const dirty = Object.keys(w.repos).filter((r) => git.isDirty(worktreePath(ws, r)));
+
     if (dirty.length) fail(`${ws} has uncommitted changes in: ${dirty.join(", ")} (use --force to discard)`);
   }
+
   for (const [repo, claim] of Object.entries(w.repos)) {
     const ok = runHooks("pre-remove", { ws, repo, ...(claim.branch ? { branch: claim.branch } : {}), ...(claim.pr ? { pr: claim.pr } : {}) });
+
     if (!ok && !force) fail(`a pre-remove hook for ${ws}/${repo} failed; nothing was removed (use --force to remove anyway)`);
   }
+
   const removed: string[] = [];
+
   for (const r of Object.keys(w.repos)) {
     try {
       git.removeWorktree(getRepo(r), worktreePath(ws, r), force);
@@ -140,8 +159,10 @@ export function removeWorkspace(ws: string, force: boolean) {
       const cause = `removing the ${r} worktree failed: ${(e as Error).message}`;
       fail(removed.length ? `${ws} is partly removed (the ${removed.join(", ")} worktrees are gone); ${cause}` : `${ws}: ${cause}; nothing was removed`);
     }
+
     removed.push(r);
   }
+
   for (const repo of Object.keys(w.repos)) untrustFolder(worktreePath(ws, repo)); // the agent may have started in one
   removeFolder(ws);
   withState((s) => {
@@ -167,16 +188,21 @@ function removeFolder(ws: string) {
  */
 export function removeOrphan(name: string, force: boolean) {
   const worktrees = worktreesIn(name);
+
   if (!force) {
     const unsaved = worktrees.filter((w) => git.isDirty(w.path) || git.hasUnpushed(w.path)).map((w) => w.repo);
+
     if (unsaved.length) {
       fail(`orphan ${name} has uncommitted changes or unpushed commits in: ${unsaved.join(", ")}; nothing was removed (use --force to discard)`);
     }
+
     const stray = strayFiles(wsDir(name), worktrees.map((w) => basename(w.path)));
+
     if (stray.length) {
       fail(`orphan ${name} holds files outside its worktrees: ${stray.join(", ")}; nothing was removed (move them, or use --force to discard)`);
     }
   }
+
   worktrees.forEach((w) => {
     git.removeWorktree(getRepo(w.repo), w.path, force);
     untrustFolder(w.path);
@@ -195,11 +221,14 @@ export function checkout(args: string[], wsOpt?: string, opts: { base?: string; 
   const ws = requireWs(wsOpt);
   let [repo, ref] = args;
   const owned = Object.keys(getWorkspace(readState(), ws).repos);
+
   if (repo && ref === undefined) {
     if (owned.length !== 1) fail("usage: overbridge checkout <repo> <branch|#pr>");
     [repo, ref] = [owned[0], repo];
   }
+
   if (!repo || !ref) fail("usage: overbridge checkout <repo> <branch|#pr>");
+
   if (!owned.includes(repo)) addRepo(repo, ws);
 
   const spec = getRepo(repo);
@@ -212,11 +241,13 @@ export function checkout(args: string[], wsOpt?: string, opts: { base?: string; 
   let base = opts.base ?? `origin/${git.defaultBranch(spec)}`;
   let remote: Stack | undefined;
   const selector = git.parsePrRef(ref);
+
   if (selector) {
     const info = git.prInfo(wt, selector);
     pr = info.number;
     prUrl = info.url;
     branch = info.headRefName;
+
     if (info.isCrossRepository) {
       // Fork PR: track the PR head under a local pr-N branch.
       branch = `pr-${pr}`;
@@ -224,6 +255,7 @@ export function checkout(args: string[], wsOpt?: string, opts: { base?: string; 
       must(["git", "-C", wt, "fetch", "--quiet", "origin", `+pull/${pr}/head:${base}`]);
     } else {
       remote = remoteStack(wt, pr);
+
       if (remote && !hasGhStack()) {
         log(`PR #${pr} is part of stack #${remote.number}; install gh-stack to pull every layer`);
         remote = undefined;
@@ -238,7 +270,9 @@ export function checkout(args: string[], wsOpt?: string, opts: { base?: string; 
 
   withState((s) => {
     const owner = claimOwner(s, repo, want, holdings(repo, stacks), ws);
+
     if (owner) fail(`${repo} ${pr ? `PR #${pr} (${branch})` : branch} (or its stack or issue) is claimed by workspace ${owner}`);
+
     // A URL, because gh stack reads a bare number as a stack number first.
     if (remote) must(["gh", "stack", "checkout", prUrl!], { cwd: wt });
     else git.switchTo(wt, branch, base);
@@ -255,6 +289,7 @@ export function release(repo: string | undefined, wsOpt?: string) {
   withState((s) => {
     const w = getWorkspace(s, ws);
     const repos = repo ? [repo] : Object.keys(w.repos);
+
     for (const r of repos) {
       if (!w.repos[r]) fail(`${r} is not in ${ws}`);
       // Detach in place: keeps files untouched, frees the branch for other worktrees.
@@ -271,23 +306,29 @@ export function recordPr(repo: string | undefined, wsOpt?: string) {
   const found: { repo: string; branch: string; pr: number }[] = [];
   withState((s) => {
     const w = getWorkspace(s, ws);
+
     for (const r of repo ? [repo] : Object.keys(w.repos)) {
       const c = w.repos[r] ?? fail(`${r} is not in ${ws}`);
       // gh stack up/down/init/add move HEAD between layers; the claim follows it within a stack.
       const stacks = localStacks(r);
       const head = git.currentBranch(worktreePath(ws, r));
       const stack = stackOf(stacks, head);
+
       if (head && stack && head !== c.branch && (!c.branch || stackOf([stack], c.branch))) {
         const owner = claimOwner(s, r, cover(stacks, [head]), holdings(r, stacks), ws);
+
         if (owner) fail(`${r} stack ${chain(stack)} overlaps a claim by workspace ${owner}`);
         c.branch = head;
       }
+
       if (!c.branch) continue;
       c.pr = git.prForBranch(worktreePath(ws, r), c.branch);
       log(`${ws}/${r} ${c.branch}: ${c.pr ? `PR #${c.pr}` : "no PR"}`);
+
       if (c.pr) found.push({ repo: r, branch: c.branch, pr: c.pr });
     }
   });
+
   for (const f of found) runHooks("post-pr", { ws, ...f });
 }
 
@@ -295,26 +336,34 @@ export function status(all: boolean, json: boolean) {
   const s = readState();
   const cur = currentWorkspace();
   const names = (all || !cur ? Object.keys(s.workspaces) : [cur]).sort(naturalSort);
+
   const rows = names.flatMap((ws) => {
     const repos = Object.entries(getWorkspace(s, ws).repos);
     const iceboxed = isIceboxed(getWorkspace(s, ws));
+
     if (!repos.length)
       return [{ ws, repo: "", branch: "", pr: undefined as number | undefined, head: "", dirty: false, iceboxed, stack: undefined as Stack | undefined, reboundFrom: undefined as ReboundFrom | undefined }];
+
     return repos.map(([repo, c]) => {
       const wt = worktreePath(ws, repo);
       const head = git.head(wt);
       const stacks = localStacks(repo);
       const stack = stackOf(stacks, head) ?? stackOf(stacks, c.branch);
+
       return { ws, repo, branch: c.branch ?? "", pr: c.pr, head, dirty: git.isDirty(wt), iceboxed, stack, reboundFrom: c.reboundFrom };
     });
   });
+
   if (json) return console.log(JSON.stringify(rows, null, 2));
+
   const stackCell = (r: (typeof rows)[number]) => {
     if (!r.stack) return "";
     const at = r.stack.layers.findIndex((l) => l.branch === r.head);
     const prs = r.stack.layers.map((l) => (l.pr ? `#${l.pr}` : "-")).join(" ");
+
     return `${r.stack.number ? `#${r.stack.number}` : "local"} ${at < 0 ? "-" : at + 1}/${r.stack.layers.length} (${prs})`;
   };
+
   table(
     ["ws", "repo", "claim", "pr", "head", "stack", ""],
     rows.map((r) => [
@@ -333,13 +382,16 @@ export function status(all: boolean, json: boolean) {
 function workspaceNames(): string[] {
   const all = readState().workspaces;
   const names = Object.keys(all).sort(naturalSort);
+
   if (!names.length) fail("no workspaces yet; create one with `overbridge new`");
+
   return names.filter((ws) => !isIceboxed(all[ws]));
 }
 
 /** Print the layout `up` would use; stderr says whether it is the user's file or the generated one. */
 export function layout(mux: Mux = defaultMux()) {
   const choice = chooseLayout(workspaceNames(), selfCommand(), mux.kind);
+
   if (choice.source === "user") {
     log(`layout: ${choice.path} (user file, replaces the generated layout)`);
     process.stdout.write(readFileSync(choice.path, "utf8"));
@@ -356,18 +408,22 @@ export function up(fresh: boolean, mux: Mux = defaultMux()) {
   const session = sessionName();
   const choice = chooseLayout(names, selfCommand(), mux.kind, session);
   let file: string;
+
   if (choice.source === "user") file = choice.path;
   else {
     file = layoutPath(mux.kind);
     writeFileSync(file, choice.text);
+
     if (choice.conf !== undefined) writeFileSync(tmuxConfPath(), choice.conf);
   }
 
   let exists = mux.sessionExists(session);
+
   if (exists && fresh) {
     mux.killSession(session);
     exists = false;
   }
+
   if (exists) log(`attaching to ${session} (use \`overbridge up --fresh\` to rebuild the layout)`);
   recordLaunch(mux.kind, session, exists ? "attach" : fresh ? "fresh" : "create");
   process.exit(exec(exists ? mux.attachCommand(session) : mux.createCommand(session, file)));
@@ -392,6 +448,7 @@ export const SCRATCH = "scratch";
 export function spinup(mux: Mux = defaultMux()) {
   if (mux.inSession()) fail(`already inside ${mux.kind}; detach first`);
   init();
+
   if (!Object.keys(readState().workspaces).length) createWorkspace(SCRATCH, []);
   up(true, mux);
 }
@@ -410,12 +467,14 @@ export function claude(ws: string, extra: string[]) {
   scaffold(ws);
   const cwd = agentDirOf(ws);
   trustFolder(wsDir(ws));
+
   if (cwd !== wsDir(ws)) trustFolder(cwd);
   const [only] = repos;
   const spec = repos.length === 1 && only ? loadRepoConfig(worktreePath(ws, only), only).shell : undefined;
   const settings = cwd === wsDir(ws) ? scaffoldPlugins() : workspaceSettingsPath(ws);
   const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, workspaceClaudeArgs(ws, settings, extra), cwd);
   mkdirSync(dirname(agentShellFile(ws)), { recursive: true });
+
   if (spec && only) writeFileSync(agentShellFile(ws), only);
   else rmSync(agentShellFile(ws), { force: true });
   process.exit(exec(inv.cmd, { cwd: inv.cwd, env: { ...inv.env, OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() } }));
@@ -443,21 +502,27 @@ export function claudeOrchestration(t: OrchestrationTab, extra: string[]): never
   const env = { ...process.env, OVERBRIDGE_NAME: "", [ORCHESTRATION_ENV]: t.tab, OVERBRIDGE_ROOT: root() };
   // Ctrl-C belongs to Claude; without a handler it would also kill this loop
   process.on("SIGINT", () => {});
+
   const session = (args: string[], streak: number): never => {
     const startedMs = Date.now();
     const p = Bun.spawnSync({ cmd: orchestrationArgs(scaffoldOrchestration(t.tab), args), cwd: t.dir(), env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+
     if (p.signalCode && STOP_SIGNALS.has(String(p.signalCode))) {
       process.exit(1);
     }
+
     const next = restartAfter(Date.now() - startedMs, streak);
+
     if (next.delayMs) {
       log(`${t.tab}: claude exited quickly ${next.streak} times in a row; starting a fresh session in ${next.delayMs / 1_000}s`);
       Bun.sleepSync(next.delayMs);
     } else {
       log(`${t.tab}: claude exited; starting a fresh session`);
     }
+
     return session([], next.streak);
   };
+
   return session(extra, 0);
 }
 
@@ -468,11 +533,13 @@ function inRepoShell(ws: string, repo: string, cmd: string[]) {
   const dir = worktreePath(ws, repo);
   const here = process.cwd();
   const config = loadRepoConfig(dir, repo);
+
   return { config, inv: shellInvocation(repo, dir, config.shell, cmd, isInside(here, dir) ? here : dir) };
 }
 
 export function shell(repo: string, cmd: string[], wsOpt?: string) {
   const ws = requireWs(wsOpt);
+
   if (!cmd.length) fail("usage: overbridge shell <repo> [--ws name] -- <cmd>...");
   const { inv } = inRepoShell(ws, repo, cmd);
   process.exit(exec(inv.cmd, { cwd: inv.cwd, env: inv.env }));
@@ -486,20 +553,25 @@ export async function check(repoArg: string | undefined, cmd: string[], wsOpt?: 
   const ws = requireWs(wsOpt);
   const repos = Object.keys(getWorkspace(readState(), ws).repos);
   const here = repoOf(process.cwd());
+
   const repo =
     repoArg ??
     (here && repos.includes(here) ? here : undefined) ??
     (repos.length === 1 ? repos[0] : undefined) ??
     fail(`name the repo to check in: overbridge check <repo> -- <cmd> (${ws} holds ${repos.join(", ") || "no repos"})`);
+
   const { config, inv } = inRepoShell(ws, repo, cmd);
   const settings = timeoutSeconds === undefined ? config.checkQueue : { ...config.checkQueue, timeoutSeconds };
+
   return runCheck(inv, { ws, repo, command: cmd.map(shellQuote).join(" ") }, settings);
 }
 
 /** `overbridge ahead`: the workspaces whose branch is ahead of the default branch. */
 export function ahead(json: boolean) {
   const rows = aheadRows();
+
   if (json) return console.log(JSON.stringify(rows, null, 2));
+
   if (!rows.length) return console.log("no workspace is ahead of its default branch");
   table(
     ["ws", "repo", "branch", "ahead", "behind", "pr", "last commit", ""],
@@ -510,11 +582,14 @@ export function ahead(json: boolean) {
 /** `overbridge phase <phase> [--stack n/m]`: record this workspace's phase before its PR exists; `--clear` forgets it. */
 export function phase(args: string[], stack: string | undefined, clear: boolean) {
   const ws = requireWs();
+
   if (clear) return clearPhase(ws);
   const [name, ...extra] = args;
   const known = PHASES.find((p) => p === name);
+
   if (!known || extra.length) fail(`usage: overbridge phase <${PHASES.join("|")}> [--stack n/m] | --clear`);
   const layer = stack === undefined ? undefined : (parseLayer(stack) ?? fail("--stack takes the layer and the stack size, like 2/3"));
+
   if (layer && known !== "implement") fail("--stack only applies to the implement phase");
   writePhase(ws, known, layer);
 }
@@ -526,6 +601,7 @@ export function whoami() {
 export function table(header: string[], rows: string[][]) {
   const all = [header, ...rows];
   const widths = header.map((_, i) => Math.max(...all.map((r) => (r[i] ?? "").length)));
+
   for (const r of all) console.log(r.map((c, i) => (c ?? "").padEnd(widths[i]!)).join("  ").trimEnd());
 }
 
@@ -538,6 +614,7 @@ function configTarget(arg?: string): { file: string; repo?: string } {
   const isFile = existsSync(given) && statSync(given).isFile();
   const file = isFile ? given : configPath(given);
   const repo = repoOf(isFile ? dirname(given) : given);
+
   return repo === undefined ? { file } : { file, repo };
 }
 
@@ -548,12 +625,16 @@ function configTarget(arg?: string): { file: string; repo?: string } {
 export function configCheck(arg?: string) {
   const { file, repo } = configTarget(arg);
   const rootFile = rootConfigPath();
+
   if (file === rootFile) {
     if (!existsSync(file)) fail(`${file} does not exist`);
     loadRootLayers(file);
+
     return log(`${file}: ok`);
   }
+
   const present = [file, rootFile].filter((f) => existsSync(f));
+
   if (!present.length) fail(`${file} does not exist`);
   loadConfigFile(file, repo);
   log(`${present.join(" + ")}: ok`);
@@ -571,6 +652,7 @@ export function configShow(arg?: string) {
 export function configGet(key: string, arg?: string) {
   const { file, repo } = configTarget(arg);
   const value = getConfigValue(loadConfigFile(file, repo), key);
+
   if (value === undefined) fail(`${key} is not set`);
   console.log(typeof value === "string" ? value : JSON.stringify(value));
 }

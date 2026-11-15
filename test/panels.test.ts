@@ -31,6 +31,7 @@ describe("sidebar on screen", () => {
     entry("ws3", "·"),
     { ...entry("ws4", "✔", "7 Fix the login redirect loop"), state: "done" },
   ];
+
   const draw = (current: number, offset: number, height: number, width: number, items = list) =>
     new Screen(width, height).write(frame(renderSidebar(items, current, offset, height, width, undefined, 0), height, width));
 
@@ -58,6 +59,7 @@ describe("sidebar on screen", () => {
     expect(s.line(1)).toBe("│ ⌥4 ✔ 7 Fix the login │");
     expect(s.line(2)).toBe("│      redirect loop   │");
     expect(s.line(3)).toMatch(/^│ +finished +│$/);
+
     for (let y = 0; y < 20; y++) expect(s.line(y).length).toBeLessThanOrEqual(24);
   });
 
@@ -76,6 +78,7 @@ describe("sidebar on screen", () => {
 
 describe("top panel on screen", () => {
   const spec = (id: string): AppSpec => ({ id, label: id, dir: ".", start: "x", ports: [], open: false, when: "always" });
+
   const app = (id: string, status: AppStatus, port?: number): TopApp => ({
     repo: "r",
     spec: spec(id),
@@ -84,6 +87,7 @@ describe("top panel on screen", () => {
     available: true,
     ...(port === undefined ? {} : { port }),
   });
+
   const snap: TopSnapshot = {
     ws: "w1",
     dir: "/w/w1",
@@ -94,8 +98,10 @@ describe("top panel on screen", () => {
     apps: [app("web", AppStatus.Running, 3000), app("db", AppStatus.Stopped)],
     message: "refresh failed",
   };
+
   const draw = (width: number, cursor: number, height = 8) => {
     const f = layoutTop(snap, width, height);
+
     return { f, s: new Screen(width, height).write(paintTop(f, cursor)) };
   };
 
@@ -107,6 +113,7 @@ describe("top panel on screen", () => {
     expect(s.line(2)).toMatch(/^╰─ refresh failed ─+╯$/);
     expect(new Set(f.placed.map((p) => p.row))).toEqual(new Set([1]));
     expect(f.placed.map((p) => p.button.label)).toEqual(["📋 12", "📋 PR #3", "🟢 web :3000", "⚫ db", "📝 zed", "🤖 claude", "💻 terminal", "🔀 diff"]);
+
     for (const p of f.placed) expect(s.line(1)).toContain(cell(p.button));
   });
 
@@ -134,6 +141,7 @@ describe("top panel on screen", () => {
     expect(rows[0]).toMatch(/^╭─ Add dark mode ─+╮$/);
     expect(rows.at(-1)).toMatch(/^╰─ refresh failed ─+╯$/);
     expect(rows.length).toBeGreaterThan(3);
+
     for (const p of f.placed) expect(s.line(p.row)).toContain(cell(p.button));
   });
 
@@ -150,12 +158,14 @@ describe("top panel on screen", () => {
 
   test("a three-layer stack draws a numbered row per PR, bottom to top", () => {
     const stack = [11, 12, 13];
+
     const links = stack.map((n) => ({
       label: `PR #${n}`,
       url: `u${n}`,
       status: "mergeable" as const,
       pr: { repo: "api", number: n, title: "feat: x", draft: false, dir: "/w/w1/api", stack, layer: { n: stack.indexOf(n) + 1, of: 3 }, claimed: n === 12 },
     }));
+
     const f = layoutTop({ ...snap, links }, 140, 10);
     const s = new Screen(140, 10).write(paintTop(f, 0));
     expect(s.line(1)).toContain("api #11 1/3");

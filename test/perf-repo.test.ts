@@ -184,6 +184,7 @@ describe("windows and the cache", () => {
   test("the server rebuilds the views once inside the window, on demand", async () => {
     let built = 0;
     let t = 0;
+
     const h = createHandler({
       refreshTop: async () => { throw new Error("unused"); },
       refreshPerf: async () => ++built,
@@ -193,6 +194,7 @@ describe("windows and the cache", () => {
       onVersionMismatch: () => undefined,
       now: () => t,
     });
+
     const post = (path: string) => h.handle(new Request(`http://x${path}`, { method: "POST" }));
     await Promise.all([post("/refresh/perf"), post("/refresh/perf")]);
     expect(built).toBe(1);

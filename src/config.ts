@@ -23,14 +23,18 @@ export function initReposFile() {
 
 export function loadRepos(): Record<string, RepoSpec> {
   if (!existsSync(reposFile())) return {};
+
   const data = Bun.TOML.parse(readFileSync(reposFile(), "utf8")) as {
     repos?: Record<string, { url?: string; default_branch?: string }>;
   };
+
   const out: Record<string, RepoSpec> = {};
+
   for (const [name, r] of Object.entries(data.repos ?? {})) {
     if (!r.url) fail(`repos.toml: repos.${name} has no url`);
     out[name] = { name, url: r.url, defaultBranch: r.default_branch };
   }
+
   return out;
 }
 
@@ -40,11 +44,14 @@ export const SIDEBAR_WIDTH_RANGE = { min: 12, max: 200 } as const;
 /** Columns of the tab sidebar: `[sidebar] width` in repos.toml, else the default. */
 export function sidebarWidth(): number {
   const width = readSidebarSection().width;
+
   if (width === undefined) return SIDEBAR_WIDTH;
   const { min, max } = SIDEBAR_WIDTH_RANGE;
+
   if (typeof width !== "number" || !Number.isInteger(width) || width < min || width > max) {
     fail(`repos.toml: sidebar.width must be an integer from ${min} to ${max}`);
   }
+
   return width;
 }
 
@@ -56,12 +63,14 @@ export function appendRepo(spec: RepoSpec) {
   initReposFile();
   // JSON string literals are valid TOML basic strings.
   let block = `\n[repos.${spec.name}]\nurl = ${JSON.stringify(spec.url)}\n`;
+
   if (spec.defaultBranch) block += `default_branch = ${JSON.stringify(spec.defaultBranch)}\n`;
   appendFileSync(reposFile(), block);
 }
 
 /** `[sidebar] motion` in repos.toml: `off` keeps every glyph still, `while-active` animates a card only while its agent works. */
 export const Motion = { Off: "off", WhileActive: "while-active" } as const;
+
 export type Motion = (typeof Motion)[keyof typeof Motion];
 
 type SidebarSection = { width?: unknown; motion?: unknown };
@@ -70,13 +79,16 @@ type SidebarSection = { width?: unknown; motion?: unknown };
 function readSidebarSection(): SidebarSection {
   if (!existsSync(reposFile())) return {};
   const data = Bun.TOML.parse(readFileSync(reposFile(), "utf8")) as { sidebar?: SidebarSection };
+
   return data.sidebar ?? {};
 }
 
 /** Whether the tab sidebar animates: `[sidebar] motion` in repos.toml, else `while-active`. Read once when the pane starts. */
 export function sidebarMotion(): Motion {
   const motion = readSidebarSection().motion;
+
   if (motion === undefined) return Motion.WhileActive;
   const modes = Object.values(Motion);
+
   return modes.find((m) => m === motion) ?? fail(`repos.toml: sidebar.motion must be one of ${modes.map((m) => `"${m}"`).join(", ")}`);
 }

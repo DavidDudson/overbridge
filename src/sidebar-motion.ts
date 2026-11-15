@@ -19,5 +19,6 @@ const isBusyCard = (e: Entry): boolean => e.state === "busy" && !e.fault && e.gl
 export function animate(list: Entry[], nowMs: number, motion: Motion): Entry[] {
   if (motion === Modes.Off || !list.some(isBusyCard)) return list;
   const frame = busyFrame(nowMs);
+
   return list.map((e) => (isBusyCard(e) ? { ...e, glyph: frame } : e));
 }

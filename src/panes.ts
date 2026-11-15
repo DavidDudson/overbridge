@@ -23,6 +23,7 @@ export function findPane(panes: MuxPane[], ws: string, kind: PaneKind): MuxPane 
 /** Where a terminal opens: the first claimed repo's worktree, else the workspace dir. */
 export function terminalDir(ws: string): string {
   const repo = terminalRepo(ws);
+
   return repo ? worktreePath(ws, repo) : wsDir(ws);
 }
 
@@ -31,12 +32,15 @@ const terminalRepo = (ws: string): string | undefined => Object.keys(getWorkspac
 /** The terminal's command: the user's shell inside the repo's dev shell, or nothing (the multiplexer's default shell). */
 function terminalCommand(ws: string, deps: PaneDeps): string[] {
   const repo = terminalRepo(ws);
+
   if (!repo) return [];
+
   try {
     if (!loadRepoConfig(worktreePath(ws, repo), repo).shell) return [];
   } catch {
     return [];
   }
+
   return [...deps.self, "shell", repo, "--ws", ws, "--", process.env.SHELL || "sh"];
 }
 
@@ -55,20 +59,29 @@ export function togglePane(ws: string, kind: PaneKind, deps: PaneDeps = defaultD
   const { mux } = deps;
   const panes = mux.listPanes();
   const claude = findPane(panes, ws, "claude");
+
   if (kind === "claude") {
     if (!claude) return "no claude pane in this tab";
     mux.focusPane(claude.id);
+
     return undefined;
   }
+
   const open = findPane(panes, ws, kind);
+
   if (open) {
     mux.closePane(open.id);
+
     if (claude) mux.focusPane(claude.id);
+
     return undefined;
   }
+
   const other = findPane(panes, ws, kind === "terminal" ? "diff" : "terminal");
   const anchor = other ?? claude;
+
   if (!anchor) return "no claude pane in this tab";
+
   const opened = mux.newPane({
     anchor: anchor.id,
     direction: other ? "down" : "right",
@@ -77,6 +90,7 @@ export function togglePane(ws: string, kind: PaneKind, deps: PaneDeps = defaultD
     command: kind === "diff" ? [...deps.self, "diff", "--ws", ws] : terminalCommand(ws, deps),
     closeOnExit: kind === "diff",
   });
+
   return opened ? undefined : `could not open ${kind}`;
 }
 
@@ -86,6 +100,7 @@ export function togglePane(ws: string, kind: PaneKind, deps: PaneDeps = defaultD
  */
 export function focusClaude(tab: string, mux: Mux): boolean {
   const claude = findPane(mux.listPanes(), tab, "claude");
+
   return claude !== undefined && mux.focusPane(claude.id);
 }
 
@@ -105,8 +120,10 @@ export function diff(ws: string) {
   const columns = process.stdout.columns ?? 80;
   const repos = Object.keys(getWorkspace(readState(), ws).repos);
   let out = "";
+
   for (const repo of repos) {
     const dir = worktreePath(ws, repo);
+
     const def = (() => {
       try {
         return git.defaultBranch(getRepo(repo));
@@ -114,18 +131,25 @@ export function diff(ws: string) {
         return undefined;
       }
     })();
+
     const base = (def && run(["git", "-C", dir, "merge-base", "HEAD", `origin/${def}`]).stdout) || "HEAD";
     const raw = Bun.spawnSync({ cmd: ["git", "-C", dir, "diff", "-w", "--color=always", base], cwd: spawnCwd(), stdout: "pipe", stderr: "pipe" });
+
     if (!raw.stdout.length) continue;
+
     const text = Bun.which("delta")
       ? Bun.spawnSync({ cmd: deltaCommand(columns), cwd: dir, stdin: raw.stdout, stdout: "pipe", stderr: "pipe" }).stdout.toString()
       : raw.stdout.toString();
+
     out += `${repos.length > 1 ? `\x1b[1m── ${repo} ──\x1b[0m\n` : ""}${text}\n`;
   }
+
   if (!out) {
     console.log("no changes (whitespace ignored)");
     Bun.sleepSync(2_000);
+
     return;
   }
+
   Bun.spawnSync({ cmd: ["less", "-R"], cwd: spawnCwd(), stdin: Buffer.from(out), stdout: "inherit", stderr: "inherit" });
 }

@@ -19,12 +19,15 @@ export const silenceLegacyWarnings = () => {
 /** `OVERBRIDGE_<name>`, falling back to the pre-rename `WS_<name>` with a one-time warning. */
 export function envVar(name: "ROOT" | "NAME" | "SELF" | "SESSION"): string | undefined {
   const current = process.env[`OVERBRIDGE_${name}`];
+
   if (current !== undefined) return current;
   const legacy = process.env[`WS_${name}`];
+
   if (legacy !== undefined && !quietLegacy && !warned.has(name)) {
     warned.add(name);
     console.error(`overbridge: WS_${name} is deprecated, use OVERBRIDGE_${name}`);
   }
+
   return legacy;
 }
 
@@ -38,6 +41,7 @@ export const sessionName = () => envVar("SESSION") ?? "workspaces";
  */
 export function root(): string {
   const dir = resolve(envVar("ROOT") ?? join(homedir(), "workspaces"));
+
   try {
     return realpathSync(dir);
   } catch {
@@ -49,18 +53,24 @@ export function root(): string {
 export function metaDir(): string {
   const dir = join(root(), ".overbridge");
   const legacy = join(root(), ".ws");
+
   if (!existsSync(dir) && existsSync(legacy)) renameSync(legacy, dir);
+
   return dir;
 }
+
 /** Where an orchestration tab's plan-mode plans go: it has no workspace folder, so they live in the meta dir. */
 export const orchestrationPlansDir = () => join(metaDir(), "orchestration", "plans");
 export const reposFile = () => join(root(), "repos.toml");
 export const barePath = (repo: string) => join(root(), ".bare", `${repo}.git`);
+
 /** `gh repo list` cache; outside OVERBRIDGE_ROOT so workspace Claudes may read it. */
 export const ghReposCache = () =>
   join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "overbridge", "github-repos.json");
+
 /** Resolved dev shell envs (`src/shell.ts`); outside OVERBRIDGE_ROOT like `ghReposCache`. */
 export const shellCacheDir = () => join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "overbridge", "shell");
+
 /** Set on an orchestration Claude (`src/orchestration.ts`) so the agent-state hook records its state under the tab name. */
 export const ORCHESTRATION_ENV = "OVERBRIDGE_TAB";
 export const wsDir =(ws: string) => join(root(), ws);
@@ -68,6 +78,7 @@ export const worktreePath = (ws: string, repo: string) => join(wsDir(ws), repo);
 
 export function isInside(child: string, parent: string): boolean {
   const rel = relative(parent, child);
+
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
@@ -90,6 +101,7 @@ function isSymlink(p: string): boolean {
 export function realPath(p: string): string {
   const tail: string[] = [];
   let cur = p;
+
   for (;;) {
     try {
       return join(realpathSync(cur), ...[...tail].reverse());
@@ -98,10 +110,13 @@ export function realPath(p: string): string {
         return UNRESOLVABLE;
       }
     }
+
     const parent = dirname(cur);
+
     if (parent === cur) {
       return UNRESOLVABLE;
     }
+
     tail.push(basename(cur));
     cur = parent;
   }
@@ -110,16 +125,20 @@ export function realPath(p: string): string {
 /** Workspace name containing `dir`, if any. */
 export function workspaceOf(dir: string): string | undefined {
   const rel = relative(root(), resolve(dir));
+
   if (!rel || rel.startsWith("..") || isAbsolute(rel)) return;
   const first = rel.split(sep)[0]!;
+
   return first.startsWith(".") ? undefined : first;
 }
 
 /** Repo name of the worktree containing `dir` (`<root>/<ws>/<repo>/…`), if any. */
 export function repoOf(dir: string): string | undefined {
   const rel = relative(root(), resolve(dir));
+
   if (!rel || rel.startsWith("..") || isAbsolute(rel)) return;
   const [ws, repo] = rel.split(sep);
+
   return ws && !ws.startsWith(".") && repo && !repo.startsWith(".") ? repo : undefined;
 }
 
@@ -135,6 +154,8 @@ export function currentWorkspace(cwd = process.cwd()): string | undefined {
 export function selfCommand(): string[] {
   if (envVar("SELF")) return envVar("SELF")!.split(" ");
   const script = process.argv[1];
+
   if (script && /\.[cm]?[jt]s$/.test(script)) return [process.execPath, script];
+
   return [process.execPath];
 }

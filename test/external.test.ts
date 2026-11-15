@@ -13,6 +13,7 @@ function script(dir: string, name: string, body: string, mode = 0o755) {
   const file = join(dir, name);
   writeFileSync(file, `#!/usr/bin/env bash\n${body}\n`);
   chmodSync(file, mode);
+
   return file;
 }
 
@@ -68,6 +69,7 @@ describe("overbridge <external>", () => {
       stdout: "pipe",
       stderr: "pipe",
     });
+
     return { code: p.exitCode, out: p.stdout.toString(), err: p.stderr.toString() };
   };
 

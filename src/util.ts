@@ -16,17 +16,21 @@ export type RunResult = { ok: boolean; code: number; stdout: string; stderr: str
  */
 export function spawnCwd(cwd?: string): string {
   if (cwd) return cwd;
+
   try {
     const here = process.cwd();
+
     if (existsSync(here)) return here;
   } catch {
     // Linux: process.cwd() throws once the directory is gone (macOS returns the stale path)
   }
+
   return homedir();
 }
 
 export function run(cmd: string[], opts: { cwd?: string } = {}): RunResult {
   const p = Bun.spawnSync({ cmd, cwd: spawnCwd(opts.cwd), stdout: "pipe", stderr: "pipe" });
+
   return {
     ok: p.exitCode === 0,
     code: p.exitCode ?? 1,
@@ -38,7 +42,9 @@ export function run(cmd: string[], opts: { cwd?: string } = {}): RunResult {
 /** Run a command, failing with its stderr if it exits non-zero. Returns trimmed stdout. */
 export function must(cmd: string[], opts: { cwd?: string } = {}): string {
   const r = run(cmd, opts);
+
   if (!r.ok) fail(`\`${cmd.join(" ")}\` failed:\n${r.stderr || r.stdout}`);
+
   return r.stdout;
 }
 
@@ -52,6 +58,7 @@ export function exec(cmd: string[], opts: { cwd?: string; env?: Record<string, s
     stdout: "inherit",
     stderr: "inherit",
   });
+
   return p.exitCode ?? 1;
 }
 
@@ -67,9 +74,12 @@ export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v =
 /** What `v` is, for an error about a value that should have been something else: `null`, `missing`, `an array`, `a number`. */
 export function describeValue(v: unknown): string {
   if (v === null) return "null";
+
   if (v === undefined) return "missing";
+
   if (Array.isArray(v)) return "an array";
   const type = typeof v;
+
   return `${/^[aeiou]/.test(type) ? "an" : "a"} ${type}`;
 }
 

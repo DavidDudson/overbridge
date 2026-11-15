@@ -83,12 +83,15 @@ describe("worklist", () => {
     const base = JSON.stringify(rank(fixture()));
     let seed = 42;
     const rnd = () => (seed = (seed * 1664525 + 1013904223) % 2 ** 32) / 2 ** 32;
+
     for (let i = 0; i < 100; i++) {
       const rows = fixture();
+
       for (let j = rows.length - 1; j > 0; j--) {
         const k = Math.floor(rnd() * (j + 1));
         [rows[j], rows[k]] = [rows[k]!, rows[j]!];
       }
+
       expect(JSON.stringify(rank(rows))).toBe(base);
     }
   });

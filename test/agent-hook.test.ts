@@ -152,6 +152,7 @@ describe("overbridge hook", () => {
       stdout: "pipe",
       stderr: "pipe",
     });
+
     return { code: p.exitCode, out: p.stdout.toString(), err: p.stderr.toString() };
   };
 

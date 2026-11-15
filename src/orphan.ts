@@ -30,9 +30,11 @@ const real = (path: string): string => {
 /** Paths of the worktrees registered in `repo`'s bare clone, from `git worktree list --porcelain`. */
 export function registeredWorktrees(repo: string): string[] {
   const bare = barePath(repo);
+
   if (!existsSync(bare)) {
     return [];
   }
+
   return run(["git", "-C", bare, "worktree", "list", "--porcelain"])
     .stdout.split("\n")
     .flatMap((line) => (line.startsWith("worktree ") ? [line.slice("worktree ".length)] : []));
@@ -41,6 +43,7 @@ export function registeredWorktrees(repo: string): string[] {
 /** The registered worktrees of every repo that sit inside `name`'s folder. */
 export function worktreesIn(name: string): OrphanWorktree[] {
   const dir = wsDir(name);
+
   return Object.keys(loadRepos()).flatMap((repo) =>
     registeredWorktrees(repo)
       .filter((path) => isInside(real(path), dir) && real(path) !== dir)
@@ -64,6 +67,7 @@ export function isOrphan(name: string, state: State): boolean {
   if (!NAME_RE.test(name) || isOrchestrationTab(name) || state.workspaces[name] || !isDir(wsDir(name))) {
     return false;
   }
+
   return isDir(join(wsDir(name), ".claude")) || worktreesIn(name).length > 0;
 }
 
@@ -79,6 +83,7 @@ export function strayFiles(dir: string, worktrees: readonly string[]): string[] 
   if (!isDir(dir)) {
     return [];
   }
+
   return readdirSync(dir)
     .filter((entry) => !worktrees.includes(entry) && !GENERATED.includes(entry))
     .sort(naturalSort);

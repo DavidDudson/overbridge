@@ -15,6 +15,7 @@ beforeEach(() => {
   meta = join(tmp, ".overbridge");
   process.env.OVERBRIDGE_ROOT = tmp;
 });
+
 afterEach(() => {
   savedRoot === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = savedRoot);
   rmSync(tmp, { recursive: true, force: true });

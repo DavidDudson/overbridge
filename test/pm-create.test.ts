@@ -7,11 +7,14 @@ type Rule = [match: string[], answer: { ok?: boolean; stdout?: string; stderr?: 
 /** A stub CLI: the first rule whose words all appear in the command answers; every call is recorded. */
 function stub(rules: Rule[]) {
   const calls: string[][] = [];
+
   const runner: Runner = (cmd) => {
     calls.push(cmd);
     const r = rules.find(([words]) => words.every((w) => cmd.includes(w)))?.[1] ?? { ok: false, stderr: "unexpected call" };
+
     return { ok: r.ok ?? true, code: r.ok === false ? 1 : 0, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   };
+
   return { runner, calls };
 }
 
@@ -34,6 +37,7 @@ describe("github createItem / updateItemBody", () => {
       [["repos/acme/app/issues/55"], { stdout: "9001" }],
       [["POST"], { stdout: "{}" }],
     ]);
+
     githubProvider(gh, "/w", runner).createItem({ title: "T", body: "B", parent: "#17" });
     expect(calls.at(-1)).toEqual([
       "gh", "api", "-X", "POST", "repos/acme/app/issues/17/sub_issues", "-F", "sub_issue_id=9001",
@@ -46,6 +50,7 @@ describe("github createItem / updateItemBody", () => {
       [["repos/acme/app/issues/55"], { stdout: "9001" }],
       [["POST"], { ok: false, stderr: "Not Found" }],
     ]);
+
     expect(() => githubProvider(gh, "/w", runner).createItem({ title: "T", body: "B", parent: "17" })).toThrow(
       "created https://github.com/acme/app/issues/55 but could not attach it to #17",
     );
@@ -68,6 +73,7 @@ describe("jira createItem / updateItemBody", () => {
     const { runner, calls } = stub([
       [["issue", "create"], { stdout: "✓ Issue created\nhttps://example.atlassian.net/browse/ENG-77\n" }],
     ]);
+
     const item = jiraProvider(jira, "/w", runner).createItem({ title: "T", body: "B", labels: ["debt"], parent: "12" });
     expect(item).toEqual({ id: "ENG-77", title: "T", url: "https://example.atlassian.net/browse/ENG-77" });
     expect(calls[0]).toEqual([

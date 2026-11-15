@@ -10,9 +10,11 @@ export const CONFIG_FILE = "overbridge.yml";
 export const CONFIG_VERSION = 1;
 
 export const PM_NAMES = ["github", "jira"] as const;
+
 export type PmName = (typeof PM_NAMES)[number];
 
 export const IDES = ["vscode", "zed", "webstorm"] as const;
+
 export type Ide = (typeof IDES)[number];
 
 export interface ProjectManagement {
@@ -50,11 +52,14 @@ export const WORKSPACE_PLACEHOLDERS = ["id", "number", "repo"] as const;
 export function templateProblems(template: string, allowed: readonly string[], needsId: boolean): string[] {
   const used = [...template.matchAll(/\{([^}]*)\}/g)].map((m) => m[1]!);
   const problems = used.filter((p) => !allowed.includes(p)).map((p) => `unknown placeholder {${p}} (allowed: ${allowed.map((a) => `{${a}}`).join(", ")})`);
+
   if (needsId && !used.some((p) => p === "id" || p === "number")) problems.push("needs {id} or {number}, so a branch names its item");
+
   return problems;
 }
 
 export const APP_WHEN = ["always", "feature-branch"] as const;
+
 export type AppWhen = (typeof APP_WHEN)[number];
 
 /** How to tell an app is up. A tcp `port` of undefined means the port allocated at start. */
@@ -81,7 +86,9 @@ export interface AppSpec {
 
 /** Shell commands skills run to check a change. Each is optional; a missing one means the repo has none. */
 export const COMMAND_NAMES = ["lint", "typecheck", "test", "build", "format"] as const;
+
 export type CommandName = (typeof COMMAND_NAMES)[number];
+
 export type Commands = Partial<Record<CommandName, string>>;
 
 /**
@@ -89,7 +96,9 @@ export type Commands = Partial<Record<CommandName, string>>;
  * in a repo's own file would run whatever a checked-out branch says.
  */
 export const HOOK_NAMES = ["post-add", "post-checkout", "post-pr", "pre-remove"] as const;
+
 export type HookName = (typeof HOOK_NAMES)[number];
+
 export type Hooks = Partial<Record<HookName, string[]>>;
 
 /**
@@ -185,15 +194,18 @@ const APP_KEYS = ["id", "label", "dir", "start", "stop", "prepare", "ports", "re
 
 function distance(a: string, b: string): number {
   const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+
   for (let i = 1; i <= a.length; i++) {
     let prev = row[0]!;
     row[0] = i;
+
     for (let j = 1; j <= b.length; j++) {
       const tmp = row[j]!;
       row[j] = Math.min(row[j]! + 1, row[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
       prev = tmp;
     }
   }
+
   return row[b.length]!;
 }
 
@@ -201,10 +213,13 @@ function distance(a: string, b: string): number {
 export function suggest(key: string, allowed: readonly string[]): string | undefined {
   let best: string | undefined;
   let bestDistance = Infinity;
+
   for (const candidate of allowed) {
     const d = distance(key.toLowerCase(), candidate);
+
     if (d < bestDistance) [best, bestDistance] = [candidate, d];
   }
+
   return bestDistance <= Math.max(2, Math.floor(key.length / 3)) ? best : undefined;
 }
 
@@ -229,47 +244,63 @@ class Problems {
   string(obj: Record<string, unknown>, key: string, path: string, required: boolean): string | undefined {
     const at = path ? `${path}.${key}` : key;
     const v = obj[key];
+
     if (v === undefined || v === null) {
       if (required && !this.partial) this.add(at, "required");
+
       return;
     }
+
     // YAML parses `project: 123` as a number; accept it for ids and project numbers.
     if (typeof v === "number") return String(v);
+
     if (typeof v !== "string" || v === "") {
       this.add(at, "expected a non-empty string");
+
       return;
     }
+
     return v;
   }
   /** A list of non-empty strings, or undefined when the key is absent. */
   stringList(obj: Record<string, unknown>, key: string, path: string): string[] | undefined {
     const at = path ? `${path}.${key}` : key;
     const v = obj[key];
+
     if (v === undefined || v === null) return;
+
     if (!Array.isArray(v)) {
       this.add(at, "expected a list of strings");
+
       return;
     }
+
     const out: string[] = [];
     v.forEach((item, i) => {
       if (typeof item !== "string" || item === "") this.add(`${at}[${i}]`, "expected a non-empty string");
       else out.push(item);
     });
+
     return out;
   }
   /** A whole number from 1 to `max`, or undefined when the key is absent. */
   positiveInt(obj: Record<string, unknown>, key: string, path: string, max = Number.MAX_SAFE_INTEGER): number | undefined {
     const at = path ? `${path}.${key}` : key;
     const v = obj[key];
+
     if (v === undefined || v === null) return;
+
     if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > max) {
       this.add(at, `expected a whole number from 1${max === Number.MAX_SAFE_INTEGER ? " up" : ` to ${max}`} (got ${JSON.stringify(v)})`);
+
       return;
     }
+
     return v as number;
   }
   oneOf<T extends string>(value: string | undefined, choices: readonly T[], path: string): T | undefined {
     if (value === undefined) return;
+
     if ((choices as readonly string[]).includes(value)) return value as T;
     this.add(path, `expected one of ${choices.join(", ")} (got "${value}")`);
   }
@@ -281,6 +312,7 @@ const portOk =(n: unknown): n is number => Number.isInteger(n) && (n as number) 
 function validateApp(entry: Record<string, unknown>, path: string, p: Problems): AppSpec | undefined {
   p.unknownKeys(entry, APP_KEYS, path);
   const id = p.string(entry, "id", path, true);
+
   // the id names the app's record and log files, so it must not be able to leave their directory
   if (id !== undefined && !APP_ID_RE.test(id)) p.add(`${path}.id`, `'${id}' must start with a letter or digit and use only letters, digits, '.', '_' and '-'`);
   const start = p.string(entry, "start", path, true);
@@ -290,9 +322,11 @@ function validateApp(entry: Record<string, unknown>, path: string, p: Problems):
 
   // `stop: ~` (or absent) means kill the process group
   let stop: string | undefined;
+
   if (entry.stop !== undefined && entry.stop !== null) stop = p.string(entry, "stop", path, false);
 
   let ports: number[] = [];
+
   if (entry.ports !== undefined) {
     if (!Array.isArray(entry.ports) || !entry.ports.every(portOk)) p.add(`${path}.ports`, "expected a list of ports (1-65535)");
     else if (new Set(entry.ports).size !== entry.ports.length) p.add(`${path}.ports`, "duplicate port");
@@ -300,14 +334,18 @@ function validateApp(entry: Record<string, unknown>, path: string, p: Problems):
   }
 
   let ready: Ready | undefined;
+
   if (entry.ready !== undefined && entry.ready !== null) {
     const r = entry.ready;
+
     if (!isRecord(r)) p.add(`${path}.ready`, "expected a mapping with http or tcp");
     else {
       p.unknownKeys(r, ["http", "tcp"], `${path}.ready`);
+
       if ((r.http === undefined) === (r.tcp === undefined)) p.add(`${path}.ready`, "set exactly one of http or tcp");
       else if (r.http !== undefined) {
         const url = p.string(r, "http", `${path}.ready`, true);
+
         if (url) ready = { kind: "http", url };
       } else if (r.tcp === "{port}" || r.tcp === true) ready = { kind: "tcp" };
       else if (portOk(r.tcp)) ready = { kind: "tcp", port: r.tcp };
@@ -316,6 +354,7 @@ function validateApp(entry: Record<string, unknown>, path: string, p: Problems):
   }
 
   let open = false;
+
   if (entry.open !== undefined) {
     if (typeof entry.open !== "boolean") p.add(`${path}.open`, "expected true or false");
     else open = entry.open;
@@ -324,10 +363,13 @@ function validateApp(entry: Record<string, unknown>, path: string, p: Problems):
   const when = p.oneOf(p.string(entry, "when", path, false), APP_WHEN, `${path}.when`) ?? "always";
 
   const usesPort = [start, stop, prepare, ready?.kind === "http" ? ready.url : undefined].some((s) => s?.includes("{port}"));
+
   if (usesPort && ports.length === 0) p.add(`${path}.ports`, "required when a command or ready url uses {port}");
+
   if (ready?.kind === "tcp" && ready.port === undefined && ports.length === 0) p.add(`${path}.ready.tcp`, "{port} needs ports");
 
   if (!id || !start) return;
+
   return {
     id,
     label: label ?? id,
@@ -356,6 +398,7 @@ export interface ButtonSpec {
   url?: string;
   side: "left" | "right";
 }
+
 const BUTTON_KEYS = ["id", "label", "status", "run", "url", "side"];
 
 /** `path` without a leading `./` or trailing `/`, so a configured prune path compares equal to what git lists. */
@@ -364,6 +407,7 @@ export const normalizePrunePath = (path: string): string => path.replace(/^(\.\/
 /** A path below the repo root: no `..`, no absolute path, no glob or pathspec magic, and never git's or the workspace's own files. */
 export function isPrunablePath(path: string): boolean {
   const parts = normalizePrunePath(path).split("/");
+
   return !path.startsWith("/") && !parts.includes("") && !parts.includes("..") && !parts.includes(".") && ![".git", ".claude"].includes(parts[0]!) && !/[*?[\\:]/.test(path);
 }
 
@@ -376,10 +420,12 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
   if (raw === null || raw === undefined) return defaultConfig();
   const p = new Problems(partial);
   const config = defaultConfig();
+
   if (!isRecord(raw)) fail(`${file}: expected a mapping at the top level`);
 
   p.unknownKeys(raw, TOP_KEYS, "", true);
   const extensions = Object.entries(raw).filter(([key]) => isExtensionKey(key));
+
   if (extensions.length) config.extensions = Object.fromEntries(extensions);
 
   if (raw.version !== undefined && raw.version !== CONFIG_VERSION) {
@@ -387,6 +433,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
   }
 
   const pm = raw["project-management"];
+
   if (pm !== undefined && pm !== null) {
     if (!isRecord(pm)) p.add("project-management", "expected a mapping with name and project");
     else {
@@ -396,27 +443,34 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       const url = p.string(pm, "url", "project-management", false);
       const techDebt = p.string(pm, "tech-debt", "project-management", false);
       const branch = p.string(pm, "branch", "project-management", false);
+
       if (branch) for (const problem of templateProblems(branch, BRANCH_PLACEHOLDERS, true)) p.add("project-management.branch", problem);
       const workspace = p.string(pm, "workspace", "project-management", false);
+
       if (workspace) for (const problem of templateProblems(workspace, WORKSPACE_PLACEHOLDERS, true)) p.add("project-management.workspace", problem);
       const issueType = p.string(pm, "issue-type", "project-management", false);
       const worklistJql = pm["worklist-jql"] === "" ? "" : p.string(pm, "worklist-jql", "project-management", false);
       const worklistScope = p.oneOf(p.string(pm, "worklist-scope", "project-management", false), WORKLIST_SCOPES, "project-management.worklist-scope");
       const worklistProject = p.string(pm, "worklist-project", "project-management", false);
+
       if (worklistProject && !/^(?:[\w.-]+\/)?\d+$/.test(worklistProject)) p.add("project-management.worklist-project", "expected <owner>/<number> or a project number, e.g. DavidDudson/2");
       const worklistStatuses = p.stringList(pm, "worklist-statuses", "project-management");
       let branchTypes: Record<string, string> | undefined;
       const types = pm["branch-types"];
+
       if (types !== undefined && types !== null) {
         if (!isRecord(types)) p.add("project-management.branch-types", "expected a mapping of item type to branch type");
         else {
           branchTypes = {};
+
           for (const type of Object.keys(types)) {
             const value = p.string(types, type, "project-management.branch-types", true);
+
             if (value) branchTypes[type] = value;
           }
         }
       }
+
       if (name && project) {
         config.projectManagement = {
           name,
@@ -437,16 +491,19 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
   }
 
   const board = raw.board;
+
   if (board !== undefined && board !== null) {
     if (!isRecord(board)) p.add("board", "expected a mapping with columns");
     else {
       p.unknownKeys(board, BOARD_KEYS, "board");
       const columns = board.columns;
+
       if (columns !== undefined && columns !== null) {
         if (!isRecord(columns)) p.add("board.columns", `expected a mapping of column name to ${WORK_STATUSES.join(", ")}`);
         else {
           for (const name of Object.keys(columns)) {
             const status = p.oneOf(p.string(columns, name, "board.columns", true), WORK_STATUSES, `board.columns.${name}`);
+
             if (status) config.boardColumns[name.trim().toLowerCase()] = status;
           }
         }
@@ -455,41 +512,53 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
   }
 
   const apps = raw.apps;
+
   if (apps !== undefined && apps !== null) {
     if (!Array.isArray(apps)) p.add("apps", "expected a list");
     else {
       const seen = new Set<string>();
       apps.forEach((entry, i) => {
         const path = `apps[${i}]`;
+
         if (!isRecord(entry)) return p.add(path, "expected a mapping");
         const before = p.list.length;
         const app = validateApp(entry, path, p);
+
         if (app && seen.has(app.id)) p.add(`${path}.id`, `duplicate app id '${app.id}'`);
+
         if (app) seen.add(app.id);
+
         if (app && p.list.length === before) config.apps.push(app);
       });
     }
   }
 
   const hooks = raw.hooks;
+
   if (hooks !== undefined && hooks !== null) {
     if (!root) p.add("hooks", ROOT_ONLY);
     else if (!isRecord(hooks)) p.add("hooks", "expected a mapping of hook name to a command or a list of commands");
     else {
       p.unknownKeys(hooks, HOOK_NAMES, "hooks");
       const out: Hooks = {};
+
       for (const name of HOOK_NAMES) {
         const value = hooks[name];
+
         if (value === undefined || value === null) continue;
         const list = typeof value === "string" ? (value ? [value] : undefined) : p.stringList(hooks, name, "hooks");
+
         if (list === undefined && typeof value === "string") p.add(`hooks.${name}`, "expected a non-empty string");
+
         if (list?.length) out[name] = list;
       }
+
       if (Object.keys(out).length) config.hooks = out;
     }
   }
 
   const buttons = raw.buttons;
+
   if (buttons !== undefined && buttons !== null) {
     if (!root) p.add("buttons", ROOT_ONLY);
     else if (!Array.isArray(buttons)) p.add("buttons", "expected a list");
@@ -497,19 +566,26 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       const seen = new Set<string>();
       buttons.forEach((entry, i) => {
         const at = `buttons[${i}]`;
+
         if (!isRecord(entry)) return p.add(at, "expected a mapping");
         p.unknownKeys(entry, BUTTON_KEYS, at);
         const id = p.string(entry, "id", at, true);
+
         if (id !== undefined && !APP_ID_RE.test(id)) p.add(`${at}.id`, `'${id}' must start with a letter or digit and use only letters, digits, '.', '_' and '-'`);
+
         if (id && seen.has(id)) p.add(`${at}.id`, `duplicate button id '${id}'`);
+
         if (id) seen.add(id);
         const label = p.string(entry, "label", at, true);
         const status = p.string(entry, "status", at, false);
         const runCmd = p.string(entry, "run", at, false);
         const url = p.string(entry, "url", at, false);
+
         if (runCmd && url) p.add(at, "set run or url, not both");
+
         if (!runCmd && !url && !status && !partial) p.add(at, "set run, url or status");
         const side = p.oneOf(p.string(entry, "side", at, false), ["left", "right"] as const, `${at}.side`) ?? "right";
+
         if (id && label)
           config.buttons.push({ id, label, side, ...(status ? { status } : {}), ...(runCmd ? { run: runCmd } : {}), ...(url ? { url } : {}) });
       });
@@ -517,27 +593,33 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
   }
 
   const commands = raw.commands;
+
   if (commands !== undefined && commands !== null) {
     if (!isRecord(commands)) p.add("commands", "expected a mapping of command name to shell command");
     else {
       p.unknownKeys(commands, COMMAND_NAMES, "commands");
+
       for (const name of COMMAND_NAMES) {
         const command = p.string(commands, name, "commands", false);
+
         if (command) config.commands[name] = command;
       }
     }
   }
 
   const review = raw.review;
+
   if (review !== undefined && review !== null) {
     if (!isRecord(review)) p.add("review", "expected a mapping");
     else {
       p.unknownKeys(review, REVIEW_KEYS, "review");
       const personas = p.stringList(review, "personas", "review");
+
       if (personas) config.review.personas = personas;
       config.review.exclude = p.stringList(review, "exclude", "review") ?? [];
       config.review.localDir = p.string(review, "local-dir", "review", false) ?? DEFAULT_PERSONA_DIR;
       const shipPr = review["ship-pr"];
+
       if (shipPr === undefined || shipPr === null) config.review.shipPr = true;
       else if (typeof shipPr !== "boolean") p.add("review.ship-pr", "expected true or false");
       else config.review.shipPr = shipPr;
@@ -545,24 +627,30 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
   }
 
   const icebox = raw.icebox;
+
   if (icebox !== undefined && icebox !== null) {
     if (!isRecord(icebox)) p.add("icebox", "expected a mapping with prune, idle-days");
     else {
       p.unknownKeys(icebox, ICEBOX_KEYS, "icebox");
       const prune = p.stringList(icebox, "prune", "icebox") ?? [];
+
       for (const path of prune) {
         if (!isPrunablePath(path)) p.add("icebox.prune", `'${path}' must be a path inside the repo, such as node_modules or target`);
       }
+
       config.icebox.prune = prune;
       const idleDays = p.positiveInt(icebox, "idle-days", "icebox");
+
       if (idleDays !== undefined) config.icebox.idleDays = idleDays;
     }
   }
 
   const ide = p.oneOf(p.string(raw, "ide", "", false), IDES, "ide");
+
   if (ide) config.ide = ide;
 
   const shell = raw.shell;
+
   if (shell !== undefined && shell !== null) {
     if (typeof shell === "string") {
       if (shell === "") p.add("shell", "expected a non-empty string or a mapping");
@@ -573,19 +661,24 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       const enter = p.string(shell, "enter", "shell", true);
       const env = p.string(shell, "env", "shell", false);
       const key = p.stringList(shell, "key", "shell") ?? [];
+
       if (key.length && !env) p.add("shell.key", "needs shell.env: the key only invalidates a cached env");
+
       if (enter) config.shell = { enter, ...(env ? { env } : {}), key };
     }
   }
 
   const checkQueue = raw["check-queue"];
+
   if (checkQueue !== undefined && checkQueue !== null) {
     if (!isRecord(checkQueue)) p.add("check-queue", `expected a mapping with ${CHECK_QUEUE_KEYS.join(", ")}`);
     else {
       p.unknownKeys(checkQueue, CHECK_QUEUE_KEYS, "check-queue");
+
       const set = (value: number | undefined, field: keyof CheckQueue) => {
         if (value !== undefined) config.checkQueue = { ...config.checkQueue, [field]: value };
       };
+
       set(p.positiveInt(checkQueue, "max-load-percent", "check-queue"), "maxLoadPercent");
       set(p.positiveInt(checkQueue, "max-parallel", "check-queue"), "maxParallel");
       set(p.positiveInt(checkQueue, "timeout-seconds", "check-queue"), "timeoutSeconds");
@@ -595,6 +688,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
   }
 
   if (p.list.length) fail(`${file}:\n${p.list.map((line) => `  ${line}`).join("\n")}`);
+
   return config;
 }
 
@@ -649,20 +743,26 @@ export interface RootLayers {
 /** Read and check `<root>/config.yml`. A missing or empty file has no layers. */
 export function loadRootLayers(file = rootConfigPath()): RootLayers {
   const layers: RootLayers = { file, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] };
+
   if (!existsSync(file)) return layers;
   const raw = parseYaml(readFileSync(file, "utf8"), file);
+
   if (raw === null || raw === undefined) return layers;
+
   if (!isRecord(raw)) fail(`${file}: expected a mapping at the top level`);
 
   const p = new Problems();
   p.unknownKeys(raw, ROOT_KEYS, "");
+
   if (raw.version !== undefined && raw.version !== CONFIG_VERSION) {
     p.add("version", `unsupported version ${JSON.stringify(raw.version)} (this overbridge reads version ${CONFIG_VERSION})`);
   }
+
   if (raw.defaults !== undefined && raw.defaults !== null) {
     if (isRecord(raw.defaults)) layers.defaults = raw.defaults;
     else p.add("defaults", "expected a mapping in overbridge.yml's format");
   }
+
   if (raw.repos !== undefined && raw.repos !== null) {
     if (!isRecord(raw.repos)) p.add("repos", "expected a mapping of repo name to settings");
     else
@@ -671,24 +771,30 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
         else if (layer !== null) p.add(`repos.${name}`, "expected a mapping in overbridge.yml's format");
       }
   }
+
   layers.skillExtensions = p.stringList(raw, "skill-extensions", "") ?? [];
   layers.githubOrgs = p.stringList(raw, "github-orgs", "") ?? [];
+
   if (raw.guard !== undefined && raw.guard !== null) {
     if (!isRecord(raw.guard)) p.add("guard", "expected a mapping with read-paths and deny");
     else {
       p.unknownKeys(raw.guard, GUARD_KEYS, "guard");
       layers.guard.readPaths = p.stringList(raw.guard, "read-paths", "guard") ?? [];
       const deny = raw.guard.deny;
+
       if (deny !== undefined && deny !== null) {
         if (!Array.isArray(deny)) p.add("guard.deny", "expected a list of { pattern, reason }");
         else
           deny.forEach((rule, i) => {
             const at = `guard.deny[${i}]`;
+
             if (!isRecord(rule)) return p.add(at, "expected a mapping with pattern and reason");
             p.unknownKeys(rule, ["pattern", "reason"], at);
             const source = p.string(rule, "pattern", at, true);
             const reason = p.string(rule, "reason", at, true);
+
             if (!source || !reason) return;
+
             try {
               layers.guard.deny.push({ pattern: new RegExp(source), reason });
             } catch (e) {
@@ -698,10 +804,13 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
       }
     }
   }
+
   if (p.list.length) fail(`${file}:\n${p.list.map((line) => `  ${line}`).join("\n")}`);
 
   if (layers.defaults) validateConfig(layers.defaults, `${file} (defaults)`, { partial: true, root: true });
+
   for (const [name, layer] of Object.entries(layers.repos)) validateConfig(layer, `${file} (repos.${name})`, { partial: true, root: true });
+
   return layers;
 }
 
@@ -711,12 +820,15 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
  */
 export function overlay(base: unknown, over: unknown): unknown {
   if (over === undefined || over === null) return base;
+
   if (!isRecord(base) || !isRecord(over)) return over;
   const out: Record<string, unknown> = { ...base };
+
   for (const [key, value] of Object.entries(over)) {
     if (value === null) delete out[key];
     else out[key] = overlay(out[key], value);
   }
+
   return out;
 }
 
@@ -727,11 +839,13 @@ export function overlay(base: unknown, over: unknown): unknown {
 export function resolveConfig(repoRaw: unknown, repo: string | undefined, file: string, layers = loadRootLayers()): ProjectConfig {
   if (repoRaw !== undefined && repoRaw !== null) validateConfig(repoRaw, file, { partial: true });
   const over = repo === undefined ? undefined : layers.repos[repo];
+
   const sources = [
     layers.defaults && `${layers.file} (defaults)`,
     repoRaw !== undefined && repoRaw !== null && file,
     over && `${layers.file} (repos.${repo})`,
   ].filter(Boolean);
+
   // the repo file was checked for root-only keys above, so any left come from the root config
   return validateConfig(overlay(overlay(layers.defaults, repoRaw), over), sources.join(" + ") || file, { root: true });
 }
@@ -739,6 +853,7 @@ export function resolveConfig(repoRaw: unknown, repo: string | undefined, file: 
 /** Load a config file for `repo` with the root layers applied. A missing file means the root layers alone. */
 export function loadConfigFile(file: string, repo: string | undefined): ProjectConfig {
   const raw = existsSync(file) ? parseYaml(readFileSync(file, "utf8"), file) : undefined;
+
   return resolveConfig(raw, repo, file);
 }
 
@@ -766,9 +881,11 @@ export function getConfigValue(config: ProjectConfig, key: string): unknown {
   const [first = "", ...rest] = key.split(".");
   const extension = isExtensionKey(first);
   let node: unknown = extension ? config.extensions?.[first] : config[camel(first) as keyof ProjectConfig];
+
   for (const segment of rest) {
     if (!isRecord(node)) return;
     node = node[extension ? segment : camel(segment)];
   }
+
   return node;
 }

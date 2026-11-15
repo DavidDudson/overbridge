@@ -13,6 +13,7 @@ import { currentWorkspace, isInside, ORCHESTRATION_ENV, realPath, root } from ".
 import { type GuardConfig, loadRootLayers } from "./project-config";
 
 export type HookInput = { cwd?: string; tool_name?: string; tool_input?: Record<string, unknown> };
+
 /** `extra` is the root config's `guard` block: more paths to read and more commands to block. */
 export type GuardCtx = { root: string; ws: string; home: string; extra?: GuardConfig };
 
@@ -22,8 +23,10 @@ const PATH_KEYS = ["file_path", "path", "notebook_path"];
 
 // `git`, optionally followed by global options like `-C dir` or `--no-pager`.
 const GIT = String.raw`\bgit(?:\s+(?:-[cC]\s+\S+|--?[\w.-]+(?:=\S+)?))*\s+`;
+
 // Command position: start of line, or after a separator, subshell or backtick; optional path prefix.
 const CMD = String.raw`(?:^|[;&|(\x60\n])\s*(?:\S*/)?`;
+
 // `gh stack`, or its default `gs` shell alias in command position.
 const GH_STACK = CMD + String.raw`(?:gh\s+stack|gs)\s+`;
 const END =String.raw`(?![^;&|\n]*\s--(?:\s|$))`; // no ` -- ` (pathspec) later in the same command
@@ -66,34 +69,46 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
 
   const expand = (p: string) =>
     realPath(resolve(cwd, p === "~" || p.startsWith("~/") ? join(ctx.home, p.slice(1)) : p));
+
   const readable = (ctx.extra?.readPaths ?? []).map(expand);
+
   // Under the root but outside this workspace. `read-paths` only ever relaxes reads, never writes.
   const foreign = (abs: string) =>
     isInside(abs, rootPath) && !isInside(abs, wsPath) && !readable.some((dir) => isInside(abs, dir));
 
   if (WRITE_TOOLS.has(tool) || READ_TOOLS.has(tool)) {
     const paths = PATH_KEYS.map((k) => ti[k]).filter((v): v is string => typeof v === "string" && v !== "");
+
     if (tool === "Glob" && typeof ti.pattern === "string" && /^[~/]/.test(ti.pattern)) paths.push(ti.pattern);
+
     for (const p of paths) {
       const abs = expand(p);
+
       if (WRITE_TOOLS.has(tool)) {
         if (!isInside(abs, wsPath)) return `${tool} on ${abs} is outside workspace ${ctx.ws} (${wsPath})`;
+
         if (isInside(abs, join(wsPath, ".claude"))) return "workspace .claude config is managed by overbridge";
       } else if (foreign(abs)) {
         return `${abs} is outside workspace ${ctx.ws}; only ${wsPath} is accessible`;
       }
     }
+
     return;
   }
 
   if (tool === "Bash") {
     const cmd = String(ti.command ?? "").replace(/\$\{?HOME\}?/g, ctx.home);
+
     for (const [re, reason] of BASH_RULES) if (re.test(cmd)) return reason;
+
     for (const { pattern, reason } of ctx.extra?.deny ?? []) if (pattern.test(cmd)) return reason;
     const other = /--ws[=\s]+(\S+)/.exec(cmd);
+
     if (other && other[1] !== ctx.ws) return `workspace ${ctx.ws} cannot act on workspace ${other[1]}`;
+
     for (const m of cmd.matchAll(PATH_TOKEN)) {
       const abs = expand(m[1]!);
+
       if (foreign(abs)) return `${abs} is outside workspace ${ctx.ws}; only ${wsPath} is accessible`;
     }
   }
@@ -103,11 +118,14 @@ export async function guardMain(): Promise<number> {
   try {
     const input: HookInput = JSON.parse(await Bun.stdin.text());
     const reason = guardReason(input, process.env);
+
     if (!reason) return 0;
     console.error(`overbridge guard: ${reason}`);
+
     return 2;
   } catch (e) {
     console.error(`overbridge guard: internal error, blocking to be safe: ${e}`);
+
     return 2;
   }
 }
@@ -121,10 +139,13 @@ export function guardReason(input: HookInput, env: Record<string, string | undef
   if (env[ORCHESTRATION_ENV] && !env.OVERBRIDGE_NAME) {
     return checkOrchestrator(input);
   }
+
   const ws = currentWorkspace(input.cwd ?? process.cwd());
+
   if (!ws) {
     return undefined;
   }
+
   // a config.yml that can't be read throws, and guardMain's catch blocks: the guard fails closed
   return check(input, { root: root(), ws, home: homedir(), extra: loadRootLayers().guard });
 }

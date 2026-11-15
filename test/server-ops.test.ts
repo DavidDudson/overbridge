@@ -17,6 +17,7 @@ const settle = async () => {
 describe("rate limit gate", () => {
   test("recognises what gh and GraphQL print for a limit", () => {
     for (const t of ["gh: API rate limit exceeded for user ID 1 (HTTP 403)", "You have exceeded a secondary rate limit", `{"errors":[{"type":"RATE_LIMITED"}]}`]) expect(isRateLimited(t)).toBe(true);
+
     for (const t of ["could not resolve to a PullRequest", "rateLimit{cost remaining}", "timed out"]) expect(isRateLimited(t)).toBe(false);
   });
 
@@ -57,8 +58,10 @@ describe("rate limit gate", () => {
       const gate = new RateGate({ now: () => 0, lookupReset: async () => reset });
       gate.observe("rate limit exceeded");
       await settle();
+
       return gate.stats().untilMs;
     };
+
     expect(await at(1_000)).toBe(MIN_PAUSE_MS);
     expect(await at(10 * 3_600_000)).toBe(MAX_PAUSE_MS);
     expect(await at(undefined)).toBe(DEFAULT_PAUSE_MS);
@@ -84,6 +87,7 @@ describe("rate limit gate", () => {
     const gate = new RateGate({ now: () => t });
     const pr = { number: 1, url: "u", title: "t", isDraft: false, updatedAt: "2026-01-01T00:00:00Z", state: "OPEN", headRefOid: "a", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", statusCheckRollup: { contexts: { nodes: [] } }, reviewRequests: { nodes: [] }, latestReviews: { nodes: [] }, comments: { nodes: [] }, reviewThreads: { nodes: [] } };
     const reply = JSON.stringify({ data: { rateLimit: { cost: 1 }, repository: { p1: pr } } });
+
     const batcher = new PrBatcher({
       now: () => t,
       sleep: async () => undefined,
@@ -91,9 +95,11 @@ describe("rate limit gate", () => {
       onError: (_k, e) => gate.observe(e.message),
       run: async () => {
         calls++;
+
         return limited ? { stdout: "", stderr: "gh: API rate limit exceeded for user ID 1 (HTTP 403)", code: 1 } : { stdout: reply, stderr: "", code: 0 };
       },
     });
+
     const first = await batcher.get("o/r", [1], { force: true });
     expect(first.prs[1]).toBeTruthy();
     expect(calls).toBe(1);
@@ -108,11 +114,13 @@ describe("rate limit gate", () => {
 
     // paused: more refreshes make no gh call, serve the last reply and name the pause. The pause is no failure, so it leaves no backoff
     t += 5_000;
+
     for (let i = 0; i < 3; i++) {
       const got = await batcher.get("o/r", [1]);
       expect(got.error).toContain("GitHub rate limit reached");
       expect(got.prs[1]).toBeTruthy();
     }
+
     expect(calls).toBe(2);
     expect(batcher.stats().cache.keys["gh:prs:o/r"]!.failures).toBe(1);
 
@@ -224,6 +232,7 @@ describe("watchdog", () => {
     const code = await Promise.race([victim.exited, Bun.sleep(5_000).then(() => "alive")]);
     expect(code).not.toBe("alive");
     expect(victim.signalCode).toBe("SIGKILL");
+
     for (let i = 0; i < 50 && !existsSync(marker); i++) await Bun.sleep(20);
     expect(existsSync(marker)).toBe(true);
     stop();
@@ -242,14 +251,17 @@ describe("watchdog", () => {
 
 describe("overbridge server", () => {
   const CLI = join(import.meta.dir, "..", "src", "cli.ts");
+
   const cli = async (root: string, ...args: string[]) => {
     const p = Bun.spawn({ cmd: [process.execPath, CLI, "server", ...args], env: { ...process.env, OVERBRIDGE_ROOT: root, OVERBRIDGE_SELF: `${process.execPath} ${CLI}`, OVERBRIDGE_NAME: "" }, stdout: "pipe", stderr: "pipe" });
     const [out, code] = await Promise.all([new Response(p.stdout).text(), p.exited]);
+
     return { out, code };
   };
 
   test("status says none is running; restart starts one, status lists its keys, stop ends it", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "ob-srvcmd-")));
+
     try {
       mkdirSync(join(root, ".overbridge"), { recursive: true });
       writeFileSync(join(root, ".overbridge", "state.json"), JSON.stringify({ version: 1, workspaces: { w1: { created: "", repos: {} } } }));
@@ -283,6 +295,7 @@ describe("server stop and status are safe", () => {
     const saved = process.env.OVERBRIDGE_ROOT;
     process.env.OVERBRIDGE_ROOT = root;
     mkdirSync(join(root, ".overbridge"), { recursive: true });
+
     try {
       await fn(root);
     } finally {

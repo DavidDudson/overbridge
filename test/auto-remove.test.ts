@@ -7,18 +7,22 @@ function fake(opts: { ended: string[]; dirty?: string[] }) {
   const removed: string[] = [];
   const clock = { nowMs: 1_000_000 };
   const dirty = new Set(opts.dirty ?? []);
+
   const deps: ReapDeps = {
     endedForGood: (ws) => opts.ended.includes(ws),
     gitClean: (ws) => {
       gitChecks.push(ws);
+
       return !dirty.has(ws);
     },
     remove: (ws) => {
       removed.push(ws);
+
       return undefined;
     },
     now: () => clock.nowMs,
   };
+
   return { deps, gitChecks, removed, clock, dirty };
 }
 
@@ -62,8 +66,10 @@ describe("one workspace's failure", () => {
     const base = f.deps.gitClean;
     f.deps.gitClean = (ws) => {
       boom("a", "no workspace")(ws);
+
       return base(ws);
     };
+
     const { unsaved, faults } = createReaper(f.deps)([{ tab: "a" }, { tab: "b" }, { tab: "c" }]);
     expect(faults.get("a")).toBe("no workspace for a");
     expect(f.removed).toEqual(["b"]);
@@ -75,8 +81,10 @@ describe("one workspace's failure", () => {
     const base = f.deps.endedForGood;
     f.deps.endedForGood = (ws) => {
       boom("b", "agent file")(ws);
+
       return base(ws);
     };
+
     const { faults } = createReaper(f.deps)([{ tab: "a" }, { tab: "b" }]);
     expect([...faults.keys()]).toEqual(["b"]);
     expect(f.removed).toEqual(["a"]);
@@ -87,8 +95,10 @@ describe("one workspace's failure", () => {
     f.deps.remove = (ws) => {
       boom("a", "state is locked")(ws);
       f.removed.push(ws);
+
       return undefined;
     };
+
     const { faults } = createReaper(f.deps)([{ tab: "a" }, { tab: "b" }]);
     expect(faults.get("a")).toBe("state is locked for a");
     expect(f.removed).toEqual(["b"]);
@@ -100,8 +110,10 @@ describe("one workspace's failure", () => {
     f.deps.remove = (ws) => {
       if (fail) throw new Error("state is locked");
       f.removed.push(ws);
+
       return undefined;
     };
+
     const reap = createReaper(f.deps);
     expect(reap([{ tab: "a" }]).faults.get("a")).toBe("state is locked");
     fail = false;
@@ -117,13 +129,16 @@ describe("one workspace's failure", () => {
     f.deps.remove = () => {
       throw new Error("gone");
     };
+
     const reap = createReaper(f.deps);
     reap([{ tab: "a" }]);
     expect(reap([]).faults.size).toBe(0);
     f.deps.remove = (ws) => {
       f.removed.push(ws);
+
       return undefined;
     };
+
     expect(reap([{ tab: "a" }]).faults.size).toBe(0);
     expect(f.removed).toEqual(["a"]);
   });

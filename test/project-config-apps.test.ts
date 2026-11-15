@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { parseConfig } from "../src/project-config";
 
 const app = (body: string) => parseConfig(`apps:\n  - id: web\n${body.replace(/^/gm, "    ")}`).apps[0]!;
+
 const err = (body: string): string => {
   try {
     app(body);
   } catch (e) {
     return (e as Error).message;
   }
+
   throw new Error("expected a validation error");
 };
 
@@ -29,6 +31,7 @@ ready:
   http: http://localhost:{port}/health
 open: true
 when: feature-branch`);
+
     expect(a).toEqual({
       id: "web",
       label: "Web",

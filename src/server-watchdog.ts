@@ -17,6 +17,7 @@ export type Verdict = "ok" | "hung" | "slept";
  */
 export function watchdogVerdict(o: { beatMs: number; nowMs: number; lastCheckMs: number; hungMs: number; checkMs: number }): Verdict {
   if (o.nowMs - o.lastCheckMs > o.checkMs * 4) return "slept";
+
   return o.nowMs - o.beatMs >= o.hungMs ? "hung" : "ok";
 }
 
@@ -41,6 +42,7 @@ export function startWatchdog(o: WatchdogOptions): () => void {
   timer?.unref();
   const worker = new Worker(new URL("./server-watchdog-worker.ts", import.meta.url).href);
   worker.postMessage({ beat, pid: o.pid ?? process.pid, restart: o.restart, stopMarker: o.stopMarker, hungMs: o.hungMs ?? HUNG_MS, checkMs: o.checkMs ?? CHECK_MS });
+
   return () => {
     if (timer) clearInterval(timer);
     worker.terminate();

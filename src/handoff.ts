@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { wsDir } from "./paths";
 
 export const HandoffReason = { Context: "context", Manual: "manual", Icebox: "icebox" } as const;
+
 export type HandoffReason = (typeof HandoffReason)[keyof typeof HandoffReason];
 
 export interface HandoffRow {
@@ -23,6 +24,7 @@ export interface HandoffInput {
 export function renderHandoff(h: HandoffInput): string {
   const table = h.rows.map((r) => `| ${r.repo} | ${r.branch || "-"} | ${r.head || "-"} | none |`);
   const prs = h.rows.filter((r) => r.pr).map((r) => `- ${r.repo}: PR #${r.pr} on \`${r.branch}\``);
+
   return [
     `# Handoff: ${h.ws} paused`,
     "",
@@ -51,5 +53,6 @@ export function writeHandoff(h: HandoffInput, now = new Date()): string {
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${handoffStamp(now)}-${h.reason}.md`);
   writeFileSync(file, renderHandoff(h));
+
   return file;
 }

@@ -27,11 +27,13 @@ const env = () => ({
 
 function ob(args: string[], cwd = tmp) {
   const p = Bun.spawnSync({ cmd: [process.execPath, CLI, ...args], cwd, env: env(), stdout: "pipe", stderr: "pipe" });
+
   return { code: p.exitCode, out: p.stdout.toString(), err: p.stderr.toString() };
 }
 
 function sh(cmd: string[], cwd: string) {
   const p = Bun.spawnSync({ cmd, cwd, env: env(), stdout: "pipe", stderr: "pipe" });
+
   if (p.exitCode !== 0) throw new Error(`${cmd.join(" ")}: ${p.stderr}`);
 }
 
@@ -123,12 +125,14 @@ describe("lifecycle", () => {
     const saved = { root: process.env.OVERBRIDGE_ROOT, log: process.env.HOOK_LOG };
     process.env.OVERBRIDGE_ROOT = root;
     process.env.HOOK_LOG = logFile;
+
     try {
       expect(runHooks("post-pr", { ws: "w3", repo: "app", branch: "topic", pr: 42 })).toBe(true);
     } finally {
       saved.root === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = saved.root);
       saved.log === undefined ? delete process.env.HOOK_LOG : (process.env.HOOK_LOG = saved.log);
     }
+
     expect(hookLog()).toBe(`post-pr w3 app branch=topic pr=42 pwd=${join(root, "w3", "app")}\n`);
   });
 });

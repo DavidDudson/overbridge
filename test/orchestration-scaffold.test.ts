@@ -19,6 +19,7 @@ afterAll(() => {
   } else {
     process.env.OVERBRIDGE_ROOT = savedRoot;
   }
+
   rmSync(tmp, { recursive: true, force: true });
 });
 

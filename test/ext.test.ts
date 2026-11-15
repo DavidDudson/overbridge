@@ -35,6 +35,7 @@ describe("extensionDirs", () => {
   test("expands ~ and root-relative dirs, then adds the repo's own dir", () => {
     const saved = process.env.OVERBRIDGE_ROOT;
     process.env.OVERBRIDGE_ROOT = root;
+
     try {
       expect(extensionDirs(repo, ["/abs", "~/x", "rel"], "/home/u")).toEqual(["/abs", "/home/u/x", join(root, "rel"), join(repo, ".overbridge", "ext")]);
       expect(extensionDirs(undefined, [], "/home/u")).toEqual([]);
@@ -78,6 +79,7 @@ describe("overbridge ext", () => {
       stdout: "pipe",
       stderr: "pipe",
     });
+
     return { code: p.exitCode, out: p.stdout.toString(), err: p.stderr.toString() };
   };
 

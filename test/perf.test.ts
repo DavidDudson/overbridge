@@ -7,10 +7,12 @@ import { legend, PERF_KEY, PERF_TAB } from "../src/sidebar";
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
 const rec = (at: number, event: "UserPromptSubmit" | "Stop"): HistoryRecord => ({ kind: "claude", at, event });
+
 const ws = (name: string, turnMs: number, checks: HistoryRecord[] = []): WorkspaceSummary => ({
   ws: name,
   summary: summarize([rec(0, "UserPromptSubmit"), rec(turnMs, "Stop"), ...checks]),
 });
+
 const check: HistoryRecord = { kind: "check", at: 5, repo: "r", command: "bun test", cls: "test", queuedMs: 0, runMs: 90_000, exit: 1 };
 
 describe("perf tab", () => {

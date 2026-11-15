@@ -10,6 +10,7 @@ let tmp: string;
 
 beforeEach(() => {
   saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+
   for (const k of KEYS) delete process.env[k];
   tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-paths-")));
 });

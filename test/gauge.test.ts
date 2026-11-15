@@ -7,11 +7,13 @@ import { COMPACT_SHOWN_MS, CONTEXT_STALE_MS, cachedRead, contextPath, gaugeText,
 import { type Entry, entryHeight, entryLines, Section, withReceipt } from "../src/sidebar";
 
 let meta: string;
+
 beforeEach(() => {
   meta = mkdtempSync(join(tmpdir(), "overbridge-gauge-"));
   mkdirSync(join(meta, "agent"));
   mkdirSync(join(meta, "context"));
 });
+
 afterEach(() => rmSync(meta, { recursive: true, force: true }));
 
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
@@ -20,8 +22,10 @@ const writeContext = (ws: string, pct: number, at: number) => writeFileSync(cont
 describe("recordTurn", () => {
   const turn = (ws: string, ...steps: [string, string?, string?][]) => {
     let now = 1000;
+
     for (const [event, tool, source] of steps) recordTurn(meta, ws, event, tool, source, (now += 1000));
   };
+
   const receipt = (ws: string) => readReceipt(ws, meta);
 
   test("a turn's duration, edits and errors become its receipt", () => {

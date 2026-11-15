@@ -15,11 +15,13 @@ type Replies = Record<string, RunResult>;
 function fakeDeps(replies: Replies, over: Partial<GatherDeps> = {}) {
   const calls: string[] = [];
   const keys = Object.keys(replies).toSorted((a, b) => b.length - a.length);
+
   const deps: GatherDeps = {
     exec: (cmd) => {
       const line = cmd.join(" ");
       calls.push(line);
       const key = keys.find((k) => line.startsWith(k));
+
       return key ? replies[key]! : failed(`unexpected: ${line}`);
     },
     provider: () => fakeProvider([{ id: "ENG-1", title: "One", url: "" }, { id: "ENG-2", title: "Two", url: "" }], "jira", ["ENG-2"]),
@@ -29,10 +31,12 @@ function fakeDeps(replies: Replies, over: Partial<GatherDeps> = {}) {
     strayFiles: () => [],
     ...over,
   };
+
   return { deps, calls };
 }
 
 const GIT = `git -C ${WT}`;
+
 /** A clean worktree on `branch`, `ahead` commits past main, all of them on a remote. */
 const cleanGit = (branch: string, ahead = 0): Replies => ({
   [`${GIT} branch --show-current`]: ok(branch),

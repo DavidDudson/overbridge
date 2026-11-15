@@ -9,12 +9,15 @@ import { barePath } from "./paths";
 import { run } from "./util";
 
 export type StackLayer = { branch: string; pr?: number };
+
 export type Stack = { number?: number; trunk: string; layers: StackLayer[] };
+
 export type Cover = { branches: Set<string>; prs: Set<number>; issues: Set<number> };
 
 /** The issue a `<type>/<n>-<slug>` branch works on (`feat/383-iwr` → 383), so two branch names for one issue clash. */
 export function issueOf(branch: string): number | undefined {
   const m = /^[a-z]+\/(\d+)-[a-z]/.exec(branch);
+
   return m ? Number(m[1]) : undefined;
 }
 
@@ -24,12 +27,14 @@ export function issueOf(branch: string): number | undefined {
  */
 export function localStacks(repo: string): Stack[] {
   let file: any;
+
   try {
     file = JSON.parse(readFileSync(join(barePath(repo), "gh-stack"), "utf8"));
   } catch (e: any) {
     if (e.code === "ENOENT") return [];
     throw e;
   }
+
   return (file.stacks ?? []).map((s: any) => ({
     number: s.number || undefined,
     trunk: s.trunk?.branch ?? "",
@@ -44,18 +49,26 @@ export const stackOf = (stacks: Stack[], branch?: string) =>
 /** Branches, PRs and issues covered by `branches`/`prs`, widened to every layer of any stack they touch. */
 export function cover(stacks: Stack[], branches: (string | undefined)[], prs: (number | undefined)[] = []): Cover {
   const c: Cover = { branches: new Set(), prs: new Set(), issues: new Set() };
+
   const add = (b?: string, pr?: number) => {
     if (b) c.branches.add(b);
     const issue = b && issueOf(b);
+
     if (issue) c.issues.add(issue);
+
     if (pr) c.prs.add(pr);
   };
+
   for (const pr of prs) add(undefined, pr);
+
   for (const b of branches) {
     add(b);
+
     for (const l of stackOf(stacks, b)?.layers ?? []) add(l.branch, l.pr);
   }
+
   for (const s of stacks) if (s.layers.some((l) => l.pr && c.prs.has(l.pr))) s.layers.forEach((l) => add(l.branch, l.pr));
+
   return c;
 }
 
@@ -81,10 +94,13 @@ export function remoteStack(wt: string, pr: number): Stack | undefined {
     ["gh", "api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-F", `number=${pr}`, "-f", `query=${STACK_QUERY}`],
     { cwd: wt },
   );
+
   if (!r.ok) return;
   const s = JSON.parse(r.stdout)?.data?.repository?.pullRequest?.stack;
+
   if (!s) return;
   const nodes = [...s.entries.nodes].sort((a: any, b: any) => a.position - b.position);
+
   return {
     number: s.number,
     trunk: s.baseRefName,

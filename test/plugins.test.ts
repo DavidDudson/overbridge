@@ -6,6 +6,7 @@ import { packageRoot } from "../src/paths";
 import { pluginProblems, pluginSettings } from "../src/plugins";
 
 const tmp = mkdtempSync(join(tmpdir(), "overbridge-plugins-"));
+
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 const ENABLED = { "overbridge@overbridge": true, "overbridge-review@overbridge": true };

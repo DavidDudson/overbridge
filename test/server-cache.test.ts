@@ -6,12 +6,14 @@ const opts = { ttlMs: 1_000, staleMs: 10_000 };
 function setup(o: ConstructorParameters<typeof Cache>[0] = {}) {
   let t = 0;
   const cache = new Cache<number>({ now: () => t, ...o });
+
   return { cache, tick: (ms: number) => (t += ms) };
 }
 
 /** A fetcher the test settles by hand, counting its calls. */
 function gate() {
   const waiting: Array<{ ok: (v: number) => void; fail: (e: Error) => void }> = [];
+
   return {
     fetch: () => new Promise<number>((ok, fail) => waiting.push({ ok, fail })),
     get calls() {
@@ -51,10 +53,13 @@ describe("ttl", () => {
   test("age counts from the start of the fetch, so a refresh every ttl is never skipped", async () => {
     const { cache, tick } = setup();
     let n = 0;
+
     const fetch = async () => {
       tick(400);
+
       return ++n;
     };
+
     await cache.get("k", fetch, opts);
     tick(600);
     expect((await cache.get("k", fetch, opts)).served).toBe("fresh");
@@ -89,10 +94,12 @@ describe("errors", () => {
     await cache.get("k", async () => 1, opts);
     tick(2_000);
     let calls = 0;
+
     const bad = async (): Promise<number> => {
       calls++;
       throw new Error("offline");
     };
+
     expect(await cache.get("k", bad, opts)).toMatchObject({ value: 1, served: "stale", error: "offline" });
     tick(50);
     expect(await cache.get("k", bad, opts)).toMatchObject({ value: 1, served: "stale" });
@@ -221,6 +228,7 @@ describe("limits", () => {
 
   test("the oldest idle entry goes once the cap is passed", async () => {
     const { cache } = setup({ maxEntries: 2 });
+
     for (const k of ["a", "b", "c"]) await cache.get(k, async () => 1, opts);
     expect(Object.keys(cache.stats().keys)).toEqual(["b", "c"]);
   });

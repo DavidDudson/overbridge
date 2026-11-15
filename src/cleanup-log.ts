@@ -5,10 +5,12 @@ import { isRecord } from "./util";
 
 /** How a finished workspace removal ended. */
 export const CleanupOutcome = { Removed: "removed", Failed: "failed" } as const;
+
 export type CleanupOutcome = (typeof CleanupOutcome)[keyof typeof CleanupOutcome];
 
 /** What removed a workspace: the Cleanup button, the merged-PR sweep, or the session-end reaper. */
 export const CleanupCause = { Cleanup: "cleanup", Merged: "merged", SessionEnded: "session-ended" } as const;
+
 export type CleanupCause = (typeof CleanupCause)[keyof typeof CleanupCause];
 
 /** One finished removal, kept in state so every sidebar can list it. */
@@ -29,6 +31,7 @@ export interface CleanupInFlight {
 
 /** Records kept in state; older ones drop off. */
 export const CLEANUP_LOG_LIMIT = 20;
+
 /** Most cleanup rows the sidebar gives up from the workspace list. */
 export const CLEANUP_ROWS = 3;
 
@@ -62,12 +65,15 @@ const rowStyle = (r: CleanupRecord): { glyph: string; word: string; color: Color
 export function cleanupRows(inFlight: readonly CleanupInFlight[], log: readonly CleanupRecord[], inner: number, now = Date.now(), sweepAt?: number): string[] {
   const timer = colorize(fit(`🧹 next check ${secondsToCheck(sweepAt, now)}s`, inner), "grey");
   const running = inFlight.map((r) => colorize(fit(`🧹 removing ${r.label}`, inner), "yellow"));
+
   const finished = log
     .filter((r) => r.atMs >= (sweepAt ?? 0))
     .toSorted((a, b) => b.atMs - a.atMs)
     .map((r) => {
       const style = rowStyle(r);
+
       return colorize(fit(`${style.glyph} ${style.word} ${r.label}`, inner), style.color);
     });
+
   return [timer, ...[...running, ...finished].slice(0, CLEANUP_ROWS)];
 }

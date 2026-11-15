@@ -7,11 +7,14 @@ import { parseConfig, type ProjectManagement } from "../src/project-config";
 /** A CLI stub answering from `replies` by the command's first two words; records every call. */
 function stub(replies: Record<string, { ok?: boolean; stdout?: string }>) {
   const calls: string[][] = [];
+
   const runner: Runner = (cmd) => {
     calls.push(cmd);
     const r = replies[`${cmd[1]} ${cmd[2]}`] ?? { ok: false };
+
     return { ok: r.ok ?? true, code: r.ok === false ? 1 : 0, stdout: r.stdout ?? "", stderr: "" };
   };
+
   return { runner, calls };
 }
 
@@ -21,6 +24,7 @@ const problems = (yaml: string) => {
   } catch (e) {
     return (e as Error).message;
   }
+
   return "";
 };
 
@@ -31,6 +35,7 @@ describe("config", () => {
     const config = parseConfig(
       pm("  branch: '{type}/{id}-{slug}'\n  workspace: '{id}'\n  branch-types: { Bug: fix, default: feat }\n  issue-type: Story\n"),
     );
+
     expect(config.projectManagement).toEqual({
       name: "jira",
       project: "ENG",

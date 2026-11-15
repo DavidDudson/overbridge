@@ -35,6 +35,7 @@ export const defaultDeps = (): RemovalDeps => ({
 function spawnFinishWorker(ws: string): number {
   mkdirSync(join(metaDir(), "remove"), { recursive: true });
   const logFd = openSync(removeLogPath(ws), "w");
+
   try {
     const proc = Bun.spawn({
       cmd: [...selfCommand(), "rm", ws, `--${FINISH_FLAG}`],
@@ -44,7 +45,9 @@ function spawnFinishWorker(ws: string): number {
       stderr: logFd,
       detached: true,
     });
+
     proc.unref();
+
     return proc.pid;
   } finally {
     closeSync(logFd);
@@ -56,6 +59,7 @@ function spawnFinishWorker(ws: string): number {
  * `IfFocused` suits a removal the user didn't start, which must not pull them off the tab they are on.
  */
 export const Landing = { Always: "always", IfFocused: "if-focused" } as const;
+
 export type Landing = (typeof Landing)[keyof typeof Landing];
 
 /**
@@ -69,39 +73,52 @@ export function beginRemoval(ws: string, opts: { previous?: string; landing?: La
   if (isOrchestrationTab(ws)) {
     return orchestrationRemoveMessage(ws);
   }
+
   const deps = opts.deps ?? defaultDeps();
   const alreadyRemoving = `${ws} is already being removed`;
+
   if (isRemoving(getWorkspace(readState(), ws))) {
     return alreadyRemoving;
   }
+
   if (!noUnsavedWork(ws)) {
     return `${ws} has uncommitted changes or unpushed commits; not removing`;
   }
+
   const list = deps.mux.inSession() ? entries() : [];
+
   // several sidebars can start the same automatic removal at once, so the check and the mark share one lock
   const claimed = withState((s) => {
     const current = getWorkspace(s, ws);
+
     if (isRemoving(current)) {
       return false;
     }
+
     const { removeError: _, ...rest } = current;
     s.workspaces[ws] = { ...rest, removing: { since: new Date().toISOString(), cause: opts.cause ?? CleanupCause.Cleanup } };
+
     return true;
   });
+
   if (!claimed) {
     return alreadyRemoving;
   }
+
   const pid = deps.spawnWorker(ws);
   withState((s) => {
     const current = s.workspaces[ws];
+
     if (current?.removing) {
       s.workspaces[ws] = { ...current, removing: { ...current.removing, pid } };
     }
   });
+
   if (deps.mux.inSession()) {
     const switchAway = opts.landing !== Landing.IfFocused || deps.mux.currentTab() === ws;
     leaveTab(ws, switchAway ? landingTab(list, ws, opts.previous) : undefined, deps.mux);
   }
+
   return undefined;
 }
 
@@ -110,12 +127,14 @@ export function leaveTab(ws: string, landing: string | undefined, mux: Mux) {
   if (landing !== undefined) {
     switchTab(landing, mux);
   }
+
   mux.closeTab(ws);
 }
 
 function waitTabGone(ws: string) {
   const deadline = Date.now() + TAB_GONE_TIMEOUT_MS;
   const mux = defaultMux();
+
   while (mux.tabs().includes(ws) && Date.now() < deadline) {
     Bun.sleepSync(100);
   }
@@ -130,16 +149,21 @@ export async function finishRemoval(ws: string): Promise<void> {
   if (isOrchestrationTab(ws)) {
     fail(orchestrationRemoveMessage(ws));
   }
+
   const label = sidebarLabel(ws, readTopCache(ws));
   const cause = readState().workspaces[ws]?.removing?.cause ?? CleanupCause.Cleanup;
+
   try {
     if (defaultMux().inSession()) {
       waitTabGone(ws);
     }
+
     refreshTop(ws);
+
     if (!cleanable(ws)) {
       fail(`${ws} is no longer clean (no open or merged PRs and not a task branch without commits, or uncommitted or unpushed work); not removed`);
     }
+
     await stopApps(ws);
     removeWorkspace(ws, false);
     recordCleanup({ ws, label, atMs: Date.now(), outcome: CleanupOutcome.Removed, cause });
@@ -161,22 +185,28 @@ export async function stopApps(ws: string): Promise<void> {
 function restore(ws: string, error: string) {
   const kept = withState((s) => {
     const w = s.workspaces[ws];
+
     if (!w) {
       return false;
     }
+
     const { removing: _, ...rest } = w;
     s.workspaces[ws] = { ...rest, removeError: error };
+
     return true;
   });
+
   if (kept && defaultMux().inSession()) {
     // best effort: a failure here must not mask the removal error already recorded. This runs in a detached
     // worker whose log nobody reads, so the recovery command goes on the card with the error
     if (!openTab(ws).ok) {
       const hint = `${ws} has no tab; open it with: ${tabCommand(ws)}`;
       log(hint);
+
       try {
         withState((s) => {
           const w = s.workspaces[ws];
+
           if (w) s.workspaces[ws] = { ...w, removeError: `${error} (${hint})` };
         });
       } catch (e) {

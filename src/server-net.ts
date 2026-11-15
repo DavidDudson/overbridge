@@ -13,36 +13,44 @@ import { overbridgeBuildTime, overbridgeVersion } from "./version";
 
 /** sockaddr_un holds 104 bytes on macOS (108 on Linux); stay under the smaller. */
 const SOCKET_PATH_MAX = 104;
+
 /** A client starts the server at most this often. */
 export const START_LOCK_MS = 30_000;
 export const VERSION_HEADER = "x-overbridge-version";
+
 /** When the calling process started (ms since epoch). Servers of older builds used it to decide who may replace them; kept so they still can. */
 export const CLIENT_START_HEADER = "x-overbridge-client-start";
+
 /** The caller's build time (seconds since epoch), sent only when it has one: only a client of a newer build may replace the server. */
 export const BUILD_HEADER = "x-overbridge-build";
 
 /** The identity headers every client sends. */
 export function clientHeaders(o: { version?: string; startedAtMs?: number; buildTime?: number } = {}): Record<string, string> {
   const build = "buildTime" in o ? o.buildTime : overbridgeBuildTime();
+
   return {
     [VERSION_HEADER]: o.version ?? overbridgeVersion(),
     [CLIENT_START_HEADER]: String(o.startedAtMs ?? PROCESS_START_MS),
     ...(build === undefined ? {} : { [BUILD_HEADER]: String(build) }),
   };
 }
+
 /** Set to anything non-empty to keep every caller on its own refresh and never start the server. */
 export const serverDisabled = (): boolean => !!process.env.OVERBRIDGE_NO_SERVER;
 
 const metaOf = () => join(root(), ".overbridge");
 export const pidFile = () => join(metaOf(), "server.pid");
+
 /** Written by `overbridge server stop`, so the watchdog does not bring back a server the user stopped. */
 export const stoppingFile = () => join(metaOf(), "server.stopping");
 
 /** `<meta>/server.sock`, or a short path under the runtime dir when that would not fit. */
 export function socketPath(rootDir: string = root()): string {
   const direct = join(rootDir, ".overbridge", "server.sock");
+
   if (Buffer.byteLength(direct) < SOCKET_PATH_MAX) return direct;
   const hash = createHash("sha1").update(rootDir).digest("hex").slice(0, 12);
+
   // the uid keeps another user on a shared /tmp from binding the name first
   return join(process.env.XDG_RUNTIME_DIR || tmpdir(), `overbridge-${process.getuid?.() ?? 0}-${hash}.sock`);
 }
@@ -60,13 +68,16 @@ export interface Reply {
  */
 export function call(method: string, path: string, o: { timeoutMs: number; sock?: string; version?: string; startedAtMs?: number; buildTime?: number }): Promise<Reply | undefined> {
   if (serverDisabled()) return Promise.resolve(undefined);
+
   return new Promise((resolve) => {
     let settled = false;
+
     const done = (r: Reply | undefined) => {
       if (settled) return;
       settled = true;
       resolve(r);
     };
+
     try {
       const req = request(
         { socketPath: o.sock ?? socketPath(), method, path, agent: false, headers: { ...clientHeaders(o), connection: "close" }, timeout: o.timeoutMs },
@@ -77,6 +88,7 @@ export function call(method: string, path: string, o: { timeoutMs: number; sock?
           res.on("error", () => done(undefined));
         },
       );
+
       req.on("timeout", () => {
         req.destroy();
         done(undefined);
@@ -92,11 +104,13 @@ export function call(method: string, path: string, o: { timeoutMs: number; sock?
 /** Whether a start was attempted within `START_LOCK_MS`; if not, records one now. */
 export function claimStart(now = Date.now()): boolean {
   const file = join(metaOf(), "server.start");
+
   try {
     if (now - statSync(file).mtimeMs < START_LOCK_MS) return false;
   } catch {
     // never started
   }
+
   try {
     mkdirSync(metaOf(), { recursive: true });
     closeSync(openSync(file, "a"));
@@ -104,14 +118,17 @@ export function claimStart(now = Date.now()): boolean {
   } catch {
     return false;
   }
+
   return true;
 }
 
 /** Start `overbridge serve` detached, at most once per `START_LOCK_MS` across every client. */
 export function startServer(spawn: (cmd: string[]) => void = defaultSpawn, now = Date.now()): boolean {
   if (serverDisabled() || !claimStart(now)) return false;
+
   try {
     spawn([...selfCommand(), "serve"]);
+
     return true;
   } catch {
     return false;
@@ -133,7 +150,9 @@ function defaultSpawn(cmd: string[]) {
  */
 export async function notifyRefresh(ws: string, o: { sock?: string; timeoutMs?: number; start?: boolean } = {}): Promise<boolean> {
   const r = await call("POST", `/refresh/top/${encodeURIComponent(ws)}?async=1`, { timeoutMs: o.timeoutMs ?? 500, ...(o.sock ? { sock: o.sock } : {}) });
+
   if (!r && o.start !== false) startServer();
+
   return r?.status === 202;
 }
 
@@ -144,16 +163,20 @@ export function takePidFile(file: string, alive: (pid: number) => boolean, pid =
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       writeFileSync(file, String(pid), { flag: "wx" });
+
       return true;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
       const holder = Number(readFileSync(file, "utf8"));
+
       // an empty file is a server that created it a moment ago and has not written its pid yet
       if (!holder && Date.now() - statSync(file).mtimeMs < PID_WRITE_GRACE_MS) return false;
+
       if (holder && holder !== pid && alive(holder)) return false;
       // stale: its process is gone
       rmSync(file, { force: true });
     }
   }
+
   return false;
 }

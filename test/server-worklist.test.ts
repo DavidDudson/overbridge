@@ -15,6 +15,7 @@ describe("sourceKey", () => {
       { repo: "b", url: "x", pm: { name: "jira", project: "eng" } },
       { repo: "c", url: "x", pm: { name: "jira", project: "ENG", worklistJql: "labels = x" } },
     ]);
+
     expect(sources).toHaveLength(2);
     expect(new Set(sources.map(sourceKey)).size).toBe(2);
     expect(sourceKey(jira("ENG", ["a"]))).toBe(sourceKey(jira("ENG", ["a", "b"])));
@@ -33,16 +34,20 @@ describe("worklist refresher", () => {
     const reads: string[] = [];
     const written: SourceRead[] = [];
     let t = 0;
+
     const r = createWorklistRefresher({
       now: () => t,
       plan: async () => ({ sources, notes: ["plan note"] }),
       read: async (s) => {
         reads.push(sourceKey(s));
+
         if (over.fail?.has(s.kind === "github" ? s.repo : s.project)) throw new Error("rate limited\nmore");
+
         return { rows: [row(s.kind === "github" ? s.repo : s.repos[0]!, "1")], notes: [], failedRepos: [] };
       },
       finish: (_notes, read) => void written.push(read),
     });
+
     return { r, reads, written, advance: (ms: number) => (t += ms) };
   };
 
@@ -57,12 +62,14 @@ describe("worklist refresher", () => {
 
   test("a failed plan after a good run answers the old time with the error, so the route can say 502", async () => {
     let plans = 0;
+
     const r = createWorklistRefresher({
       now: () => 0,
       plan: async () => (++plans > 1 ? Promise.reject(new Error("git exploded")) : { sources: [], notes: [] }),
       read: async () => ({ rows: [], notes: [], failedRepos: [] }),
       finish: () => {},
     });
+
     expect((await r.refresh()).error).toBeUndefined();
     expect((await r.refresh(true)).error).toContain("git exploded");
   });
@@ -81,12 +88,14 @@ describe("worklist refresher", () => {
     let t = 0;
     const written: SourceRead[] = [];
     const reads: number[] = [];
+
     const r = createWorklistRefresher({
       now: () => t,
       plan: async () => ({ sources: [gh("a")], notes: [] }),
       read: async () => (reads.push(t), failing ? { rows: [], notes: ["a: rate limited"], failedRepos: ["a"] } : { rows: [row("a", "1")], notes: [], failedRepos: [] }),
       finish: (_n, read) => void written.push(read),
     });
+
     await r.refresh();
     failing = true;
     t += 61_000;

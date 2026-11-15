@@ -8,9 +8,11 @@ import { recordCheck } from "../src/check-queue";
 import { duration, summaries, summaryLines } from "../src/history-report";
 
 let dir: string;
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "overbridge-history-"));
 });
+
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const ev = (at: number, event: ClaudeEvent, extra: Partial<ClaudeRecord> = {}): ClaudeRecord => ({ kind: "claude", at, event, ...extra });
@@ -75,6 +77,7 @@ describe("fileStore", () => {
   });
   test("cuts a file past its cap to the newest half", () => {
     const store = fileStore(dir, 300);
+
     for (let i = 0; i < 20; i++) store.append("a", ev(i, "Stop"));
     const at = store.read("a").map((r) => r.at);
     expect(at.at(-1)).toBe(19);
@@ -136,6 +139,7 @@ describe("summarize", () => {
       ev(10 * S, "PostToolUse", { tool: "Grep", id: "b" }),
       ev(20 * S, "Stop"),
     ]);
+
     expect(s.toolMs).toBe(10 * S);
     expect(s.modelMs).toBe(10 * S);
     expect(s.tools.Read).toEqual({ count: 1, ms: 10 * S });
@@ -150,6 +154,7 @@ describe("summarize", () => {
       { kind: "check", at: 1, repo: "r", command: "bun test", cls: "test", queuedMs: 100, runMs: 4000, exit: 0 },
       { kind: "check", at: 2, repo: "r", command: "bun test", cls: "test", queuedMs: 50, runMs: 2000, exit: 1 },
     ]);
+
     expect(s.checks.test).toEqual({ count: 2, ms: 6000, failed: 1, queuedMs: 150 });
   });
 });

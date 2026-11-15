@@ -24,16 +24,19 @@ commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){pageInfo{hasN
 /** The aliased query for `numbers` (`p<n>: pullRequest(number:<n>)`), with the call's cost in `rateLimit`. */
 export function buildBatchQuery(numbers: number[]): string {
   const aliases = numbers.map((n) => `p${n}:pullRequest(number:${n}){...F}`).join(" ");
+
   return `query($owner:String!,$name:String!){rateLimit{cost remaining resetAt} repository(owner:$owner,name:$name){${aliases}}} ${FRAGMENT}`;
 }
 
 type Nodes<T> = { nodes?: (T | null)[] } | null | undefined;
+
 const nodes = <T>(c: Nodes<T>): T[] => (c?.nodes ?? []).filter((n): n is T => n != null);
 
 /** One reply node as `gh pr view --json ...` would have printed that PR. */
 export function mapPr(node: Record<string, any>): PrView {
   const contexts = nodes<Record<string, any>>(node.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts).map(({ __typename: _t, ...c }) => c);
   const requests = nodes<{ requestedReviewer?: { login?: string; name?: string } | null }>(node.reviewRequests).flatMap((r) => (r.requestedReviewer ? [r.requestedReviewer] : []));
+
   return {
     url: node.url,
     title: node.title,
@@ -74,23 +77,30 @@ export interface BatchReply {
  */
 export function parseBatch(out: string, numbers: number[]): BatchReply {
   let body: any;
+
   try {
     body = JSON.parse(out);
   } catch {
     throw new Error("GitHub reply was not JSON");
   }
+
   const repo = body?.data?.repository;
+
   if (!repo) throw new Error(body?.errors?.[0]?.message ?? "GitHub reply had no repository");
   // an alias that is null because the PR is gone (NOT_FOUND) is a missing PR; any other error on it (a timeout, a
   // resource limit) fails the call, so a transient fault is not cached for the TTL as a deleted PR
   const failed = (body.errors ?? []).find((e: any) => e?.type !== "NOT_FOUND" && /^p\d+$/.test(String(e?.path?.[1] ?? "")));
+
   if (failed) throw new Error(failed.message ?? `GitHub error on ${failed.path?.[1]}`);
   const prs: Record<number, PrView | null | undefined> = {};
+
   for (const n of numbers) {
     const node = repo[`p${n}`];
     prs[n] = !node ? null : truncated(node) ? undefined : mapPr(node);
   }
+
   const cost = body?.data?.rateLimit?.cost;
+
   return { prs, ...(typeof cost === "number" ? { cost } : {}) };
 }
 
@@ -100,14 +110,18 @@ export type GhRun = (args: string[]) => Promise<{ stdout: string; stderr: string
 export const ghRun: GhRun = async (args) => {
   const p = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   let timedOut = false;
+
   const timer = setTimeout(() => {
     timedOut = true;
     p.kill();
   }, 30_000);
+
   try {
     const [stdout, stderr] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
     const code = await p.exited;
+
     if (timedOut) throw new Error("gh api graphql timed out after 30s");
+
     return { stdout, stderr, code };
   } finally {
     clearTimeout(timer);
@@ -177,17 +191,23 @@ export class PrBatcher {
   async get(repo: string, numbers: number[], o: { force?: boolean } = {}): Promise<{ prs: Record<number, PrView | null | undefined>; error?: string }> {
     const want = this.wanted.get(repo) ?? new Set<number>();
     this.wanted.set(repo, want);
+
     for (const n of numbers) want.add(n);
     const key = `gh:prs:${repo}`;
     // paused by a rate limit: serve the last reply without a fetch, so the pause counts as no failure and leaves no backoff behind. A forced read (the user's `r`) goes through.
     const paused = o.force ? undefined : this.paused();
+
     if (paused) {
       const held = this.cache.peek(key);
+
       if (held === undefined) throw new Error(paused);
+
       return { prs: held, error: paused };
     }
+
     const opts = { ttlMs: PR_TTL_MS, staleMs: PR_STALE_MS, force: o.force === true };
     let got = await this.cache.get(key, () => this.fetch(repo), opts);
+
     // a PR opened since the reply was read is not in it: read again once
     if (numbers.some((n) => !(n in got.value)) && got.served !== "stale") {
       try {
@@ -196,6 +216,7 @@ export class PrBatcher {
         // the first reply still serves every PR it holds
       }
     }
+
     return { prs: got.value, ...(got.error ? { error: got.error } : {}) };
   }
 
@@ -206,20 +227,24 @@ export class PrBatcher {
     const all = [...new Set([...(this.wanted.get(repo) ?? []), ...this.claimed(repo)])].sort((a, b) => a - b);
     this.wanted.delete(repo);
     const out: Record<number, PrView | null | undefined> = {};
+
     for (let i = 0; i < all.length; i += this.perQuery) {
       const page = all.slice(i, i + this.perQuery);
       const r = await this.run(["api", "graphql", "-f", `query=${buildBatchQuery(page)}`, "-f", `owner=${owner}`, "-f", `name=${name}`]);
       this.counters.calls++;
       this.counters.prs += page.length;
       let reply: BatchReply;
+
       try {
         reply = parseBatch(r.stdout, page);
       } catch (e) {
         throw new Error(`${errorText(e)}${r.stderr ? `: ${r.stderr.trim().split("\n")[0]}` : ""}`);
       }
+
       this.counters.points += reply.cost ?? 0;
       Object.assign(out, reply.prs);
     }
+
     return out;
   }
 }

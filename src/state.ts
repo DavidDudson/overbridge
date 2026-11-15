@@ -8,20 +8,29 @@ import { describeValue, errorMessage, fail, isRecord } from "./util";
 
 /** What a claim was moved from by a re-bind (`overbridge start` inside a task workspace, or `--here`). */
 export type ReboundFrom = { branch: string; pr?: number };
+
 export type Claim = { branch?: string; pr?: number; reboundFrom?: ReboundFrom };
+
 /** Branch prefix for a workspace started with no work item. */
 export const TASK_BRANCH_PREFIX = "task/";
+
 /** A claim on a `task/` branch that has no PR yet: work with no item that can continue into one. */
 export const isTaskClaim = (c: Claim): boolean => c.branch?.startsWith(TASK_BRANCH_PREFIX) === true && c.pr === undefined;
+
 /** A background removal in flight: when it started, what started it and, once spawned, the worker's pid. */
 export type Removing = { since: string; cause?: CleanupCause; pid?: number };
+
 /** Why a workspace that would be removed by itself is kept; shown on its sidebar card. */
 export const RemovalBlock = { MergedUnsaved: "merged-unsaved" } as const;
+
 export type RemovalBlock = (typeof RemovalBlock)[keyof typeof RemovalBlock];
+
 /** A repo whose worktree `icebox --drop-worktree` removed, and the branch it was on; `thaw` recreates it there. */
 export type DroppedRepo = { repo: string; branch?: string };
+
 /** A paused workspace: no tab, no processes, claims kept. */
 export type Iceboxed = { since: string; handoff?: string; dropped?: DroppedRepo[] };
+
 export type WorkspaceState = {
   created: string;
   repos: Record<string, Claim>;
@@ -34,6 +43,7 @@ export type WorkspaceState = {
   /** Set by `overbridge icebox`; cleared by `thaw`. The workspace has no tab while it is set. */
   iceboxed?: Iceboxed;
 };
+
 export type State = {
   version: 1;
   workspaces: Record<string, WorkspaceState>;
@@ -62,28 +72,38 @@ export function readState(): State {
 /** `readState` for a pane that must keep running: `fallback` plus why when the file is unreadable; writers keep `readState` so `withState` never overwrites a file it cannot parse. */
 export function tryReadState(fallback: State = { version: 1, workspaces: {} }): { state: State; fault?: string } {
   let state: unknown;
+
   try {
     state = readState();
   } catch (e) {
     return { state: fallback, fault: `${STATE_FILE}: ${errorMessage(e)}` };
   }
+
   if (!isRecord(state)) return { state: fallback, fault: `${STATE_FILE}: expected a mapping, got ${describeValue(state)}` };
+
   if (!isRecord(state.workspaces)) return { state: fallback, fault: `${STATE_FILE}: workspaces is ${describeValue(state.workspaces)}, not a mapping` };
+
   return { state: state as State };
 }
 
 /** Why one workspace record in state cannot be trusted (a hand edit, a half-written file), or undefined when its shape is right. */
 export function workspaceFault(w: unknown): string | undefined {
   if (!isRecord(w)) return `state record is ${describeValue(w)}, not a mapping`;
+
   if (!isRecord(w.repos)) return `state record has ${w.repos === undefined ? "no repos" : `repos as ${describeValue(w.repos)}`}`;
+
   if (w.removing !== undefined) {
     if (!isRecord(w.removing)) return `state record has removing as ${describeValue(w.removing)}`;
+
     if (typeof w.removing.since !== "string" || Number.isNaN(Date.parse(w.removing.since))) return "state record's removing has no valid since";
   }
+
   if (w.removeError !== undefined && typeof w.removeError !== "string") return `state record has removeError as ${describeValue(w.removeError)}`;
+
   if (w.removalBlocked !== undefined && !Object.values<unknown>(RemovalBlock).includes(w.removalBlocked)) {
     return `state record has removalBlocked as ${JSON.stringify(w.removalBlocked)}`;
   }
+
   return undefined;
 }
 
@@ -104,25 +124,30 @@ export function withState<T>(fn: (s: State) => T): T {
   mkdirSync(metaDir(), { recursive: true });
   const deadline = Date.now() + LOCK_WAIT_MS;
   let fd: number | undefined;
+
   while (fd === undefined) {
     try {
       fd = openSync(lockPath(), "wx");
     } catch (e: any) {
       if (e.code !== "EEXIST") throw e;
+
       try {
         if (Date.now() - statSync(lockPath()).mtimeMs > LOCK_STALE_MS) {
           rmSync(lockPath(), { force: true });
           continue;
         }
       } catch {}
+
       if (Date.now() > deadline) fail(`state is locked (${lockPath()}); delete it if no ws command is running`);
       Bun.sleepSync(50);
     }
   }
+
   try {
     const s = readState();
     const out = fn(s);
     writeState(s);
+
     return out;
   } finally {
     closeSync(fd);
@@ -137,13 +162,16 @@ export function withState<T>(fn: (s: State) => T): T {
 export function watchState(onChange: () => void, debounceMs = 50): () => void {
   mkdirSync(metaDir(), { recursive: true });
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   const watcher = watch(metaDir(), (_event, filename) => {
     if (filename !== STATE_FILE) {
       return;
     }
+
     clearTimeout(timer);
     timer = setTimeout(onChange, debounceMs);
   });
+
   return () => {
     clearTimeout(timer);
     watcher.close();
@@ -161,9 +189,11 @@ export function isRemoving(w: WorkspaceState, now = Date.now(), alive: (pid: num
   if (!w.removing) {
     return false;
   }
+
   if (w.removing.pid !== undefined) {
     return alive(w.removing.pid);
   }
+
   return now - Date.parse(w.removing.since) < REMOVING_GRACE_MS;
 }
 
@@ -187,6 +217,7 @@ export function claimOwner(
 ): string | undefined {
   for (const [ws, w] of Object.entries(s.workspaces)) {
     const c = w.repos[repo];
+
     if (ws !== self && c && overlaps(coverOf(ws, c), want)) return ws;
   }
 }

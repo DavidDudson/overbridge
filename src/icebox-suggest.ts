@@ -20,10 +20,13 @@ export interface IdleFacts {
 /** Whole days since the last known activity when `facts` call for a suggestion; undefined otherwise, including when no activity is known. */
 export function idleDaysFor(facts: IdleFacts): number | undefined {
   const known = facts.activityMs.filter((t): t is number => t !== undefined);
+
   if (facts.idleDays === undefined || !facts.draftOnly || known.length === 0) {
     return undefined;
   }
+
   const days = Math.floor((facts.now - Math.max(...known)) / DAY_MS);
+
   return days >= facts.idleDays ? days : undefined;
 }
 
@@ -32,11 +35,13 @@ export function idleThreshold(ws: string): number | undefined {
   const days = Object.keys(getWorkspace(readState(), ws).repos).flatMap((repo) => {
     try {
       const value = loadRepoConfig(worktreePath(ws, repo), repo).icebox.idleDays;
+
       return value === undefined ? [] : [value];
     } catch {
       return [];
     }
   });
+
   return days.length ? Math.min(...days) : undefined;
 }
 
@@ -48,7 +53,9 @@ export function iceboxHint(ws: string, cache: Pick<TopCache, "draftOnly" | "prAc
   if (!cache.draftOnly) {
     return undefined;
   }
+
   const commits = Object.keys(getWorkspace(readState(), ws).repos).map((repo) => git.headTimeMs(worktreePath(ws, repo)));
   const days = idleDaysFor({ idleDays: idleThreshold(ws), draftOnly: cache.draftOnly, activityMs: [...commits, cache.prActiveAt, readAgentAt(ws)], now });
+
   return days === undefined ? undefined : `draft PRs idle ${days}d · icebox?`;
 }

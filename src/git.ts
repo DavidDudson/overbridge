@@ -7,6 +7,7 @@ import { fail, log, must, run } from "./util";
 /** Clone `spec` as a bare repo with a normal remote-tracking refspec. No-op if present. */
 export function ensureBare(spec: RepoSpec): string {
   const bare = barePath(spec.name);
+
   if (existsSync(bare)) return bare;
   mkdirSync(dirname(bare), { recursive: true });
   log(`cloning ${spec.url} → ${bare}`);
@@ -17,14 +18,17 @@ export function ensureBare(spec: RepoSpec): string {
   must(["git", "-C", bare, "fetch", "origin", "--prune", "--quiet"]);
   const def = defaultBranch(spec);
   const heads = must(["git", "-C", bare, "for-each-ref", "--format=%(refname:short)", "refs/heads"]);
+
   for (const b of heads.split("\n").filter(Boolean)) {
     if (b !== def) must(["git", "-C", bare, "branch", "-D", b]);
   }
+
   return bare;
 }
 
 export function defaultBranch(spec: RepoSpec): string {
   if (spec.defaultBranch) return spec.defaultBranch;
+
   return must(["git", "-C", barePath(spec.name), "symbolic-ref", "--short", "HEAD"]);
 }
 
@@ -40,7 +44,9 @@ export function addWorktree(spec: RepoSpec, path: string) {
 
 export function removeWorktree(spec: RepoSpec, path: string, force: boolean) {
   const bare = barePath(spec.name);
+
   if (!existsSync(bare)) return;
+
   if (existsSync(path)) must(["git", "-C", bare, "worktree", "remove", ...(force ? ["--force"] : []), path]);
   must(["git", "-C", bare, "worktree", "prune"]);
 }
@@ -66,6 +72,7 @@ export function currentBranch(wt: string): string | undefined {
 
 export function head(wt: string): string {
   if (!existsSync(wt)) return "(missing)";
+
   return currentBranch(wt) || `detached@${run(["git", "-C", wt, "rev-parse", "--short", "HEAD"]).stdout}`;
 }
 
@@ -74,7 +81,9 @@ export function headSha(wt: string): string | undefined {
   if (!existsSync(wt)) {
     return undefined;
   }
+
   const r = run(["git", "-C", wt, "rev-parse", "HEAD"]);
+
   return r.ok && r.stdout ? r.stdout : undefined;
 }
 
@@ -83,6 +92,7 @@ export function headTimeMs(wt: string): number | undefined {
   if (!existsSync(wt)) return undefined;
   const r = run(["git", "-C", wt, "log", "-1", "--format=%ct"]);
   const secs = Number(r.stdout);
+
   return r.ok && r.stdout !== "" && Number.isFinite(secs) ? secs * 1000 : undefined;
 }
 
@@ -97,9 +107,11 @@ export function isDirty(wt: string): boolean {
  */
 export function containedInPrHead(wt: string, prHead: string): boolean {
   if (!existsSync(wt)) return true;
+
   if (!run(["git", "-C", wt, "cat-file", "-e", `${prHead}^{commit}`]).ok) {
     if (!run(["git", "-C", wt, "fetch", "--quiet", "origin", prHead]).ok) return false;
   }
+
   return run(["git", "-C", wt, "merge-base", "--is-ancestor", "HEAD", prHead]).ok;
 }
 
@@ -110,6 +122,7 @@ export function containedInPrHead(wt: string, prHead: string): boolean {
 export function hasUnpushed(wt: string): boolean {
   if (!existsSync(wt)) return false;
   const r = run(["git", "-C", wt, "rev-list", "--count", "HEAD", "--not", "--remotes"]);
+
   return !r.ok || r.stdout !== "0";
 }
 
@@ -120,6 +133,7 @@ export function hasUnpushed(wt: string): boolean {
 export function commitsPast(wt: string, ref: string): number | undefined {
   if (!existsSync(wt)) return undefined;
   const r = run(["git", "-C", wt, "rev-list", "--count", `${ref}..HEAD`]);
+
   return r.ok && /^\d+$/.test(r.stdout) ? Number(r.stdout) : undefined;
 }
 
@@ -128,7 +142,9 @@ export type PrInfo = { number: number; url: string; headRefName: string; isCross
 /** Accepts `#123`, `pr:123`, or a PR URL. Returns the gh selector, or undefined if `ref` is a branch. */
 export function parsePrRef(ref: string): string | undefined {
   const m = /^(?:#|pr:)(\d+)$/i.exec(ref);
+
   if (m) return m[1];
+
   if (/^https?:\/\/.+\/pull\/\d+/.test(ref)) return ref;
 }
 
@@ -139,5 +155,6 @@ export function prInfo(wt: string, selector: string): PrInfo {
 /** PR number for a branch, if one is open. */
 export function prForBranch(wt: string, branch: string): number | undefined {
   const r = run(["gh", "pr", "view", branch, "--json", "number"], { cwd: wt });
+
   return r.ok ? JSON.parse(r.stdout).number : undefined;
 }

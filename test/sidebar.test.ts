@@ -47,6 +47,7 @@ describe("entry cards", () => {
   test("a frame fits the height and width exactly, with a card per entry and the limits inside", () => {
     const rows = renderSidebar(list, 0, 0, 20, 30, undefined, 0);
     expect(rows).toHaveLength(20);
+
     for (const r of rows) expect(textWidth(r.replace(/\x1b\[[0-9;]*m/g, ""))).toBe(30);
     expect(rows[0]).toContain("Workspaces");
     expect(rows.at(-1)).toContain("╰");
@@ -159,6 +160,7 @@ describe("wrapping", () => {
   test("a long title wraps under its text, the status line last", () => {
     const lines = entryLines(entry("add a rather long title here"), 0, false, 20).map((l) => l.replace(/\x1b\[[0-9;]*m/g, ""));
     expect(lines.length).toBeGreaterThan(2);
+
     for (const l of lines) expect(textWidth(l)).toBe(20);
     expect(lines[0]!.startsWith("⌥1 ")).toBe(true);
     expect(lines[1]!.startsWith("   ")).toBe(true);
@@ -271,7 +273,11 @@ describe("agent state", () => {
 describe("switchTab", () => {
   test("goes to the tab, then focuses its sidebar when known", () => {
     const calls: string[][] = [];
-    const record = zellijMux((c) => { calls.push(c); return { ok: true, stdout: "" }; });
+
+    const record = zellijMux((c) => { calls.push(c);
+
+ return { ok: true, stdout: "" }; });
+
     expect(switchTab("w2", record)).toBe(true);
     expect(calls).toEqual([["zellij", "action", "go-to-tab-name", "w2"]]);
 
@@ -316,7 +322,9 @@ describe("switching with history", () => {
 
   test("travel with nowhere to go does not switch", () => {
     const calls: string[][] = [];
-    expect(travelTab("w1", Travel.Back, list, zellijMux((c) => { calls.push(c); return { ok: true, stdout: "" }; }))).toBe(false);
+    expect(travelTab("w1", Travel.Back, list, zellijMux((c) => { calls.push(c);
+
+ return { ok: true, stdout: "" }; }))).toBe(false);
     expect(calls).toEqual([]);
   });
 });
@@ -370,10 +378,13 @@ describe("stacked PRs on a card", () => {
 
 describe("new workspace prompt", () => {
   const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+
   const type = (text: string, start = { text: "" }) =>
     [...text].reduce((p, ch) => {
       const step = promptInput(p, key(ch));
+
       if (step.kind !== PromptStepKind.Edit) throw new Error(`unexpected ${step.kind} on '${ch}'`);
+
       return step.prompt;
     }, start);
 
@@ -438,6 +449,7 @@ describe("new workspace prompt", () => {
 describe("runStart", () => {
   const spawner = (result: Finished) => {
     const calls: string[][] = [];
+
     return { calls, spawn: async (cmd: string[]) => (calls.push(cmd), result) };
   };
 
@@ -460,6 +472,7 @@ describe("runStart", () => {
     const footer = await runStart("x", "1", async () => {
       throw new Error("ENOENT");
     });
+
     expect(footer).toEqual({ kind: FooterKind.Error, message: "could not run overbridge start: ENOENT" });
   });
 });
@@ -499,6 +512,7 @@ describe("busy motion", () => {
     expect(busyFrame(0)).toBe(BUSY_FRAMES[0]!);
     expect(busyFrame(FRAME_MS)).toBe(BUSY_FRAMES[1]!);
     expect(busyFrame(FRAME_MS * BUSY_FRAMES.length)).toBe(BUSY_FRAMES[0]!);
+
     for (const f of BUSY_FRAMES) expect(textWidth(f)).toBe(textWidth(GLYPHS.busy));
   });
 

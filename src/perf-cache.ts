@@ -37,6 +37,7 @@ export function writePerfCache(views: PerfViews, file = perfCacheFile()): void {
 
 function isPerfViews(v: unknown): v is PerfViews {
   const o = v as { at?: unknown; windows?: unknown } | null;
+
   return typeof o === "object" && o !== null && typeof o.at === "number" && typeof o.windows === "object" && o.windows !== null;
 }
 
@@ -44,6 +45,7 @@ function isPerfViews(v: unknown): v is PerfViews {
 export function readPerfCache(file = perfCacheFile()): PerfViews | undefined {
   try {
     const v: unknown = JSON.parse(readFileSync(file, "utf8"));
+
     return isPerfViews(v) ? v : undefined;
   } catch {
     // missing or half written: compute instead
@@ -55,7 +57,9 @@ export function readPerfCache(file = perfCacheFile()): PerfViews | undefined {
 export function loadPerf(o: { read?: () => PerfViews | undefined; compute?: () => PerfViews; now?: number } = {}): PerfViews {
   const now = o.now ?? Date.now();
   const cached = (o.read ?? readPerfCache)();
+
   if (cached && now - cached.at < PERF_CACHE_MAX_AGE_MS) return cached;
+
   return (o.compute ?? computePerf)();
 }
 
@@ -63,5 +67,6 @@ export function loadPerf(o: { read?: () => PerfViews | undefined; compute?: () =
 export function refreshPerf(store: HistoryStore = historyStore(), now = Date.now(), file = perfCacheFile()): PerfViews {
   const views = computePerf(store, now);
   writePerfCache(views, file);
+
   return views;
 }

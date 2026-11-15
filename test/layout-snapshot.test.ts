@@ -3,7 +3,9 @@ import { layoutKdl } from "../src/layout";
 
 // A fixed root keeps the snapshot independent of the machine it runs on.
 const saved = process.env.OVERBRIDGE_ROOT;
+
 beforeAll(() => void (process.env.OVERBRIDGE_ROOT = "/ws-root"));
+
 afterAll(() => (saved === undefined ? delete process.env.OVERBRIDGE_ROOT : void (process.env.OVERBRIDGE_ROOT = saved)));
 
 describe("generated layout", () => {
@@ -24,6 +26,7 @@ describe("generated layout", () => {
     expect([...reviews!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@reviews · reviews"]);
     expect([...perf!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@perf · perf"]);
     expect(tabs).toHaveLength(3);
+
     for (const tab of tabs) {
       const order = [...tab.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1]!.replace(/^\w+ · /, ""));
       expect(order).toEqual(["sidebar", "top", "claude"]);

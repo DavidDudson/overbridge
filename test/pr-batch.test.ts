@@ -30,6 +30,7 @@ const viewJson = JSON.stringify({
   latestReviews: [REVIEW],
   comments: [RABBIT],
 });
+
 const threadsJson = JSON.stringify({
   data: { repository: { pullRequest: { reviewThreads: { nodes: [
     { isResolved: false, comments: { nodes: [{ author: { login: "coderabbitai" } }] } },
@@ -54,6 +55,7 @@ const node = {
   reviewThreads: { nodes: JSON.parse(threadsJson).data.repository.pullRequest.reviewThreads.nodes },
   commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [{ __typename: "CheckRun", ...CHECK }, { __typename: "StatusContext", ...STATUS }] } } } }] },
 };
+
 const reply = (prs: Record<number, unknown>, cost = 1) => JSON.stringify({ data: { rateLimit: { cost }, repository: Object.fromEntries(Object.entries(prs).map(([n, v]) => [`p${n}`, v])) } });
 
 describe("PR batch mapping", () => {
@@ -108,10 +110,12 @@ describe("refreshTop from a batched reply", () => {
   beforeEach(() => {
     tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-prb-")));
     process.env.OVERBRIDGE_ROOT = tmp;
+
     for (const ws of ["w1", "w2"]) {
       mkdirSync(join(tmp, ws, "r"), { recursive: true });
       writeFileSync(join(tmp, ws, "r", "overbridge.yml"), "version: 1\nproject-management:\n  name: github\n  project: o/r\n");
     }
+
     withState((s) => {
       s.workspaces.w1 = { created: "now", repos: { r: { branch: "feat/12-dark-mode", pr: 3 } } };
       s.workspaces.w2 = { created: "now", repos: { r: { branch: "feat/13-other", pr: 4 } } };
@@ -128,6 +132,7 @@ describe("refreshTop from a batched reply", () => {
       provider: () => fakeProvider(items),
       exec: (cmd) => (cmd[1] === "api" ? threadsJson : viewJson),
     });
+
     const batched = refreshTop("w1", {
       provider: () => fakeProvider(items),
       exec: () => {
@@ -135,6 +140,7 @@ describe("refreshTop from a batched reply", () => {
       },
       prefetched: { r: { prs: { 3: mapPr(node) } } },
     });
+
     expect(JSON.stringify(strip(batched))).toBe(JSON.stringify(strip(perPr)));
     // the fixture exercises a comment count and a reviewer: guard against an empty comparison
     expect(batched.links[1]!.pr!.reviewers).toEqual([
@@ -152,7 +158,11 @@ describe("refreshTop from a batched reply", () => {
 
   test("a PR the reply did not ask for is read directly; stale prs carry the refetch error", () => {
     const asked: string[] = [];
-    const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => { asked.push(cmd.join(" ")); return cmd[1] === "api" ? threadsJson : viewJson; }, prefetched: { r: { prs: {}, error: "HTTP 502" } } });
+
+    const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => { asked.push(cmd.join(" "));
+
+ return cmd[1] === "api" ? threadsJson : viewJson; }, prefetched: { r: { prs: {}, error: "HTTP 502" } } });
+
     expect(asked.some((c) => c.startsWith("gh pr view 3"))).toBe(true);
     expect(cache.message).toBe("r: HTTP 502");
   });
@@ -174,6 +184,7 @@ describe("PrBatcher", () => {
   const fakeRun = (log: string[][]): GhRun => async (args) => {
     log.push(args);
     const numbers = [...args.join(" ").matchAll(/pullRequest\(number:(\d+)\)/g)].map((m) => Number(m[1]));
+
     return { stdout: reply(Object.fromEntries(numbers.map((n) => [n, node])), 2), stderr: "", code: 0 };
   };
 
@@ -182,6 +193,7 @@ describe("PrBatcher", () => {
     const b = new PrBatcher({ run: fakeRun(calls), sleep: () => Promise.resolve() });
     const got = await Promise.all(Array.from({ length: 10 }, (_, i) => b.get("o/r", [100 + i])));
     expect(calls).toHaveLength(1);
+
     for (const g of got) expect(Object.keys(g.prs)).toHaveLength(10);
     expect(b.stats()).toMatchObject({ calls: 1, prs: 10, points: 2 });
     // inside the TTL the next window costs nothing

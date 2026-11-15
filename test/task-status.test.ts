@@ -12,10 +12,12 @@ import type { PrStatus, TopLink } from "../src/top";
 
 let tmp: string;
 const saved = { root: process.env.OVERBRIDGE_ROOT, name: process.env.OVERBRIDGE_NAME };
+
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "overbridge-task-"));
   process.env.OVERBRIDGE_ROOT = tmp;
 });
+
 afterEach(() => {
   saved.root === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = saved.root);
   saved.name === undefined ? delete process.env.OVERBRIDGE_NAME : (process.env.OVERBRIDGE_NAME = saved.name);
@@ -28,6 +30,7 @@ const link = (status: PrStatus, pr: Partial<NonNullable<TopLink["pr"]>> = {}): T
   status,
   pr: { repo: "app", number: 1, title: "t", draft: false, dir: "/x", stack: [], ...pr },
 });
+
 const reviewer = (state: "reviewing" | "reviewed" | "comments" | "changes") => ({ name: "Copilot" as const, state });
 
 describe("taskStatus", () => {
@@ -71,6 +74,7 @@ describe("phase store", () => {
     mkdirSync(dirname(phasePath(ws)), { recursive: true });
     writeFileSync(phasePath(ws), text);
   };
+
   test("round-trips and clears", () => {
     writePhase("w1", "implement", { n: 1, of: 2 }, 5);
     expect(readPhase("w1")).toEqual({ phase: "implement", layer: { n: 1, of: 2 }, at: 5 });
@@ -93,6 +97,7 @@ describe("phase store", () => {
   });
   test("parseLayer", () => {
     expect(parseLayer("2/3")).toEqual({ n: 2, of: 3 });
+
     for (const bad of ["0/3", "4/3", "x", "2", "2/"]) expect(parseLayer(bad)).toBeUndefined();
   });
 });
@@ -171,7 +176,9 @@ describe("aheadRows", () => {
       d: { created: "t", repos: { app: { branch: "feat/z" } } },
     },
   };
+
   type Counts = { ahead?: string | undefined; behind?: string | undefined };
+
   const deps = (heads: Record<string, string>, counts: Counts, over: Partial<AheadDeps> = {}): AheadDeps => ({
     state: () => state,
     base: () => "origin/main",
@@ -180,11 +187,14 @@ describe("aheadRows", () => {
     dirty: () => false,
     git: (_wt, args) => {
       if (args[0] === "rev-list") return args[2]!.startsWith("HEAD") ? counts.behind : counts.ahead;
+
       return args.includes("--format=%aI") ? "2026-11-01T00:00:00+00:00" : "one\ntwo";
     },
     ...over,
   });
+
   const quiet = () => {};
+
   test("lists live branches with commits main lacks, by workspace name", () => {
     const rows = aheadRows(deps({ a: "feat/x", b: "main", c: "feat/y", d: "HEAD" }, { ahead: "2", behind: "5" }), quiet);
     expect(rows).toHaveLength(1);
@@ -205,12 +215,15 @@ describe("aheadRows", () => {
   });
   test("a worktree whose read throws is reported and skipped, the rest still listed", () => {
     const warnings: string[] = [];
+
     const throwing = deps({ a: "feat/x", d: "feat/z" }, { ahead: "1", behind: "0" }, {
       base: (repo) => {
         if (warnings.length === 0 && repo === "app") throw new Error("repo app is not registered");
+
         return "origin/main";
       },
     });
+
     const rows = aheadRows(throwing, (m) => warnings.push(m));
     expect(warnings).toEqual(["ahead: skipped a/app: repo app is not registered"]);
     expect(rows.map((r) => r.ws)).toEqual(["d"]);

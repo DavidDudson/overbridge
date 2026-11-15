@@ -6,14 +6,17 @@ import { packageRoot } from "../src/paths";
 import { requiredSkillProblems } from "../src/plugins";
 
 const tmp = mkdtempSync(join(tmpdir(), "overbridge-prereqs-"));
+
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 function skillsDir(name: string, skills: string[]): string {
   const dir = join(tmp, name);
+
   for (const s of skills) {
     mkdirSync(join(dir, s), { recursive: true });
     writeFileSync(join(dir, s, "SKILL.md"), `---\nname: ${s}\n---\n`);
   }
+
   return dir;
 }
 
@@ -43,8 +46,10 @@ describe("skill frontmatter", () => {
     const undeclared = skills.filter((file) => {
       const text = readFileSync(file, "utf8");
       const front = /^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? "";
+
       return /gh[ -]stack/.test(text) && !/^requires:.*\bgh-stack\b/m.test(front);
     });
+
     expect(undeclared).toEqual([]);
   });
 });

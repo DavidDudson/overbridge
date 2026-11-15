@@ -5,6 +5,7 @@
  */
 
 export const REVIEWER_STATES = ["reviewing", "reviewed", "changes", "comments", "limited", "skipped", "failed", "none"] as const;
+
 export type ReviewerState = (typeof REVIEWER_STATES)[number];
 
 export interface ReviewerStatus {
@@ -48,8 +49,11 @@ export const shortDuration = (text: string): string =>
  */
 function copilot(view: ReviewerView, pr: string): ReviewerStatus {
   const review = view.latestReviews?.find((r) => COPILOT.test(r.author?.login ?? ""));
+
   if (review) return { name: "Copilot", state: review.state === "CHANGES_REQUESTED" ? "changes" : "reviewed", url: review.url ?? pr };
+
   if (view.reviewRequests?.some((r) => COPILOT.test(`${r.login ?? ""} ${r.name ?? ""}`))) return { name: "Copilot", state: "reviewing", url: pr };
+
   return { name: "Copilot", state: "none", url: pr };
 }
 
@@ -62,29 +66,41 @@ function codeRabbit(view: ReviewerView, pr: string): ReviewerStatus {
   const comments = (view.comments ?? []).filter((c) => CODERABBIT.test(c.author?.login ?? ""));
   const review = view.latestReviews?.find((r) => CODERABBIT.test(r.author?.login ?? ""));
   const limit = comments.filter((c) => c.body?.includes(RATE_LIMITED)).at(-1);
+
   if (limit && (!review?.submittedAt || (limit.createdAt ?? "") > review.submittedAt)) {
     const wait = /available in\s+([^*\n.]+?)\.?\s*\*\*/i.exec(limit.body ?? "")?.[1];
+
     return { name: "CodeRabbit", state: "limited", ...(wait ? { detail: shortDuration(wait) } : {}), url: limit.url ?? pr };
   }
+
   const check = view.statusCheckRollup?.find((c) => CODERABBIT.test(c.name ?? c.context ?? ""));
   const url = check?.detailsUrl ?? check?.targetUrl ?? pr;
+
   if (review) return { name: "CodeRabbit", state: review.state === "CHANGES_REQUESTED" ? "changes" : "reviewed", url: review.url ?? url };
+
   if (!check) return { name: "CodeRabbit", state: "none", url: pr };
   const outcome = check.conclusion || check.state || check.status || "";
+
   if (["SUCCESS", "PASSED"].includes(outcome)) return { name: "CodeRabbit", state: "reviewed", url };
+
   if (["NEUTRAL", "SKIPPED"].includes(outcome)) return { name: "CodeRabbit", state: "skipped", url };
+
   if (["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED"].includes(outcome)) return { name: "CodeRabbit", state: "failed", url };
+
   return { name: "CodeRabbit", state: "reviewing", url };
 }
 
 /** Both reviewers' statuses for a PR at `pr` (its URL). CodeRabbit is left out when the repo never uses it. */
 export function reviewerStatuses(view: ReviewerView, pr: string): ReviewerStatus[] {
   const rabbit = codeRabbit(view, pr);
+
   // unresolved threads beat every other state: they are what needs doing next
   const flag = (r: ReviewerStatus): ReviewerStatus => {
     const n = view.unresolved?.[r.name] ?? 0;
+
     return n > 0 ? { ...r, state: "comments", detail: String(n) } : r;
   };
+
   return [flag(copilot(view, pr)), ...(rabbit.state === "none" ? [] : [flag(rabbit)])];
 }
 
@@ -108,7 +124,9 @@ const THREADS_QUERY = "query($owner:String!,$repo:String!,$number:Int!){reposito
 /** The `gh api graphql` command listing a PR's review threads, or undefined when `url` is not a GitHub PR URL. */
 export function threadsCommand(url: string): string[] | undefined {
   const m = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(url);
+
   if (!m) return undefined;
+
   return ["gh", "api", "graphql", "-f", `query=${THREADS_QUERY}`, "-F", `owner=${m[1]}`, "-F", `repo=${m[2]}`, "-F", `number=${m[3]}`];
 }
 
@@ -117,12 +135,15 @@ type ThreadNodes = { isResolved?: boolean; comments?: { nodes?: { author?: { log
 /** Unresolved review threads per reviewer, from a PR's thread nodes. A thread belongs to whoever opened it. */
 export function countUnresolved(threads: ThreadNodes): NonNullable<ReviewerView["unresolved"]> {
   const counts: NonNullable<ReviewerView["unresolved"]> = {};
+
   for (const t of threads) {
     if (t.isResolved) continue;
     const login = t.comments?.nodes?.[0]?.author?.login ?? "";
     const name = COPILOT.test(login) ? "Copilot" : CODERABBIT.test(login) ? "CodeRabbit" : undefined;
+
     if (name) counts[name] = (counts[name] ?? 0) + 1;
   }
+
   return counts;
 }
 

@@ -142,22 +142,27 @@ function opts<T extends Record<string, { type: "string" | "boolean"; short?: str
 async function main(argv: string[]): Promise<number> {
   const [sub, ...rest] = argv;
   const ws = { ws: { type: "string" as const } };
+
   switch (sub) {
     case "init":
       cmd.init();
       break;
     case "repo": {
       const [action, ...r] = rest;
+
       if (action === "add") {
         const { values, positionals } = opts(r, { branch: { type: "string" } });
+
         if (positionals.length !== 2) throw new OverbridgeError("usage: overbridge repo add <name> <url> [--branch b]");
         cmd.repoAdd(positionals[0]!, positionals[1]!, values.branch);
       } else if (action === "ls" || action === "list") cmd.repoList();
       else throw new OverbridgeError("usage: overbridge repo add|ls");
       break;
     }
+
     case "config": {
       const [action, target] = rest;
+
       if (action === "check") cmd.configCheck(target);
       else if (action === "show") cmd.configShow(target);
       else if (action === "get") {
@@ -166,6 +171,7 @@ async function main(argv: string[]): Promise<number> {
       } else throw new OverbridgeError("usage: overbridge config check|show|get [path]");
       break;
     }
+
     case "item":
       item(rest);
       break;
@@ -177,51 +183,65 @@ async function main(argv: string[]): Promise<number> {
       await appCommand(values.ws, values.repo, positionals[0], positionals[1], !!values["no-wait"]);
       break;
     }
+
     case "sidebar": {
       const { values } = opts(rest, ws);
       await sidebar(values.ws);
       break;
     }
+
     case "next":
       console.log(next(currentTab()));
       break;
     case "go": {
       const { positionals } = opts(rest, {});
+
       if (positionals.length !== 1) throw new OverbridgeError(GO_USAGE);
       console.log(go(positionals[0]!));
       break;
     }
+
     case "diff": {
       const { values } = opts(rest, ws);
       diff(cmd.requireWs(values.ws));
       break;
     }
+
     case "history": {
       const { values } = opts(rest, { ...ws, hours: { type: "string" }, by: { type: "string" }, json: { type: "boolean" } });
       const hours = values.hours === undefined ? undefined : Number(values.hours);
       const usage = "usage: overbridge history [--ws name] [--hours n] [--by repo] [--json]";
+
       if (hours !== undefined && !(hours > 0)) throw new OverbridgeError(usage);
+
       if (values.by !== undefined && values.by !== "repo") throw new OverbridgeError(usage);
+
       if (values.ws && !historyStore().workspaces().includes(values.ws)) throw new OverbridgeError(`no history for ${values.ws}`);
       const windowMs = hours === undefined ? undefined : hours * 3600_000;
+
       if (values.by === "repo") {
         const repos = repoSummaries(undefined, windowMs, values.ws);
+
         if (values.json) console.log(JSON.stringify(repos, null, 2));
         else if (!repos.length) log("no check runs yet");
         else for (const r of repos) console.log(repoLines(r).join("\n"));
         break;
       }
+
       const rows = summaries(undefined, windowMs, values.ws);
+
       if (values.json) console.log(JSON.stringify(rows, null, 2));
       else if (!rows.length) log("no history yet");
       else for (const row of rows) console.log(summaryLines(row).join("\n"));
       break;
     }
+
     case "perf":
       await perfPane();
       break;
     case "worklist": {
       const sub = rest[0];
+
       if (sub === "refresh") {
         const cache = refreshWorklist();
         log(`worklist: ${cache.rows.length} open item(s)${cache.notes.length ? `; ${cache.notes.join("; ")}` : ""}`);
@@ -232,11 +252,14 @@ async function main(argv: string[]): Promise<number> {
       } else {
         await worklistPane();
       }
+
       break;
     }
+
     case "prs":
     case "reviews": {
       const kind: PrListKind = sub;
+
       if (rest[0] === "refresh") {
         const cache = refreshPrList(kind);
         log(`${kind}: ${cache.rows.length} open PR(s)${cache.error ? `; ${cache.error}` : ""}`);
@@ -245,26 +268,33 @@ async function main(argv: string[]): Promise<number> {
       } else {
         await prListPane(kind);
       }
+
       break;
     }
+
     case "top": {
       const { values, positionals } = opts(rest, ws);
+
       if (positionals[0] === "refresh") topRefresh(values.ws);
       else if (positionals[0] === "sweep") await sweepWithServer();
       else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh|sweep] [--ws name]");
       else await topPanel(values.ws);
       break;
     }
+
     case "server": {
       const { serverCommand } = await import("./server-cmd");
+
       return serverCommand(rest);
     }
+
     case "serve": {
       opts(rest, {});
       const { serve } = await import("./server");
       await serve();
       break;
     }
+
     case "sync":
       cmd.sync();
       break;
@@ -273,73 +303,94 @@ async function main(argv: string[]): Promise<number> {
       cmd.newWorkspace(positionals[0], values.repo ?? []);
       break;
     }
+
     case "add": {
       const { values, positionals } = opts(rest, ws);
+
       if (positionals.length < 1) throw new OverbridgeError("usage: overbridge add <repo>... [--ws name]");
+
       for (const r of positionals) cmd.addRepo(r, values.ws);
       break;
     }
+
     case "rm": {
       const { values, positionals } = opts(rest, { force: { type: "boolean", short: "f" }, [FINISH_FLAG]: { type: "boolean" } });
+
       if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge rm <name> [--force]");
+
       if (values[FINISH_FLAG]) {
         await finishRemoval(positionals[0]!);
       } else {
         cmd.removeWorkspace(positionals[0]!, !!values.force);
       }
+
       break;
     }
+
     case "cleanup": {
       const { values, positionals } = opts(rest, { json: { type: "boolean" }, "no-fetch": { type: "boolean" }, "dry-run": { type: "boolean" } });
+
       if (positionals.length) throw new OverbridgeError("usage: overbridge cleanup [--json] [--no-fetch]");
       cleanup(values.json ? Format.Json : Format.Table, values["no-fetch"] ? Fetch.No : Fetch.Yes);
       break;
     }
+
     case "status":
     case "st": {
       const { values } = opts(rest, { all: { type: "boolean", short: "a" }, json: { type: "boolean" } });
       cmd.status(!!values.all, !!values.json);
       break;
     }
+
     case "ahead": {
       const { values, positionals } = opts(rest, { json: { type: "boolean" } });
+
       if (positionals.length) throw new OverbridgeError("usage: overbridge ahead [--json]");
       cmd.ahead(!!values.json);
       break;
     }
+
     case "phase": {
       const { values, positionals } = opts(rest, { stack: { type: "string" }, clear: { type: "boolean" } });
       cmd.phase(positionals, values.stack, !!values.clear);
       break;
     }
+
     case "whoami":
       cmd.whoami();
       break;
     case "prereqs": {
       const problems = requiredSkillProblems();
+
       if (problems.length) throw new OverbridgeError(problems.join("\n"));
       console.log(`ok: ${REQUIRED_SKILLS.join(", ")} installed`);
       break;
     }
+
     case "checkout":
     case "co": {
       const { values, positionals } = opts(rest, ws);
       cmd.checkout(positionals, values.ws);
       break;
     }
+
     case "release": {
       const { values, positionals } = opts(rest, ws);
       cmd.release(positionals[0], values.ws);
       break;
     }
+
     case "pr": {
       const { values, positionals } = opts(rest, ws);
       cmd.recordPr(positionals[0], values.ws);
       break;
     }
+
     case "up": {
       const { values, positionals } = opts(rest, { fresh: { type: "boolean" } });
+
       if (positionals.length > 1 || (positionals.length === 1 && values.fresh)) throw new OverbridgeError("usage: overbridge up [--fresh] | overbridge up <name>");
+
       // inside the session `up` cannot attach, so a name opens (or shows) that workspace's tab
       if (positionals.length === 1) {
         if (!defaultMux().inSession()) throw new OverbridgeError("overbridge up <name> adds a tab to the running session, so run it inside zellij; `overbridge up` starts one");
@@ -348,29 +399,36 @@ async function main(argv: string[]): Promise<number> {
       else cmd.up(!!values.fresh);
       break;
     }
+
     case "spinup":
       opts(rest, {});
       cmd.spinup();
       break;
     case "tab": {
       const { values, positionals } = opts(rest, { prompt: { type: "string" } });
+
       if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge tab <name> [--prompt text]");
       showTab(cmd.requireWs(positionals[0]!), { prompt: values.prompt });
       break;
     }
+
     case "icebox": {
       const { values, positionals } = opts(rest, { prune: { type: "boolean" }, "drop-worktree": { type: "boolean" } });
+
       if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge icebox <name> [--prune] [--drop-worktree]");
       const handoff = await icebox(cmd.requireWs(positionals[0]!), { prune: values.prune, dropWorktree: values["drop-worktree"] });
       console.log(`iceboxed ${positionals[0]}; handoff at ${handoff}`);
       break;
     }
+
     case "thaw": {
       const { positionals } = opts(rest, {});
+
       if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge thaw <name>");
       thaw(cmd.requireWs(positionals[0]!));
       break;
     }
+
     case "start": {
       const { values, positionals } = opts(rest, {
         prompt: { type: "string" },
@@ -379,60 +437,77 @@ async function main(argv: string[]): Promise<number> {
         name: { type: "string" },
         here: { type: "boolean" },
       });
+
       if (values.stack) {
         if (values.task !== undefined || values.here || positionals.length < 3) throw new OverbridgeError(START_USAGE);
         startStack(positionals[0]!, positionals.slice(1), { name: values.name, prompt: values.prompt });
         break;
       }
+
       if (values.name !== undefined) throw new OverbridgeError("--name only goes with --stack");
+
       if (values.task !== undefined) {
         if (positionals.length !== 1 || values.prompt === undefined || values.here) {
           throw new OverbridgeError("usage: overbridge start <repo> --task <slug> --prompt <text>");
         }
+
         startTask(positionals[0]!, values.task, values.prompt);
         break;
       }
+
       if (positionals.length !== 2) throw new OverbridgeError(START_USAGE);
       start(positionals[0]!, positionals[1]!, values.prompt, { here: values.here });
       break;
     }
+
     case "layout":
       cmd.layout();
       break;
     case "claude": {
       const [name, ...extra] = rest;
+
       if (!name) throw new OverbridgeError("usage: overbridge claude <name> [-- claude args]");
       const args = extra[0] === "--" ? extra.slice(1) : extra;
       const tab = orchestrationTab(name);
+
       if (tab?.pane) throw new OverbridgeError(`${tab.tab} runs \`overbridge ${tab.pane}\`, not Claude`);
+
       if (tab) cmd.claudeOrchestration(tab, args);
       else cmd.claude(name, args);
       break;
     }
+
     case "shell": {
       // everything after `--` belongs to the child: never parse its flags
       const cut = rest.indexOf("--");
       const mine = cut < 0 ? rest : rest.slice(0, cut);
       const { values, positionals } = opts(mine, ws);
+
       if (positionals.length !== 1 || cut < 0 || cut === rest.length - 1)
         throw new OverbridgeError("usage: overbridge shell <repo> [--ws name] -- <cmd>...");
       cmd.shell(positionals[0]!, rest.slice(cut + 1), values.ws);
       break;
     }
+
     case "check": {
       // everything after `--` belongs to the child: never parse its flags
       const cut = rest.indexOf("--");
       const usage = "usage: overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>...";
       const { values, positionals } = opts(cut < 0 ? rest : rest.slice(0, cut), { ...ws, "timeout-seconds": { type: "string" } });
+
       if (positionals.length > 1 || cut < 0 || cut === rest.length - 1) throw new OverbridgeError(usage);
       const timeout = values["timeout-seconds"];
       const timeoutSeconds = timeout === undefined ? undefined : Number(timeout);
+
       if (timeoutSeconds !== undefined && (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1))
         throw new OverbridgeError(`--timeout-seconds expects a whole number of seconds above 0 (got '${timeout}')\n${usage}`);
+
       return cmd.check(positionals[0], rest.slice(cut + 1), values.ws, timeoutSeconds);
     }
+
     case "guard":
       silenceLegacyWarnings();
+
       return guardMain();
     case undefined:
     case "help":
@@ -442,10 +517,12 @@ async function main(argv: string[]): Promise<number> {
       break;
     default: {
       const bin = externalCommand(sub);
+
       if (bin) return exec([bin, ...rest], { env: externalEnv() });
       throw new OverbridgeError(`unknown command '${sub}'\n\n${HELP}${externalHelp()}`);
     }
   }
+
   return 0;
 }
 
@@ -458,6 +535,7 @@ export async function run(argv: string[]): Promise<never> {
       console.error(`overbridge: ${(e as Error).message}`);
       process.exit(1);
     }
+
     throw e;
   }
 }

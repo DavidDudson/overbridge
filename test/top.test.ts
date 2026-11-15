@@ -11,10 +11,12 @@ import { fakeProvider } from "./helpers/fake-provider";
 
 const prJson = (state = "OPEN", extra: Record<string, unknown> = {}) =>
   JSON.stringify({ url: "https://host/o/r/pull/3", state, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", statusCheckRollup: [], ...extra });
+
 const noPane = () => undefined;
 const editorButton = (s: TopSnapshot) => buttons(s).find((b) => b.action.kind === "editor");
 
 const spec = (id: string): AppSpec => ({ id, label: id, dir: ".", start: "x", ports: [], open: false, when: "always" });
+
 const app = (id: string, status: AppStatus, port?: number, available = true): TopApp => ({
   repo: "r",
   spec: { ...spec(id), ready: { kind: "http", url: "http://localhost:{port}" } },
@@ -23,6 +25,7 @@ const app = (id: string, status: AppStatus, port?: number, available = true): To
   available,
   ...(port === undefined ? {} : { port }),
 });
+
 const snap = (over: Partial<TopSnapshot> = {}): TopSnapshot => ({ ws: "w1", dir: "/w/w1", links: [], apps: [], ...over });
 
 describe("buttons and layout", () => {
@@ -32,6 +35,7 @@ describe("buttons and layout", () => {
       ide: "zed",
       apps: [app("web", AppStatus.Running, 3000), app("db", AppStatus.Stopped), app("api", AppStatus.Starting, 3001), app("job", AppStatus.Exited, 3002)],
     });
+
     expect(buttons(s).map((b) => b.label)).toEqual(["📋 PR #3", "🟢 web :3000", "⚫ db", "🟡 api :3001", "🔴 job :3002", "📝 zed", "🤖 claude", "💻 terminal", "🔀 diff"]);
     expect(buttons(s).filter((b) => b.side === "left")).toHaveLength(1);
     expect(buttons(s).find((b) => b.label.includes("web"))!.color).toBe("green");
@@ -64,7 +68,9 @@ describe("buttons and layout", () => {
     expect(f.rows.length).toBeGreaterThan(3);
     expect(f.rows[0]).toMatch(/^╭─ w1 ─+╮$/);
     expect(f.rows.at(-1)).toMatch(/^╰─ m ─+╯$/);
+
     for (const row of f.rows) expect(textWidth(row)).toBeLessThanOrEqual(24);
+
     for (const p of f.placed) expect(p.col + p.width).toBeLessThanOrEqual(22);
     expect(f.placed.map((p) => p.button.label).slice(0, 4)).toEqual(["📋 alpha", "📋 bravo", "📋 charlie", "📋 delta"]);
   });
@@ -158,6 +164,7 @@ describe("PR rows", () => {
 
 describe("activate", () => {
   const calls: string[] = [];
+
   const deps: ActDeps = {
     open: (u) => calls.push(`open ${u}`),
     spawn: (c) => calls.push(`spawn ${c.join(" ")}`),
@@ -169,6 +176,7 @@ describe("activate", () => {
     merge: (p) => void calls.push(`merge ${p.number}`),
     run: (cmd, dir, env) => void calls.push(`run ${cmd} in ${dir} pr=${env.OVERBRIDGE_PR}`),
   };
+
   beforeEach(() => void (calls.length = 0));
 
   test("link opens the url", () => {
@@ -200,6 +208,7 @@ describe("activate", () => {
 
   test("an app toggles: stopped/exited start, starting/running stop", () => {
     for (const status of [AppStatus.Stopped, AppStatus.Exited]) activate({ label: "a", action: { kind: "app", app: app("web", status) } }, deps);
+
     for (const status of [AppStatus.Starting, AppStatus.Running]) activate({ label: "a", action: { kind: "app", app: app("web", status) } }, deps);
     expect(calls).toEqual(["start web", "start web", "stop web", "stop web"]);
   });
@@ -286,11 +295,14 @@ describe("refreshTop", () => {
       JSON.stringify({ schemaVersion: 1, stacks: [{ trunk: { branch: "main" }, branches: [layer("feat/11-a", 2), layer("feat/12-dark-mode", 3), layer("feat/13-c", 4)] }] }),
     );
     const viewed: string[] = [];
+
     const exec = (cmd: string[]) => {
       if (cmd[1] !== "pr") return undefined;
       viewed.push(cmd[3]!);
+
       return JSON.stringify({ url: `https://host/o/r/pull/${cmd[3]}`, title: `t${cmd[3]}`, state: cmd[3] === "3" ? "OPEN" : "MERGED", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", statusCheckRollup: [] });
     };
+
     const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec });
     const prs = cache.links.flatMap((l) => (l.pr ? [l.pr] : []));
     expect(prs.map((p) => p.number)).toEqual([2, 3, 4]);
@@ -347,15 +359,21 @@ describe("cleanable", () => {
   let wt: string;
   const savedRoot = process.env.OVERBRIDGE_ROOT;
   const gitEnv = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", GIT_CONFIG_GLOBAL: "/dev/null" };
+
   const sh = (cmd: string[], cwd: string) => {
     const p = Bun.spawnSync({ cmd, cwd, env: gitEnv, stdout: "pipe", stderr: "pipe" });
+
     if (p.exitCode !== 0) throw new Error(`${cmd.join(" ")}: ${p.stderr}`);
+
     return p.stdout.toString().trim();
   };
+
   const items = [{ id: "12", title: "Add dark mode", url: "x" }];
+
   /** Cache the PR state as `gh` would report it. */
   const cachePr = (state: string, extra: Record<string, unknown> = {}) =>
     refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson(state, extra) });
+
   const headSha = () => sh(["git", "rev-parse", "HEAD"], wt);
 
   beforeEach(() => {
@@ -535,6 +553,7 @@ describe("button keys", () => {
       cleanup: true,
       apps: [app("web", AppStatus.Running, 3000), app("db", AppStatus.Stopped)],
     });
+
     const keys = Object.fromEntries(buttons(s).map((b) => [b.label, b.key]));
     expect(keys).toEqual({
       "📋 12": "i",
@@ -554,6 +573,7 @@ describe("button keys", () => {
     const links = ["a #1", "b #2", "c #3"].map((label) => ({ label, url: label, status: "pending" as const }));
     const keys = buttons(snap({ links })).map((b) => b.key).slice(0, 3);
     expect(keys).toEqual(["p", "u", "y"]);
+
     for (const k of ["q", "r", "o", "l", "h", "L"]) expect(buttons(snap({ links, ide: "zed", cleanup: true })).map((b) => b.key)).not.toContain(k);
   });
 });

@@ -15,14 +15,17 @@ export type Send = (frame: string) => void;
 
 export function createEvents() {
   const subscribers = new Set<Send>();
+
   return {
     /** Add a subscriber; returns its unsubscribe. A subscriber whose `send` throws is dropped. */
     subscribe(send: Send): () => void {
       subscribers.add(send);
+
       return () => void subscribers.delete(send);
     },
     publish(key: string): void {
       const frame = changedFrame(key);
+
       for (const send of [...subscribers]) {
         try {
           send(frame);
@@ -36,4 +39,5 @@ export function createEvents() {
     },
   };
 }
+
 export type Events = ReturnType<typeof createEvents>;

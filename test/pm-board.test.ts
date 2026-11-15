@@ -38,10 +38,12 @@ function shuffled<T>(list: readonly T[], seed: number): T[] {
   const out = [...list];
   let s = seed;
   const next = () => (s = (s * 1664525 + 1013904223) % 2 ** 32) / 2 ** 32;
+
   for (let i = out.length - 1; i > 0; i--) {
     const j = Math.floor(next() * (i + 1));
     [out[i], out[j]] = [out[j]!, out[i]!];
   }
+
   return out;
 }
 
@@ -147,13 +149,17 @@ describe("determinism", () => {
 
   test("the rules are a total order: no two open items tie, and comparison is antisymmetric", () => {
     const ranked = rank(FIXTURE);
+
     const cmp = (a: (typeof ranked)[number], b: (typeof ranked)[number]) => {
       for (const rule of RULES) {
         const [ka, kb] = [rule.key(a), rule.key(b)];
+
         if (ka !== kb) return typeof ka === "string" && typeof kb === "string" ? ka.localeCompare(kb, undefined, { numeric: true }) : ka < kb ? -1 : 1;
       }
+
       return 0;
     };
+
     for (const a of ranked) {
       for (const b of ranked) {
         if (a === b) expect(cmp(a, b)).toBe(0);
@@ -206,6 +212,7 @@ describe("renderBoard", () => {
     expect(lines.find((l) => l.includes(" 40 "))).toContain("assumed open");
     expect(lines.at(-1)).toContain("⏎ start in a slot");
     expect(rows.length).toBe(14);
+
     // the Screen clips instead of wrapping, so an overflowing row would lose its right border
     for (const line of lines) expect(line.endsWith("│") || line.endsWith("╮") || line.endsWith("╯")).toBe(true);
   });

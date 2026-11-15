@@ -59,13 +59,17 @@ export interface RepoBoard {
  */
 export function boardSources(repos: readonly RepoBoard[]): { sources: BoardSource[]; notes: string[] } {
   const withPm = repos.filter((r): r is RepoBoard & { pm: ProjectManagement } => r.pm !== undefined);
+
   const github = withPm
     .filter((r) => r.pm.name === "github")
     .map((r) => ({ r, slug: slugFromUrl(r.url) ?? (/^[\w.-]+\/[\w.-]+$/.test(r.pm.project) ? r.pm.project : undefined) }));
+
   const jiraRepos = withPm.filter((r) => r.pm.name === "jira");
   const jiraGroups = Map.groupBy(jiraRepos, (r) => JSON.stringify([r.pm.project.toUpperCase(), r.pm.worklistJql ?? null, r.pm.url ?? null]));
+
   const jira = [...jiraGroups.values()].map((group): BoardSource => {
     const pm = group[0]!.pm;
+
     return {
       kind: "jira",
       project: pm.project.toUpperCase(),
@@ -74,11 +78,13 @@ export function boardSources(repos: readonly RepoBoard[]): { sources: BoardSourc
       ...(pm.url ? { site: pm.url } : {}),
     };
   });
+
   return {
     sources: [
       ...github.flatMap(({ r, slug }): BoardSource[] => {
         if (!slug) return [];
         const project = r.pm.worklistProject ? parseProject(r.pm.worklistProject, slug.split("/")[0], r.pm.worklistStatuses) : undefined;
+
         return [
           {
             kind: "github",
@@ -121,6 +127,7 @@ export interface SourceRead {
 export function readSource(s: BoardSource, readers: BoardReaders = defaultReaders): SourceRead {
   try {
     const rows = s.kind === "github" ? readers.github(s.slug, s.repo, { ...(s.columns ? { columns: s.columns } : {}), ...(s.scope ? { scope: s.scope } : {}), ...(s.project ? { project: s.project } : {}) }) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
+
     return { rows, notes: [], failedRepos: [] };
   } catch (e) {
     return { rows: [], notes: [`${sourceName(s)}: ${(e as Error).message.split("\n")[0]}`], failedRepos: s.kind === "github" ? [s.repo] : s.repos };
@@ -145,6 +152,7 @@ export const mergeReads = (results: readonly SourceRead[]): SourceRead => ({
  */
 export function sourceKey(s: BoardSource): string {
   const shape = (v: unknown) => new Bun.CryptoHasher("sha1").update(JSON.stringify(v ?? null)).digest("hex").slice(0, 10);
+
   return s.kind === "github"
     ? `board:gh:${s.slug}:${s.repo}:${shape([s.scope, s.project, s.columns])}`
     : `board:jira:${s.project}:${shape([s.filter, s.site])}`;
@@ -157,6 +165,7 @@ export function sourceKey(s: BoardSource): string {
 export function keepLastGood(previous: readonly WorkRow[], fresh: readonly WorkRow[], failedRepos: readonly string[]): WorkRow[] {
   const failed = new Set(failedRepos);
   const have = new Set(fresh.map((r) => keyOf(r)));
+
   return [...fresh, ...previous.filter((r) => failed.has(r.repo) && !have.has(keyOf(r)))];
 }
 
@@ -166,12 +175,15 @@ export function planWorklist(): { sources: BoardSource[]; notes: string[] } {
     try {
       const config = committedConfig(spec);
       const pm = config.projectManagement;
+
       return { repo: spec.name, url: spec.url, ...(pm ? { pm } : {}), columns: config.boardColumns };
     } catch (e) {
       return `${spec.name}: ${(e as Error).message.split("\n")[0]}`;
     }
   });
+
   const planned = boardSources(configs.filter((c): c is RepoBoard => typeof c !== "string"));
+
   return { sources: planned.sources, notes: [...configs.filter((c): c is string => typeof c === "string"), ...planned.notes] };
 }
 
@@ -179,11 +191,13 @@ export function planWorklist(): { sources: BoardSource[]; notes: string[] } {
 export function finishWorklist(planNotes: readonly string[], read: SourceRead, now = Date.now()): WorklistCache {
   const cache = { at: now, rows: keepLastGood(readWorklist().rows, read.rows, read.failedRepos), notes: [...planNotes, ...read.notes] };
   writeWorklist(cache);
+
   return cache;
 }
 
 /** Read every registered repo's board into the cache. A repo whose config cannot be read adds a note. */
 export function refreshWorklist(now = Date.now()): WorklistCache {
   const plan = planWorklist();
+
   return finishWorklist(plan.notes, readBoards(plan.sources), now);
 }

@@ -33,10 +33,13 @@ describe("github board", () => {
 
   test("githubRows asks who is signed in, then runs one graphql call", () => {
     const calls: string[][] = [];
+
     const rows = githubRows("o/r", "ob", (cmd) => {
       calls.push(cmd);
+
       return cmd[2] === "user" ? { ok: true, stdout: "me\n", stderr: "", code: 0 } : { ok: true, stdout: reply, stderr: "", code: 0 };
     });
+
     expect(rows).toHaveLength(2);
     expect(calls).toHaveLength(2);
     expect(calls[1]).toContain("login=me");
@@ -58,6 +61,7 @@ describe("github board", () => {
     JSON.stringify({
       data: { repository: { issues: { pageInfo: { hasNextPage: !!next, endCursor: next ?? null }, nodes: [{ number: n, title: `t${n}`, url: `u${n}`, updatedAt: "2026-01-01T00:00:00Z", labels: { nodes: [] }, parent: null, blockedBy: { nodes: [] } }] } } },
     });
+
   const ok = (stdout: string) => ({ ok: true, stdout, stderr: "", code: 0 });
 
   test("nextCursor is the end cursor only while another page exists", () => {
@@ -69,10 +73,13 @@ describe("github board", () => {
   test("reads every page, passing each end cursor as `after`", () => {
     const replies = [page(1, "c1"), page(2, "c2"), page(3)];
     const calls: string[][] = [];
+
     const rows = githubRows("o/r", "ob", (cmd) => {
       calls.push(cmd);
+
       return cmd[2] === "user" ? ok("me") : ok(replies.shift()!);
     });
+
     expect(rows.map((r) => r.id)).toEqual(["1", "2", "3"]);
     expect(calls.filter((c) => c.includes("graphql"))).toHaveLength(3);
     expect(calls[1]).not.toContain("after=c1");
@@ -94,6 +101,7 @@ describe("github board", () => {
       data: { repository: { issues: { nodes: [{ number: 9, title: "t", url: "u", updatedAt: "2026-01-01T00:00:00Z", labels: { nodes: labels.map((name) => ({ name })) }, parent: null, blockedBy: { nodes: [] },
         projectItems: { nodes: [null, { fieldValueByName: null }, { fieldValueByName: status ? { name: status } : null }] } }] } } },
     });
+
   const statusOf = (reply: string, columns = {}) => rowsFromGraphql(reply, "ob", columns)[0]!.status;
 
   test("the project Status column sets the status, through the configured map first", () => {
@@ -120,6 +128,7 @@ describe("github board", () => {
     number: n, title: `t${n}`, url: `u${n}`, updatedAt: "2026-01-01T00:00:00Z", labels: { nodes: [] }, parent: null, blockedBy: { nodes: [] },
     assignees: { totalCount: assignees }, projectItems: { nodes: onBoard ? [{ fieldValueByName: { name: "Todo" } }] : [] },
   });
+
   const mixed = JSON.stringify({ data: { repository: { issues: { nodes: [issue(1, 1, true), issue(2, 0, true), issue(3, 0, false)] } } } });
 
   test("scope: assigned and all keep every returned issue; unassigned keeps nobody's issues on a board", () => {
@@ -131,16 +140,22 @@ describe("github board", () => {
   test("only the assigned scope filters on a login, and only it declares $login", () => {
     expect(boardQuery("assigned")).toContain("filterBy:{assignee:$login}");
     expect(boardQuery("assigned")).toContain("$login:String!");
+
     for (const scope of ["unassigned", "all"] as const) {
       expect(boardQuery(scope)).not.toContain("$login");
       expect(boardQuery(scope)).not.toContain("filterBy");
     }
+
     expect(BOARD_QUERY).toBe(boardQuery("assigned"));
   });
 
   test("a non-assigned scope never asks who is signed in", () => {
     const calls: string[][] = [];
-    const rows = githubRows("o/r", "ob", (cmd) => { calls.push(cmd); return ok(mixed); }, {}, "all");
+
+    const rows = githubRows("o/r", "ob", (cmd) => { calls.push(cmd);
+
+ return ok(mixed); }, {}, "all");
+
     expect(rows).toHaveLength(3);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.join(" ")).not.toContain("login=");

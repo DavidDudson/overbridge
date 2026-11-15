@@ -21,9 +21,11 @@ let root: string;
 
 function sh(cmd: string[], cwd: string) {
   const p = Bun.spawnSync({ cmd, cwd, env: process.env, stdout: "pipe", stderr: "pipe" });
+
   if (p.exitCode !== 0) {
     throw new Error(`${cmd.join(" ")}: ${p.stderr}`);
   }
+
   return p.stdout.toString().trim();
 }
 
@@ -34,11 +36,14 @@ const ok = (stdout = ""): RunResult => ({ ok: true, code: 0, stdout, stderr: "" 
 function fakeDeps(listTabs: string, focused = "") {
   const calls: string[][] = [];
   const stopped = { apps: [] as string[], checks: [] as string[] };
+
   const deps: IceboxDeps = {
     mux: zellijMux(
       (cmd) => {
         calls.push(cmd);
+
         if (cmd[2] === "list-tabs") return ok(listTabs);
+
         return cmd[2] === "current-tab-info" && focused ? ok(`name: ${focused}\n`) : ok();
       },
       { env: { ZELLIJ: "0" } },
@@ -46,6 +51,7 @@ function fakeDeps(listTabs: string, focused = "") {
     stopApps: async (ws) => void stopped.apps.push(ws),
     stopChecks: (ws) => (stopped.checks.push(ws), 0),
   };
+
   return { deps, calls, stopped };
 }
 
@@ -164,6 +170,7 @@ describe("opt-in reclaim", () => {
     sh(["git", "push", "-q", "origin", branch], wt);
     mkdirSync(join(wt, "node_modules", "dep"), { recursive: true });
     writeFileSync(join(wt, "node_modules", "dep", "i.js"), "x");
+
     return wt;
   }
 
@@ -251,11 +258,13 @@ describe("opt-in reclaim", () => {
   test("thaw undoes the worktrees it made when a later repo fails, and stays iceboxed", async () => {
     ob(["repo", "add", "lib", join(tmp, "remote.git")]);
     ob(["new", "duo", "-r", "app", "-r", "lib"]);
+
     for (const [repo, branch] of [["app", "feat/duo-a"], ["lib", "feat/duo-b"]] as const) {
       ob(["checkout", repo, branch, "--ws", "duo"]);
       sh(["git", "commit", "-q", "--allow-empty", "-m", branch], join(root, "duo", repo));
       sh(["git", "push", "-q", "origin", branch], join(root, "duo", repo));
     }
+
     await icebox("duo", { dropWorktree: true }, fakeDeps("").deps);
     expect(readState().workspaces.duo!.iceboxed?.dropped).toEqual([
       { repo: "app", branch: "feat/duo-a" },

@@ -9,6 +9,7 @@ import { run, shellQuote } from "./util";
 export type MuxExec = (cmd: string[]) => { ok: boolean; stdout: string; stderr?: string };
 
 export const MuxKind = { Zellij: "zellij", Tmux: "tmux" } as const;
+
 export type MuxKind = (typeof MuxKind)[keyof typeof MuxKind];
 
 /** A pane as the multiplexer lists it. `id` is what `focusPane` and `closePane` take back. */
@@ -33,6 +34,7 @@ export interface NewPane {
 
 /** Where focus ends up after a tab opens: back on the tab you were on, or on the new tab. */
 export const TabFocus = { Background: "background", Foreground: "foreground" } as const;
+
 export type TabFocus = (typeof TabFocus)[keyof typeof TabFocus];
 
 export interface MuxResult {
@@ -101,25 +103,34 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
   const env = opts.env ?? process.env;
   const meta = opts.metaDir ?? metaDir;
   const actIn = (session: string | undefined, args: string[]) => exec(session === undefined ? ["zellij", "action", ...args] : ["zellij", "--session", session, "action", ...args]);
+
   // "There is no active session!" can be a transient miss (a busy server) while this pane's own session is alive,
   // so ask for that session by name before giving up
   const act = (...args: string[]) => {
     const r = actIn(opts.session, args);
     const ownSession = env.ZELLIJ_SESSION_NAME;
+
     if (r.ok || opts.session !== undefined || !ownSession || !/no active session/i.test(`${r.stderr ?? ""}${r.stdout}`)) return r;
     // a stale name fails differently; report the first error, the one that says what went wrong
     const byName = actIn(ownSession, args);
+
     return byName.ok ? byName : r;
   };
+
   const target = (id: string) => `terminal_${id}`;
+
   const tabs = () => {
     const r = act("query-tab-names");
+
     return r.ok ? lines(r.stdout) : [];
   };
+
   const currentTab = () => {
     const r = act("current-tab-info");
+
     return r.ok ? /^name: (.+)$/m.exec(r.stdout)?.[1]?.trim() : undefined;
   };
+
   return {
     kind: MuxKind.Zellij,
     inSession: () => !!env.ZELLIJ,
@@ -129,8 +140,10 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
     currentTab,
     goToTab(name, pane) {
       const r = result(act("go-to-tab-name", name));
+
       // focusing a pane that already has focus exits 2, which is fine here
       if (r.ok && pane !== undefined) act("focus-pane-id", target(pane));
+
       return r;
     },
     openTab(spec, focus) {
@@ -140,16 +153,21 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
       writeFileSync(file, `layout {\n${specKdl({ ...spec, focus: true })}\n}\n`);
       const back = focus === TabFocus.Background ? currentTab() : undefined;
       const r = act("new-tab", "--layout", file, "--name", spec.name);
+
       if (!r.ok) return result(r);
+
       // new-tab always focuses the tab it makes, so go back to the pane you left
       if (back !== undefined) act("go-to-tab-name", back);
+
       return { ok: true };
     },
     closeTab(name) {
       const id = act("list-tabs").stdout.split("\n").flatMap((line) => {
         const m = /^\s*(\d+)\s+\d+\s+(.+?)\s*$/.exec(line);
+
         return m && m[2] === name ? [m[1]!] : [];
       })[0];
+
       return id !== undefined && act("close-tab-by-id", id).ok;
     },
     moveTab(name, index) {
@@ -158,8 +176,10 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
     },
     listPanes() {
       const r = act("list-panes", "--json");
+
       try {
         const panes = (r.ok ? JSON.parse(r.stdout) : []) as { id: number; is_plugin?: boolean; title?: string; tab_name?: string; exited?: boolean }[];
+
         return panes.filter((p) => !p.is_plugin).map((p) => ({ id: String(p.id), title: p.title ?? "", tab: p.tab_name ?? "", exited: p.exited === true }));
       } catch {
         return [];
@@ -171,8 +191,11 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
     newPane(req) {
       act("focus-pane-id", target(req.anchor));
       const args = ["new-pane", "--direction", req.direction, "--name", req.title, "--cwd", req.cwd];
+
       if (req.closeOnExit) args.push("--close-on-exit");
+
       if (req.command.length) args.push("--", ...req.command);
+
       return act(...args).ok;
     },
     sessionExists: (name) => lines(exec(["zellij", "list-sessions", "--short", "--no-formatting"]).stdout).includes(name),
@@ -200,12 +223,16 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
   const env = opts.env ?? process.env;
   const session = opts.session ?? configuredSession();
   const tmux = (...args: string[]) => exec(["tmux", ...args]);
+
   const windows = () => {
     const r = tmux("list-windows", "-t", `=${session}`, "-F", `#{window_id}${SEP}#{window_name}`);
+
     return r.ok ? lines(r.stdout).map((l) => ({ id: l.split(SEP)[0]!, name: l.split(SEP)[1] ?? "" })) : [];
   };
+
   // windows are addressed by id: a name starting with `@` (an orchestration tab) reads as a window id even after `=`
   const windowId = (name: string) => windows().find((w) => w.name === name)?.id;
+
   return {
     kind: MuxKind.Tmux,
     inSession: () => !!env.TMUX,
@@ -214,36 +241,47 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
     tabs: () => windows().map((w) => w.name),
     currentTab() {
       const r = tmux("display-message", "-p", "-t", `=${session}:`, "#{window_name}");
+
       return r.ok ? r.stdout.trim() || undefined : undefined;
     },
     goToTab(name, pane) {
       const id = windowId(name);
+
       if (id === undefined) return { ok: false, error: `no tab ${name}` };
       // one tmux call with `;` between the commands: separate processes repaint the screen once each, which flickers
       const select = ["select-window", "-t", id];
+
       if (pane === undefined) return result(tmux(...select));
       const both = tmux(...select, ";", "select-pane", "-t", pane);
+
       // a stale pane id must not undo the switch: go to the tab alone
       return both.ok ? { ok: true } : result(tmux(...select));
     },
     openTab(spec, focus) {
       const opened = tmux(...tabOpen(session, spec, { first: false, printId: true }));
+
       if (!opened.ok) return result(opened);
       const id = opened.stdout.trim();
+
       for (const cmd of tabFill(id, spec)) {
         const r = tmux(...cmd);
+
         if (!r.ok) return result(r);
       }
+
       return focus === TabFocus.Foreground ? result(tmux("select-window", "-t", id)) : { ok: true };
     },
     closeTab(name) {
       const id = windowId(name);
+
       return id !== undefined && tmux("kill-window", "-t", id).ok;
     },
     moveTab(name, index) {
       const order = windows().map((w) => w.id);
       const id = windowId(name);
+
       if (id === undefined) return;
+
       for (let at = order.indexOf(id); at > index; at--) {
         tmux("swap-window", "-d", "-s", id, "-t", order[at - 1]!);
         [order[at - 1], order[at]] = [order[at]!, order[at - 1]!];
@@ -251,9 +289,12 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
     },
     listPanes() {
       const r = tmux("list-panes", "-s", "-t", `=${session}`, "-F", ["#{pane_id}", "#{window_name}", "#{pane_title}", "#{pane_dead}"].join(SEP));
+
       if (!r.ok) return [];
+
       return lines(r.stdout).map((l) => {
         const [id = "", tab = "", title = "", dead = "0"] = l.split(SEP);
+
         return { id, tab, title, exited: dead === "1" };
       });
     },
@@ -261,10 +302,13 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
     closePane: (id) => tmux("kill-pane", "-t", id).ok,
     newPane(req) {
       const args = ["split-window", "-P", "-F", "#{pane_id}", "-t", req.anchor, req.direction === "right" ? "-h" : "-v", "-c", req.cwd];
+
       if (req.command.length) args.push(req.command.map(shellQuote).join(" "));
       const r = tmux(...args);
+
       if (!r.ok) return false;
       tmux("select-pane", "-t", r.stdout.trim(), "-T", req.title);
+
       return true;
     },
     sessionExists: (name) => tmux("has-session", "-t", `=${name}`).ok,
@@ -277,7 +321,9 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
 /** Which multiplexer this process uses: the one it runs inside, else `$OVERBRIDGE_MUX`, else zellij. */
 export function muxKind(env: Record<string, string | undefined> = process.env): MuxKind {
   if (env.TMUX) return MuxKind.Tmux;
+
   if (env.ZELLIJ) return MuxKind.Zellij;
+
   return env.OVERBRIDGE_MUX === MuxKind.Tmux ? MuxKind.Tmux : MuxKind.Zellij;
 }
 
@@ -293,5 +339,6 @@ export const layoutPath = (kind: MuxKind) => join(metaDir(), kind === MuxKind.Tm
  */
 export function defaultMux(env: Record<string, string | undefined> = process.env, exec: MuxExec = safeExec): Mux {
   if (muxKind(env) === MuxKind.Tmux) return tmuxMux(exec, { env, conf: tmuxConfPath });
+
   return zellijMux(exec, { env, ...(env.ZELLIJ ? {} : { session: configuredSession() }) });
 }

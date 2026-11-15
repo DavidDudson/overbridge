@@ -47,27 +47,33 @@ export const realDeps: AheadDeps = {
   dirty: git.isDirty,
   git: (wt, args) => {
     const r = run(["git", "-C", wt, ...args]);
+
     return r.ok ? r.stdout : undefined;
   },
 };
 
 const count = (deps: AheadDeps, wt: string, range: string): number | undefined => {
   const n = deps.git(wt, ["rev-list", "--count", range]);
+
   return n !== undefined && /^\d+$/.test(n) ? Number(n) : undefined;
 };
 
 /** The row for one worktree, or undefined when it is not ahead or cannot be read. */
 function aheadRow(deps: AheadDeps, ws: string, repo: string, pr: number | undefined): AheadRow | undefined {
   const wt = worktreePath(ws, repo);
+
   if (!deps.exists(wt)) return undefined;
   const branch = deps.head(wt);
   const base = deps.base(repo);
+
   if (branch === "HEAD" || `origin/${branch}` === base) return undefined;
   const ahead = count(deps, wt, `${base}..HEAD`);
   const behind = count(deps, wt, `HEAD..${base}`);
+
   if (!ahead || behind === undefined) return undefined;
   const subjects = (deps.git(wt, ["log", `-${MAX_SUBJECTS}`, "--format=%s", `${base}..HEAD`]) ?? "").split("\n").filter(Boolean);
   const lastCommit = deps.git(wt, ["log", "-1", "--format=%aI"]) ?? "";
+
   return { ws, repo, branch, session: ws, base, ahead, behind, subjects, lastCommit, ...(pr === undefined ? {} : { pr }), dirty: deps.dirty(wt) };
 }
 
@@ -78,16 +84,20 @@ function aheadRow(deps: AheadDeps, ws: string, repo: string, pr: number | undefi
  */
 export function aheadRows(deps: AheadDeps = realDeps, warn: (message: string) => void = console.error): AheadRow[] {
   const state = deps.state();
+
   return Object.keys(state.workspaces)
     .sort(naturalSort)
     .flatMap((ws) => {
       const w = getWorkspace(state, ws);
+
       if (isIceboxed(w)) return [];
+
       return Object.entries(w.repos).flatMap(([repo, claim]) => {
         try {
           return aheadRow(deps, ws, repo, claim.pr) ?? [];
         } catch (e) {
           warn(`ahead: skipped ${ws}/${repo}: ${errorMessage(e)}`);
+
           return [];
         }
       });

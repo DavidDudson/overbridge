@@ -25,9 +25,11 @@ export const CheckExit = {
   TimedOut: 124,
   Stalled: 137,
 } as const;
+
 export type CheckExit = (typeof CheckExit)[keyof typeof CheckExit];
 
 export const StopReason = { TimedOut: "timed-out", Stalled: "stalled" } as const;
+
 export type StopReason = (typeof StopReason)[keyof typeof StopReason];
 
 export interface Ticket {
@@ -43,6 +45,7 @@ export interface Ticket {
 }
 
 const TURN_POLL_MS = 1_000;
+
 /** How long the 1-minute load average takes to show most of a new run. */
 const LOAD_SETTLE_MS = 60_000;
 const MAX_SAMPLE_MS = 15_000;
@@ -67,10 +70,12 @@ export function readTickets(dir = queueDir()): Ticket[] {
       return [];
     }
   })();
+
   return names
     .flatMap((name) => {
       try {
         const parsed: unknown = JSON.parse(readFileSync(join(dir, name), "utf8"));
+
         return isTicket(parsed) ? [parsed] : [];
       } catch {
         return [];
@@ -122,6 +127,7 @@ export const Gate = {
   Parallel: "parallel",
   Load: "load",
 } as const;
+
 export type Gate = (typeof Gate)[keyof typeof Gate];
 
 export interface Machine {
@@ -132,12 +138,15 @@ export interface Machine {
 /** Whether `me` may start now, given the live queue, or what holds it back. */
 export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machine: Machine, nowMs: number): Gate {
   const ahead = live.filter((t) => byQueueOrder(t, me) < 0);
+
   if (!ahead.every(isRunning)) {
     return Gate.Queue;
   }
+
   if (settings.maxParallel !== undefined && ahead.length >= settings.maxParallel) {
     return Gate.Parallel;
   }
+
   return loadAllows(machine.load1 + unsettledLoad(ahead, nowMs), machine.cores, settings.maxLoadPercent) ? Gate.Start : Gate.Load;
 }
 
@@ -167,9 +176,11 @@ const signalGroup = (pgid: number, signal: NodeJS.Signals) => {
 async function killGroup(pgid: number) {
   signalGroup(pgid, "SIGTERM");
   const deadline = Date.now() + KILL_GRACE_MS;
+
   while (groupAlive(pgid) && Date.now() < deadline) {
     await Bun.sleep(200);
   }
+
   signalGroup(pgid, "SIGKILL");
 }
 
@@ -179,6 +190,7 @@ function reap(ticket: Ticket, dir: string) {
     log(`overbridge check: the holder from ${ticket.ws} died; killing what it left running: ${ticket.command}`);
     signalGroup(ticket.runPid, "SIGKILL");
   }
+
   rmSync(join(dir, ticketName(ticket)), { force: true });
 }
 
@@ -188,17 +200,21 @@ function reap(ticket: Ticket, dir: string) {
  */
 export function stopChecksFor(ws: string, dir = queueDir()): number {
   const mine = readTickets(dir).filter((t) => t.ws === ws);
+
   for (const t of mine) {
     if (t.runPid !== undefined && groupAlive(t.runPid)) {
       signalGroup(t.runPid, "SIGTERM");
     }
+
     try {
       process.kill(t.pid, "SIGTERM");
     } catch {
       // the owner is already gone
     }
+
     rmSync(join(dir, ticketName(t)), { force: true });
   }
+
   return mine.length;
 }
 
@@ -229,6 +245,7 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
   const cores = availableParallelism();
   const limit = (cores * settings.maxLoadPercent) / 100;
   let announced: string | undefined;
+
   for (;;) {
     const { live, dead } = splitQueue(readTickets(dir), pidAlive);
     dead.forEach((t) => reap(t, dir));
@@ -236,26 +253,33 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
     const ahead = live.filter((t) => byQueueOrder(t, me) < 0);
     const load1 = loadavg()[0] ?? 0;
     const gate = gateFor(me, live, settings, { load1, cores }, now);
+
     if (gate === Gate.Start) {
       return true;
     }
+
     const running = ahead.filter(isRunning);
     const runningNow = running.length ? `running: ${running.map(label).join("; ")}` : "nothing running yet";
     const overLoad = `load ${(load1 + unsettledLoad(running, now)).toFixed(2)} is over ${limit.toFixed(1)} (${settings.maxLoadPercent}% of ${cores} cores)`;
+
     if (now >= deadlineMs) {
       log(
         gate === Gate.Load
           ? `overbridge check: ${overLoad} for ${settings.waitSeconds}s (wait-seconds); giving up`
           : `overbridge check: the queue was still busy after ${settings.waitSeconds}s (wait-seconds); ${runningNow}`,
       );
+
       return false;
     }
+
     const key = `${gate} ${ahead.map(ticketName).join(" ")}`;
+
     if (announced !== key) {
       announced = key;
       const cap = gate === Gate.Parallel ? ` (max-parallel ${settings.maxParallel})` : "";
       log(gate === Gate.Load ? `overbridge check: ${overLoad}, waiting; ${runningNow}` : `overbridge check: waiting behind ${ahead.length} in the queue${cap}; ${runningNow}`);
     }
+
     await Bun.sleep(Math.min(TURN_POLL_MS, Math.max(0, deadlineMs - now)));
   }
 }
@@ -273,29 +297,38 @@ async function runHeld(inv: ShellInvocation, me: Ticket, file: string, settings:
     stderr: "inherit",
     detached: true,
   });
+
   onStart(child.pid);
   const startedMs = Date.now();
   writeTicket(file, { ...me, runPid: child.pid, runningSinceMs: startedMs });
 
   const watch: { stopped?: StopReason; sample?: CpuSample; sampledMs: number } = { sampledMs: startedMs };
+
   const stop = (reason: StopReason, message: string) => {
     if (watch.stopped) {
       return;
     }
+
     watch.stopped = reason;
     log(`overbridge check: ${message}: ${me.command}`);
     void killGroup(child.pid);
   };
+
   const sampleMs = sampleIntervalMs(settings.stallSeconds);
+
   const timer = setInterval(() => {
     const now = Date.now();
+
     if (now - startedMs >= settings.timeoutSeconds * 1_000) {
       stop(StopReason.TimedOut, `stopped after ${settings.timeoutSeconds}s (timeout-seconds; pass --timeout-seconds for longer)`);
+
       return;
     }
+
     if (now - watch.sampledMs >= sampleMs) {
       watch.sampledMs = now;
       watch.sample = nextSample(watch.sample, groupCpuSeconds(child.pid), now);
+
       if (isStalled(watch.sample, now, settings.stallSeconds)) {
         stop(StopReason.Stalled, `killed: it used no CPU for ${settings.stallSeconds}s (stall-seconds)`);
       }
@@ -304,9 +337,11 @@ async function runHeld(inv: ShellInvocation, me: Ticket, file: string, settings:
 
   const code = await child.exited;
   clearInterval(timer);
+
   if (watch.stopped) {
     return exitFor(watch.stopped);
   }
+
   return child.signalCode ? signalExit(child.signalCode as NodeJS.Signals) : code;
 }
 
@@ -318,6 +353,7 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
   if (process.env[HELD_ENV]) {
     return exec(inv.cmd, { cwd: inv.cwd, env: inv.env });
   }
+
   const dir = queueDir();
   mkdirSync(dir, { recursive: true });
   const me: Ticket = { pid: process.pid, ...who, queuedAtMs: Date.now() };
@@ -326,28 +362,37 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
 
   const held: { runPid?: number } = {};
   const leave = () => rmSync(file, { force: true });
+
   const onSignal = (signal: NodeJS.Signals) => {
     if (held.runPid !== undefined) {
       signalGroup(held.runPid, "SIGTERM");
     }
+
     leave();
     process.exit(signalExit(signal));
   };
+
   const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
   signals.forEach((s) => process.on(s, onSignal));
   process.on("exit", leave);
 
   try {
     const deadlineMs = me.queuedAtMs + settings.waitSeconds * 1_000;
+
     if (!(await waitForStart(me, dir, settings, deadlineMs))) {
       recordCheck(me, Date.now(), undefined, CheckExit.GaveUp);
+
       return CheckExit.GaveUp;
     }
+
     const startedMs = Date.now();
+
     const code = await runHeld(inv, me, file, settings, (pid) => {
       held.runPid = pid;
     });
+
     recordCheck(me, startedMs, Date.now(), code);
+
     return code;
   } finally {
     signals.forEach((s) => process.off(s, onSignal));

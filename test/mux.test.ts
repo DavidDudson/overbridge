@@ -13,6 +13,7 @@ const ok = (stdout = ""): ReturnType<MuxExec> => ({ ok: true, stdout });
 const recorder = (answer: (cmd: string[]) => ReturnType<MuxExec> = () => ok()) => {
   const calls: string[][] = [];
   const exec: MuxExec = (cmd) => (calls.push(cmd), answer(cmd));
+
   return { calls, exec };
 };
 
@@ -58,6 +59,7 @@ describe("zellijMux", () => {
       { id: 2, is_plugin: true, title: "status", tab_name: "w" },
       { id: 3, title: "w · terminal", tab_name: "w", exited: true },
     ];
+
     const mux = zellijMux(recorder(() => ok(JSON.stringify(panes))).exec);
     expect(mux.listPanes()).toEqual([
       { id: "1", title: "w · claude", tab: "w", exited: false },
@@ -89,8 +91,10 @@ describe("zellijMux", () => {
 
 describe("tmuxMux argv", () => {
   const windows = "@0|||@root\n@1|||w1\n@2|||w2\n";
+
   const mux = (answer?: (cmd: string[]) => ReturnType<MuxExec>) => {
     const r = recorder(answer);
+
     return { ...r, mux: tmuxMux(r.exec, { session: "s", env: {} }) };
   };
 
@@ -245,9 +249,11 @@ describe("tmux layout script", () => {
 
   test("the server config has no prefix, no status bar, extended keys, fixed titles and only Alt root bindings", () => {
     const conf = tmuxConf(["ob"]);
+
     for (const line of ["set -g prefix None", "set -g status off", "set -g mouse on", "set -s extended-keys always", "set -g allow-set-title off", "set -g base-index 0"]) {
       expect(conf).toContain(`${line}\n`);
     }
+
     expect(conf.split("\n").filter((l) => l.startsWith("bind")).every((l) => l.startsWith("bind -n M-"))).toBe(true);
     expect(conf).toContain('bind -n M-3 run-shell -b "ob go 3"');
     expect(conf).toContain('bind -n M-w run-shell -b "ob next"');
@@ -264,8 +270,10 @@ describe.skipIf(!Bun.which("tmux"))("tmuxMux against a real tmux", () => {
   // Bun's spawn ignores `delete process.env.TMUX`, so the child's environment is built here, with no `$TMUX` and the private socket directory.
   const privateExec: MuxExec = (cmd) => {
     const { TMUX: _session, TMUX_PANE: _pane, ...env } = process.env;
+
     try {
       const p = Bun.spawnSync({ cmd, env: { ...env, TMUX_TMPDIR: tmp }, stdout: "pipe", stderr: "pipe" });
+
       return { ok: p.exitCode === 0, stdout: p.stdout.toString().trim(), stderr: p.stderr.toString().trim() };
     } catch {
       return { ok: false, stdout: "" };

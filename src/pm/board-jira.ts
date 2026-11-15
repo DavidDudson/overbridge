@@ -49,9 +49,11 @@ function openBlockers(issue: RawIssue): string[] {
 export function rowsFromJiraRaw(reply: string, project: string, repos: string[], site?: string): WorkRow[] {
   const issues = JSON.parse(reply.trim() || "[]") as RawIssue[];
   const base = site?.replace(/\/+$/, "");
+
   return issues.map((i): WorkRow => {
     const f = i.fields ?? {};
     const priority = priorityFromJira(f.priority?.name ?? undefined);
+
     return {
       repo: project,
       repos,
@@ -75,8 +77,10 @@ export const worklistJql = (project: string, filter = DEFAULT_WORKLIST_JQL) =>
 /** Open tickets assigned to the signed-in user in Jira project `project`, one row per ticket. */
 export function jiraRows(project: string, repos: string[], opts: { filter?: string; site?: string } = {}, runner: Runner = run): WorkRow[] {
   const r = runner(["jira", "issue", "list", "--jql", worklistJql(project, opts.filter), "--raw"]);
+
   if (!r.ok) {
     throw new Error(`jira: reading ${project} failed: ${(r.stderr || r.stdout).trim()}. Check \`jira me\` works and project-management.worklist-jql is valid JQL`);
   }
+
   return rowsFromJiraRaw(r.stdout, project, repos, opts.site);
 }

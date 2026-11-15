@@ -23,20 +23,26 @@ export const tabRetry = { delaysMs: [250, 500], sleep: (ms: number) => Bun.sleep
 export function openTab(ws: string, prompt?: string, focus: TabFocus = TabFocus.Background, mux: Mux = defaultMux(), resume = false): MuxResult {
   if (!mux.inSession()) {
     log(`${ws} has no tab outside ${mux.kind}; run \`overbridge up\` to open it`);
+
     return { ok: true };
   }
+
   const spec = workspaceTabSpec(ws, selfCommand(), { sidebarWidth: sidebarWidth(), focus: true, agentCwd: agentDirOf(ws), ...(prompt ? { prompt } : {}), ...(resume ? { resume } : {}) });
   let r = mux.openTab(spec, focus);
+
   for (const delay of tabRetry.delaysMs) {
     if (r.ok) break;
     log(`could not open a tab for ${ws}: ${r.error ?? "no reason given"}; retrying`);
     tabRetry.sleep(delay);
+
     if (mux.tabs().includes(ws)) return { ok: true };
     r = mux.openTab(spec, focus);
   }
+
   if (!r.ok) {
     log(`could not open a tab for ${ws}: ${r.error ?? "no reason given"}`);
   }
+
   return r;
 }
 
@@ -47,6 +53,7 @@ export const tabCommand = (ws: string, prompt?: string) => `overbridge tab ${she
 export function requireTab(...args: Parameters<typeof openTab>) {
   const [ws, prompt] = args;
   const r = openTab(...args);
+
   if (!r.ok) {
     fail(`${ws} exists but its tab did not open (${r.error ?? "no reason given"}). Open it with: ${tabCommand(ws, prompt)}`);
   }

@@ -17,6 +17,7 @@ export const MERGE_SETTINGS_TTL_MS = 60 * 60_000;
 const KEEP_MS = 90 * 24 * 60 * 60_000;
 
 type Entry = { value: string; at: number };
+
 const file = () => join(metaDir(), "values.json");
 
 function read(): Record<string, Entry> {
@@ -34,9 +35,12 @@ function read(): Record<string, Entry> {
  */
 export function cachedValue(key: string, ttlMs: number, fetch: () => string | undefined, now = Date.now(), staleOnError = true): string | undefined {
   const entry = read()[key];
+
   if (entry && now - entry.at < ttlMs) return entry.value;
   const value = fetch();
+
   if (value === undefined) return staleOnError ? entry?.value : undefined;
+
   try {
     // entries long past any TTL (a signed-out account's `gh:user:<stamp>`) are dropped as the file is rewritten
     const kept = Object.fromEntries(Object.entries(read()).filter(([, e]) => now - e.at < KEEP_MS));
@@ -49,6 +53,7 @@ export function cachedValue(key: string, ttlMs: number, fetch: () => string | un
   } catch {
     // an unwritable cache only costs the next caller a fetch
   }
+
   return value;
 }
 
@@ -58,8 +63,10 @@ export function cachedValue(key: string, ttlMs: number, fetch: () => string | un
  */
 export function ghAccountStamp(): string {
   const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+
   if (token) return `token-${Bun.hash(token).toString(36)}`;
   const dir = process.env.GH_CONFIG_DIR || join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "gh");
+
   try {
     return String(Math.trunc(statSync(join(dir, "hosts.yml")).mtimeMs));
   } catch {

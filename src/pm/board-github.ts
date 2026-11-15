@@ -4,10 +4,11 @@ import { keyOf, statusFromColumn, type WorkRow, type WorkStatus } from "./workli
 
 type Runner = (cmd: string[]) => RunResult;
 
-export const BOARD_FIELDS = `pageInfo{hasNextPage endCursor} nodes{number title url updatedAt assignees(first:1){totalCount} projectItems(first:10){nodes{fieldValueByName(name:\"Status\"){...on ProjectV2ItemFieldSingleSelectValue{name}}}} labels(first:20){nodes{name}} parent{number} blockedBy(first:20){nodes{number state}}}`;
+export const BOARD_FIELDS = `pageInfo{hasNextPage endCursor} nodes{number title url updatedAt assignees(first:1){totalCount} projectItems(first:10){nodes{fieldValueByName(name:"Status"){...on ProjectV2ItemFieldSingleSelectValue{name}}}} labels(first:20){nodes{name}} parent{number} blockedBy(first:20){nodes{number state}}}`;
 
 /** Whose issues the list shows: those assigned to you, those in the project with nobody on them, or both. */
 export const WORKLIST_SCOPES = ["assigned", "unassigned", "all"] as const;
+
 export type WorklistScope = (typeof WORKLIST_SCOPES)[number];
 
 /**
@@ -38,6 +39,7 @@ interface Node {
 /** `blocked` and `in progress` style labels set the status; anything else is todo. */
 function statusFromLabels(labels: string[]): WorkStatus {
   const found = labels.map((l) => statusFromColumn(l));
+
   return found.find((s) => s === "blocked") ?? found.find((s) => s === "in-progress") ?? "todo";
 }
 
@@ -49,12 +51,14 @@ type Reply = { data?: { repository?: { issues?: { nodes?: Node[]; pageInfo?: { h
 /** The cursor of the next page of a reply, or undefined on the last page. */
 export function nextCursor(reply: string): string | undefined {
   const info = (JSON.parse(reply) as Reply).data?.repository?.issues?.pageInfo;
+
   return info?.hasNextPage && info.endCursor ? info.endCursor : undefined;
 }
 
 /** `unassigned` keeps only issues nobody holds that sit on a project board, so stray issues do not flood the list. */
 function inScope(n: Node, scope: WorklistScope): boolean {
   if (scope !== "unassigned") return true;
+
   return (n.assignees?.totalCount ?? 0) === 0 && (n.projectItems?.nodes.some((i) => i !== null) ?? false);
 }
 
@@ -70,6 +74,7 @@ function boardColumn(n: Node): string | undefined {
 function statusOf(n: Node, labels: string[], columns: Record<string, WorkStatus>): WorkStatus {
   const column = boardColumn(n);
   const fromColumn = column ? statusFromColumn(column, columns) : "todo";
+
   return fromColumn !== "todo" ? fromColumn : statusFromLabels(labels);
 }
 
@@ -79,8 +84,10 @@ function statusOf(n: Node, labels: string[], columns: Record<string, WorkStatus>
  */
 export function rowsFromGraphql(reply: string, repo: string, columns: Record<string, WorkStatus> = {}, scope: WorklistScope = "assigned"): WorkRow[] {
   const nodes = (JSON.parse(reply) as Reply).data?.repository?.issues?.nodes ?? [];
+
   return nodes.filter((n) => inScope(n, scope)).map((n): WorkRow => {
     const labels = n.labels.nodes.map((l) => l.name);
+
     return {
       repo,
       id: String(n.number),
@@ -99,27 +106,37 @@ export function rowsFromGraphql(reply: string, repo: string, columns: Record<str
 export function githubRows(slug: string, repo: string, runner: Runner = run, columns: Record<string, WorkStatus> = {}, scope: WorklistScope = "assigned"): WorkRow[] {
   const [owner, name] = slug.split("/") as [string, string];
   const login: string[] = [];
+
   if (scope === "assigned") {
     let failure = "";
+
     const read = () => {
       const r = runner(["gh", "api", "user", "-q", ".login"]);
       failure = r.stderr || "gh printed nothing";
+
       return r.ok && r.stdout.trim() ? r.stdout.trim() : undefined;
     };
+
     // who is signed in changes almost never: one read per hour for every worklist refresh. A caller that injects its own runner (a test) is not cached.
     const who = runner === run ? cachedValue(`gh:user:${ghAccountStamp()}`, USER_TTL_MS, read) : read();
+
     if (!who) throw new Error(`github: cannot tell who is signed in: ${failure}`);
     login.push("-F", `login=${who}`);
   }
+
   const rows: WorkRow[] = [];
   let after: string | undefined;
+
   for (let page = 0; page < MAX_PAGES; page++) {
     const r = runner(["gh", "api", "graphql", "-f", `query=${boardQuery(scope)}`, "-F", `owner=${owner}`, "-F", `name=${name}`, ...login, ...(after ? ["-F", `after=${after}`] : [])]);
+
     if (!r.ok) throw new Error(`github: reading ${slug} failed: ${r.stderr || r.stdout}`);
     rows.push(...rowsFromGraphql(r.stdout, repo, columns, scope));
     after = nextCursor(r.stdout);
+
     if (!after) return rows;
   }
+
   throw new Error(`github: ${slug} has more than ${MAX_PAGES * 100} open issues, stopping`);
 }
 
@@ -134,6 +151,7 @@ export interface ProjectBoard {
 export function parseProject(spec: string, defaultOwner: string | undefined, statuses?: string[]): ProjectBoard | undefined {
   const m = /^(?:([\w.-]+)\/)?(\d+)$/.exec(spec.trim());
   const owner = m?.[1] ?? defaultOwner;
+
   return m && owner ? { owner, number: Number(m[2]), ...(statuses ? { statuses } : {}) } : undefined;
 }
 
@@ -150,12 +168,16 @@ interface ProjectItem {
 export function rowsFromProject(json: string, slug: string, repo: string, statuses?: string[], columns: Record<string, WorkStatus> = {}): WorkRow[] {
   const items = (JSON.parse(json) as { items?: ProjectItem[] }).items ?? [];
   const want = statuses?.map((s) => s.trim().toLowerCase());
+
   return items.flatMap((i): WorkRow[] => {
     const c = i.content;
+
     if (!c || c.type !== "Issue" || c.number === undefined || c.repository !== slug) return [];
     const status = statusFromColumn(i.status, columns);
+
     if (want ? !want.includes((i.status ?? "").trim().toLowerCase()) : status === "done") return [];
     const labels = i.labels ?? [];
+
     return [{ repo, id: String(c.number), title: c.title ?? i.title ?? "", url: c.url ?? "", status, labels: i.priority ? [...labels, i.priority] : labels, blockedBy: [], updatedAt: "" }];
   });
 }
@@ -163,7 +185,9 @@ export function rowsFromProject(json: string, slug: string, repo: string, status
 /** Items of a Projects v2 board that belong to `slug`, as work rows labelled with `repo`. Needs `gh auth refresh -s project`. */
 export function projectRows(board: ProjectBoard, slug: string, repo: string, runner: Runner = run, columns: Record<string, WorkStatus> = {}): WorkRow[] {
   const r = runner(["gh", "project", "item-list", String(board.number), "--owner", board.owner, "--limit", "500", "--format", "json"]);
+
   if (!r.ok) throw new Error(`github: reading project ${board.owner}/${board.number} failed: ${(r.stderr || r.stdout).trim().split("\n")[0]}. Check \`gh auth refresh -s project\``);
+
   return rowsFromProject(r.stdout, slug, repo, board.statuses, columns);
 }
 

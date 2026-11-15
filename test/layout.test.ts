@@ -35,6 +35,7 @@ describe("layoutKdl", () => {
     expect(first).toContain('args "sidebar" "--ws" "@root"');
     expect(first).toContain('args "claude" "@root"\n');
     expect(first).not.toContain('"top"');
+
     for (const tab of rest) expect(tab.split("\n")[0]).not.toContain("focus=true");
   });
 
@@ -44,11 +45,13 @@ describe("layoutKdl", () => {
 
   test("every tab has sidebar, top panel, and agent in the workspace dir", () => {
     const kdl = layoutKdl(["a", "b"], self);
+
     for (const ws of ["a", "b"]) {
       expect(kdl).toContain(`args "sidebar" "--ws" "${ws}"`);
       expect(kdl).toContain(`args "top" "--ws" "${ws}"`);
       expect(kdl).toContain(`args "claude" "${ws}"`);
     }
+
     expect(kdl).toContain(`size=${SIDEBAR_WIDTH}`);
     expect(kdl).toContain(`size=${TOP_ROWS}`);
   });
@@ -117,6 +120,7 @@ describe("user layout", () => {
     writeFileSync(path, "layout {}\n");
     const choice = chooseLayout(["a"], self, "tmux", "workspaces", path);
     expect(choice.source).toBe("generated");
+
     if (choice.source === "generated") {
       expect(choice.text).toStartWith('"new-session"');
       expect(choice.conf).toContain("set -g prefix None");
@@ -146,6 +150,7 @@ describe("newTabKdl", () => {
 
 describe("agentDir", () => {
   const home = () => join(tmp, "home");
+
   const transcript = (dir: string) => {
     mkdirSync(transcriptDir(dir, home()), { recursive: true });
     writeFileSync(join(transcriptDir(dir, home()), "s.jsonl"), "{}\n");

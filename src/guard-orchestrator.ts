@@ -161,35 +161,44 @@ export function splitCommand(cmd: string): Split {
   let word = "";
   let inWord = false;
   let quote: "'" | '"' | undefined;
+
   const endWord = () => {
     if (inWord) {
       words.push(word);
     }
+
     word = "";
     inWord = false;
   };
+
   const endSegment = () => {
     endWord();
+
     if (words.length) {
       segments.push(words);
     }
+
     words = [];
   };
 
   for (let i = 0; i < cmd.length; i++) {
     const c = cmd[i]!;
     const next = cmd[i + 1];
+
     if (quote === "'") {
       if (c === "'") {
         quote = undefined;
       } else {
         word += c;
       }
+
       continue;
     }
+
     if (c === "`" || (c === "$" && next === "(")) {
       return { reason: blocked("command substitution") };
     }
+
     if (quote === '"') {
       if (c === '"') {
         quote = undefined;
@@ -198,8 +207,10 @@ export function splitCommand(cmd: string): Split {
       } else {
         word += c;
       }
+
       continue;
     }
+
     if (c === "'" || c === '"') {
       quote = c;
       inWord = true;
@@ -212,21 +223,26 @@ export function splitCommand(cmd: string): Split {
       if (next === ">") {
         return { reason: blocked("redirection") };
       }
+
       endWord();
     } else if (c === ">") {
       const safe = SAFE_REDIRECT.exec(cmd.slice(i));
+
       if (!safe) {
         return { reason: blocked("redirection to a file") };
       }
+
       // the `2` of `2>&1` names a descriptor, not an argument
       if (inWord && /^\d$/.test(word)) {
         word = "";
         inWord = false;
       }
+
       endWord();
       i += safe[0].length - 1;
     } else if (c === ";" || c === "|" || c === "&" || c === "\n") {
       endSegment();
+
       if ((c === "|" || c === "&") && next === c) {
         i++;
       }
@@ -237,10 +253,13 @@ export function splitCommand(cmd: string): Split {
       inWord = true;
     }
   }
+
   if (quote) {
     return { reason: blocked("an unterminated quote") };
   }
+
   endSegment();
+
   return { segments };
 }
 
@@ -253,8 +272,10 @@ function gitVerbIndex(args: readonly string[]): number | string {
   const withValue = new Set(["-C", "--git-dir", "--work-tree"]);
   const alone = /^(?:--no-pager|--git-dir=.+|--work-tree=.+)$/;
   let i = 0;
+
   while (i < args.length && args[i]!.startsWith("-")) {
     const a = args[i]!;
+
     if (withValue.has(a)) {
       i += 2;
     } else if (alone.test(a)) {
@@ -263,21 +284,26 @@ function gitVerbIndex(args: readonly string[]): number | string {
       return blocked(`\`git ${a}\``);
     }
   }
+
   return i;
 }
 
 function gitVerbReason(verb: string, rest: readonly string[]): string | undefined {
   const sub = rest[0];
   const refused = blocked(`\`git ${[verb, ...rest].join(" ")}\``);
+
   switch (verb) {
     case "branch":
     case "tag": {
       const listing = rest.some((a) => a === "--list" || a === "-l");
+
       const writes = rest.some((a) =>
         /^(?:-[dDmMcCfu]$|--(?:delete|move|copy|force|set-upstream-to|unset-upstream|edit-description))/.test(a),
       );
+
       return writes || (!listing && hasPositional(rest)) ? refused : undefined;
     }
+
     case "remote":
       return !sub || sub === "-v" || sub === "show" || sub === "get-url" ? undefined : refused;
     case "stash":
@@ -298,74 +324,97 @@ function gitVerbReason(verb: string, rest: readonly string[]): string | undefine
 
 function gitReason(args: readonly string[]): string | undefined {
   const at = gitVerbIndex(args);
+
   if (typeof at === "string") {
     return at;
   }
+
   const verb = args[at];
+
   if (!verb || !GIT_READ.has(verb)) {
     return blocked(`\`git ${verb ?? ""}\``.trim());
   }
+
   return gitVerbReason(verb, args.slice(at + 1));
 }
 
 function ghApiReason(args: readonly string[]): string | undefined {
   const methodAt = args.findIndex((a) => a === "-X" || a === "--method");
   const method = methodAt >= 0 ? args[methodAt + 1] : args.map((a) => /^(?:-X|--method=)(.+)$/.exec(a)?.[1]).find(Boolean);
+
   if (method !== undefined && method.toUpperCase() !== "GET") {
     return blocked(`\`gh api --method ${method}\``);
   }
+
   if (args.some((a) => /^(?:-[fF]|--field|--raw-field|--input)/.test(a))) {
     return blocked("`gh api` with a request body");
   }
+
   return undefined;
 }
 
 function ghReason(args: readonly string[]): string | undefined {
   const [group, sub] = args;
+
   if (group === "api") {
     return ghApiReason(args.slice(1));
   }
+
   const subs = group === undefined ? undefined : GH_READ[group];
+
   if (!subs || (subs.length && !subs.includes(sub ?? ""))) {
     return blocked(`\`gh ${args.slice(0, 2).join(" ")}\``);
   }
+
   return undefined;
 }
 
 function overbridgeReason(args: readonly string[]): string | undefined {
   const [sub, action] = args;
   const actions = sub === undefined ? undefined : OVERBRIDGE_ALLOWED[sub];
+
   if (!actions || (actions.length && !actions.includes(action ?? ""))) {
     return blocked(`\`overbridge ${args.slice(0, 2).join(" ")}\``.trim());
   }
+
   return undefined;
 }
 
 function segmentReason(words: readonly string[]): string | undefined {
   // leading `VAR=value` words only set the environment of the command after them
   const at = words.findIndex((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
+
   if (at < 0) {
     return undefined;
   }
+
   const cmd = basename(words[at]!);
   const args = words.slice(at + 1);
+
   if (cmd === "git") {
     return gitReason(args);
   }
+
   if (cmd === "gh") {
     return ghReason(args);
   }
+
   if (cmd === "gs") {
     return ghReason(["stack", ...args]);
   }
+
   if (cmd === "overbridge" || cmd === "ws") {
     return overbridgeReason(args);
   }
+
   const flags = READ_UTILS[cmd];
+
   if (!flags) {
     return blocked(`\`${cmd}\``);
   }
+
   const bad = args.find((a) => flags.some((f) => a === f || a.startsWith(`${f}=`)));
+
   return bad ? blocked(`\`${cmd} ${bad}\``) : undefined;
 }
 
@@ -373,28 +422,37 @@ const FILE_WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit"]);
 
 function writesPlan(input: HookInput): boolean {
   const target = input.tool_input?.file_path;
+
   if (typeof target !== "string" || target === "") {
     return false;
   }
+
   const expanded = target === "~" || target.startsWith("~/") ? join(homedir(), target.slice(1)) : target;
+
   return isInside(realPath(resolve(input.cwd ?? "/", expanded)), realPath(orchestrationPlansDir()));
 }
 
 /** Returns a reason to block the orchestrator's tool call, or undefined to allow it. */
 export function checkOrchestrator(input: HookInput): string | undefined {
   const tool = input.tool_name ?? "";
+
   if (tool === "Bash") {
     const split = splitCommand(String(input.tool_input?.command ?? ""));
+
     if ("reason" in split) {
       return split.reason;
     }
+
     return split.segments.map(segmentReason).find((r) => r !== undefined);
   }
+
   if (FILE_WRITE_TOOLS.has(tool) && writesPlan(input)) {
     return undefined;
   }
+
   if (ALLOWED_TOOLS.has(tool) || MCP_READ.test(tool)) {
     return undefined;
   }
+
   return blocked(`the ${tool || "unnamed"} tool`);
 }

@@ -64,6 +64,7 @@ const hook = (sub: string) => ({ type: "command", command: [...selfCommand(), su
  */
 function agentStateHooks() {
   const state = [{ hooks: [hook("hook")] }];
+
   return {
     PreToolUse: [{ matcher: "*", hooks: [hook("guard"), hook("hook")] }],
     ...Object.fromEntries(["SessionStart", "UserPromptSubmit", "Notification", "PermissionRequest", "SubagentStart", "SubagentStop", "PreCompact", "Stop", "SessionEnd"].map((event) => [event, state])),
@@ -83,14 +84,17 @@ export const orchestrationSettingsPath = (tab: string) => join(metaDir(), "orche
 export function scaffoldOrchestration(tab: string): string {
   const file = orchestrationSettingsPath(tab);
   mkdirSync(dirname(file), { recursive: true });
+
   const settings = {
     env: { [ORCHESTRATION_ENV]: tab, OVERBRIDGE_ROOT: root(), OVERBRIDGE_NAME: "" },
     hooks: agentStateHooks(),
     ...pluginSettings(),
     plansDirectory: orchestrationPlansDir(),
   };
+
   mkdirSync(orchestrationPlansDir(), { recursive: true });
   writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
+
   return file;
 }
 
@@ -109,6 +113,7 @@ export function scaffoldPlugins(): string {
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(pluginSettings(), null, 2) + "\n");
   renameSync(tmp, file);
+
   return file;
 }
 
@@ -156,7 +161,9 @@ and orphaned workspaces with \`overbridge cleanup --json\` and removes the safe 
  */
 function devShellSection(ws: string): string {
   const repos = Object.keys(getWorkspace(readState(), ws).repos);
+
   if (repos.length < 2) return "";
+
   const withShell = repos.filter((repo) => {
     try {
       return loadRepoConfig(worktreePath(ws, repo), repo).shell !== undefined;
@@ -164,7 +171,9 @@ function devShellSection(ws: string): string {
       return false;
     }
   });
+
   if (!withShell.length) return "";
+
   return `
 ## Dev shells
 
@@ -220,13 +229,16 @@ type GhRepo = { name: string; url: string; isFork?: boolean; isArchived?: boolea
 /** Markdown table from the `gh repo list` cache, or a hint when there is none yet. */
 function repoTable(): string {
   let repos: GhRepo[];
+
   try {
     repos = JSON.parse(readFileSync(ghReposCache(), "utf8"));
   } catch {
     return "\nNo cache yet; run the refresh command above.\n";
   }
+
   const rows = repos
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
     .map((r) => `| ${r.name} | ${r.url} | ${[r.isFork && "fork", r.isArchived && "archived"].filter(Boolean).join(", ")} |`);
+
   return ["", "| name | url | |", "| --- | --- | --- |", ...rows, ""].join("\n");
 }

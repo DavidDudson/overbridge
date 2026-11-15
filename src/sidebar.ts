@@ -41,7 +41,9 @@ export function legend(count: number, pending = ""): string {
   if (pending) {
     return `${pending}…`;
   }
+
   const digits = count > 1 ? `1-${count} go  ` : count === 1 ? "1 go  " : "";
+
   return `${digits}←→ back  ⌥w next  s new ws  p perf`;
 }
 
@@ -55,6 +57,7 @@ const POLL_MS = 1_000;
 
 /** The sidebar frame an entry is drawn in. */
 export const Section = { Orchestration: "orchestration", Workspaces: "workspaces" } as const;
+
 export type Section = (typeof Section)[keyof typeof Section];
 
 export interface Entry {
@@ -99,6 +102,7 @@ export { currentTab, tabOrder };
 const entryFor = (tab: string, section: Section, label: string): Entry => {
   const detail = readAgentDetail(tab);
   const state = detail?.state;
+
   return {
     tab, section, glyph: glyphFor(state), state, label,
     ...(detail?.since === undefined ? {} : { since: detail.since }),
@@ -135,9 +139,11 @@ const stackText = (s: { prs: number[]; current: number }) => `stack ${s.prs.map(
 /** The card for workspace `ws` whose state record is `w`: a fault card when the record or its top cache is malformed. */
 function workspaceEntry(ws: string, w: unknown): Entry {
   const recordFault = workspaceFault(w);
+
   if (recordFault !== undefined) {
     return faultEntry(ws, Section.Workspaces, recordFault);
   }
+
   const { removeError: error, removalBlocked: blocked } = w as WorkspaceState;
   const { cache, fault } = readTopCacheChecked(ws);
   const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
@@ -145,6 +151,7 @@ function workspaceEntry(ws: string, w: unknown): Entry {
   const idleHint = fault ? undefined : iceboxHint(ws, cache);
   const task = fault ? undefined : taskStatus(cache, readPhase(ws));
   const gauge = entry.state === "busy" ? readGauge(ws) : undefined;
+
   return { ...entry, ...(gauge ? { gauge } : {}), ...(!fault && cacheIsStale(cache.at, Date.now()) ? { stale: true } : {}), ...(task ? { task } : {}), ...(stacks.length ? { stacks } : {}), ...(fault ? { fault } : {}), ...(error ? { error } : {}), ...(blocked ? { blocked } : {}), ...(idleHint ? { idleHint } : {}) };
 }
 
@@ -152,6 +159,7 @@ function workspaceEntry(ws: string, w: unknown): Entry {
 export const withReceipt = (list: Entry[], self: string, read: (ws: string) => Receipt | undefined = readReceipt): Entry[] =>
   list.map((e) => {
     const receipt = e.tab === self && !e.fault && e.state !== "busy" ? read(e.tab) : undefined;
+
     return receipt ? { ...e, receipt } : e;
   });
 
@@ -163,6 +171,7 @@ const removingRecord = (w: unknown, now = Date.now()): (WorkspaceState & { remov
 const isIced = (workspaces: Record<string, unknown>, ws: string): boolean => {
   try {
     const w = workspaces[ws];
+
     return isWorkspaceState(w) && isIceboxed(w);
   } catch {
     return false; // a record that throws is a card to show, never one to hide
@@ -189,7 +198,11 @@ const hiddenByRemoval = (workspaces: Record<string, unknown>, ws: string): boole
 export function entries(order: string[] = tabOrder(), state: State = readState()): Entry[] {
   const workspaces: Record<string, unknown> = state.workspaces;
   const names = Object.keys(workspaces).filter((ws) => !hiddenByRemoval(workspaces, ws) && !isIced(workspaces, ws)).sort(naturalSort);
-  const rank = (ws: string) => { const i = order.indexOf(ws); return i < 0 ? order.length : i; };
+
+  const rank = (ws: string) => { const i = order.indexOf(ws);
+
+ return i < 0 ? order.length : i; };
+
   return [
     ...ORCHESTRATION_TABS.map((t) => guardedEntry(t.tab, Section.Orchestration, () => entryFor(t.tab, Section.Orchestration, t.label), t.label)),
     ...names.toSorted((a, b) => rank(a) - rank(b)).map((ws) => guardedEntry(ws, Section.Workspaces, () => workspaceEntry(ws, workspaces[ws]))),
@@ -214,7 +227,9 @@ export function scrollFor(selected: number, offset: number, heights: number[], r
   if (selected < offset) return selected;
   let start = offset;
   const span = () => heights.slice(start, selected + 1).reduce((n, h) => n + h, 0);
+
   while (start < selected && span() > rows) start++;
+
   return start;
 }
 
@@ -222,13 +237,16 @@ export function scrollFor(selected: number, offset: number, heights: number[], r
 export function clampScroll(offset: number, heights: number[], rows: number): number {
   let start = Math.max(0, Math.min(offset, heights.length - 1));
   const span = (from: number) => heights.slice(from).reduce((n, h) => n + h, 0);
+
   while (start > 0 && span(start - 1) <= rows) start--;
+
   return start;
 }
 
 /** Rows above the workspace list (top border) and below it (divider, two limit rows, key legend, bottom border). */
 export const CHROME_TOP = 1;
 export const CHROME_BOTTOM = 5;
+
 /** Longest a title may wrap to. */
 const MAX_TITLE_ROWS = 3;
 
@@ -249,28 +267,38 @@ const NO_SESSION_TEXT = { text: "no session", color: "grey" } as const satisfies
 const BLOCK_TEXT: Record<RemovalBlock, { text: string; color: Color }> = {
   [RemovalBlock.MergedUnsaved]: { text: "merged · unsaved work", color: "yellow" },
 };
+
 const UNSAVED_TEXT: { text: string; color: Color } = { text: "ended · unsaved work", color: "red" };
 const FAULT_COLOR: Color = "red";
 
 /** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, an icebox suggestion (unless the agent wants you), then `claude status - task status`. */
 function statusFor(e: Entry): { text: string; color: Color } | undefined {
   if (e.fault) return { text: `error: ${e.fault}`, color: FAULT_COLOR };
+
   if (e.error) return { text: `cleanup failed: ${e.error}`, color: FAULT_COLOR };
+
   if (e.blocked) return BLOCK_TEXT[e.blocked];
+
   if (e.unsaved) return UNSAVED_TEXT;
+
   if (e.idleHint && !(e.state && ATTENTION.includes(e.state))) return { text: e.idleHint, color: "cyan" };
   // an orchestration tab has no task, so no suffix
   const claude = e.state ? stateText(e) : e.task ? NO_SESSION_TEXT : undefined;
+
   if (!claude) return undefined;
+
   return e.task ? { text: `${claude.text} - ${e.task}`, color: claude.color } : claude;
 }
 
 /** `4m12s` under ten minutes, then `12m`, then `1h05m`; `seconds: false` rounds down to whole minutes (under a minute stays in seconds). */
 export function durationText(ms: number, { seconds = true } = {}): string {
   const secs = Math.max(0, Math.floor(ms / 1000));
+
   if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);
+
   if (mins < 10) return seconds ? `${mins}m${String(secs % 60).padStart(2, "0")}s` : `${mins}m`;
+
   return mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, "0")}m`;
 }
 
@@ -282,6 +310,7 @@ const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 /** The state's status line with its detail. Time shows from the first second while working, but only from a minute on for a wait or a finish. */
 export function stateText(e: Entry, now = Date.now()): { text: string; color: Color } {
   const { state } = e;
+
   if (!state) return { text: "", color: "grey" };
   const base = STATE_TEXT[state];
   const head = state === "bg" && e.agents ? `finished · ${plural(e.agents, "task")} running` : base.text;
@@ -289,12 +318,14 @@ export function stateText(e: Entry, now = Date.now()): { text: string; color: Co
   const timed = ms !== undefined && TIMED.has(state) && (state === "busy" || ms >= 60_000) ? ` ${durationText(ms, { seconds: state === "busy" })}` : "";
   const tool = state === "waiting" && e.tool ? ` · ${e.tool}` : "";
   const agents = state === "busy" && e.agents ? ` · ${plural(e.agents, "agent")}` : "";
+
   return { text: `${head}${timed}${tool}${agents}`, color: base.color };
 }
 
 /** The Workspaces frame title: with how many agents want you (`ATTENTION` states) once any do. */
 export function workspacesTitle(list: Entry[]): string {
   const n = list.filter((e) => e.section === Section.Workspaces && e.state && ATTENTION.includes(e.state)).length;
+
   return n ? `Workspaces · ${n} need you` : "Workspaces";
 }
 
@@ -303,25 +334,33 @@ export function wrapText(text: string, width: number): string[] {
   const lines: string[] = [];
   let line = "";
   const push = () => { if (line) lines.push(line); line = ""; };
+
   for (const word of text.split(/\s+/).filter(Boolean)) {
     let rest = word;
+
     while (textWidth(rest) > width) {
       push();
       let head = "";
+
       for (const ch of rest) {
         if (textWidth(head + ch) > width) break;
         head += ch;
       }
+
       if (!head) break;
       lines.push(head);
       rest = rest.slice(head.length);
     }
+
     if (!rest) continue;
+
     if (!line) line = rest;
     else if (textWidth(line) + 1 + textWidth(rest) <= width) line += ` ${rest}`;
     else { push(); line = rest; }
   }
+
   push();
+
   return lines.length ? lines : [""];
 }
 
@@ -331,6 +370,7 @@ function titleRows(e: Entry, index: number, inner: number): string[] {
   const lead = `${digit} ${e.glyph} `;
   const lines = wrapText(e.label, Math.max(1, inner - textWidth(lead)));
   const clipped = lines.length > MAX_TITLE_ROWS ? [...lines.slice(0, MAX_TITLE_ROWS - 1), `${lines.slice(MAX_TITLE_ROWS - 1).join(" ")}`] : lines;
+
   return clipped.map((l, i) => (i === 0 ? lead : " ".repeat(textWidth(lead))) + l);
 }
 
@@ -359,13 +399,16 @@ export function entryLines(e: Entry, index: number, selected: boolean, inner: nu
   const sub = statusRow(`${indent}${status?.text ?? ""}`, gaugeFor(e), inner);
   const stacks = (e.stacks ?? []).map((st) => fit(`${indent}${stackText(st)}`, inner));
   const receipt = e.receipt ? [fit(`${indent}${receiptText(e.receipt)}`, inner)] : [];
+
   if (selected) return [...titles, sub, ...stacks, ...receipt].map(inverse);
   const lines = [...titles, status ? colorize(sub, status.color) : sub, ...stacks.map(dim), ...receipt.map(dim)];
+
   return e.stale ? lines.map(dim) : lines;
 }
 
 const elapsed = (sinceMs: number, now: number) => {
   const secs = Math.max(0, Math.round((now - sinceMs) / 1000));
+
   return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${String(secs % 60).padStart(2, "0")}s`;
 };
 
@@ -373,6 +416,7 @@ const elapsed = (sinceMs: number, now: number) => {
 export function queueRows(queue: { running: Ticket[]; waiting: Ticket[] }, inner: number, now = Date.now()): string[] {
   const running = queue.running.map((t) => colorize(fit(`▶ ${t.ws} ${elapsed(t.runningSinceMs ?? now, now)} ${t.command}`, inner), "blue"));
   const waiting = queue.waiting.length ? [dim(fit(`⧗ ${queue.waiting.length} waiting: ${queue.waiting.map((t) => t.ws).join(" ")}`, inner))] : [];
+
   return [...running, ...waiting];
 }
 
@@ -382,6 +426,7 @@ const droppedLabel = (w: WorkspaceState): string => (w.iceboxed?.dropped?.length
 /** Iceboxed workspaces, one dim row each under the divider; they have no tab, so no card and no digit. */
 export function icedRows(state: State, inner: number): string[] {
   const workspaces = state.workspaces as Record<string, unknown>;
+
   return Object.keys(workspaces)
     .filter((ws) => isIced(workspaces, ws))
     .sort(naturalSort)
@@ -392,6 +437,7 @@ export function icedRows(state: State, inner: number): string[] {
 export function inFlightCleanups(state: State = readState(), now = Date.now()): CleanupInFlight[] {
   return Object.entries(state.workspaces as Record<string, unknown>).flatMap(([ws, w]) => {
     const record = removingRecord(w, now);
+
     return record ? [{ label: sidebarLabel(ws, readTopCache(ws)), sinceMs: Date.parse(record.removing.since) }] : [];
   });
 }
@@ -433,33 +479,44 @@ const NO_REAP: ReapResult = { unsaved: new Set(), faults: new Map() };
  */
 export function gather(readers: SidebarReaders, inner: number, last: Model): Model {
   const faults: string[] = [];
+
   const attempt = <T>(what: string, fn: () => T, fallback: T): T => {
     try {
       return fn();
     } catch (e) {
       faults.push(`${what}: ${errorMessage(e)}`);
+
       return fallback;
     }
   };
+
   const read = attempt("state", () => readers.readState(last.state), { state: last.state });
+
   if (read.fault) {
     faults.push(read.fault);
   }
+
   const stateUnreadable = faults.length > 0;
   const state = stateUnreadable ? last.state : read.state;
   const order = attempt("tabs", readers.tabOrder, []);
   attempt("orchestration tabs", () => readers.keepOrchestration(order), undefined);
+
   if (!stateUnreadable) {
     attempt("merge sweep", readers.sweep, undefined);
   }
+
   const listed = attempt("workspace list", () => readers.entries(order, state), last.list);
   const reaped = attempt("auto-remove", () => readers.reap(listed), NO_REAP);
+
   const list = listed.map((e) => {
     const fault = reaped.faults.get(e.tab);
+
     return fault ? { ...e, fault } : reaped.unsaved.has(e.tab) ? { ...e, unsaved: true } : e;
   });
+
   const status = attempt("status rows", () => readers.status(state, inner), []);
   const limits = attempt("limits", readers.limits, undefined);
+
   return { list, status, limits, state, ...(faults[0] ? { fault: faults[0] } : {}) };
 }
 
@@ -477,6 +534,7 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
   const bodyRows = Math.max(0, height - pinnedFrame.length - CHROME_TOP - CHROME_BOTTOM - queue.length);
   const visible = cards(pinned + offset, list.length).slice(0, bodyRows);
   const body = [...visible, ...Array<string>(bodyRows - visible.length).fill(" ".repeat(inner))];
+
   return [
     ...pinnedFrame,
     boxTop(workspacesTitle(list), width),
@@ -491,6 +549,7 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
 
 /** What the sidebar's last row shows. */
 export const FooterKind = { Legend: "legend", Prompt: "prompt", Busy: "busy", Error: "error" } as const;
+
 export type FooterKind = (typeof FooterKind)[keyof typeof FooterKind];
 
 /**
@@ -513,8 +572,10 @@ export const LEGEND_FOOTER: Footer = { kind: FooterKind.Legend };
 /** The footer to draw: the user's prompt or message first, else the last key press's fault, else this poll's, else the legend. */
 export function footerToDraw(footer: Footer, inputFault: string | undefined, pollFault: string | undefined): Footer {
   const fault = inputFault ?? pollFault;
+
   return footer.kind === FooterKind.Legend && fault ? { kind: FooterKind.Error, message: fault } : footer;
 }
+
 export const EMPTY_PROMPT: Footer = { kind: FooterKind.Prompt, prompt: { text: "" } };
 
 export const promptLabel = (p: Prompt) => (p.id === undefined ? "new ws: " : `repo for ${p.id}: `);
@@ -524,7 +585,9 @@ function fitTail(text: string, width: number): string {
   if (textWidth(text) <= width) {
     return fit(text, width);
   }
+
   const tail = [...text].reduceRight((kept, ch) => (textWidth(ch + kept) <= width - 1 ? ch + kept : kept), "");
+
   return fit(`…${tail}`, width);
 }
 
@@ -543,6 +606,7 @@ export function footerRow(footer: Footer, inner: number, legendText = legend(0))
 }
 
 export const PromptStepKind = { Edit: "edit", Cancel: "cancel", Submit: "submit" } as const;
+
 export type PromptStepKind = (typeof PromptStepKind)[keyof typeof PromptStepKind];
 
 export type PromptStep =
@@ -560,22 +624,28 @@ export function promptInput(p: Prompt, input: Input): PromptStep {
   if (input.kind !== "key") {
     return { kind: PromptStepKind.Edit, prompt: p };
   }
+
   if (input.key === "escape" || input.key === "ctrl-c") {
     return { kind: PromptStepKind.Cancel };
   }
+
   if (input.key === "enter") {
     return { kind: PromptStepKind.Submit, prompt: p };
   }
+
   if (input.key === "\x7f" || input.key === "\b") {
     return { kind: PromptStepKind.Edit, prompt: { ...p, text: [...p.text].slice(0, -1).join("") } };
   }
+
   if (isPrintable(input.key)) {
     return { kind: PromptStepKind.Edit, prompt: { ...p, text: p.text + input.key } };
   }
+
   return { kind: PromptStepKind.Edit, prompt: p };
 }
 
 export const StartPlanKind = { Run: "run", AskRepo: "ask-repo", Invalid: "invalid" } as const;
+
 export type StartPlanKind = (typeof StartPlanKind)[keyof typeof StartPlanKind];
 
 export type StartPlan =
@@ -589,17 +659,21 @@ export type StartPlan =
  */
 export function parseStart(p: Prompt, holds: readonly string[]): StartPlan {
   const words = p.text.trim().split(/\s+/).filter(Boolean);
+
   if (p.id !== undefined) {
     return words.length === 1
       ? { kind: StartPlanKind.Run, repo: words[0]!, id: p.id }
       : { kind: StartPlanKind.Invalid, message: `type one repo name for ${p.id}, such as ${holds[0] ?? "my-repo"}` };
   }
+
   if (words.length === 2) {
     return { kind: StartPlanKind.Run, repo: words[0]!, id: words[1]! };
   }
+
   if (words.length === 1) {
     return holds.length === 1 ? { kind: StartPlanKind.Run, repo: holds[0]!, id: words[0]! } : { kind: StartPlanKind.AskRepo, id: words[0]! };
   }
+
   return { kind: StartPlanKind.Invalid, message: `type <repo> <id> or <id>, such as ${holds[0] ?? "my-repo"} 123` };
 }
 
@@ -614,12 +688,14 @@ export type Spawner = (cmd: string[]) => Promise<Finished>;
 const spawnAsync: Spawner = async (cmd) => {
   const p = Bun.spawn({ cmd, cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "pipe" });
   const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text()]);
+
   return { code, stderr };
 };
 
 /** The last non-empty stderr line without the CLI's `overbridge: ` prefix, else a line naming the command. */
 export function startError(repo: string, id: string, result: Finished): string {
   const last = result.stderr.split("\n").map((l) => l.trim()).filter(Boolean).at(-1);
+
   return last?.replace(/^overbridge: /, "") ?? `overbridge start ${repo} ${id} failed with exit code ${result.code}`;
 }
 
@@ -630,6 +706,7 @@ export function startError(repo: string, id: string, result: Finished): string {
  */
 export async function runStart(repo: string, id: string, spawn: Spawner = spawnAsync): Promise<Footer> {
   const result = await spawn([...selfCommand(), "start", repo, id]).catch((e: unknown): Finished => ({ code: -1, stderr: `could not run overbridge start: ${(e as Error).message}` }));
+
   return result.code === 0 ? LEGEND_FOOTER : { kind: FooterKind.Error, message: startError(repo, id, result) };
 }
 
@@ -639,21 +716,27 @@ export async function runStart(repo: string, id: string, spawn: Spawner = spawnA
  */
 export function entryAt(row: number, offset: number, heights: number[], rows: number, top = CHROME_TOP): number | undefined {
   let y = top;
+
   for (let i = offset; i < heights.length; i++) {
     if (y + heights[i]! > top + rows) return undefined;
+
     if (row < y + heights[i]!) return row >= y ? i : undefined;
     y += heights[i]!;
   }
+
   return undefined;
 }
 
 /** The entry index under a click on screen row `row`, in the Orchestration frame or the scrolled Workspaces one. */
 function clickTarget(row: number, offset: number, heights: number[], rows: number, pinned: number): number | undefined {
   const pinnedRows = pinnedRowsFor(heights, pinned);
+
   if (row < pinnedRows) {
     return entryAt(row, 0, heights.slice(0, pinned), pinnedRows - 2, 1);
   }
+
   const hit = entryAt(row, offset, heights.slice(pinned), rows, pinnedRows + CHROME_TOP);
+
   return hit === undefined ? undefined : pinned + hit;
 }
 
@@ -665,9 +748,11 @@ function clickTarget(row: number, offset: number, heights: number[], rows: numbe
 export function targetFor(input: Input, current: number, offset: number, heights: number[], rows: number, pinned = 0): number | undefined {
   const count = heights.length;
   let target: number | undefined;
+
   if (input.kind === "click") target = clickTarget(input.row, offset, heights, rows, pinned);
   else if (input.key === "up" || input.key === "k") target = current - 1;
   else if (input.key === "down" || input.key === "j") target = current + 1;
+
   return inRange(target, count, current);
 }
 
@@ -689,23 +774,31 @@ export interface Step {
  */
 export function stepFor(input: Input, current: number, offset: number, heights: number[], rows: number, pinned = 0, pending = ""): Step {
   const count = heights.length;
+
   if (input.kind === "key" && /^[0-9]$/.test(input.key)) {
     if (pending) {
       const number = Number(pending + input.key);
+
       return { target: inRange((number <= count ? number : Number(pending)) - 1, count, current), pending: "" };
     }
+
     const held = Number(input.key);
+
     if (held === 0) {
       return { pending: "" };
     }
+
     return count >= held * 10 ? { pending: input.key } : { target: inRange(held - 1, count, current), pending: "" };
   }
+
   if (input.kind === "key" && (input.key === "left" || input.key === "h")) {
     return { travel: Travel.Back, pending: "" };
   }
+
   if (input.kind === "key" && (input.key === "right" || input.key === "l")) {
     return { travel: Travel.Forward, pending: "" };
   }
+
   return { target: targetFor(input, current, offset, heights, rows, pinned), pending: "" };
 }
 
@@ -717,6 +810,7 @@ export function commitDigit(pending: string, list: Entry[], self: string, focuse
   if (!pending || focused !== self) {
     return undefined;
   }
+
   return inRange(Number(pending) - 1, list.length, list.findIndex((e) => e.tab === self));
 }
 
@@ -725,6 +819,7 @@ const paneFile = (ws: string) => join(metaDir(), "sidebars", ws);
 
 function registerPane(ws: string) {
   const id = defaultMux().ownPaneId();
+
   if (id === undefined) return;
   mkdirSync(join(metaDir(), "sidebars"), { recursive: true });
   writeFileSync(paneFile(ws), id);
@@ -749,6 +844,7 @@ export function switchTab(tab: string, mux: Mux = defaultMux()): boolean {
 /** Go from `self` to `tab`, picked any way but ← and →, recording the visit in the session's history. */
 export function visitTab(self: string, tab: string, mux?: Mux): boolean {
   const before = readHistory();
+
   return moveWithHistory(before, visit(before, self), () => switchTab(tab, mux));
 }
 
@@ -756,22 +852,27 @@ export function visitTab(self: string, tab: string, mux?: Mux): boolean {
 export function travelTab(self: string, way: Travel, list: Entry[], mux?: Mux): boolean {
   const before = readHistory();
   const moved = travel(before, way, self, new Set(list.map((e) => e.tab)));
+
   if (moved.target === undefined) {
     return false;
   }
+
   const target = moved.target;
+
   return moveWithHistory(before, moved.history, () => switchTab(target, mux));
 }
 
 /** `overbridge sidebar [--ws]`. `q` or Ctrl-C quits. */
 export async function sidebar(wsOpt?: string) {
   const self = (wsOpt === undefined ? undefined : orchestrationTab(wsOpt)?.tab) ?? requireWs(wsOpt);
+
   if (!process.stdin.isTTY) throw new Error("overbridge sidebar needs a terminal");
   registerPane(self);
 
   // Read once at start, so a pane left running across an upgrade shows the version it runs.
   const version = overbridgeVersion();
   const userLayout = existsSync(userLayoutPath());
+
   const readers: SidebarReaders = {
     tabOrder: () => readView().order,
     // a user layout decides its own tabs, so only the generated one gets its orchestration tabs back
@@ -783,19 +884,23 @@ export async function sidebar(wsOpt?: string) {
     status: (state, inner) => [...icedRows(state, inner), ...cleanupRows(inFlightCleanups(state), cleanupRecords(state.cleanups), inner, Date.now(), state.mergeSweepAt), ...queueRows(readQueue(), inner)],
     limits: readLimits,
   };
+
   let last: Model = EMPTY_MODEL;
   let offset = 0;
   let footer: Footer = LEGEND_FOOTER;
   let statusRowCount = 0;
   let pending = "";
   let digitTimer: ReturnType<typeof setTimeout> | undefined;
+
   const hold = (digit: string) => {
     clearTimeout(digitTimer);
     pending = digit;
     digitTimer = digit ? setTimeout(commit, DIGIT_MS) : undefined;
   };
+
   /** What the last key press threw, shown in the footer until the next key press; a poll does not clear it. */
   let inputFault: string | undefined;
+
   /** Run `fn`; when it throws, the error goes to the footer instead of ending the pane. */
   const guarded = (what: string, fn: () => void) => {
     try {
@@ -804,39 +909,48 @@ export async function sidebar(wsOpt?: string) {
       inputFault = `${what}: ${errorMessage(e)}`;
     }
   };
+
   const commit = () => {
     guarded("go to tab", () => {
       const list = last.list;
       const target = commitDigit(pending, list, self, currentTab());
       hold("");
+
       if (target !== undefined) {
         visitTab(self, list[target]!.tab);
       }
     });
     draw();
   };
+
   const size = () => ({ height: process.stdout.rows ?? 24, width: process.stdout.columns ?? 28 });
   const painter = createPainter((text) => process.stdout.write(text));
+
   // a bad `[sidebar] motion` must not end the pane: run still and say why in the footer until the next key press
   const motion = (() => {
     try {
       return sidebarMotion();
     } catch (e) {
       inputFault = errorMessage(e);
+
       return Motion.Off;
     }
   })();
+
   let lastGatherAtMs = 0;
+
   /** Gather, then paint; neither may end the pane, so a failure is named in the footer and the next poll tries again. */
   const draw = () => {
     const { height, width } = size();
     const inner = Math.max(0, width - 4);
     lastGatherAtMs = Date.now();
+
     try {
       last = gather(readers, inner, last);
     } catch (e) {
       last = { ...last, fault: `sidebar: ${errorMessage(e)}` };
     }
+
     try {
       const { status } = last;
       const list = animate(last.list, Date.now(), motion);
@@ -853,12 +967,15 @@ export async function sidebar(wsOpt?: string) {
       painter.paint(frame([colorize(fit(`sidebar: ${errorMessage(e)}`, width), FAULT_COLOR)], height, width));
     }
   };
+
   const show = (next: Footer) => {
     footer = next;
     draw();
   };
+
   const submit = (prompt: Prompt) => {
     const plan = parseStart(prompt, Object.keys(last.state.workspaces[self]?.repos ?? {}));
+
     switch (plan.kind) {
       case StartPlanKind.AskRepo:
         return show({ kind: FooterKind.Prompt, prompt: { text: "", id: plan.id } });
@@ -866,13 +983,16 @@ export async function sidebar(wsOpt?: string) {
         return show({ kind: FooterKind.Error, message: plan.message });
       case StartPlanKind.Run:
         show({ kind: FooterKind.Busy, id: plan.id });
+
         return void runStart(plan.repo, plan.id).then(show);
     }
   };
+
   /** Feed one input to the footer; true when the footer took it and the sidebar keys skip it. */
   const footerTakes = (input: Input): boolean => {
     if (footer.kind === FooterKind.Prompt) {
       const step = promptInput(footer.prompt, input);
+
       if (step.kind === PromptStepKind.Cancel) {
         show(LEGEND_FOOTER);
       } else if (step.kind === PromptStepKind.Submit) {
@@ -880,17 +1000,22 @@ export async function sidebar(wsOpt?: string) {
       } else {
         show({ kind: FooterKind.Prompt, prompt: step.prompt });
       }
+
       return true;
     }
+
     if (footer.kind === FooterKind.Error) {
       show(LEGEND_FOOTER);
     }
+
     if (input.kind === "key" && input.key === "s") {
       if (footer.kind !== FooterKind.Busy) {
         show(EMPTY_PROMPT);
       }
+
       return true;
     }
+
     return false;
   };
 
@@ -905,6 +1030,7 @@ export async function sidebar(wsOpt?: string) {
       rmSync(paneFile(self), { force: true });
       resolve();
     };
+
     process.stdout.write(ENTER_SCREEN);
     painter.invalidate();
     process.stdin.setRawMode(true);
@@ -912,29 +1038,37 @@ export async function sidebar(wsOpt?: string) {
     process.stdin.on("data", (buf) => {
       // one draw per chunk, so a fault from any key in it stays on screen
       inputFault = undefined;
+
       for (const input of decodeInput(buf.toString())) {
         let taken = false;
         guarded("key", () => {
           taken = footerTakes(input);
         });
+
         if (taken) {
           hold("");
           continue;
         }
+
         // an open prompt takes q and ctrl-c as text and cancel, so quit only once the footer has passed on the key
         if (input.kind === "key" && (input.key === "q" || input.key === "ctrl-c")) return quit();
         guarded("key", () => {
           if (input.kind === "key" && input.key === "n") {
             hold("");
             next(self);
+
             return;
           }
+
           if (input.kind === "key" && input.key === PERF_KEY) {
             hold("");
             const perf = last.list.find((e) => e.tab === PERF_TAB);
+
             if (perf && perf.tab !== self) visitTab(self, perf.tab);
+
             return;
           }
+
           // the list on screen, so a click lands on the card the user saw
           const list = last.list;
           const current = list.findIndex((e) => e.tab === self);
@@ -943,6 +1077,7 @@ export async function sidebar(wsOpt?: string) {
           const pinned = pinnedCount(list);
           const step = stepFor(input, current, offset, heights, bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount), pinned, pending);
           hold(step.pending);
+
           if (step.travel !== undefined) {
             travelTab(self, step.travel, list);
           } else if (step.target !== undefined) {
@@ -950,12 +1085,14 @@ export async function sidebar(wsOpt?: string) {
           }
         });
       }
+
       draw();
     });
     process.stdout.on("resize", () => {
       painter.invalidate();
       draw();
     });
+
     // a hidden tab's sidebar gathers only every HIDDEN_POLL_MS, and catches up on the first tick after its tab is focused
     // the server's event stream redraws as soon as a top cache changes. It does not let a hidden sidebar stop polling (unlike the top and perf panes): the gather also runs the reaper, reopens orchestration tabs and starts the sweep fallback, and no event wakes those
     const events = subscribeEvents({
@@ -966,11 +1103,13 @@ export async function sidebar(wsOpt?: string) {
         if (live) tick();
       },
     });
+
     const tick = () => {
       if (shouldPoll(self, readView(), lastGatherAtMs, Date.now())) {
         draw();
       }
     };
+
     const timer = setInterval(tick, POLL_MS);
     const stopWatch = watchState(tick);
     draw();

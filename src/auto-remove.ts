@@ -49,34 +49,44 @@ const defaultDeps = (): ReapDeps => ({
 export function createReaper(deps: ReapDeps = defaultDeps()): (candidates: readonly ReapCandidate[]) => ReapResult {
   const memos = new Map<string, Memo>();
   const fresh = (m: Memo) => deps.now() - m.atMs < GIT_RECHECK_MS;
+
   const isClean = (ws: string): boolean => {
     const memo = memos.get(ws);
+
     if (memo && "clean" in memo && fresh(memo)) {
       return memo.clean;
     }
+
     const clean = deps.gitClean(ws);
     memos.set(ws, { atMs: deps.now(), clean });
+
     return clean;
   };
+
   return (candidates) => {
     const unsaved = new Set<string>();
     const faults = new Map<string, string>();
     const seen = new Set<string>();
+
     for (const c of candidates) {
       if (isOrchestrationTab(c.tab) || c.error !== undefined || c.fault !== undefined) continue;
       const memo = memos.get(c.tab);
+
       if (memo && "fault" in memo && fresh(memo)) {
         seen.add(c.tab);
         faults.set(c.tab, memo.fault);
         continue;
       }
+
       try {
         if (!deps.endedForGood(c.tab)) continue;
         seen.add(c.tab);
+
         if (!isClean(c.tab)) {
           unsaved.add(c.tab);
           continue;
         }
+
         deps.remove(c.tab);
       } catch (e) {
         const fault = errorMessage(e);
@@ -85,7 +95,9 @@ export function createReaper(deps: ReapDeps = defaultDeps()): (candidates: reado
         faults.set(c.tab, fault);
       }
     }
+
     [...memos.keys()].filter((ws) => !seen.has(ws)).forEach((ws) => memos.delete(ws));
+
     return { unsaved, faults };
   };
 }

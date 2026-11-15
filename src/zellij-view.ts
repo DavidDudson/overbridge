@@ -10,6 +10,7 @@ import { defaultMux, type Mux } from "./mux";
 
 /** How old the shared view may be before a reader refreshes it. */
 export const VIEW_MAX_AGE_MS = 1_000;
+
 /** How often a pane on a hidden tab still gathers and draws, so it is close to current when shown. */
 export const HIDDEN_POLL_MS = 30_000;
 
@@ -43,13 +44,16 @@ const isView = (v: unknown): v is ZellijView => {
   if (typeof v !== "object" || v === null) {
     return false;
   }
+
   const r = v as Record<string, unknown>;
+
   return Array.isArray(r.order) && r.order.every((t) => typeof t === "string") && typeof r.atMs === "number" && (r.focused === undefined || typeof r.focused === "string");
 };
 
 function readCached(dir: string): ZellijView | undefined {
   try {
     const parsed: unknown = JSON.parse(readFileSync(viewPath(dir), "utf8"));
+
     return isView(parsed) ? parsed : undefined;
   } catch {
     return undefined;
@@ -59,12 +63,15 @@ function readCached(dir: string): ZellijView | undefined {
 /** True when this caller should refresh the view; touches the lock so the other panes skip this round. */
 function claimViewRefresh(dir: string, nowMs: number): boolean {
   const lock = lockPath(dir);
+
   if (ageMs(lock, nowMs) < VIEW_MAX_AGE_MS) {
     return false;
   }
+
   mkdirSync(dir, { recursive: true });
   writeFileSync(lock, "");
   utimesSync(lock, nowMs / 1000, nowMs / 1000);
+
   return true;
 }
 
@@ -78,19 +85,24 @@ function writeView(dir: string, view: ZellijView) {
 /** The shared view, refreshed from zellij when stale and no other pane is refreshing it. Never throws. */
 export function readView(deps: ViewDeps = {}): ZellijView {
   const nowMs = deps.nowMs ?? Date.now();
+
   try {
     const dir = deps.dir ?? metaDir();
     const cached = readCached(dir);
+
     if (cached && nowMs - cached.atMs < VIEW_MAX_AGE_MS) {
       return cached;
     }
+
     if (!claimViewRefresh(dir, nowMs)) {
       return cached ?? EMPTY_VIEW;
     }
+
     const mux = deps.mux ?? defaultMux();
     const focused = mux.currentTab();
     const view: ZellijView = { order: mux.tabs(), ...(focused === undefined ? {} : { focused }), atMs: nowMs };
     writeView(dir, view);
+
     return view;
   } catch {
     return EMPTY_VIEW;
@@ -111,11 +123,13 @@ export const shouldPoll = (tab: string, view: ZellijView, lastPollAtMs: number, 
 /** A writer that skips a frame identical to the last one written. `invalidate` forces the next write. */
 export function createPainter(write: (text: string) => void) {
   let lastPainted: string | undefined;
+
   return {
     paint(text: string) {
       if (text === lastPainted) {
         return;
       }
+
       lastPainted = text;
       write(text);
     },
