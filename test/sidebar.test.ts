@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentStateFile, GLYPHS, glyphFor, readAgentState, UNKNOWN_GLYPH } from "../src/agent-state";
-import { sidebarMotion, sidebarWidth } from "../src/config";
-import { animate, BUSY_FRAMES, busyFrame, FRAME_MS, Motion } from "../src/sidebar-motion";
+import { Motion, sidebarMotion, sidebarWidth } from "../src/config";
+import { animate, BUSY_FRAMES, busyFrame, FRAME_MS } from "../src/sidebar-motion";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
 import { bodyRowsFor, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Finished, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
@@ -508,6 +508,14 @@ describe("busy motion", () => {
     expect(i).toBe(idle);
   });
 
+  test("a faulted busy card and one with another glyph keep theirs", () => {
+    const faulted: Entry = { ...busy, fault: "bad cache" };
+    const custom: Entry = { ...busy, glyph: "★" };
+    const out = animate([faulted, custom], FRAME_MS, Motion.WhileActive);
+    expect(out[0]).toBe(faulted);
+    expect(out[1]).toBe(custom);
+  });
+
   test("off, and a list with nothing busy, come back untouched", () => {
     const l = [busy, idle];
     expect(animate(l, FRAME_MS, Motion.Off)).toBe(l);
@@ -516,9 +524,9 @@ describe("busy motion", () => {
   });
 
   test("sidebar motion defaults, reads repos.toml and rejects nonsense", () => {
-    expect(sidebarMotion()).toBe("while-active");
+    expect(sidebarMotion()).toBe(Motion.WhileActive);
     writeFileSync(reposFile(), '[sidebar]\nmotion = "off"\n');
-    expect(sidebarMotion()).toBe("off");
+    expect(sidebarMotion()).toBe(Motion.Off);
     writeFileSync(reposFile(), '[sidebar]\nmotion = "always"\n');
     expect(() => sidebarMotion()).toThrow("sidebar.motion must be one of");
   });
