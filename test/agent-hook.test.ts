@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claimRefresh, EVENT_STATE, recordState, REFRESH_AFTER_MS } from "../src/agent-hook";
-import { AGENT_STATES, agentStatePath, EndReason, endedForGood, readAgentState, sessionEndedForGood, STALE_MS } from "../src/agent-state";
+import { AGENT_STATES, agentStatePath, turnPath, EndReason, endedForGood, readAgentState, sessionEndedForGood, STALE_MS } from "../src/agent-state";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 let tmp: string;
@@ -164,8 +164,17 @@ describe("overbridge hook", () => {
   test("ignores unlisted events and unbound sessions", () => {
     expect(hook(JSON.stringify({ hook_event_name: "PreCompact" }), "w2").code).toBe(0);
     expect(existsSync(agentStatePath(meta, "w2"))).toBe(false);
+    // the compaction is noted in the turn summary, not the state
+    expect(existsSync(turnPath(meta, "w2"))).toBe(true);
     expect(hook(JSON.stringify({ hook_event_name: "Stop" }), undefined).code).toBe(0);
-    expect(existsSync(join(meta, "agent"))).toBe(false);
+    expect(existsSync(agentStatePath(meta, "undefined"))).toBe(false);
+  });
+
+  test("an edit tool call counts toward the turn receipt; other tool calls write nothing", () => {
+    hook(JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Bash" }), "w3");
+    expect(existsSync(turnPath(meta, "w3"))).toBe(false);
+    hook(JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Edit" }), "w3");
+    expect(JSON.parse(readFileSync(turnPath(meta, "w3"), "utf8")).edits).toBe(1);
   });
 
   test("records an orchestration tab's state under its tab name, without a top panel refresh", () => {

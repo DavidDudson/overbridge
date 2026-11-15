@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { metaDir } from "./paths";
 import { pidAlive } from "./proc";
@@ -176,4 +176,59 @@ export function readAgentAt(ws: string): number | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * `<meta>/agent/<ws>.turn.json`: the last turn's receipt, kept by the hook so the sidebar never scans history.
+ * `startedAt` is the last prompt, `endedAt` its Stop; `compactedAt` the last compaction.
+ */
+export interface TurnSummary {
+  startedAt?: number;
+  endedAt?: number;
+  edits?: number;
+  errors?: number;
+  compactedAt?: number;
+}
+
+export const turnPath = (meta: string, ws: string) => join(meta, "agent", `${ws}.turn.json`);
+
+/** Tools whose successful call counts as an edit. */
+export const EDIT_TOOLS: readonly string[] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
+
+/** What `event` does to the turn summary: undefined for the many events (most tool calls) that leave it alone, so they cost no I/O. */
+export function turnChange(event: string, tool: string | undefined, source: string | undefined, now: number): ((t: TurnSummary) => TurnSummary) | "reset" | undefined {
+  switch (event) {
+    case "SessionStart":
+      return source === "resume" || source === "compact" ? undefined : "reset";
+    case "UserPromptSubmit":
+      return (t) => ({ ...(t.compactedAt === undefined ? {} : { compactedAt: t.compactedAt }), startedAt: now, edits: 0, errors: 0 });
+    case "PostToolUse":
+      return tool !== undefined && EDIT_TOOLS.includes(tool) ? (t) => ({ ...t, edits: (t.edits ?? 0) + 1 }) : undefined;
+    case "PostToolUseFailure":
+      return (t) => ({ ...t, errors: (t.errors ?? 0) + 1 });
+    case "Stop":
+      return (t) => ({ ...t, endedAt: now });
+    case "PreCompact":
+      return (t) => ({ ...t, compactedAt: now });
+    default:
+      return undefined;
+  }
+}
+
+/** Apply `event` to `ws`'s turn summary. Best effort: a parallel hook may lose a count. */
+export function recordTurn(meta: string, ws: string, event: string, tool: string | undefined, source: string | undefined, now = Date.now()) {
+  const change = turnChange(event, tool, source, now);
+  if (!change) return;
+  const file = turnPath(meta, ws);
+  if (change === "reset") return rmSync(file, { force: true });
+  let old: TurnSummary = {};
+  try {
+    old = JSON.parse(readFileSync(file, "utf8")) as TurnSummary;
+  } catch {
+    // none yet
+  }
+  mkdirSync(join(meta, "agent"), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(change(old)));
+  renameSync(tmp, file);
 }

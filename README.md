@@ -726,6 +726,12 @@ projected usage at reset, and a key legend. Claude's statusline script writes th
 `<meta>/limits.json` as `{"at": <ms>, "fiveHour": {"pct", "resetsAt"}, "weekly": {...}}` (`resetsAt` in epoch
 seconds); unknown or over six hours old shows `–`.
 
+A busy card also shows a context gauge, `working ▕███░░▏62%`, with `↻` for 30 minutes after a compaction. Claude's
+statusline writes the percent to `<meta>/context/<ws>.json` as `{"at": <ms>, "pct": 62}` (read only while under ten
+minutes old). The selected card shows a last-turn receipt (`last turn 2m14s · 3 edits · 1 error`) from
+`<meta>/agent/<ws>.turn.json`, which the agent hook updates only on a prompt, an edit tool, a failure, a stop or a
+compaction. Both files are read mtime-cached; the sidebar never reads the history.
+
 `overbridge next` (the `n` key in the sidebar, and a zellij binding) goes to the next tab that needs you:
 waiting for input first, then finished, then finished with background tasks running, cycling from the current tab.
 
