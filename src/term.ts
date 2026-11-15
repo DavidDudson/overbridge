@@ -16,6 +16,13 @@ export type Color = keyof typeof COLORS;
 /** Whether `name` is one of the colours. */
 export const isColor = (name: string): name is Color => Object.hasOwn(COLORS, name);
 
+/** `s` padded with spaces to `width` columns by display width, so emoji cells line up. */
+export const cell = (s: string, width: number): string => s + " ".repeat(Math.max(0, width - textWidth(s)));
+
+/** `s` without control characters, so API text cannot move the cursor or spoof a row on the tty. */
+// eslint-disable-next-line no-control-regex -- stripping control characters is the point
+export const stripControl = (s: string): string => s.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+
 export const colorize = (s: string, color: Color) => `${ESC}[${COLORS[color]}m${s}${ESC}[0m`;
 
 /** Emoji below U+1F000 that terminals draw two columns wide. Every other emoji the panes use is astral. */

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { committedConfig } from "./committed-config";
 import { loadRepos } from "./config";
+import { loadRootLayers } from "./project-config";
 import { metaDir } from "./paths";
 import { githubRows, parseProject, projectRows, slugFromUrl, type ProjectBoard, type WorklistScope } from "./pm/board-github";
 import { jiraRows } from "./pm/board-jira";
@@ -24,11 +25,11 @@ export interface WorklistCache {
   notes: string[];
 }
 
-const cacheFile = () => join(metaDir(), "worklist.json");
+export const worklistPath = () => join(metaDir(), "worklist.json");
 
 export function readWorklist(): WorklistCache {
   try {
-    return JSON.parse(readFileSync(cacheFile(), "utf8"));
+    return JSON.parse(readFileSync(worklistPath(), "utf8"));
   } catch {
     return { at: 0, rows: [], notes: [] };
   }
@@ -36,9 +37,9 @@ export function readWorklist(): WorklistCache {
 
 function writeWorklist(cache: WorklistCache) {
   mkdirSync(metaDir(), { recursive: true });
-  const tmp = `${cacheFile()}.${process.pid}.tmp`;
+  const tmp = `${worklistPath()}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(cache, null, 2) + "\n");
-  renameSync(tmp, cacheFile());
+  renameSync(tmp, worklistPath());
 }
 
 /** One board read: a GitHub repo, or a Jira project shared by every repo that names it. */
@@ -220,6 +221,14 @@ export function keepLastGood(previous: readonly WorkRow[], fresh: readonly WorkR
   return [...fresh, ...previous.filter((r) => failed.has(r.repo) && !have.has(keyOf(r)))];
 }
 
+/** Keep GitHub boards owned by one of `orgs` (any case); no orgs keeps all. Jira sources have no GitHub owner, so they always stay. */
+export function filterBoardsByOrg(sources: readonly BoardSource[], orgs: readonly string[]): BoardSource[] {
+  if (orgs.length === 0) return [...sources];
+  const owners = new Set(orgs.map((o) => o.toLowerCase()));
+
+  return sources.filter((s) => s.kind !== "github" || owners.has((s.slug.split("/")[0] ?? "").toLowerCase()));
+}
+
 /** The reads a refresh makes, and the notes for repos whose config cannot be read: one line per repo. */
 export function planWorklist(): WorklistPlan {
   const boards: RepoBoard[] = [];
@@ -240,7 +249,7 @@ export function planWorklist(): WorklistPlan {
 
   const planned = boardSources(boards);
 
-  return { sources: planned.sources, notes: [...notes, ...planned.notes] };
+  return { sources: filterBoardsByOrg(planned.sources, loadRootLayers().githubOrgs), notes: [...notes, ...planned.notes] };
 }
 
 /** Write the cache from a plan's notes and what its reads returned, keeping the last good rows of a failed repo. */

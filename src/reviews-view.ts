@@ -13,7 +13,7 @@ const TABLE_CHROME = 3;
 const FOOTER_ROWS = 1;
 
 /** How the reviews are ordered until the user cycles it: what needs doing first. */
-export const REVIEWS_SORT: SortMode = "status";
+export const DEFAULT_REVIEWS_SORT: SortMode = "status";
 
 export type Group = "direct" | "team";
 
@@ -24,7 +24,7 @@ const GROUPS: Record<Group, { title: string; empty: string; unit: string }> = {
 
 const groupOf = (r: PrRow): Group => r.group ?? "direct";
 
-/** The rows split into the two tables, each in its original (newest first) order. */
+/** The rows split into the two tables, each keeping the order of `rows`. */
 export const split = (rows: readonly PrRow[]): Record<Group, PrRow[]> => ({ direct: rows.filter((r) => groupOf(r) === "direct"), team: rows.filter((r) => groupOf(r) === "team") });
 
 /** Cursor order: the direct table, then the team table. */
@@ -169,7 +169,7 @@ const footer = (message: string, inner: number, sort: SortMode) =>
   message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit(`j/k move   o open in browser   s sort: ${SORT_LABEL[sort]}   r refresh   q quit`, inner));
 
 /** The Reviews tab as screen rows: two tables, same columns, direct requests above team requests. Pure, so it is snapshot-tested. */
-function render(rows: readonly PrRow[], { selected, height, width, message, now, sort = REVIEWS_SORT }: ViewState): string[] {
+function render(rows: readonly PrRow[], { selected, height, width, message, now, sort = DEFAULT_REVIEWS_SORT }: ViewState): string[] {
   const inner = width - 4;
   const cols = columnsFor(inner);
   const groups = split(rows);

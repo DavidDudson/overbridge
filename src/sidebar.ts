@@ -43,6 +43,9 @@ export const PERF_KEY = "p";
 export const SORT_KEY = "o";
 export const PERF_TAB = "@perf";
 
+/** Cycles how the workspaces are ordered: a-z, by status, by age. */
+export const SORT_KEY = "o";
+
 /** How long a held digit waits for a second one before it goes to its one-digit tab. */
 export const DIGIT_MS = 600;
 
@@ -1111,8 +1114,11 @@ export async function sidebar(wsOpt?: string) {
     lastGatherAtMs = Date.now();
 
     try {
-      last = gather(readers, inner, last);
-      last = { ...last, list: sortEntries(last.list, sortMode) };
+      // a half-typed two-digit number must keep meaning the same workspace, so the list holds still until it ends
+      if (!pending) {
+        last = gather(readers, inner, last);
+        last = { ...last, list: sortEntries(last.list, sortMode) };
+      }
     } catch (e) {
       last = { ...last, fault: `sidebar: ${errorMessage(e)}` };
     }
