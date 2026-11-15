@@ -58,6 +58,7 @@ export interface TopLink {
 }
 
 export const PR_STATUSES = ["merged", "mergeable", "failing", "conflict", "pending", "blocked", "closed", "unknown"] as const;
+
 export type PrStatus = (typeof PR_STATUSES)[number];
 
 /** What `gh pr view --json state,mergeable,mergeStateStatus,statusCheckRollup` returns, as far as we read it. */
@@ -79,13 +80,20 @@ const PENDING = new Set(["PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITIN
 /** Merged, failing build, conflicts, pending build, then whether it can merge: the first that applies. */
 export function classifyPr(pr: PrView): PrStatus {
   if (pr.state === "MERGED") return "merged";
+
   if (pr.state === "CLOSED") return "closed";
   const checks = pr.statusCheckRollup ?? [];
+
   if (checks.some((c) => FAILED.has(c.conclusion ?? "") || FAILED.has(c.state ?? ""))) return "failing";
+
   if (pr.mergeable === "CONFLICTING" || pr.mergeStateStatus === "DIRTY") return "conflict";
+
   if (checks.some((c) => PENDING.has(c.state ?? "") || (c.status !== undefined && c.status !== "COMPLETED"))) return "pending";
+
   if (["CLEAN", "UNSTABLE", "HAS_HOOKS"].includes(pr.mergeStateStatus ?? "")) return "mergeable";
+
   if (["BLOCKED", "BEHIND", "DRAFT"].includes(pr.mergeStateStatus ?? "")) return "blocked";
+
   return pr.mergeable === "MERGEABLE" ? "mergeable" : "unknown";
 }
 
@@ -145,9 +153,11 @@ export interface CustomButton {
  */
 export function parseButtonStatus(out: string): ButtonState {
   const trimmed = out.trim();
+
   if (trimmed.startsWith("{")) {
     try {
       const v = JSON.parse(trimmed) as { text?: unknown; color?: unknown };
+
       return {
         ...(typeof v.text === "string" && v.text ? { text: v.text } : {}),
         ...(typeof v.color === "string" && v.color in COLORS ? { color: v.color as Color } : {}),
@@ -156,7 +166,9 @@ export function parseButtonStatus(out: string): ButtonState {
       // not JSON after all: fall through to plain text
     }
   }
+
   const line = trimmed.split("\n")[0]!.trim();
+
   return line ? { text: line } : {};
 }
 
@@ -168,6 +180,7 @@ export function buttonEnv(ws: string, repo: string, claim: { branch?: string; pr
 /** Fill `{ws}`, `{repo}`, `{branch}` and `{pr}` in a button's URL, each URL-encoded. */
 export function buttonUrl(template: string, env: Record<string, string>): string {
   const vars: Record<string, string> = { ws: env.OVERBRIDGE_NAME ?? "", repo: env.OVERBRIDGE_REPO ?? "", branch: env.OVERBRIDGE_BRANCH ?? "", pr: env.OVERBRIDGE_PR ?? "" };
+
   return template.replace(/\{(ws|repo|branch|pr)\}/g, (_, k: string) => encodeURIComponent(vars[k]!));
 }
 
@@ -192,6 +205,7 @@ export const stripConventional = (title: string): string => title.replace(CONVEN
  */
 export function sidebarLabel(ws: string, cache: Pick<TopCache, "headline" | "title">): string {
   const title = cache.title ?? (cache.headline?.includes(" ") ? cache.headline.replace(/^\S+\s+/, "") : undefined);
+
   return title ? stripConventional(title) : ws;
 }
 
@@ -227,6 +241,7 @@ export function topCacheFault(raw: unknown): string | undefined {
   if (!isRecord(raw)) return `expected a mapping, got ${describeValue(raw)}`;
   const wrong = (field: string, ok: boolean) => (ok ? undefined : `${field} is ${describeValue(raw[field])}`);
   const optional = (field: string, ok: boolean) => (raw[field] === undefined ? undefined : wrong(field, ok));
+
   return (
     optional("headline", typeof raw.headline === "string") ??
     optional("title", typeof raw.title === "string") ??
@@ -245,13 +260,17 @@ export function topCacheFault(raw: unknown): string | undefined {
 /** The cache file, checked: a missing file is the empty cache; an unreadable or misshapen one is the empty cache plus why, for that workspace's card. */
 export function readTopCacheChecked(ws: string): { cache: TopCache; fault?: string } {
   let raw: unknown;
+
   try {
     raw = JSON.parse(readFileSync(cacheFile(ws), "utf8"));
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return { cache: EMPTY_CACHE };
+
     return { cache: EMPTY_CACHE, fault: `top cache: ${errorMessage(e)}` };
   }
+
   const fault = topCacheFault(raw);
+
   return fault ? { cache: EMPTY_CACHE, fault: `top cache: ${fault}` } : { cache: raw as TopCache };
 }
 
@@ -267,8 +286,10 @@ export const readTopCache = (ws: string): TopCache => readTopCacheChecked(ws).ca
 export function claimedCache(ws: string, cache: TopCache = readTopCache(ws)): TopCache {
   if (!cache.branches || (!cache.merged && !cache.prsOpen)) return cache;
   const moved = Object.entries(getWorkspace(readState(), ws).repos).some(([repo, c]) => c.branch !== undefined && cache.branches?.[repo] !== c.branch);
+
   if (!moved) return cache;
   const { merged: _m, prsOpen: _p, ...rest } = cache;
+
   return rest;
 }
 
@@ -311,13 +332,17 @@ export interface RefreshDeps {
  */
 export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   const provider = deps.provider ?? providerFor;
+
   const exec =
     deps.exec ??
     ((cmd: string[], cwd: string) => {
       const r = run(cmd, { cwd });
+
       if (!r.ok) deps.onFailure?.(cmd, r.stderr);
+
       return r.ok && r.stdout ? r.stdout : undefined;
     });
+
   const old = readTopCache(ws);
   const claims = Object.entries(getWorkspace(readState(), ws).repos);
   const links: TopLink[] = [];
@@ -336,17 +361,21 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   for (const [repo, claim] of claims) {
     const dir = worktreePath(ws, repo);
     let config;
+
     try {
       config = loadRepoConfig(dir, repo);
     } catch (e) {
       problems.push(`${repo}: ${(e as Error).message}`);
       continue;
     }
+
     const pm = config.projectManagement;
+
     if (pm && claim.branch && !itemLink) {
       try {
         const p = provider(pm, dir);
         const id = p.idFromBranch(claim.branch);
+
         if (id) {
           const title = refreshTitle(p, pm.project, id, { ttlMs: TITLE_TTL_MS });
           headline = title ? `${id} ${title}` : id;
@@ -357,32 +386,42 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
         problems.push(`${repo}: ${(e as Error).message}`);
       }
     }
+
     for (const spec of config.buttons) {
       if (!spec.status) continue;
       const env = Object.entries(buttonEnv(ws, repo, claim)).map(([k, v]) => `${k}=${v}`);
       const out = exec(["env", ...env, "sh", "-c", spec.status], dir);
+
       if (out !== undefined) buttonStates[`${repo}/${spec.id}`] = parseButtonStatus(out);
     }
+
     const batched = deps.prefetched?.[repo];
+
     const viewOf = (n: number): PrView | undefined => {
       if (!batched) return parsePrView(exec(prViewCommand(n), dir));
       // null is GitHub saying the PR is gone. A PR the reply lacks (claimed after the prefetch read the state, cut short,
       // or the whole call failed) is read directly, so a batch fault never leaves the panel worse off than before
       const got = "prs" in batched ? batched.prs[n] : undefined;
+
       return got === null ? undefined : (got ?? parsePrView(exec(prViewCommand(n), dir)));
     };
+
     // while gh is paused the PR facts are the last ones read (below), so no PR is looked at
     if (claim.pr !== undefined && !deps.paused) {
       if (batched && "prs" in batched && batched.error) problems.push(`${repo}: ${batched.error}`);
       const view = viewOf(claim.pr);
+
       if (view?.url) {
         const layers = stackOf(safeStacks(repo), claim.branch)?.layers ?? [];
         const prs = layers.length > 1 ? layers.flatMap((l) => (l.pr === undefined ? [] : [l.pr])) : [];
         const stack = prs.length > 1 && prs.includes(claim.pr as number) ? prs : [];
+
         const link = (n: number, v: PrView & { url: string }): TopLink => {
           const threads = v.unresolved === undefined ? threadsCommand(v.url) : undefined;
+
           if (threads) v.unresolved = parseUnresolved(exec(threads, dir));
           const layer = stack.length ? { n: stack.indexOf(n) + 1, of: stack.length } : undefined;
+
           return {
             label: claims.length > 1 ? `${repo} #${n}` : `PR #${n}`,
             url: v.url,
@@ -390,25 +429,32 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
             pr: { repo, number: n, title: v.title ?? "", draft: v.isDraft === true, dir, stack, ...(layer ? { layer, claimed: n === claim.pr } : {}), reviewers: reviewerStatuses(v, v.url) },
           };
         };
+
         // a stack lists every layer bottom to top; only the claimed one feeds the open/merged counts below
         for (const n of stack.length ? stack : [claim.pr]) {
           if (n === claim.pr) {
             links.push(link(n, view as PrView & { url: string }));
             continue;
           }
+
           const other = viewOf(n);
+
           if (other?.url) links.push(link(n, other as PrView & { url: string }));
           else problems.push(`${repo}: no URL for PR #${n}`);
         }
       }
       else problems.push(`${repo}: no URL for PR #${claim.pr}`);
+
       if (view?.state === "OPEN") {
         openPrs++;
+
         if (view.isDraft === true) draftPrs++;
       }
       else if (view?.state === "MERGED") mergedPrs++;
       const updated = Date.parse(view?.updatedAt ?? "");
+
       if (Number.isFinite(updated)) prActiveAt = Math.max(prActiveAt ?? 0, updated);
+
       if (claim.branch && view?.state === "MERGED" && view.headRefOid) {
         mergedHeads[repo] = view.headRefOid;
       }
@@ -438,7 +484,9 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     ...(deps.paused || problems.length ? { message: [...(deps.paused ? [deps.paused] : []), ...problems].join("; ") } : {}),
     at: Date.now(),
   };
+
   writeTopCache(ws, cache);
+
   return cache;
 }
 
@@ -452,11 +500,14 @@ export function cleanable(ws: string): boolean {
   if (isOrchestrationTab(ws)) {
     return false;
   }
+
   const cache = claimedCache(ws);
   const finished = cache.merged !== undefined || cache.prsOpen || readAgentState(ws) === "empty" || sessionEndedForGood(ws) || taskWithoutCommits(ws);
+
   if (!finished) {
     return false;
   }
+
   return noUnsavedWork(ws, cache);
 }
 
@@ -467,12 +518,14 @@ export function cleanable(ws: string): boolean {
  */
 export function taskWithoutCommits(ws: string): boolean {
   const claims = Object.entries(getWorkspace(readState(), ws).repos).filter(([, claim]) => claim.branch);
+
   return (
     claims.length > 0 &&
     claims.every(([repo, claim]) => {
       if (!isTaskClaim(claim)) {
         return false;
       }
+
       try {
         return git.commitsPast(worktreePath(ws, repo), `origin/${git.defaultBranch(getRepo(repo))}`) === 0;
       } catch {
@@ -494,13 +547,17 @@ export function noUnsavedWork(ws: string, cache: Pick<TopCache, "merged"> = clai
 export function mergedClean(ws: string, heads: Record<string, string>): boolean {
   return Object.keys(getWorkspace(readState(), ws).repos).every((repo) => {
     const wt = worktreePath(ws, repo);
+
     if (!existsSync(wt)) {
       return true;
     }
+
     if (git.isDirty(wt)) {
       return false;
     }
+
     const head = heads[repo];
+
     return head === undefined ? !git.hasUnpushed(wt) : git.containedInPrHead(wt, head);
   });
 }
@@ -509,6 +566,7 @@ export function mergedClean(ws: string, heads: Record<string, string>): boolean 
 export function gitClean(ws: string): boolean {
   return Object.keys(getWorkspace(readState(), ws).repos).every((repo) => {
     const wt = worktreePath(ws, repo);
+
     return !git.isDirty(wt) && !git.hasUnpushed(wt);
   });
 }
@@ -519,6 +577,7 @@ export const CLEANUP_ARM_MS = 5_000;
 /** The first press arms Cleanup; a second within `CLEANUP_ARM_MS` confirms. Pure so the timing is testable. */
 export function pressCleanup(armedAt: number | undefined, now: number): { confirmed: boolean; armedAt: number | undefined } {
   if (armedAt !== undefined && now - armedAt <= CLEANUP_ARM_MS) return { confirmed: true, armedAt: undefined };
+
   return { confirmed: false, armedAt: now };
 }
 
@@ -531,17 +590,22 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
   const custom: CustomButton[] = [];
   let ide: Ide | undefined;
   const problems: string[] = cache.message ? [cache.message] : [];
+
   for (const repo of claims) {
     const repoDir = worktreePath(ws, repo);
+
     try {
       const config = loadRepoConfig(repoDir, repo);
       ide ??= config.ide;
+
       for (const spec of config.buttons) {
         const state = cache.buttons?.[`${repo}/${spec.id}`];
+
         // a button with a status command waits for it to print something
         if (spec.status && !state) continue;
         custom.push({ repo, spec, dir: repoDir, env: buttonEnv(ws, repo, claimed[repo] ?? {}), ...(state ? { state } : {}) });
       }
+
       for (const spec of config.apps) {
         const record = readRecord(ws, repo, spec.id);
         apps.push({
@@ -557,7 +621,9 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
       problems.push(`${repo}: ${(e as Error).message}`);
     }
   }
+
   const editor = ide ? undefined : env.OVERBRIDGE_IDE?.trim() || env.EDITOR?.trim() || undefined;
+
   return {
     ws,
     dir: wsDir(ws),
@@ -625,9 +691,12 @@ export const appUrlOf = (app: TopApp): string | undefined => appUrl(app.spec, ap
 /** Split an editor env value like `code -w` (or an ide name like `zed`) into a command and a label. */
 function editorFromEnv(editor: string | undefined): { label: string; cmd: string[] } | undefined {
   const cmd = editor?.split(/\s+/).filter(Boolean);
+
   if (!cmd?.length) return undefined;
   const name = cmd[0]!;
+
   if (cmd.length === 1 && name in IDE_COMMANDS) return { label: name, cmd: [IDE_COMMANDS[name as Ide]] };
+
   return { label: basename(name), cmd };
 }
 
@@ -637,9 +706,11 @@ function editorFromEnv(editor: string | undefined): { label: string; cmd: string
  */
 function withKeys(list: Button[]): Button[] {
   let app = 0;
+
   return list.map((b) => {
     const a = b.action;
     let key: string | undefined;
+
     if (a.kind === "link" || a.kind === "custom") return b;
     else if (a.kind === "ready") key = b.prRow === 0 ? "g" : undefined;
     else if (a.kind === "merge") key = b.prRow === 0 ? "m" : undefined;
@@ -647,6 +718,7 @@ function withKeys(list: Button[]): Button[] {
     else if (a.kind === "editor") key = "e";
     else if (a.kind === "pane") key = { claude: "c", terminal: "t", diff: "d" }[a.pane];
     else key = "x";
+
     return key ? { ...b, key } : b;
   });
 }
@@ -662,10 +734,13 @@ export type PrChange = { kind: "ready"; pr: PrInfo; ready: boolean } | { kind: "
 /** `snap` as it should look right after `change`: the PR (or every PR of its stack) flipped to draft or ready, or merged. */
 export function applyOptimistic(snap: TopSnapshot, change: PrChange): TopSnapshot {
   const numbers = new Set(change.pr.stack.length ? change.pr.stack : [change.pr.number]);
+
   const links = snap.links.map((l) => {
     if (!l.pr || l.pr.repo !== change.pr.repo || !numbers.has(l.pr.number)) return l;
+
     return change.kind === "ready" ? { ...l, pr: { ...l.pr, draft: !change.ready } } : { ...l, status: "merged" as const };
   });
+
   return { ...snap, links };
 }
 
@@ -677,6 +752,7 @@ export function buttons(snap: TopSnapshot): Button[] {
   const issueKeys = ["i"];
   const out: Button[] = [];
   let prRow = 0;
+
   for (const l of snap.links) {
     const isPr = l.status !== undefined || l.label.includes("#");
     const key = isPr ? prKeys.shift() : issueKeys.shift();
@@ -691,31 +767,42 @@ export function buttons(snap: TopSnapshot): Button[] {
       ...(key ? { key } : {}),
       ...(look ? { color: look.color } : {}),
     });
+
     if (pr) {
       const row = prRow++;
+
       for (const r of pr.reviewers ?? []) out.push({ label: reviewerLabel(r), action: { kind: "link", url: r.url ?? l.url }, side: "right", color: REVIEWER_LOOK[r.state].color, prRow: row });
+
       if (l.status !== "merged" && l.status !== "closed" && pr.claimed !== false) {
         out.push({ label: pr.draft ? "✅ Ready" : "📝 Draft", action: { kind: "ready", pr }, side: "right", prRow: row });
+
         if (l.status === "mergeable" && !pr.draft) out.push({ label: pr.stack.length > 1 ? "🟣 Merge stack" : "🟣 Merge", action: { kind: "merge", pr }, side: "right", color: "purple", prRow: row });
       }
     }
   }
+
   if (snap.cleanup) out.push({ label: "🧹 Cleanup", action: { kind: "cleanup" }, side: "left" });
   const repos = new Set((snap.custom ?? []).map((c) => c.repo));
+
   for (const c of snap.custom ?? []) {
     const name = repos.size > 1 ? `${c.repo} ${c.spec.label}` : c.spec.label;
     const text = c.state?.text ? `${name}: ${c.state.text}` : name;
     out.push({ label: text, action: { kind: "custom", button: c }, side: c.spec.side, ...(c.state?.color ? { color: c.state.color } : {}) });
   }
+
   for (const app of snap.apps) {
     if (!app.available) continue;
     const port = app.status === AppStatus.Stopped || app.port === undefined ? "" : ` :${app.port}`;
     const color = APP_COLORS[app.status];
     out.push({ label: `${MARKS[app.status]} ${app.spec.label}${port}`, action: { kind: "app", app }, side: "right", ...(color ? { color } : {}) });
   }
+
   const editor = snap.ide ? { label: snap.ide, cmd: [IDE_COMMANDS[snap.ide]] } : editorFromEnv(snap.editor);
+
   if (editor) out.push({ label: `📝 ${editor.label}`, action: { kind: "editor", cmd: editor.cmd, dir: snap.dir }, side: "right" });
+
   for (const p of PANE_BUTTONS) out.push({ label: p.label, action: { kind: "pane", pane: p.pane }, side: "right" });
+
   return withKeys(out);
 }
 
@@ -774,27 +861,35 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
   const flow = (items: { button: Button; text: string }[], align: "left" | "right", firstRow?: { row: number; used: number }) => {
     let row = firstRow?.row ?? base;
     let line: typeof items = [];
+
     const flush = () => {
       if (!line.length) return;
       let col = align === "left" ? (row === firstRow?.row ? firstRow.used : 0) : Math.max(0, inner - widthOf(line));
+
       for (const item of line) {
         placed.push({ button: item.button, row, col, width: textWidth(item.text) });
         col += textWidth(item.text) + 1;
       }
+
       row++;
       line = [];
     };
+
     for (const item of items) {
       const base = align === "left" && row === firstRow?.row ? firstRow.used : 0;
+
       if (line.length && base + widthOf([...line, item]) > inner) flush();
       line.push(item);
     }
+
     flush();
+
     return row;
   };
 
   // one row per PR: the PR first, its actions against the right edge
   let base = 0;
+
   for (const row of new Set(all.flatMap((b) => (b.prRow === undefined ? [] : [b.prRow])))) {
     const group = all.filter((b) => b.prRow === row);
     const main = group.find((b) => b.side !== "right")!;
@@ -803,16 +898,19 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
     const text = clip(cell(main), Math.max(1, inner - taken));
     placed.push({ button: main, row: base, col: 0, width: textWidth(text) });
     let col = inner - widthOf(actions);
+
     for (const a of actions) {
       placed.push({ button: a.button, row: base, col, width: textWidth(a.text) });
       col += textWidth(a.text) + 1;
     }
+
     base++;
   }
 
   const left = cells("left");
   const right = cells("right");
   const rules: Rule[] = [];
+
   if (base > 0 && right.length) {
     // PR rows above: the launchers get their own section under a divider, so they never read as PR actions
     const next = flow(left, "left");
@@ -824,27 +922,35 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
   } else {
     flow(right, "right", { row: flow(left, "left"), used: 0 });
   }
+
   const used = Math.max(0, ...placed.map((p) => p.row + 1));
+
   for (let y = 0; y < Math.max(used, height - 2, 1); y++) {
     let text = "";
     const rule = rules.find((r) => r.row === y);
+
     if (rule) text = fit(rule.text, inner).trimEnd();
+
     for (const p of placed.filter((q) => q.row === y).sort((a, b) => a.col - b.col)) {
       text += " ".repeat(Math.max(0, p.col - textWidth(text))) + clip(cell(p.button), p.width);
     }
+
     content.push(text);
   }
+
   // inside the frame: one row down for the top border, two columns across for the border and padding
   const shifted = placed.map((p) => ({ ...p, row: p.row + 1, col: p.col + 2 }));
   const title = snap.title ?? snap.headline ?? snap.ws;
   const message = snap.message ?? "";
   const rows = [plain(boxTop(title, width)), ...content.map((r) => plain(boxRow(fit(r, inner)))), plain(boxBottom(width, message))];
+
   return { rows, placed: shifted, rules: rules.map((r) => ({ ...r, row: r.row + 1 })), title, message, width };
 }
 
 /** The button under a 0-based (col,row) cell, if any. */
 export function hit(frame: Frame, col: number, row: number): number | undefined {
   const i = frame.placed.findIndex((p) => p.row === row && col >= p.col && col < p.col + p.width);
+
   return i < 0 ? undefined : i;
 }
 
@@ -859,12 +965,14 @@ export function paintTop(f: Frame, cursor: number): string {
   f.rows.forEach((_, y) => {
     out += `${ESC}[${y + 1};1H${y === 0 ? boxTop(f.title, f.width) : y === last ? boxBottom(f.width, f.message) : blank}`;
   });
+
   for (const r of f.rules) out += `${ESC}[${r.row + 1};3H${ESC}[2m${fit(r.text, Math.max(1, f.width - 4))}${ESC}[0m`;
   f.placed.forEach((p, i) => {
     const text = clip(cell(p.button), p.width);
     const shown = i === cursor ? inverse(text) : p.button.color ? colorize(text, p.button.color) : text;
     out += `${ESC}[${p.row + 1};${p.col + 1}H${shown}`;
   });
+
   return out;
 }
 
@@ -889,12 +997,15 @@ export interface ActDeps {
 /** Do what a button says; returns a message for the message row, or undefined. */
 export function activate(button: Button, deps: ActDeps): string | undefined {
   const a = button.action;
+
   switch (a.kind) {
     case "link":
       deps.open(a.url);
+
       return undefined;
     case "editor":
       deps.spawn([...a.cmd, a.dir]);
+
       return undefined;
     case "pane":
       return deps.pane(a.pane);
@@ -906,18 +1017,23 @@ export function activate(button: Button, deps: ActDeps): string | undefined {
       return deps.merge(a.pr);
     case "custom": {
       const { spec, dir, env } = a.button;
+
       if (spec.url) deps.open(buttonUrl(spec.url, env));
       else if (spec.run) deps.run(spec.run, dir, env);
+
       return undefined;
     }
+
     case "app": {
       const live = a.app.status === AppStatus.Running || a.app.status === AppStatus.Starting;
+
       try {
         if (live) deps.stop(a.app);
         else deps.start(a.app);
       } catch (e) {
         return (e as Error).message;
       }
+
       return undefined;
     }
   }
@@ -926,5 +1042,6 @@ export function activate(button: Button, deps: ActDeps): string | undefined {
 /** `o` on an app button: its URL when it is running. */
 export function openTarget(button: Button): string | undefined {
   const a = button.action;
+
   return a.kind === "app" && a.app.status === AppStatus.Running ? appUrlOf(a.app) : undefined;
 }

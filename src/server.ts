@@ -29,12 +29,15 @@ export const CLAIMED_TTL_MS = 5_000;
 
 export const TOP_TTL_MS = 60_000;
 export const TOP_STALE_MS = 10 * 60_000;
+
 /** The perf views are cheap to build, so they are rebuilt often; a stale set is served while one builds. */
 export const PERF_TTL_MS = 5_000;
 export const PERF_STALE_MS = 60_000;
+
 /** How often the server checks whether the sweep is due. */
 export const SWEEP_TICK_MS = 5_000;
 export const IDLE_EXIT_MS = 10 * 60_000;
+
 /** Refreshes running at once: each runs `gh` calls of its own. */
 export const MAX_REFRESHES = 4;
 
@@ -92,6 +95,7 @@ export function createHandler(deps: HandlerDeps) {
       const built = await deps.refreshTop(ws, { force });
       // the cache file is written by now, so a pane that reads it on this event sees the new value
       events.publish(`top:${ws}`);
+
       return built;
     }, {
       ttlMs: TOP_TTL_MS,
@@ -106,10 +110,12 @@ export function createHandler(deps: HandlerDeps) {
   function eventStream(): Response {
     const enc = new TextEncoder();
     let cleanup = () => {};
+
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         const send = (frame: string) => controller.enqueue(enc.encode(frame));
         const unsubscribe = events.subscribe(send);
+
         // each stream pings only itself; a failed write means the client is gone
         const beat = setInterval(() => {
           try {
@@ -118,14 +124,17 @@ export function createHandler(deps: HandlerDeps) {
             end();
           }
         }, HEARTBEAT_MS);
+
         const close = () => {
           end();
+
           try {
             controller.close();
           } catch {
             // already closed by the client
           }
         };
+
         function end() {
           clearInterval(beat);
           unsubscribe();
@@ -133,6 +142,7 @@ export function createHandler(deps: HandlerDeps) {
           // idle exit counts from the last stream closing, not from when it opened hours ago
           lastRequestAt = now();
         }
+
         cleanup = end;
         streams.add(close);
         send(CONNECTED_FRAME);
@@ -141,6 +151,7 @@ export function createHandler(deps: HandlerDeps) {
         cleanup();
       },
     });
+
     return new Response(body, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" } });
   }
 
@@ -148,6 +159,7 @@ export function createHandler(deps: HandlerDeps) {
     lastRequestAt = now();
     const url = new URL(req.url);
     const theirs = req.headers.get(VERSION_HEADER);
+
     if (theirs && theirs !== deps.version) {
       // only a client of a newer build may replace this server, so builds running side by side (an older pane that
       // outlived an upgrade, a dev checkout) cannot keep killing each other's server; no build time on either side, no replace
@@ -155,70 +167,92 @@ export function createHandler(deps: HandlerDeps) {
         draining = true;
         deps.onVersionMismatch();
       }
+
       return json(409, { error: "version mismatch", server: deps.version, client: theirs });
     }
+
     if (req.method === "GET" && url.pathname === "/status") {
       return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, subscribers: events.count, ...cache.stats(), perf: perf.stats(), ...(deps.prBatch ? { prBatch: deps.prBatch() } : {}), ...(deps.worklistStats ? { worklist: deps.worklistStats() } : {}), ...(deps.sweepStats ? { sweep: deps.sweepStats() } : {}), ...(deps.rateStats ? { rateLimit: deps.rateStats() } : {}) });
     }
+
     if (req.method === "GET" && url.pathname === "/events") {
       return eventStream();
     }
+
     if (req.method === "GET" && url.pathname === "/sweep" && deps.sweepStats) {
       // a sidebar asks this to learn the server runs the sweep, so it skips its own
       return json(200, { owner: true, ...(deps.sweepStats() as object) });
     }
+
     if (req.method === "POST" && url.pathname === "/refresh/perf") {
       const got = perf.get("perf", async () => {
         const at = await deps.refreshPerf();
         events.publish("perf");
+
         return at;
       }, { ttlMs: PERF_TTL_MS, staleMs: PERF_STALE_MS, force: url.searchParams.get("force") === "1", swr: true });
+
       if (url.searchParams.get("async") === "1") {
         got.catch(() => undefined);
+
         return json(202, { queued: "perf" });
       }
+
       try {
         const { served, error } = await got;
+
         return json(200, { served, ...(error ? { error } : {}) });
       } catch (e) {
         return json(502, { error: errorText(e) });
       }
     }
+
     if (req.method === "POST" && url.pathname === "/refresh/worklist" && deps.refreshWorklist) {
       try {
         const at = await deps.refreshWorklist(url.searchParams.get("force") === "1");
+
         // the worklist refresher serves its own cache, so only a new build is a change
         if (at !== lastWorklistAt) {
           lastWorklistAt = at;
           events.publish("worklist");
         }
+
         return json(200, { served: at });
       } catch (e) {
         return json(502, { error: errorText(e) });
       }
     }
+
     const top = /^\/refresh\/top\/([^/]+)$/.exec(url.pathname);
+
     if (req.method === "POST" && top) {
       let ws: string;
+
       try {
         ws = decodeURIComponent(top[1]!);
       } catch {
         return json(400, { error: "bad workspace name" });
       }
+
       if (!NAME_RE.test(ws) || !deps.workspaceExists(ws)) return json(404, { error: `no workspace ${ws}` });
       const force = url.searchParams.get("force") === "1";
       const got = refreshWs(ws, force);
+
       if (url.searchParams.get("async") === "1") {
         got.catch(() => undefined);
+
         return json(202, { queued: ws });
       }
+
       try {
         const { served, error } = await got;
+
         return json(200, { ws, served, ...(error ? { error } : {}) });
       } catch (e) {
         return json(502, { error: errorText(e) });
       }
     }
+
     return json(404, { error: "not found" });
   }
 
@@ -256,24 +290,30 @@ interface WorkerReply {
 function workerJob<T>(file: string, message: unknown, o: { timeoutMs: number; label: string; fallback: string; pick: (r: WorkerReply) => T | undefined }): Promise<T> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL(file, import.meta.url).href);
+
     const timer = setTimeout(() => {
       worker.terminate();
       reject(new Error(`${o.label} timed out`));
     }, o.timeoutMs);
+
     const finish = () => {
       clearTimeout(timer);
       worker.terminate();
     };
+
     worker.onmessage = (e: MessageEvent<WorkerReply>) => {
       finish();
       const picked = e.data.ok ? o.pick(e.data) : undefined;
+
       if (picked !== undefined) resolve(picked);
       else reject(new Error(e.data.error ?? o.fallback));
     };
+
     worker.onerror = (e) => {
       finish();
       reject(new Error(e.message));
     };
+
     worker.postMessage(message);
   });
 }
@@ -286,6 +326,7 @@ export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, time
     fallback: "refresh failed",
     pick: (r) => {
       if (r.limited) onLimited?.(r.limited);
+
       return r.cache;
     },
   });
@@ -302,10 +343,13 @@ export const workerCall = <T>(file: string, message: unknown, timeoutMs = 120_00
 export async function serve(): Promise<void> {
   mkdirSync(metaDir(), { recursive: true });
   const pid = pidFile();
+
   if (!takePidFile(pid, pidAlive)) {
     log("server already running");
+
     return;
   }
+
   const sock = socketPath();
   rmSync(sock, { force: true });
   // a stop that is over (this is a new server) must not stop the watchdog from restarting this one
@@ -313,6 +357,7 @@ export async function serve(): Promise<void> {
   let exiting = false;
   // a rate-limit reply pauses every gh key until GitHub's reset: they serve what they hold and say why
   const gate = new RateGate({ lookupReset: ghResetLookup, log });
+
   const batcher = new PrBatcher({
     claimed: cachedClaimedPrs(CLAIMED_TTL_MS),
     paused: () => gate.message(),
@@ -321,13 +366,17 @@ export async function serve(): Promise<void> {
       log(`${key}: ${e.message}`);
     },
   });
+
   // set while a forced worklist refresh that the gate let through is running: its board reads call `gh` despite the pause
   let worklistForced = false;
+
   const worklist = createWorklistRefresher({
     plan: () => workerCall("./server-worklist-worker.ts", { kind: "plan" }),
     read: async (source) => {
       const paused = source.kind === "github" && !worklistForced ? gate.message() : undefined;
+
       if (paused) throw new Error(paused);
+
       try {
         return await workerCall("./server-worklist-worker.ts", { kind: "read", source }, 60_000);
       } catch (e) {
@@ -337,7 +386,9 @@ export async function serve(): Promise<void> {
     },
     finish: (notes, read) => finishWorklist(notes, read),
   });
+
   let refreshForSweep: (ws: string) => Promise<unknown> = () => Promise.resolve();
+
   const sweeper = createSweeper({
     claim: claimSweep,
     stale: staleCandidates,
@@ -348,25 +399,30 @@ export async function serve(): Promise<void> {
         // a workspace whose refresh failed keeps; the sweep never judges it from an old cache
         refresh: (ws) => {
           const e = failed.get(ws);
+
           if (e) throw e;
         },
       }),
     now: Date.now,
     log,
   });
+
   const handler = createHandler({
     sweepStats: () => sweeper.stats(),
     sweepBusy: () => sweeper.busy,
     refreshWorklist: async (force) => {
       worklistForced = force && gate.allowForced();
       let r;
+
       try {
         r = await worklist.refresh(force);
       } finally {
         worklistForced = false;
       }
+
       // a failed planning job serves the last timestamp with `error`; the file was not rebuilt, so the route must not answer 200
       if (r.error) throw new Error(r.error);
+
       return r.value;
     },
     worklistStats: () => worklist.stats(),
@@ -375,6 +431,7 @@ export async function serve(): Promise<void> {
     refreshTop: async (ws, o) => {
       // a forced refresh (the user's `r`) goes past a pause once, to learn whether the limit is still on; every call that sees one feeds the gate
       const forced = o?.force === true && gate.allowForced();
+
       return refreshInWorker(ws, await prefetchFor(ws, batcher, { force: forced }), 120_000, forced ? undefined : gate.message(), (text) => void gate.observe(text));
     },
     prBatch: () => batcher.stats(),
@@ -387,26 +444,34 @@ export async function serve(): Promise<void> {
     buildTime: overbridgeBuildTime(),
     onVersionMismatch: () => void shutdown(),
   });
+
   refreshForSweep = async (ws) => {
     const got = await handler.refresh(ws);
+
     // a stale value served over a failed refresh is a failure here: the sweep must not judge that workspace from it
     if (got.error) throw new Error(got.error);
   };
+
   const old = process.umask(0o177);
+
   // a refresh outlasts Bun's 10 s default idle timeout, so each request opts out of it
   const server = Bun.serve({
     unix: sock,
     fetch: (req, srv) => {
       srv.timeout(req, 0);
+
       return handler.handle(req);
     },
   });
+
   process.umask(old);
+
   try {
     chmodSync(sock, 0o600);
   } catch {
     // the socket is already 0600 from the umask set before Bun.serve
   }
+
   log(`serving on ${sock}`);
   // a hung server answers nothing and cannot notice: a watchdog thread kills it and starts a replacement
   const stopWatchdog = startWatchdog({ stopMarker: stoppingFile(), restart: ["sh", "-c", 'sleep 1; exec "$@"', "sh", ...selfCommand(), "serve"] });
@@ -414,6 +479,7 @@ export async function serve(): Promise<void> {
   async function shutdown() {
     if (exiting) return;
     exiting = true;
+
     // finish what runs, then go: the next client call starts the new version
     while (handler.busy()) await Bun.sleep(100);
     stopWatchdog();
@@ -423,6 +489,7 @@ export async function serve(): Promise<void> {
     rmSync(pid, { force: true });
     process.exit(0);
   }
+
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
   // sidebars ask `GET /sweep` and skip their own, so this is the one sweep; `claimSweep` keeps it to one per MERGE_SWEEP_MS

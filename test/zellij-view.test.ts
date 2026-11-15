@@ -20,16 +20,21 @@ const NOW_MS = 1_800_000_000_000;
 /** A fake zellij that records its calls and answers with the given tabs, focused on `focused`. */
 function fakeZellij(tabs: string[], focused: string) {
   const calls: string[][] = [];
+
   const exec: MuxExec = (cmd) => {
     calls.push(cmd);
+
     if (cmd.includes("query-tab-names")) {
       return { ok: true, stdout: tabs.join("\n") };
     }
+
     if (cmd.includes("current-tab-info")) {
       return { ok: true, stdout: `name: ${focused}\nposition: 0\n` };
     }
+
     return { ok: false, stdout: "" };
   };
+
   return { exec, calls };
 }
 

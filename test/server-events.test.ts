@@ -63,6 +63,7 @@ describe("GET /events", () => {
   let sock: string;
   let server: ReturnType<typeof Bun.serve> | undefined;
   let refreshes = 0;
+
   const handler = () =>
     createHandler({
       refreshTop: async () => (refreshes++, { at: Date.now() }) as never,
@@ -72,6 +73,7 @@ describe("GET /events", () => {
       version: overbridgeVersion(),
       onVersionMismatch: () => undefined,
     });
+
   let h: ReturnType<typeof handler>;
   beforeEach(() => {
     tmp = realpathSync(mkdtempSync(join(tmpdir(), "ob-ev-")));
@@ -88,7 +90,9 @@ describe("GET /events", () => {
 
   const until = async (cond: () => boolean, ms = 1500) => {
     const end = Date.now() + ms;
+
     while (!cond() && Date.now() < end) await Bun.sleep(10);
+
     return cond();
   };
 
@@ -110,8 +114,10 @@ describe("GET /events", () => {
     const keys: string[] = [];
     wl.handle(new Request("http://x/events")).then(async (res) => {
       const reader = res.body!.getReader();
+
       for (;;) {
         const { value, done } = await reader.read();
+
         if (done) return;
         keys.push(new TextDecoder().decode(value));
       }
@@ -159,6 +165,7 @@ describe("GET /events", () => {
       const res = await h.handle(new Request("http://x/events"));
       await res.body!.cancel();
     }
+
     expect(h.subscribers()).toBe(0);
     expect(h.streamCount()).toBe(0);
   });

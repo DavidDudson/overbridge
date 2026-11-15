@@ -14,17 +14,25 @@ export function pickGo(tabs: string[], current: string | undefined, arg: string)
   if (/^\d+$/.test(arg)) {
     const n = Number(arg);
     const tab = n >= 1 ? tabs[n - 1] : undefined;
+
     return tab === undefined ? { error: `no tab ${n}: ${tabs.length} tab${tabs.length === 1 ? "" : "s"}` } : { tab };
   }
+
   if (arg === "next" || arg === "prev") {
     const at = current === undefined ? -1 : tabs.indexOf(current);
+
     if (at < 0) return { error: "not on a tab" };
+
     if (tabs.length < 2) return { error: "only one tab" };
+
     return { tab: tabs[(at + (arg === "next" ? 1 : tabs.length - 1)) % tabs.length]! };
   }
+
   if (tabs.includes(arg)) return { tab: arg };
   const orchestration = orchestrationTab(`@${arg}`)?.tab;
+
   if (orchestration !== undefined && tabs.includes(orchestration)) return { tab: orchestration };
+
   return { error: `no tab '${arg}'` };
 }
 
@@ -35,9 +43,12 @@ export function pickGo(tabs: string[], current: string | undefined, arg: string)
 export function go(arg: string, mux: Mux = defaultMux()): string {
   const tabs = entries(mux.tabs()).map((e) => e.tab);
   const picked = pickGo(tabs, mux.currentTab(), arg);
+
   if ("error" in picked) throw new OverbridgeError(picked.error);
   const r = mux.goToTab(picked.tab);
+
   if (!r.ok) throw new OverbridgeError(`could not switch to ${picked.tab}: ${r.error || "no session"}`.trim());
   focusClaude(picked.tab, mux);
+
   return `→ ${picked.tab}`;
 }

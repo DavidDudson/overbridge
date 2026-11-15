@@ -10,6 +10,7 @@ const err = (yaml: string): string => {
   } catch (e) {
     return (e as Error).message;
   }
+
   throw new Error("expected parseConfig to throw");
 };
 
@@ -32,6 +33,7 @@ apps:
     ports: [3000, 3001]
 ide: zed
 `);
+
     expect(c.projectManagement).toEqual({ name: "jira", project: "ENG", url: "https://example.atlassian.net" });
     expect(c.apps).toHaveLength(1);
     expect(c.apps[0]!.ports).toEqual([3000, 3001]);
@@ -89,6 +91,7 @@ review:
   exclude: [pr-size]
   local-dir: .review
 `);
+
     expect(c.commands).toEqual({ test: "pnpm test", format: "pnpm format" });
     expect(c.review).toEqual({ personas: ["security", "naming"], exclude: ["pr-size"], localDir: ".review", shipPr: true });
   });
@@ -115,6 +118,7 @@ review:
     for (const bad of ["/etc", "../x", "a/../../x", ".", "*.o", "a[b]", ".git", "./.git/", ".claude", ":(exclude)x", "a//b"]) {
       expect(err(`icebox: { prune: ["${bad}"] }`)).toContain("icebox.prune");
     }
+
     expect(err("icebox: { zap: 1 }")).toContain("icebox");
   });
 
@@ -142,6 +146,7 @@ describe("loadRepoConfig", () => {
     const dir = mkdtempSync(join(tmpdir(), "overbridge-cfg-"));
     const saved = process.env.OVERBRIDGE_ROOT;
     process.env.OVERBRIDGE_ROOT = join(dir, "no-root"); // keep a real root config.yml out of the test
+
     try {
       expect(loadRepoConfig(dir)).toEqual(defaultConfig());
       mkdirSync(join(dir, "sub"));

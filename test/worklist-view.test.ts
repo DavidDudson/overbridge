@@ -56,6 +56,7 @@ describe("board sources", () => {
       { repo: "odd", url: "/local/odd", pm: { name: "github", project: "7" } },
       { repo: "none", url: "git@github.com:o/none.git" },
     ]);
+
     expect(sources).toEqual([
       { kind: "github", repo: "ob", slug: "o/ob" },
       { kind: "jira", project: "ABC", repos: ["web", "api"] },
@@ -78,6 +79,7 @@ describe("board sources", () => {
         github: (_slug, repo) => [row("1", { repo })],
       },
     );
+
     expect(out.rows.map((r) => r.id)).toEqual(["1"]);
     expect(out.notes).toEqual(["ABC: jira: reading ABC for web failed"]);
   });
@@ -99,10 +101,13 @@ describe("repo picker", () => {
 describe("refreshInChild", () => {
   test("runs `worklist refresh` under the self command and reports success", async () => {
     const calls: string[][] = [];
+
     const result = await refreshInChild(async (cmd) => {
       calls.push(cmd);
+
       return { code: 0, stderr: "worklist: 3 open item(s)\n" };
     }, ["ob"]);
+
     expect(calls).toEqual([["ob", "worklist", "refresh"]]);
     expect(result).toEqual({ ok: true, error: "" });
   });

@@ -3,6 +3,7 @@ import { check, type HookInput } from "../src/guard";
 
 const ctx = { root: "/w", ws: "ws1", home: "/home/u" };
 const bash = (command: string, cwd = "/w/ws1/app"): HookInput => ({ cwd, tool_name: "Bash", tool_input: { command } });
+
 const tool = (tool_name: string, tool_input: Record<string, unknown>): HookInput => ({
   cwd: "/w/ws1/app",
   tool_name,
@@ -142,6 +143,7 @@ describe("root config additions", () => {
     readPaths: ["/w/.seeds", "~/shared"],
     deny: [{ pattern: /\bgit\s+push\s+--force(?:\s|$)/, reason: "use --force-with-lease" }],
   };
+
   const withExtra = { ...ctx, extra };
 
   test("read-paths lets a workspace read, but not write, those paths under the root", () => {

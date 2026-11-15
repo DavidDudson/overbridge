@@ -19,6 +19,7 @@ const safeStacks = (repo: string) => {
 function claimPrs(repo: string, branch: string | undefined, pr: number, stacks: ReturnType<typeof localStacks> = safeStacks(repo)): number[] {
   const layers = stackOf(stacks, branch)?.layers ?? [];
   const prs = layers.flatMap((l) => (l.pr === undefined ? [] : [l.pr]));
+
   return [...new Set([pr, ...(prs.length > 1 && prs.includes(pr) ? prs : [])])];
 }
 
@@ -36,16 +37,21 @@ function claimedByRepo(): Map<string, Set<number>> {
   const state = readState();
   const catalogs = new Map<string, ReturnType<typeof localStacks>>();
   const stacks = (repo: string) => catalogs.get(repo) ?? catalogs.set(repo, safeStacks(repo)).get(repo)!;
+
   for (const ws of Object.keys(state.workspaces)) {
     // an iceboxed workspace has no tab and no panel to draw, so its PRs are not worth the query's points
     if (isIceboxed(state.workspaces[ws])) continue;
+
     for (const [repo, c] of Object.entries(getWorkspace(state, ws).repos)) {
       const full = c.pr === undefined ? undefined : repoOf(repo);
+
       if (full === undefined || c.pr === undefined) continue;
       const set = out.get(full) ?? out.set(full, new Set()).get(full)!;
+
       for (const n of claimPrs(repo, c.branch, c.pr, stacks(repo))) set.add(n);
     }
   }
+
   return out;
 }
 
@@ -59,11 +65,13 @@ export const claimedPrs = (repoFullName: string): number[] => [...(claimedByRepo
 export function cachedClaimedPrs(ttlMs: number, now: () => number = Date.now): (repoFullName: string) => number[] {
   let at = -Infinity;
   let all = new Map<string, Set<number>>();
+
   return (repoFullName) => {
     if (now() - at >= ttlMs) {
       all = claimedByRepo();
       at = now();
     }
+
     return [...(all.get(repoFullName) ?? [])];
   };
 }
@@ -78,7 +86,9 @@ export async function prefetchFor(ws: string, batcher: PrBatcher, o: { force?: b
   await Promise.all(
     claims.map(async ([repo, c]) => {
       const full = repoOf(repo);
+
       if (!full || c.pr === undefined) return;
+
       try {
         const { prs, error } = await batcher.get(full, claimPrs(repo, c.branch, c.pr), o);
         out[repo] = { prs, ...(error ? { error } : {}) };
@@ -87,5 +97,6 @@ export async function prefetchFor(ws: string, batcher: PrBatcher, o: { force?: b
       }
     }),
   );
+
   return out;
 }

@@ -25,28 +25,36 @@ function fakeZellij(initial: string[], focused = initial.at(-1) ?? "") {
   const tabs = [...initial];
   const calls: string[][] = [];
   const state = { focused };
+
   const exec = (cmd: string[]) => {
     calls.push(cmd);
     const [, , action, ...args] = cmd;
+
     if (action === "query-tab-names") {
       return { ok: true, stdout: tabs.join("\n") };
     }
+
     if (action === "current-tab-info") {
       return { ok: true, stdout: `name: ${state.focused}\nposition: 0` };
     }
+
     if (action === "new-tab") {
       tabs.push(args[args.indexOf("--name") + 1]!);
       state.focused = tabs.at(-1)!;
     }
+
     if (action === "move-tab") {
       const i = tabs.indexOf(state.focused);
       tabs.splice(i - 1, 0, ...tabs.splice(i, 1));
     }
+
     if (action === "go-to-tab-name") {
       state.focused = args[0]!;
     }
+
     return { ok: true, stdout: "" };
   };
+
   return { tabs, calls, state, exec };
 }
 

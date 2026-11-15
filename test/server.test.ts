@@ -28,9 +28,11 @@ beforeEach(() => {
 
 afterEach(() => {
   stopServer();
+
   for (const [k, v] of [["OVERBRIDGE_ROOT", saved.root], ["OVERBRIDGE_SELF", saved.self], ["OVERBRIDGE_NAME", saved.name]] as const) {
     v === undefined ? delete process.env[k] : (process.env[k] = v);
   }
+
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -44,6 +46,7 @@ const pidOf = (): number | undefined => {
 
 function stopServer() {
   const pid = pidOf();
+
   if (pid) {
     try {
       process.kill(pid, "SIGKILL");
@@ -57,10 +60,12 @@ const spawnServer = () => Bun.spawn({ cmd: [process.execPath, CLI, "serve"], env
 
 async function until(ok: () => boolean | Promise<boolean>, ms = 5_000) {
   const end = Date.now() + ms;
+
   while (Date.now() < end) {
     if (await ok()) return;
     await Bun.sleep(25);
   }
+
   throw new Error("timed out");
 }
 
@@ -69,10 +74,12 @@ const cacheOf = (at = 1): TopCache => ({ links: [], prsOpen: false, at });
 function handlerDeps(over: Partial<HandlerDeps> = {}) {
   const refreshed: string[] = [];
   let mismatches = 0;
+
   const deps: HandlerDeps = {
     refreshTop: async (ws) => {
       refreshed.push(ws);
       await Bun.sleep(5);
+
       return cacheOf();
     },
     refreshPerf: async () => 0,
@@ -84,6 +91,7 @@ function handlerDeps(over: Partial<HandlerDeps> = {}) {
     },
     ...over,
   };
+
   return { deps, refreshed, mismatches: () => mismatches };
 }
 
@@ -125,6 +133,7 @@ describe("routes", () => {
         },
       }).deps,
     );
+
     const r = await post(h, "/refresh/top/w1");
     expect(r.status).toBe(502);
     expect(await r.json()).toEqual({ error: "gh down" });
@@ -181,6 +190,7 @@ describe("routes", () => {
 
   test("a failed refresh is logged, also when it runs behind an async reply", async () => {
     const logged: string[] = [];
+
     const h = createHandler(
       handlerDeps({
         log: (m) => logged.push(m),
@@ -189,6 +199,7 @@ describe("routes", () => {
         },
       }).deps,
     );
+
     expect((await post(h, "/refresh/top/w1?async=1")).status).toBe(202);
     await Bun.sleep(5);
     expect(logged).toEqual(["top:w1: gh down"]);
@@ -252,6 +263,7 @@ describe("server stopped: callers fall back", () => {
 
   test("OVERBRIDGE_NO_SERVER keeps every caller on its own path and starts nothing", async () => {
     const stub = Bun.serve({ unix: socketPath(), fetch: () => Response.json({ ws: "w1", served: "fresh" }) });
+
     try {
       expect(await serverRefresh("w1", { start: false })).toMatchObject({ served: "fresh" });
       process.env.OVERBRIDGE_NO_SERVER = "1";
@@ -294,6 +306,7 @@ describe("client replies", () => {
       unix: socketPath(),
       fetch: (req) => {
         seen.push(new URL(req.url).pathname + new URL(req.url).search);
+
         return new Response(body, { status });
       },
     });
@@ -308,10 +321,12 @@ describe("client replies", () => {
     status = 502;
     body = JSON.stringify({ error: "gh down" });
     expect(await serverRefresh("w1", { start: false })).toMatchObject({ error: "gh down" });
+
     for (const s of [404, 409, 500]) {
       status = s;
       expect(await serverRefresh("w1", { start: false })).toBeUndefined();
     }
+
     status = 200;
     body = "not json";
     expect(await serverRefresh("w1", { start: false })).toBeUndefined();
@@ -328,6 +343,7 @@ describe("client replies", () => {
     status = 202;
     expect(await notifyRefresh("w1", { start: false })).toBe(true);
     expect(seen).toEqual(["/refresh/top/w1?async=1"]);
+
     for (const s of [404, 409, 500]) {
       status = s;
       expect(await notifyRefresh("w1", { start: false })).toBe(false);
@@ -356,9 +372,11 @@ describe("sweep candidates", () => {
     });
     const now = 10_000_000;
     mkdirSync(join(meta, "top"), { recursive: true });
+
     for (const [ws, at] of [["fresh", now - 1_000], ["edge", now - 60_000], ["old", now - 600_000]] as const) {
       writeFileSync(join(meta, "top", `${ws}.json`), JSON.stringify({ links: [], at }));
     }
+
     expect(staleCandidates(now).sort()).toEqual(["edge", "nocache", "old"]);
   });
 });

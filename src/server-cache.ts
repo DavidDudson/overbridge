@@ -101,9 +101,11 @@ export class Cache<T> {
 
   private entry(key: string): Entry<T> {
     let e = this.entries.get(key);
+
     if (e) return e;
     e = { failures: 0, retryAtMs: 0, hits: 0, misses: 0 };
     this.entries.set(key, e);
+
     if (this.entries.size > this.maxEntries) {
       for (const [k, v] of this.entries) {
         if (k !== key && !v.flight) {
@@ -112,11 +114,13 @@ export class Cache<T> {
         }
       }
     }
+
     return e;
   }
 
   private staleOrThrow(e: Entry<T>, err: unknown): Got<T> {
     if (e.value === undefined) throw asError(err);
+
     return { value: e.value, served: "stale", error: errorText(err) };
   }
 
@@ -131,7 +135,9 @@ export class Cache<T> {
 
     if (e.flight) {
       this.counters.shared++;
+
       if (o.swr && usable) return { value: cached, served: "stale" };
+
       try {
         return { value: await e.flight, served: "shared" };
       } catch (err) {
@@ -142,21 +148,27 @@ export class Cache<T> {
     if (cached !== undefined && age < o.ttlMs && !o.expired) {
       this.counters.hits++;
       e.hits++;
+
       return { value: cached, served: "hit" };
     }
+
     if (now < e.retryAtMs) {
       this.counters.hits++;
       e.hits++;
+
       return this.staleOrThrow(e, new Error(e.error ?? "backing off"));
     }
 
     this.counters.misses++;
     e.misses++;
     const flight = this.start(key, e, fetch);
+
     if (o.swr && usable) {
       flight.catch(() => undefined);
+
       return { value: cached, served: "stale" };
     }
+
     try {
       return { value: await flight, served: "fresh" };
     } catch (err) {
@@ -170,6 +182,7 @@ export class Cache<T> {
    */
   private async forced(e: Entry<T>, key: string, fetch: () => Promise<T>): Promise<Got<T>> {
     let next = e.forced;
+
     if (next) this.counters.shared++;
     else {
       const running = e.flight;
@@ -177,10 +190,13 @@ export class Cache<T> {
       e.misses++;
       next = (running ? running.then(undefined, () => undefined) : Promise.resolve()).then(() => {
         e.forced = undefined;
+
         return this.start(key, e, fetch);
       });
+
       if (running) e.forced = next;
     }
+
     try {
       return { value: await next, served: "fresh" };
     } catch (err) {
@@ -190,6 +206,7 @@ export class Cache<T> {
 
   stats(): CacheStats {
     const keys: CacheStats["keys"] = {};
+
     for (const [k, e] of this.entries) {
       keys[k] = {
         ...(e.atMs === undefined ? {} : { atMs: e.atMs }),
@@ -202,12 +219,14 @@ export class Cache<T> {
         ...(e.retryAtMs > this.now() ? { retryAtMs: e.retryAtMs } : {}),
       };
     }
+
     return { ...this.counters, inFlight: this.active, queued: this.waiting.length, keys };
   }
 
   private start(key: string, e: Entry<T>, fetch: () => Promise<T>): Promise<T> {
     const startedAtMs = this.now();
     this.counters.fetches++;
+
     const flight = this.limited(fetch).then(
       (value) => {
         e.value = value;
@@ -216,6 +235,7 @@ export class Cache<T> {
         e.retryAtMs = 0;
         e.error = undefined;
         e.flight = undefined;
+
         return value;
       },
       (err: unknown) => {
@@ -229,7 +249,9 @@ export class Cache<T> {
         throw err;
       },
     );
+
     e.flight = flight;
+
     return flight;
   }
 
@@ -237,10 +259,12 @@ export class Cache<T> {
   private async limited<R>(fn: () => Promise<R>): Promise<R> {
     if (this.active >= this.maxInFlight) await new Promise<void>((resolve) => this.waiting.push(resolve));
     else this.active++;
+
     try {
       return await fn();
     } finally {
       const next = this.waiting.shift();
+
       if (next) next();
       else this.active--;
     }

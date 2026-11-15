@@ -39,16 +39,20 @@ export function createSweeper(deps: SweeperDeps) {
   async function tick(): Promise<boolean> {
     if (running) return false;
     const started = deps.now();
+
     try {
       if (!deps.claim(started)) return false;
     } catch (e) {
       // an unreadable state file must not become an unhandled rejection that takes the server down
       stats.lastError = e instanceof Error ? e.message : String(e);
       deps.log(`sweep claim failed: ${stats.lastError}`);
+
       return false;
     }
+
     running = true;
     stats.running = true;
+
     try {
       const failed = new Map<string, Error>();
       await Promise.all(
@@ -70,6 +74,7 @@ export function createSweeper(deps: SweeperDeps) {
       stats.running = false;
       running = false;
     }
+
     return true;
   }
 

@@ -18,6 +18,7 @@ export const Verdict = {
   Wait: "wait",
   Remove: "remove",
 } as const;
+
 export type Verdict = (typeof Verdict)[keyof typeof Verdict];
 
 export interface VerdictInput {
@@ -32,18 +33,22 @@ export interface VerdictInput {
 /** Decide one workspace. Orchestration tabs, workspaces being removed and ones whose last removal failed are kept. */
 export function verdictFor(input: VerdictInput): Verdict {
   const { ws, workspace, cache, agent, clean } = input;
+
   if (isOrchestrationTab(ws) || isRemoving(workspace) || workspace.removeError !== undefined || !cache.merged) {
     return Verdict.Keep;
   }
+
   if (!clean()) {
     return Verdict.MergedUnsaved;
   }
+
   return AT_REST.has(agent) ? Verdict.Remove : Verdict.Wait;
 }
 
 /** Every claimed branch has a PR, so the network check is worth making. */
 export const everyClaimHasPr = (w: WorkspaceState): boolean => {
   const claims = Object.values(w.repos).filter((c) => c.branch);
+
   return claims.length > 0 && claims.every((c) => c.pr !== undefined);
 };
 
@@ -80,6 +85,7 @@ export async function sweepWithServer(): Promise<Record<string, Verdict>> {
   const unserved = new Set(await serverRefreshAll(stale));
   const local = defaultSweepDeps();
   const served = new Set(stale.filter((ws) => !unserved.has(ws)));
+
   return sweepMerged({ ...local, refresh: (ws) => (served.has(ws) ? undefined : local.refresh(ws)) });
 }
 
@@ -97,6 +103,7 @@ export function sweepMerged(deps: SweepDeps = defaultSweepDeps()): Record<string
       const refusal = deps.remove(ws);
       log(refusal ?? `removing ${ws}: every PR has merged`);
     });
+
   return verdicts;
 }
 
@@ -105,14 +112,19 @@ function checkOne(ws: string, deps: SweepDeps): Verdict {
     if (deps.now - readTopCache(ws).at >= MERGE_SWEEP_MS) {
       deps.refresh(ws);
     }
+
     const workspace = readState().workspaces[ws];
+
     if (!workspace) {
       return Verdict.Keep;
     }
+
     const cache = claimedCache(ws);
+
     return verdictFor({ ws, workspace, cache, agent: readAgentState(ws), clean: () => noUnsavedWork(ws, cache) });
   } catch (e) {
     log(`${ws}: merged-PR check failed: ${(e as Error).message}`);
+
     return Verdict.Keep;
   }
 }
@@ -121,9 +133,11 @@ function checkOne(ws: string, deps: SweepDeps): Verdict {
 function recordBlocks(verdicts: Record<string, Verdict>) {
   const wanted = (ws: string) => (verdicts[ws] === Verdict.MergedUnsaved ? RemovalBlock.MergedUnsaved : undefined);
   const changed = (s: ReturnType<typeof readState>) => Object.entries(s.workspaces).filter(([ws, w]) => w.removalBlocked !== wanted(ws));
+
   if (!changed(readState()).length) {
     return;
   }
+
   withState((s) => {
     changed(s).forEach(([ws, w]) => {
       const { removalBlocked: _, ...rest } = w;

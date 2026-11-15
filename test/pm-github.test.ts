@@ -7,11 +7,14 @@ import { clearProviders } from "../src/pm/registry";
 /** A `gh` stub answering from `replies` by the command's first two words; records every call. */
 function stub(replies: Record<string, { ok?: boolean; stdout?: string; stderr?: string }>) {
   const calls: string[][] = [];
+
   const runner: Runner = (cmd) => {
     calls.push(cmd);
     const r = replies[`${cmd[1]} ${cmd[2]}`] ?? { ok: false, stderr: "unexpected call" };
+
     return { ok: r.ok ?? true, code: r.ok === false ? 1 : 0, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   };
+
   return { runner, calls };
 }
 
@@ -90,6 +93,7 @@ describe("project number", () => {
       "repo view": { stdout: "acme/app" },
       "issue list": { stdout: "[]" },
     });
+
     const p = githubProvider(cfg, "/w", runner);
     p.assigned();
     p.link("1");

@@ -10,6 +10,7 @@ export const resolveVersion = (pkgVersion: string | undefined, envVersion: strin
 const readPackageVersion = (): string | undefined => {
   try {
     const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: unknown };
+
     return typeof pkg.version === "string" ? pkg.version : undefined;
   } catch {
     // The nix build ships only src/, without package.json.
@@ -23,6 +24,7 @@ export const overbridgeVersion = (): string => resolveVersion(readPackageVersion
 /** Reads a build time (seconds since epoch) from the environment; anything that is not a positive number is no build time. */
 export const parseBuildTime = (raw: string | undefined): number | undefined => {
   const n = Number(raw);
+
   return raw && Number.isFinite(n) && n > 0 ? n : undefined;
 };
 

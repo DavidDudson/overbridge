@@ -62,15 +62,22 @@ describe("zellij session", () => {
 /** A fake zellij with `tabs` open, `current` focused and `panes` listed; `goes` is whether go-to-tab-name succeeds. */
 const fakeZellij = (tabs: string[], current: string | undefined, panes: object[] = [], goes = true) => {
   const calls: string[][] = [];
+
   const exec = (cmd: string[]): RunResult => {
     calls.push(cmd);
     const action = cmd[2];
+
     if (action === "query-tab-names") return ok(tabs.join("\n"));
+
     if (action === "current-tab-info") return current === undefined ? failed() : ok(`name: ${current}\nposition: 0`);
+
     if (action === "list-panes") return ok(JSON.stringify(panes));
+
     if (action === "go-to-tab-name") return goes ? ok() : failed("no such tab");
+
     return ok();
   };
+
   return { calls, exec, mux: zellijMux(exec, { env: { ZELLIJ: "0" } }), actions: () => calls.map((c) => c.slice(2).join(" ")) };
 };
 

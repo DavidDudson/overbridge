@@ -25,6 +25,7 @@ export function createWorklistRefresher(deps: WorklistDeps) {
 
   async function once(force: boolean): Promise<number> {
     const plan = await deps.plan();
+
     const reads = await Promise.all(
       plan.sources.map(async (s): Promise<SourceRead> => {
         try {
@@ -34,18 +35,23 @@ export function createWorklistRefresher(deps: WorklistDeps) {
             async () => {
               // `readSource` folds a failed read into notes; as a value it would be cached as a good read for the whole window, so it fails the fetch instead
               const r = await deps.read(s);
+
               if (r.failedRepos.length) throw new Error(r.notes[0] ?? "read failed");
+
               return r;
             },
             { ttlMs: BOARD_TTL_MS, staleMs: BOARD_STALE_MS, force },
           );
+
           return got.error ? { ...got.value, notes: [...got.value.notes, `${s.kind === "github" ? s.repo : s.project}: ${got.error.split("\n")[0]} (showing the last read)`] } : got.value;
         } catch (e) {
           return { rows: [], notes: [errorText(e).startsWith(`${s.kind === "github" ? s.repo : s.project}:`) ? errorText(e).split("\n")[0]! : `${s.kind === "github" ? s.repo : s.project}: ${errorText(e).split("\n")[0]}`], failedRepos: s.kind === "github" ? [s.repo] : s.repos };
         }
       }),
     );
+
     deps.finish(plan.notes, mergeReads(reads));
+
     return now();
   }
 

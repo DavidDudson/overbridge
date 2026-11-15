@@ -32,11 +32,13 @@ const facts = (over: Partial<WorkspaceFacts> = {}): WorkspaceFacts => ({
 
 const detached = (over: Partial<RepoFacts> = {}) => {
   const { claim: _claim, head: _head, ...rest } = repo({ ahead: 0, ...over });
+
   return rest;
 };
 
 const verdictOf = (f: WorkspaceFacts) => {
   const found = classify(f);
+
   return [found.verdict, found.reason];
 };
 
@@ -135,6 +137,7 @@ describe("classify: rebind and ask", () => {
       item: { id: "ENG-1", status: ItemStatus.Open },
       named: { id: "ENG-2", status: ItemStatus.Done },
     });
+
     const found = classify(f);
     expect([found.verdict, found.reason]).toEqual([CleanupVerdict.Rebind, CleanupReason.HoldsOtherItem]);
     expect(found.summary).toBe("ENG-2 is done, but the workspace holds ENG-1's open PR #3290");

@@ -8,6 +8,7 @@ import { metaDir, selfCommand } from "./paths";
 
 /** A reopen lock older than this belongs to a sidebar that died holding it. */
 export const REOPEN_LOCK_STALE_MS = 30_000;
+
 /** How long the lock holder waits for the multiplexer to list the reopened tab before letting go. */
 const APPEAR_WAIT_MS = 2_000;
 const APPEAR_POLL_MS = 100;
@@ -35,16 +36,20 @@ const isStale = (path: string): boolean => {
 function takeLock(tab: string, retry = true): number | undefined {
   mkdirSync(orchestrationDir(), { recursive: true });
   const path = reopenLockPath(tab);
+
   try {
     return openSync(path, "wx");
   } catch (e: any) {
     if (e.code !== "EEXIST") {
       throw e;
     }
+
     if (!retry || !isStale(path)) {
       return undefined;
     }
+
     rmSync(path, { force: true });
+
     return takeLock(tab, false);
   }
 }
@@ -58,14 +63,18 @@ function waitForTab(tab: string, mux: Mux, sleep: (ms: number) => void) {
 /** Open `t` as a new tab at `index`, then focus the tab the user was on. Returns whether the multiplexer opened it. */
 function reopen(t: OrchestrationTab, index: number, mux: Mux, spec: (t: OrchestrationTab) => TabSpec): boolean {
   const focused = mux.currentTab();
+
   if (!mux.openTab(spec(t), TabFocus.Foreground).ok) {
     return false;
   }
+
   // a new tab is appended and focused, so walk it to its slot at the front
   mux.moveTab(t.tab, index);
+
   if (focused && focused !== t.tab) {
     mux.goToTab(focused);
   }
+
   return true;
 }
 
@@ -79,23 +88,31 @@ export function ensureOrchestrationTabs(tabs: string[], deps: KeepDeps = {}): st
   const mux = deps.mux ?? defaultMux();
   const sleep = deps.sleep ?? ((ms) => Bun.sleepSync(ms));
   const spec = deps.spec ?? ((t) => orchestrationTabSpec(t, selfCommand(), { sidebarWidth: sidebarWidth(), focus: true }));
+
   if (!tabs.length) {
     return [];
   }
+
   return ORCHESTRATION_TABS.flatMap((t, index) => {
     if (tabs.includes(t.tab)) {
       return [];
     }
+
     const fd = takeLock(t.tab);
+
     if (fd === undefined) {
       return [];
     }
+
     try {
       const now = mux.tabs();
+
       if (!now.length || now.includes(t.tab) || !reopen(t, index, mux, spec)) {
         return [];
       }
+
       waitForTab(t.tab, mux, sleep);
+
       return [t.tab];
     } finally {
       closeSync(fd);
@@ -116,9 +133,11 @@ const MAX_BACKOFF_MS = 30_000;
  */
 export function restartAfter(elapsedMs: number, streak: number): { streak: number; delayMs: number } {
   const next = elapsedMs < QUICK_EXIT_MS ? streak + 1 : 0;
+
   if (next < QUICK_EXITS_BEFORE_BACKOFF) {
     return { streak: next, delayMs: 0 };
   }
+
   return { streak: next, delayMs: Math.min(MAX_BACKOFF_MS, 1_000 * 2 ** (next - QUICK_EXITS_BEFORE_BACKOFF)) };
 }
 

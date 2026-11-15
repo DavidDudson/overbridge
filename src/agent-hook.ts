@@ -57,10 +57,13 @@ export function nextState(
   note?: NotificationInfo,
 ): AgentState | undefined {
   if (event === "SessionStart") return source === "resume" || source === "compact" ? "idle" : "empty";
+
   if (event === "SessionEnd" && endReason !== undefined && CONTINUING_END_REASONS.includes(endReason)) {
     return undefined;
   }
+
   if (event === "Notification") return current === "empty" || !isBlockingNotification(note) ? undefined : "waiting";
+
   return EVENT_STATE[event];
 }
 
@@ -73,6 +76,7 @@ const IDLE_MESSAGE = /waiting for your input/i;
 /** Whether a notification means Claude is blocked on the user. A Claude too old to send a type is judged by its message. */
 export function isBlockingNotification(note: NotificationInfo | undefined): boolean {
   if (note?.type !== undefined) return BLOCKING_NOTIFICATIONS.includes(note.type);
+
   return !(note?.message !== undefined && IDLE_MESSAGE.test(note.message));
 }
 
@@ -104,19 +108,24 @@ export const clearCompact = (metaDir: string, ws: string) => rmSync(compactMarke
  */
 export function takeCompactRestart(metaDir: string, ws: string, now = Date.now()): boolean {
   let at: number;
+
   try {
     at = Number(readFileSync(compactMarker(metaDir, ws), "utf8"));
   } catch {
     return false;
   }
+
   clearCompact(metaDir, ws);
+
   return now - at < COMPACT_MARKER_MS;
 }
 
 /** An unchanged state is not rewritten more often than this. */
 const REWRITE_MS = 2_000;
+
 /** The title/PR cache is refreshed when older than this. */
 export const REFRESH_AFTER_MS = 60_000;
+
 /** A second refresh is not started within this window of the last start. */
 const REFRESH_LOCK_MS = 30_000;
 
@@ -132,13 +141,17 @@ const ageMs = (path: string, now: number): number => {
 export function recordState(metaDir: string, ws: string, state: AgentState, now = Date.now(), bg: number[] = [], endReason?: string, tool?: string) {
   const file = agentStatePath(metaDir, ws);
   let since = now;
+
   try {
     const old = JSON.parse(readFileSync(file, "utf8")) as { state?: string; at?: number; since?: number };
+
     if (old.state === state) since = old.since ?? old.at ?? now;
+
     if (old.state === state && bg.length === 0 && !(old as { bg?: unknown[] }).bg?.length && now - (old.at ?? 0) < REWRITE_MS) return;
   } catch {
     // none yet, or unreadable: write it
   }
+
   mkdirSync(join(metaDir, "agent"), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify({ state, at: now, since, ...(tool ? { tool } : {}), ...(bg.length ? { bg } : {}), ...(endReason === undefined ? {} : { reason: endReason }) }));
@@ -154,12 +167,15 @@ export const cacheStale = (metaDir: string, ws: string, now = Date.now()): boole
  */
 export function claimRefresh(metaDir: string, ws: string, now = Date.now()): boolean {
   const dir = join(metaDir, "top");
+
   if (!cacheStale(metaDir, ws, now)) return false;
   const lock = join(dir, `${ws}.refresh`);
+
   if (ageMs(lock, now) < REFRESH_LOCK_MS) return false;
   mkdirSync(dir, { recursive: true });
   writeFileSync(lock, "");
   utimesSync(lock, now / 1000, now / 1000);
+
   return true;
 }
 
@@ -172,6 +188,7 @@ function startRefresh(ws: string) {
 export function recordHistory(ws: string, input: HookPayload, store: HistoryStore = historyStore(), now = Date.now()) {
   try {
     const record = claudeRecord(input, now);
+
     if (record) store.append(ws, record);
   } catch {
     // history is best effort
@@ -185,38 +202,48 @@ export async function hookMain(): Promise<number> {
     const workspace = envVar("NAME");
     // an orchestration tab has no top panel, so it records state but never refreshes a top cache
     const ws = workspace || process.env[ORCHESTRATION_ENV];
+
     if (!ws) return 0;
     const input: HookInput = JSON.parse(await Bun.stdin.text());
     const meta = join(root(), ".overbridge");
     const event = input.hook_event_name ?? "";
+
     if (event === "PreCompact" && input.trigger === "auto") markCompact(meta, ws);
     else if (event === "UserPromptSubmit" || event === "PostToolUse") clearCompact(meta, ws);
     else if (event === "Stop" && !input.stop_hook_active && takeCompactRestart(meta, ws)) {
       // stopped right after an auto-compact: block the stop so the agent carries on
       recordState(meta, ws, "busy");
       console.log(JSON.stringify({ decision: "block", reason: COMPACT_RESTART_REASON }));
+
       return 0;
     }
+
     // after the compact restart above: a Stop the hook blocks does not end the turn
     recordHistory(ws, input);
+
     try {
       // a compaction or resume keeps the session, and so its subagents; no id means no marker to tell apart
       const continuing = event === "SessionStart" ? input.source === "resume" || input.source === "compact" : input.reason !== undefined && CONTINUING_END_REASONS.includes(input.reason);
+
       if (event === "SubagentStart" && input.agent_id) markSubagent(meta, ws, input.agent_id);
       else if (event === "SubagentStop" && input.agent_id) clearSubagent(meta, ws, input.agent_id);
       else if ((event === "SessionStart" || event === "SessionEnd") && !continuing) clearSubagents(meta, ws);
     } catch {
       // subagent bookkeeping is best effort: it must not cost the state record below
     }
+
     const state = nextState(event, input.source, event === "Notification" ? readAgentState(ws) : undefined, input.reason, {
       type: input.notification_type,
       message: input.message,
     });
+
     if (state) recordState(meta, ws, state, Date.now(), state === "done" ? backgroundShells() : [], state === "end" ? input.reason : undefined, state === "waiting" ? waitingTool(input) : undefined);
+
     // the server decides whether a refresh is due; with none answering the hook refreshes on its own
     if (workspace && cacheStale(meta, workspace) && !(await notifyRefresh(workspace)) && claimRefresh(meta, workspace)) startRefresh(workspace);
   } catch {
     // a status hook must never get in the way of the agent
   }
+
   return 0;
 }

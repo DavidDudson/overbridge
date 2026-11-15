@@ -28,11 +28,14 @@ export class Screen {
 
   write(data: string): this {
     const chars = [...data];
+
     for (let i = 0; i < chars.length; i++) {
       const ch = chars[i]!;
+
       if (ch === "\x1b" && chars[i + 1] === "[") {
         let j = i + 2;
         let params = "";
+
         while (j < chars.length && /[0-9;?<]/.test(chars[j]!)) params += chars[j++];
         this.csi(params, chars[j] ?? "");
         i = j;
@@ -45,11 +48,13 @@ export class Screen {
         this.put(ch);
       }
     }
+
     return this;
   }
 
   private put(ch: string) {
     const cell = this.cells[this.row]?.[this.col];
+
     if (cell) Object.assign(cell, { ch, ...this.style });
     this.col++;
   }
@@ -57,6 +62,7 @@ export class Screen {
   private csi(params: string, final: string) {
     if (params.startsWith("?")) return; // private modes
     const nums = params.split(";").map((n) => (n === "" ? 0 : Number(n)));
+
     switch (final) {
       case "H":
         this.row = Math.max(0, (nums[0] || 1) - 1);
@@ -72,6 +78,7 @@ export class Screen {
           else if (n === 2) this.style.dim = true;
           else if (n === 7) this.style.inverse = true;
         }
+
         break;
     }
   }
@@ -84,7 +91,9 @@ export class Screen {
   /** Every row as text, trailing blank rows dropped. */
   lines(): string[] {
     const out = Array.from({ length: this.height }, (_, y) => this.line(y));
+
     while (out.length && out.at(-1) === "") out.pop();
+
     return out;
   }
 

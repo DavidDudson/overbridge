@@ -9,5 +9,6 @@
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
     "skipLibCheck": true
-  }
+  },
+  "exclude": ["node_modules", "tools/oxlint/anti-slop"]
 }

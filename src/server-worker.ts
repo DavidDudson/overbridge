@@ -13,6 +13,7 @@ self.onmessage = (event: MessageEvent<{ ws: string; prefetched?: PrefetchedPrs; 
   try {
     const { ws, prefetched, paused } = event.data;
     let limited: string | undefined;
+
     const cache = refreshTop(ws, {
       prefetched,
       ...(paused ? { paused } : {}),
@@ -20,6 +21,7 @@ self.onmessage = (event: MessageEvent<{ ws: string; prefetched?: PrefetchedPrs; 
         if (!limited && cmd[0] === "gh" && isRateLimited(stderr)) limited = stderr.trim().split("\n")[0];
       },
     });
+
     postMessage({ ok: true, cache, ...(limited ? { limited } : {}) });
   } catch (e) {
     postMessage({ ok: false, error: errorText(e) });

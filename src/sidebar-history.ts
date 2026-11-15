@@ -5,6 +5,7 @@ import { metaDir } from "./paths";
 
 /** Which way ← and → walk through the tabs visited from the sidebar. */
 export const Travel = { Back: "back", Forward: "forward" } as const;
+
 export type Travel = (typeof Travel)[keyof typeof Travel];
 
 /** The tabs visited from the sidebar, like a browser's: `back` ends with the most recent. */
@@ -30,11 +31,14 @@ export function travel(history: History, way: Travel, here: string, open: Readon
   const from = way === Travel.Back ? history.back : history.forward;
   const to = way === Travel.Back ? history.forward : history.back;
   const index = from.findLastIndex((tab) => tab !== here && open.has(tab));
+
   if (index < 0) {
     return { history };
   }
+
   const rest = from.slice(0, index);
   const other = [...to, here].slice(-HISTORY_LIMIT);
+
   return {
     history: way === Travel.Back ? { back: rest, forward: other } : { back: other, forward: rest },
     target: from[index]!,
@@ -53,6 +57,7 @@ export function readHistory(session = sessionName()): History {
   try {
     const parsed: unknown = JSON.parse(readFileSync(historyFile(session), "utf8"));
     const { back, forward } = (parsed ?? {}) as Partial<Record<keyof History, unknown>>;
+
     return isTabList(back) && isTabList(forward) ? { back, forward } : EMPTY_HISTORY;
   } catch {
     return EMPTY_HISTORY;
@@ -75,8 +80,10 @@ export function writeHistory(history: History, session = sessionName()) {
 export function moveWithHistory(before: History, after: History, move: () => boolean, session = sessionName()): boolean {
   writeHistory(after, session);
   const moved = move();
+
   if (!moved) {
     writeHistory(before, session);
   }
+
   return moved;
 }

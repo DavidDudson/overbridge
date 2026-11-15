@@ -13,11 +13,14 @@ import type { RunResult } from "../src/util";
 import { fakeProvider } from "./helpers/fake-provider";
 
 let tmp: string;
+
 tabRetry.sleep = () => {};
+
 const saved = { ...process.env };
 
 const sh = (cmd: string[], cwd: string) => {
   const p = Bun.spawnSync({ cmd, cwd, env: process.env, stdout: "pipe", stderr: "pipe" });
+
   if (p.exitCode !== 0) throw new Error(`${cmd.join(" ")}: ${p.stderr}`);
 };
 
@@ -71,6 +74,7 @@ describe("start", () => {
     withState((s) => {
       s.workspaces.holder!.removing = { since: new Date().toISOString(), pid: process.pid };
     });
+
     try {
       expect(() => start("app", "13", undefined, { provider: p, plugins: noProblems })).toThrow("claimed by workspace holder");
     } finally {
@@ -78,6 +82,7 @@ describe("start", () => {
         delete s.workspaces.holder!.removing;
       });
     }
+
     expect(readState().workspaces["gh-app-13"]).toBeUndefined();
     expect(existsSync(join(tmp, "workspaces", "gh-app-13"))).toBe(false);
   });
@@ -100,13 +105,17 @@ describe("start --stack", () => {
     { id: "32", title: "Middle layer", url: "" },
     { id: "33", title: "Top layer", url: "" },
   ];
+
   const stackProvider = () => fakeProvider(items);
   const BRANCHES = ["feat/31-base-layer", "feat/32-middle-layer", "feat/33-top-layer"];
   const wtOf = (ws: string) => join(tmp, "workspaces", ws, "app");
+
   const git = (cwd: string, ...args: string[]) => {
     const p = Bun.spawnSync({ cmd: ["git", ...args], cwd, env: process.env, stdout: "pipe" });
+
     return p.stdout.toString().trim();
   };
+
   const ghStack = () => Bun.spawnSync({ cmd: ["gh", "stack", "--version"], stdout: "pipe", stderr: "pipe" }).exitCode === 0;
   const stackTest = ghStack() ? test : test.skip;
 
@@ -117,15 +126,18 @@ describe("start --stack", () => {
     expect(git(wtOf("gh-app-31-stack"), "branch", "--show-current")).toBe(BRANCHES[0]!);
     const stack = localStacks("app").find((s) => s.layers.some((l) => l.branch === BRANCHES[0]))!;
     expect(stack.layers.map((l) => l.branch)).toEqual(BRANCHES);
+
     // each layer sits on the one below it
     const isAncestor = (a: string, b: string) =>
       Bun.spawnSync({ cmd: ["git", "merge-base", "--is-ancestor", a, b], cwd: wtOf("gh-app-31-stack") }).exitCode === 0;
+
     expect(isAncestor(BRANCHES[0]!, BRANCHES[1]!)).toBe(true);
     expect(isAncestor(BRANCHES[1]!, BRANCHES[2]!)).toBe(true);
   });
 
   stackTest("the claim covers every layer: another workspace cannot take a middle or top one", () => {
     createWorkspace("rival", ["app"]);
+
     for (const b of BRANCHES.slice(1)) {
       expect(() => checkout(["app", b], "rival")).toThrow("claimed by workspace gh-app-31-stack");
     }
@@ -141,6 +153,7 @@ describe("start --stack", () => {
       { id: "41", title: "A", url: "" },
       { id: "42", title: "B", url: "" },
     ]);
+
     checkout(["app", "feat/42-b"], "rival");
     expect(() => startStack("app", ["41", "42"], {}, { provider: p, plugins: noProblems })).toThrow("claimed by workspace rival");
     expect(readState().workspaces["gh-app-41-stack"]).toBeUndefined();
@@ -152,6 +165,7 @@ describe("start --stack", () => {
       { id: "51", title: "A", url: "" },
       { id: "52", title: "B", url: "" },
     ]);
+
     startStack("app", ["51", "52"], { name: "perf-one" }, { provider: p, plugins: noProblems });
     expect(readState().workspaces["perf-one"]?.repos.app?.branch).toBe("feat/51-a");
   });
@@ -179,20 +193,26 @@ describe("start --stack", () => {
  */
 const fakeZellij = (current: string | undefined, opens = true, tabs: string[] = []) => {
   const calls: string[][] = [];
+
   const exec = (cmd: string[]): RunResult => {
     calls.push(cmd);
     const action = cmd[2];
+
     if (action === "query-tab-names") {
       return { ok: true, code: 0, stdout: tabs.join("\n"), stderr: "" };
     }
+
     if (action === "current-tab-info") {
       return { ok: current !== undefined, code: current === undefined ? 1 : 0, stdout: current === undefined ? "" : `name: ${current}\nposition: 0`, stderr: "" };
     }
+
     if (action === "new-tab") {
       return { ok: opens, code: opens ? 0 : 1, stdout: opens ? "3" : "", stderr: opens ? "" : "no session" };
     }
+
     return { ok: true, code: 0, stdout: "", stderr: "" };
   };
+
   return { calls, exec, mux: zellijMux(exec), actions: () => calls.map((c) => c[2]) };
 };
 
@@ -250,6 +270,7 @@ describe("a tab that fails to open", () => {
   });
   afterAll(() => {
     process.env.ZELLIJ = "";
+
     if (sessionName !== undefined) process.env.ZELLIJ_SESSION_NAME = sessionName;
     tabRetry.delaysMs = delays;
     tabRetry.sleep = sleep;
@@ -259,13 +280,18 @@ describe("a tab that fails to open", () => {
   const flaky = (failures: number, tabsAfterFailure: string[] = []) => {
     let opens = 0;
     const calls: string[][] = [];
+
     const exec = (cmd: string[]): RunResult => {
       calls.push(cmd);
       const action = cmd[2];
+
       if (action === "new-tab" && opens++ < failures) return { ok: false, code: 1, stdout: "", stderr: "There is no active session!" };
+
       if (action === "query-tab-names") return { ok: true, code: 0, stdout: (opens > 0 ? tabsAfterFailure : []).join("\n"), stderr: "" };
+
       return { ok: true, code: 0, stdout: action === "current-tab-info" ? "name: mine" : "", stderr: "" };
     };
+
     return { calls, mux: zellijMux(exec), newTabs: () => calls.filter((c) => c[2] === "new-tab").length };
   };
 
@@ -410,11 +436,13 @@ describe("start inside a task workspace", () => {
   const wt = (ws: string) => join(tmp, "workspaces", ws, "app");
   const out = (cmd: string[], cwd: string) => Bun.spawnSync({ cmd, cwd, env: process.env, stdout: "pipe", stderr: "pipe" }).stdout.toString().trim();
   const hasBranch = (ws: string, branch: string) => out(["git", "branch", "--list", branch], wt(ws)) !== "";
+
   const commit = (ws: string, file: string) => {
     writeFileSync(join(wt(ws), file), file);
     sh(["git", "add", "."], wt(ws));
     sh(["git", "commit", "-qm", file], wt(ws));
   };
+
   const items = () =>
     fakeProvider([
       { id: "70", title: "Carry", url: "" },
@@ -425,15 +453,18 @@ describe("start inside a task workspace", () => {
       { id: "75", title: "Lineage", url: "" },
       { id: "76", title: "Chained", url: "" },
     ]);
+
   /** Run `fn` as the workspace's own Claude would: with `OVERBRIDGE_NAME` set. */
   const inside = (ws: string, fn: () => void) => {
     process.env.OVERBRIDGE_NAME = ws;
+
     try {
       fn();
     } finally {
       process.env.OVERBRIDGE_NAME = "";
     }
   };
+
   let errors: string[];
   let spy: ReturnType<typeof spyOn>;
 
@@ -536,6 +567,7 @@ describe("start inside a task workspace", () => {
 
   test("an item some workspace already claims by branch gets that workspace's tab, not a new workspace", () => {
     process.env.ZELLIJ = "0";
+
     try {
       const z = fakeZellij("mine", true, ["mine", "spike-a"]);
       start("app", "70", undefined, { provider: items(), mux: z.mux, plugins: noProblems });

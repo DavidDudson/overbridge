@@ -5,6 +5,7 @@ import { isInside, root } from "./paths";
 import { fail, isRecord, log } from "./util";
 
 type Project = Record<string, unknown>;
+
 type ClaudeConfig = { projects?: Record<string, Project> } & Record<string, unknown>;
 
 const TRUST_KEY = "hasTrustDialogAccepted";
@@ -17,9 +18,11 @@ const realPath = (dir: string) => (existsSync(dir) ? realpathSync(dir) : dir);
 /** Overbridge only trusts folders it creates, which all sit strictly below the root. */
 function ownedFolder(dir: string): string {
   const path = realPath(dir);
+
   if (path === root() || !isInside(path, root())) {
     fail(`refusing to change Claude trust for ${path}: it is not a workspace folder under ${root()}`);
   }
+
   return path;
 }
 
@@ -27,15 +30,19 @@ function readConfig(file: string): ClaudeConfig | undefined {
   if (!existsSync(file)) {
     return {};
   }
+
   try {
     const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+
     if (isRecord(parsed)) {
       return parsed as ClaudeConfig;
     }
   } catch {
     // reported below
   }
+
   log(`warning: ${file} is not a JSON object; left it alone, so Claude may ask to trust this workspace`);
+
   return undefined;
 }
 
@@ -50,11 +57,14 @@ function updateProjects(dir: string, change: (projects: Record<string, Project>,
   const path = ownedFolder(dir);
   const file = claudeConfigPath();
   const config = readConfig(file);
+
   if (!config) {
     return;
   }
+
   const projects = config.projects ?? {};
   const next = change(projects, path);
+
   if (next !== projects) {
     writeConfig(file, { ...config, projects: next });
   }
@@ -70,10 +80,13 @@ export const trustFolder = (dir: string) =>
 export const untrustFolder = (dir: string) =>
   updateProjects(dir, (projects, path) => {
     const entry = projects[path];
+
     if (!entry || !(TRUST_KEY in entry)) {
       return projects;
     }
+
     const { [TRUST_KEY]: _dropped, ...rest } = entry;
     const { [path]: _old, ...others } = projects;
+
     return Object.keys(rest).length ? { ...others, [path]: rest } : others;
   });

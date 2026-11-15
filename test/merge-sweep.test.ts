@@ -17,9 +17,11 @@ let root: string;
 
 function sh(cmd: string[], cwd: string) {
   const p = Bun.spawnSync({ cmd, cwd, env: process.env, stdout: "pipe", stderr: "pipe" });
+
   if (p.exitCode !== 0) {
     throw new Error(`${cmd.join(" ")}: ${p.stderr}`);
   }
+
   return p.stdout.toString().trim();
 }
 
@@ -34,6 +36,7 @@ function mergedWorkspace(ws: string): string {
   withState((s) => {
     s.workspaces[ws]!.repos.app = { branch: `feat/${ws}`, pr: 1 };
   });
+
   return sh(["git", "rev-parse", "HEAD"], wt);
 }
 
@@ -52,16 +55,19 @@ function setAgent(ws: string, state: AgentState) {
 function recordingDeps(now = Date.now()) {
   const refreshed: string[] = [];
   const removed: string[] = [];
+
   const deps: SweepDeps = {
     refresh: (ws) => {
       refreshed.push(ws);
     },
     remove: (ws) => {
       removed.push(ws);
+
       return undefined;
     },
     now,
   };
+
   return { deps, refreshed, removed };
 }
 

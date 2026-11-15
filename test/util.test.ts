@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { run, spawnCwd } from "../src/util";
 
 const start = process.cwd();
+
 afterEach(() => process.chdir(start));
 
 /** chdir into a fresh temp dir, then delete it, as `rm` does under a running sidebar pane. */
@@ -12,6 +13,7 @@ function strandInDeletedDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "ob-gone-"));
   process.chdir(dir);
   rmSync(dir, { recursive: true });
+
   return dir;
 }
 

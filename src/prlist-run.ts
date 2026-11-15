@@ -90,7 +90,9 @@ type Runner = (cmd: string[]) => RunResult;
 /** Read one list. Throws with `gh`'s message when the search fails. */
 export function readPrs(kind: PrListKind, orgs: readonly string[], runner: Runner = run): PrRow[] {
   const r = runner(searchCommand(kind, orgs));
+
   if (!r.ok) throw new Error(`gh search prs failed: ${(r.stderr || r.stdout).trim().split("\n")[0]}`);
+
   return rowsFromSearch(r.stdout);
 }
 
@@ -98,12 +100,15 @@ export function readPrs(kind: PrListKind, orgs: readonly string[], runner: Runne
 export function refreshPrList(kind: PrListKind, now = Date.now()): PrListCache {
   const orgs = loadRootLayers().githubOrgs;
   let cache: PrListCache;
+
   try {
     cache = { at: now, rows: readPrs(kind, orgs) };
   } catch (e) {
     cache = { ...readPrList(kind), at: now, error: (e as Error).message };
   }
+
   writePrList(kind, cache);
+
   return cache;
 }
 
@@ -112,16 +117,21 @@ export async function refreshPrListInChild(kind: PrListKind): Promise<{ ok: bool
   const child = Bun.spawn({ cmd: [...selfCommand(), kind, "refresh"], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "pipe" });
   const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
   const first = stderr.split("\n").find((l) => l.trim())?.trim();
+
   return code === 0 ? { ok: true, error: "" } : { ok: false, error: first ?? `${kind} refresh exited with code ${code}` };
 }
 
 /** Age as `5m`, `3h`, `2d`; empty for an unreadable date. */
 export function age(iso: string, now = Date.now()): string {
   const ms = now - Date.parse(iso);
+
   if (!Number.isFinite(ms) || ms < 0) return "";
   const m = Math.floor(ms / 60_000);
+
   if (m < 60) return `${m}m`;
+
   if (m < 60 * 24) return `${Math.floor(m / 60)}h`;
+
   return `${Math.floor(m / 60 / 24)}d`;
 }
 
@@ -137,15 +147,18 @@ export function renderPrList(kind: PrListKind, rows: readonly PrRow[], selected:
   const who = kind === "reviews" ? "author" : "state";
   const out: string[] = [boxTop(TITLES[kind].title, width), boxRow(dim(fit(`${"repo".padEnd(24)} ${"#".padEnd(5)} ${who.padEnd(12)} ${"age".padEnd(4)} title`, inner)))];
   const visible = rows.slice(offset, offset + body);
+
   for (const [i, r] of visible.entries()) {
     const col = kind === "reviews" ? r.author : r.draft ? "draft" : "open";
     const line = `${r.repo.slice(0, 24).padEnd(24)} ${String(r.number).padEnd(5)} ${col.slice(0, 12).padEnd(12)} ${age(r.updatedAt, now).padEnd(4)} ${r.title}`;
     const text = fit(line, inner);
     out.push(boxRow(offset + i === selected ? inverse(text) : r.draft ? dim(text) : text));
   }
+
   for (let i = visible.length; i < body; i++) out.push(boxRow(rows.length === 0 && i === 0 ? dim(fit(TITLES[kind].empty, inner)) : fit("", inner)));
   out.push(boxRow(message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit("j/k move   o open in browser   r refresh   q quit", inner))));
   out.push(boxBottom(width, `${rows.length} open`));
+
   return out;
 }
 
@@ -163,7 +176,9 @@ export async function prListPane(kind: PrListKind) {
     const width = process.stdout.columns ?? 80;
     selected = Math.min(selected, Math.max(0, cache.rows.length - 1));
     const body = Math.max(1, height - CHROME);
+
     if (selected < offset) offset = selected;
+
     if (selected >= offset + body) offset = selected - body + 1;
     process.stdout.write(frame(renderPrList(kind, cache.rows, selected, offset, height, width, message), height, width));
   };
@@ -194,6 +209,7 @@ export async function prListPane(kind: PrListKind) {
   process.stdin.on("data", (data: string) => {
     for (const input of decodeInput(data)) {
       if (input.kind !== "key") continue;
+
       if (input.key === "q" || input.key === "ctrl-c") quit();
       else if (input.key === "j" || input.key === "down") selected = Math.min(cache.rows.length - 1, selected + 1);
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
@@ -202,6 +218,7 @@ export async function prListPane(kind: PrListKind) {
         Bun.spawn({ cmd: ["gh", "pr", "view", "--web", cache.rows[selected]!.url], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
       }
     }
+
     draw();
   });
   process.stdout.on("resize", draw);
@@ -210,10 +227,12 @@ export async function prListPane(kind: PrListKind) {
   }, 1000);
   setInterval(() => {
     const latest = readPrList(kind);
+
     if (latest.at > cache.at) cache = latest;
     draw();
   }, 5000);
   draw();
+
   if (cache.at === 0) refresh();
   await new Promise(() => {});
 }

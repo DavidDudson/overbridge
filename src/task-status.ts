@@ -10,6 +10,7 @@ import type { TopCache } from "./top";
 
 /** Phases before a PR exists, which only the agent knows. */
 export const PHASES = ["plan", "implement", "mob-review"] as const;
+
 export type Phase = (typeof PHASES)[number];
 
 /** Layer `n` of a stack of `of` layers, 1-based. */
@@ -32,7 +33,9 @@ const PHASE_TEXT: Record<Phase, string> = { plan: "plan", implement: "implement"
 /** `2/3` → `{n: 2, of: 3}`; undefined for anything else. */
 export function parseLayer(text: string): Layer | undefined {
   const m = /^(\d+)\/(\d+)$/.exec(text);
+
   if (!m) return undefined;
+
   return validLayer(Number(m[1]), Number(m[2]));
 }
 
@@ -55,8 +58,10 @@ export function readPhase(ws: string): PhaseRecord | undefined {
   try {
     const raw = JSON.parse(readFileSync(phasePath(ws), "utf8")) as { phase?: unknown; layer?: { n?: unknown; of?: unknown }; at?: unknown };
     const phase = PHASES.find((p) => p === raw.phase);
+
     if (!phase) return undefined;
     const layer = typeof raw.layer?.n === "number" && typeof raw.layer.of === "number" ? validLayer(raw.layer.n, raw.layer.of) : undefined;
+
     return { phase, ...(layer ? { layer } : {}), at: typeof raw.at === "number" ? raw.at : 0 };
   } catch {
     return undefined;
@@ -72,19 +77,30 @@ const layerText = (l: Layer | undefined) => (l ? ` (stack ${l.n}/${l.of})` : "")
 export function taskStatus(cache: Pick<TopCache, "links" | "merged" | "headline">, phase?: PhaseRecord): string {
   if (cache.merged && Object.keys(cache.merged).length) return "merged";
   const claimed = cache.links.find((l) => l.pr && l.pr.claimed !== false);
+
   if (claimed?.pr) {
     if (claimed.status === "merged") return "merged";
     const layer = layerText(claimed.pr.layer);
+
     if (claimed.status === "closed") return "closed PR";
+
     if (claimed.pr.draft) return `draft PR${layer}`;
     const reviewers = claimed.pr.reviewers ?? [];
+
     if (claimed.status === "failing") return `build failing${layer}`;
+
     if (claimed.status === "conflict") return `conflicts${layer}`;
+
     if (reviewers.some((r) => r.state === "comments" || r.state === "changes")) return `review feedback${layer}`;
+
     if (reviewers.some((r) => r.state === "reviewing")) return `waiting AI review${layer}`;
+
     if (claimed.status === "mergeable") return `mergeable${layer}`;
+
     return `open PR${layer}`;
   }
+
   if (phase) return `${PHASE_TEXT[phase.phase]}${phase.phase === "implement" ? layerText(phase.layer) : ""}`;
+
   return cache.headline ? "started" : "ticket";
 }

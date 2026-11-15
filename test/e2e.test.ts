@@ -27,12 +27,15 @@ const env = () => ({
 
 function ws(args: string[], cwd = tmp) {
   const p = Bun.spawnSync({ cmd: [process.execPath, CLI, ...args], cwd, env: env(), stdout: "pipe", stderr: "pipe" });
+
   return { code: p.exitCode, out: p.stdout.toString(), err: p.stderr.toString() };
 }
 
 function sh(cmd: string[], cwd: string) {
   const p = Bun.spawnSync({ cmd, cwd, env: env(), stdout: "pipe", stderr: "pipe" });
+
   if (p.exitCode !== 0) throw new Error(`${cmd.join(" ")}: ${p.stderr}`);
+
   return p.stdout.toString().trim();
 }
 
@@ -62,10 +65,12 @@ describe("workflow", () => {
   test("new workspaces get worktrees and claude scaffolding", () => {
     expect(ws(["new", "ws1", "-r", "app"]).out.trim()).toBe("ws1");
     expect(readFileSync(join(root, "ws1", "CLAUDE.md"), "utf8")).toContain("No cache yet");
+
     const repos = [
       { name: "zeta", url: "https://github.com/u/zeta", isFork: true },
       { name: "Alpha", url: "https://github.com/u/Alpha", isArchived: true },
     ];
+
     mkdirSync(join(tmp, "cache", "overbridge"), { recursive: true });
     writeFileSync(join(tmp, "cache", "overbridge", "github-repos.json"), JSON.stringify(repos));
     expect(ws(["new", "ws2", "-r", "app"]).out.trim()).toBe("ws2");
@@ -92,6 +97,7 @@ describe("workflow", () => {
     expect(marketplace.source).toBe("directory");
     expect(existsSync(join(marketplace.path, ".claude-plugin", "marketplace.json"))).toBe(true);
     expect(settings.enabledPlugins).toEqual({ "overbridge@overbridge": true, "overbridge-review@overbridge": true });
+
     for (const event of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "PermissionRequest", "SubagentStart", "SubagentStop", "PreCompact", "Stop", "SessionEnd"]) {
       expect(settings.hooks[event][0].hooks[0].command).toMatch(/ hook$/);
     }
@@ -188,16 +194,20 @@ describe("workflow", () => {
   test("rm clears per-workspace files kept outside the workspace dir", () => {
     expect(ws(["new", "gone", "-r", "app"]).code).toBe(0);
     const files = ["top/gone.json", "agent/gone.json", "sidebars/gone", "tabs/gone.kdl"].map((f) => join(root, ".overbridge", f));
+
     for (const f of files) {
       mkdirSync(join(f, ".."), { recursive: true });
       writeFileSync(f, "x");
     }
+
     expect(ws(["rm", "gone"]).code).toBe(0);
+
     for (const f of files) expect(existsSync(f)).toBe(false);
   });
 
   test("a gh-stack stack is claimed as a unit", () => {
     const bare = join(root, ".bare", "app.git");
+
     for (const n of ["sa", "sb"]) expect(ws(["new", n, "-r", "app"]).code).toBe(0);
     const sa = join(root, "sa", "app");
     // gh-stack keeps its catalog in git's common dir: the shared bare repo.
@@ -243,10 +253,12 @@ describe("workflow", () => {
 describe("dev shells", () => {
   const count = () => (existsSync(join(tmp, "count")) ? readFileSync(join(tmp, "count"), "utf8").split("\n").filter(Boolean).length : 0);
   const shell = (args: string[], cwd?: string) => ws(["shell", "app", ...args], cwd);
+
   const launch = () => {
     const bin = join(tmp, "bin");
     mkdirSync(bin, { recursive: true });
     writeFileSync(join(bin, "claude"), '#!/bin/sh\necho "FOO=$FOO"\npwd\n', { mode: 0o755 });
+
     return Bun.spawnSync({
       cmd: [process.execPath, CLI, "claude", "dsa"],
       cwd: tmp,
@@ -326,20 +338,27 @@ describe("check queue", () => {
   const CHECK_TEST_MS = 20_000;
   const cq = () => join(root, "cq");
   const queue = () => join(root, ".overbridge", "check-queue");
+
   const config = (extra = "") =>
     writeFileSync(join(cq(), "app", "overbridge.yml"), `shell: env FOO=queued\ncheck-queue:\n  max-load-percent: 100000\n${extra}`);
+
   const check = (args: string[]) => ws(["check", ...args], cq());
+
   const spawnCheck = (args: string[]) =>
     Bun.spawn({ cmd: [process.execPath, CLI, "check", ...args], cwd: cq(), env: env(), stdout: "pipe", stderr: "pipe" });
+
   /** Tickets only: a holder rewrites its ticket through a `.tmp` file, so the directory briefly holds both. */
   const tickets = () => readdirSync(queue()).filter((name) => name.endsWith(".json"));
+
   const waitFor = async (done: () => boolean) => {
     const deadline = Date.now() + 10_000;
     let seen = done();
+
     while (!seen && Date.now() < deadline) {
       await Bun.sleep(25);
       seen = done();
     }
+
     expect(seen).toBe(true);
   };
 

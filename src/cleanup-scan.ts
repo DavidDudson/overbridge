@@ -17,6 +17,7 @@ export const CleanupVerdict = {
   Ask: "ask",
   Keep: "keep",
 } as const;
+
 export type CleanupVerdict = (typeof CleanupVerdict)[keyof typeof CleanupVerdict];
 
 /** Why a workspace got its verdict. */
@@ -39,6 +40,7 @@ export const CleanupReason = {
   /** A read failed, so nothing can be said about it. */
   Unreadable: "unreadable",
 } as const;
+
 export type CleanupReason = (typeof CleanupReason)[keyof typeof CleanupReason];
 
 /** What would be lost, or cut off, by removing a workspace. */
@@ -51,9 +53,11 @@ export const CleanupBlocker = {
   StrayFiles: "stray-files",
   SessionActive: "session-active",
 } as const;
+
 export type CleanupBlocker = (typeof CleanupBlocker)[keyof typeof CleanupBlocker];
 
 export const PrState = { Open: "open", Merged: "merged", Closed: "closed" } as const;
+
 export type PrState = (typeof PrState)[keyof typeof PrState];
 
 export interface PrFact {
@@ -148,29 +152,37 @@ function otherItemPr(f: WorkspaceFacts): PrFact | undefined {
   if (!isDone(f.named)) {
     return undefined;
   }
+
   return f.repos.flatMap((r) => (r.pr ? [r.pr] : [])).find((pr) => pr.state === PrState.Open && pr.item !== undefined && pr.item !== f.named?.id);
 }
 
 /** Why `f` is finished, or undefined when it is not. */
 function finishedReason(f: WorkspaceFacts): CleanupReason | undefined {
   const claimed = f.repos.filter((r) => r.claim);
+
   // a stack's other layers may still be open, and the scan reads one PR per claim
   if (!f.repos.length || f.repos.some((r) => r.stacked)) {
     return undefined;
   }
+
   if (claimed.length && claimed.every((r) => r.pr?.state === PrState.Merged)) {
     return CleanupReason.Merged;
   }
+
   if (f.repos.some((r) => prsOf(r).some((pr) => pr.state === PrState.Open))) {
     return undefined;
   }
+
   if (claimed.length && claimed.every((r) => prsOf(r).some((pr) => pr.state === PrState.Merged))) {
     return CleanupReason.MergedByItem;
   }
+
   if (isDone(f.item) || (!f.item && isDone(f.named))) {
     return CleanupReason.ItemDone;
   }
+
   const idleTask = claimed.length > 0 && claimed.every((r) => r.task && !prsOf(r).length) && f.repos.every((r) => r.ahead === 0) && f.agentAtRest;
+
   return idleTask ? CleanupReason.TaskIdle : undefined;
 }
 
@@ -185,6 +197,7 @@ const SUMMARY: Record<CleanupReason, (f: WorkspaceFacts) => string> = {
   [CleanupReason.Orphan]: () => "folder on disk that overbridge does not track",
   [CleanupReason.HoldsOtherItem]: (f) => {
     const pr = otherItemPr(f);
+
     return `${f.named?.id} is done, but the workspace holds ${pr?.item}'s open PR #${pr?.number}`;
   },
   [CleanupReason.NeverStarted]: (f) => `no commits and no PR${(f.item ?? f.named) ? `; ${(f.item ?? f.named)?.id} is not done` : ""}`,
@@ -197,21 +210,28 @@ export function classify(f: WorkspaceFacts): Finding {
   const blockers = blockersOf(f);
   const found = (verdict: CleanupVerdict, reason: CleanupReason): Finding => ({ ...f, verdict, reason, blockers, summary: SUMMARY[reason](f) });
   const removeOrReview = (reason: CleanupReason) => found(blockers.length ? CleanupVerdict.Review : CleanupVerdict.Remove, reason);
+
   if (f.problems.length) {
     return found(CleanupVerdict.Keep, CleanupReason.Unreadable);
   }
+
   if (f.orphan) {
     return removeOrReview(CleanupReason.Orphan);
   }
+
   if (otherItemPr(f)) {
     return found(CleanupVerdict.Rebind, CleanupReason.HoldsOtherItem);
   }
+
   const reason = finishedReason(f);
+
   if (reason) {
     return removeOrReview(reason);
   }
+
   if (neverStarted(f) && !blockers.length) {
     return found(CleanupVerdict.Ask, CleanupReason.NeverStarted);
   }
+
   return found(CleanupVerdict.Keep, CleanupReason.InProgress);
 }

@@ -67,10 +67,13 @@ describe("jira board", () => {
 
   test("jiraRows runs one jira-cli call and reports a failure with the project", () => {
     const calls: string[][] = [];
+
     const rows = jiraRows("ABC", ["web"], { filter: "" }, (cmd) => {
       calls.push(cmd);
+
       return { ok: true, stdout: reply, stderr: "", code: 0 };
     });
+
     expect(rows).toHaveLength(2);
     expect(calls).toEqual([["jira", "issue", "list", "--jql", worklistJql("ABC", ""), "--raw"]]);
     expect(() => jiraRows("ABC", ["web"], {}, () => ({ ok: false, stdout: "", stderr: "401 Unauthorized", code: 1 }))).toThrow(/jira: reading ABC failed: 401 Unauthorized/);

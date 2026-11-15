@@ -21,6 +21,7 @@ const ESC = "\x1b";
 /** `overbridge top refresh [--ws]`: update the cache the panel reads. */
 export function topRefresh(wsOpt?: string) {
   const cache = refreshTop(requireWs(wsOpt));
+
   if (cache.message) log(cache.message);
 }
 
@@ -38,6 +39,7 @@ const lastLine = (path: string): string => {
  */
 export async function topPanel(wsOpt?: string) {
   const ws = requireWs(wsOpt);
+
   if (!process.stdin.isTTY) throw new Error("overbridge top needs a terminal");
 
   let snap: TopSnapshot = await snapshotTop(ws);
@@ -66,6 +68,7 @@ export async function topPanel(wsOpt?: string) {
     },
     start: (app: TopApp) => {
       const record = startApp(ws, app.repo, app.spec, app.repoDir);
+
       if (app.spec.ready) {
         void waitReady(app.spec, record, READY_TIMEOUT_MS).then((ok) => {
           if (ok && app.spec.open) openBrowser(snapUrl(app));
@@ -76,37 +79,47 @@ export async function topPanel(wsOpt?: string) {
     pane: (pane) => togglePane(ws, pane),
     ready: (pr, ready) => {
       showNow({ kind: "ready", pr, ready });
+
       return setReady(pr, ready);
     },
     merge: (pr) => {
       const press = pressCleanup(mergeArmed.get(pr.number), Date.now());
+
       if (press.armedAt === undefined) mergeArmed.delete(pr.number);
       else mergeArmed.set(pr.number, press.armedAt);
+
       if (press.confirmed) showNow({ kind: "merge", pr });
+
       return press.confirmed ? mergePr(pr) : `press Merge again within ${CLEANUP_ARM_MS / 1000}s to merge ${pr.stack.length > 1 ? "the stack" : `PR #${pr.number}`}`;
     },
     cleanup: () => {
       const press = pressCleanup(armedAt, Date.now());
       armedAt = press.armedAt;
+
       return press.confirmed ? (beginRemoval(ws) ?? `removing ${ws}…`) : `press Cleanup again within ${CLEANUP_ARM_MS / 1000}s to wipe ${ws}`;
     },
   };
+
   let armedAt: number | undefined;
   const mergeArmed = new Map<number, number>();
   /** Set when a press ran a PR action, so `act` refetches at once instead of waiting for the timer. */
   let ranPrAction = false;
+
   /** Paint the expected result before the blocking `gh` call; the refetch that follows corrects it if the call failed. */
   const showNow = (change: PrChange) => {
     ranPrAction = true;
     snap = applyOptimistic(snap, change);
     draw();
   };
+
   const snapUrl = (app: TopApp) => {
     const port = app.port ?? "";
+
     return app.spec.ready?.kind === "http" ? app.spec.ready.url.replaceAll("{port}", String(port)) : "";
   };
 
   const painter = createPainter((text) => process.stdout.write(text));
+
   const draw = () => {
     frame = layoutTop({ ...snap, ...(note ? { message: note } : {}) }, process.stdout.columns ?? 80, process.stdout.rows ?? 0);
     painter.paint(paintTop(frame, cursor));
@@ -115,6 +128,7 @@ export async function topPanel(wsOpt?: string) {
   let lastReloadAtMs = 0;
   let lastRefreshAtMs = 0;
   let liveEvents = () => false;
+
   const reload = async () => {
     lastReloadAtMs = Date.now();
     snap = await snapshotTop(ws);
@@ -130,22 +144,27 @@ export async function topPanel(wsOpt?: string) {
     void (async () => {
       // through the server when it is up; otherwise a child process rebuilds the cache
       const served = await serverRefresh(ws, { force });
+
       if (!served) {
         const child = Bun.spawn({ cmd: [...selfCommand(), "top", "refresh", "--ws", ws], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
         await child.exited;
       }
+
       note = served?.error ? `refresh failed: ${served.error}` : keep;
       await reload();
     })();
   };
+
   /** A refresh that must show a change just made (a PR action, the `r` key): never answered from the cache. */
   const forceRefresh = (keep?: string) => refresh(keep, true);
 
   const current = (): Button | undefined => frame.placed[cursor]?.button;
+
   const act = async (button: Button | undefined) => {
     if (!button) return;
     ranPrAction = false;
     note = activate(button, deps) ?? note;
+
     if (ranPrAction) return forceRefresh(note);
     await Bun.sleep(150);
     await reload();
@@ -157,6 +176,7 @@ export async function topPanel(wsOpt?: string) {
       process.stdin.setRawMode(false);
       resolve();
     };
+
     process.stdout.write(ENTER_SCREEN);
     painter.invalidate();
     process.stdin.setRawMode(true);
@@ -164,37 +184,47 @@ export async function topPanel(wsOpt?: string) {
     process.stdin.on("data", (buf) => {
       const key = buf.toString();
       const mouse = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/.exec(key);
+
       if (mouse) {
         // left-button press only
         if (mouse[1] === "0" && mouse[4] === "M") {
           const i = hit(frame, Number(mouse[2]) - 1, Number(mouse[3]) - 1);
+
           if (i !== undefined) {
             cursor = i;
             void act(current());
           }
         }
+
         return;
       }
+
       note = undefined;
       const n = frame.placed.length;
+
       if (key === "q" || key === "\x03") return quit();
       const byKey = key.length === 1 ? frame.placed.findIndex((p) => p.button.key === key) : -1;
+
       if (byKey >= 0) {
         cursor = byKey;
+
         return void act(current());
       }
+
       if (key === `${ESC}[C` || key === "l" || key === "\t") cursor = n ? (cursor + 1) % n : 0;
       else if (key === `${ESC}[D` || key === "h" || key === `${ESC}[Z`) cursor = n ? (cursor + n - 1) % n : 0;
       else if (key === "\r" || key === " ") return void act(current());
       else if (key === "r") return forceRefresh();
       else if (key === "o") {
         const url = current() && openTarget(current()!);
+
         if (url) openBrowser(url);
         else note = "select a running app to open it";
       } else if (key === "L") {
         const a = current()?.action;
         note = a?.kind === "app" && a.app.status !== AppStatus.Stopped ? `${logPath(ws, a.app.repo, a.app.spec.id)}: ${lastLine(logPath(ws, a.app.repo, a.app.spec.id))}` : "select an app to see its log";
       }
+
       draw();
     });
     process.stdout.on("resize", () => {
@@ -204,17 +234,21 @@ export async function topPanel(wsOpt?: string) {
   });
 
   draw();
+
   // a hidden tab's panel reloads only every HIDDEN_POLL_MS and leaves the git and gh refresh until its tab is focused
   const tick = () => {
     const view = readView();
     const nowMs = Date.now();
+
     if (isFocused(ws, view) && nowMs - lastRefreshAtMs >= REFRESH_MS) {
       refresh();
     } else if (shouldPoll(ws, view, lastReloadAtMs, nowMs, liveEvents())) {
       void reload();
     }
   };
+
   const poll = setInterval(tick, POLL_MS);
+
   // the server says when this workspace's cache changed, so the panel reloads at once and a hidden one stops polling
   const events = subscribeEvents({
     onChange: (key) => {
@@ -224,6 +258,7 @@ export async function topPanel(wsOpt?: string) {
       if (up) void reload();
     },
   });
+
   liveEvents = events.live;
   refresh();
   await done;

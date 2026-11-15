@@ -26,14 +26,17 @@ const env = () => ({
 
 function ob(args: string[]) {
   const p = Bun.spawnSync({ cmd: [process.execPath, CLI, ...args], cwd: tmp, env: env(), stdout: "pipe", stderr: "pipe" });
+
   return { code: p.exitCode, out: p.stdout.toString(), err: p.stderr.toString() };
 }
 
 function sh(cmd: string[], cwd: string) {
   const p = Bun.spawnSync({ cmd, cwd, env: env(), stdout: "pipe", stderr: "pipe" });
+
   if (p.exitCode !== 0) {
     throw new Error(`${cmd.join(" ")}: ${p.stderr}`);
   }
+
   return p.stdout.toString().trim();
 }
 
@@ -45,6 +48,7 @@ function orphan(name: string): string {
   const state = JSON.parse(readFileSync(statePath(), "utf8")) as { workspaces: Record<string, unknown> };
   const { [name]: _dropped, ...workspaces } = state.workspaces;
   writeFileSync(statePath(), JSON.stringify({ ...state, workspaces }));
+
   return join(root, name);
 }
 

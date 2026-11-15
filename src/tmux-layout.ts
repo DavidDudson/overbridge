@@ -13,6 +13,7 @@ const word = (p: PaneSpec) => p.command.map(shellQuote).join(" ");
  */
 export function tabOpen(session: string, t: TabSpec, opts: { first: boolean; printId?: boolean }): TmuxCommand {
   const id = opts.printId ? ["-P", "-F", "#{window_id}"] : [];
+
   return opts.first
     ? ["new-session", "-d", ...id, "-s", session, "-n", t.name, "-c", t.main.cwd, word(t.main)]
     : ["new-window", "-d", ...id, "-t", `${session}:`, "-n", t.name, "-c", t.main.cwd, word(t.main)];
@@ -26,6 +27,7 @@ export function tabOpen(session: string, t: TabSpec, opts: { first: boolean; pri
  */
 export function tabFill(win: string, t: TabSpec): TmuxCommand[] {
   const title = (p: PaneSpec): TmuxCommand => ["select-pane", "-t", win, "-T", p.name];
+
   return [
     title(t.main),
     ...(t.top ? [["split-window", "-b", "-v", "-l", String(t.top.size ?? 5), "-t", win, "-c", t.top.cwd, word(t.top)], title(t.top)] : []),
@@ -47,6 +49,7 @@ export const tmuxLine = (cmd: TmuxCommand) => cmd.map(tmuxQuote).join(" ");
 export function layoutScript(session: string, tabs: TabSpec[]): string {
   if (!tabs.length) return "";
   const cmds = tabs.flatMap((t, i) => [tabOpen(session, t, { first: i === 0 }), ...tabFill(`${session}:${i}`, t)]);
+
   return `${[...cmds, ["select-window", "-t", `${session}:0`]].map(tmuxLine).join("\n")}\n`;
 }
 
@@ -58,6 +61,7 @@ export function layoutScript(session: string, tabs: TabSpec[]): string {
 export function tmuxConf(self: string[]): string {
   const cmd = self.map(shellQuote).join(" ");
   const go = (arg: string) => `run-shell -b ${tmuxQuote(`${cmd} go ${arg}`)}`;
+
   return `${[
     "set -g base-index 0",
     "set -g prefix None",

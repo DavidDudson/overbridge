@@ -10,10 +10,12 @@ import type { RunResult } from "../src/util";
 
 let tmp: string;
 const saved = process.env.OVERBRIDGE_ROOT;
+
 beforeEach(() => {
   tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-vc-")));
   process.env.OVERBRIDGE_ROOT = tmp;
 });
+
 afterEach(() => {
   saved === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = saved);
   rmSync(tmp, { recursive: true, force: true });
@@ -37,6 +39,7 @@ describe("refreshTitle with a TTL", () => {
   const items = [{ id: "7", title: "First", url: "u" }];
   test("an item named by many refreshes is fetched once per TTL", () => {
     const p = fakeProvider(items);
+
     for (const at of [0, 1, 2, 9]) expect(refreshTitle(p, "o/r", "7", { ttlMs: 10, now: at })).toBe("First");
     expect(p.calls).toBe(1);
     refreshTitle(p, "o/r", "7", { ttlMs: 10, now: 10 });
@@ -67,11 +70,14 @@ describe("mergePr settings", () => {
   test("a merge that fails on cached settings re-reads them and retries once with the method the repo now allows", () => {
     let allowed = '{"squashMergeAllowed":true}';
     const merges: string[] = [];
+
     const exec = (cmd: string[]): RunResult => {
       if (cmd[1] === "repo") return ok(allowed);
       merges.push(cmd[4]!);
+
       return cmd[4] === "--squash" && allowed.includes("mergeCommit") ? { ok: false, code: 1, stdout: "", stderr: "squash disabled" } : ok("");
     };
+
     mergePr({ dir: "/a", number: 1, stack: [] }, exec, () => "o/x"); // caches squash
     allowed = '{"mergeCommitAllowed":true}';
     expect(mergePr({ dir: "/a", number: 2, stack: [] }, exec, () => "o/x")).toBe("merged PR #2");
@@ -80,10 +86,13 @@ describe("mergePr settings", () => {
 
   test("a merge refused for another reason does not re-read the settings", () => {
     const calls: string[] = [];
+
     const exec = (cmd: string[]): RunResult => {
       calls.push(cmd[1]!);
+
       return cmd[1] === "repo" ? ok('{"squashMergeAllowed":true}') : { ok: false, code: 1, stdout: "", stderr: "Pull request is not mergeable: required checks have not passed" };
     };
+
     expect(mergePr({ dir: "/a", number: 1, stack: [] }, exec, () => "o/y")).toContain("not mergeable");
     expect(calls.filter((c) => c === "repo")).toHaveLength(1);
   });
@@ -92,6 +101,7 @@ describe("mergePr settings", () => {
 describe("ghAccountStamp", () => {
   test("follows the token in the environment, and hosts.yml's mtime otherwise", () => {
     const keep = { t: process.env.GH_TOKEN, g: process.env.GITHUB_TOKEN, d: process.env.GH_CONFIG_DIR };
+
     try {
       delete process.env.GITHUB_TOKEN;
       process.env.GH_TOKEN = "a";

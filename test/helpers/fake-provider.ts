@@ -13,6 +13,7 @@ export function fakeProvider(
   const bodies = new Map<string, string>();
   const created: FakeCreated[] = [];
   let next = 1000;
+
   return {
     name,
     calls: 0,
@@ -22,6 +23,7 @@ export function fakeProvider(
     link: (id) => `https://fake.test/items/${id}`,
     title(id) {
       this.calls++;
+
       return byId.get(id)?.title;
     },
     status: (id) => (done.includes(id) ? ItemStatus.Done : byId.has(id) ? ItemStatus.Open : undefined),
@@ -35,6 +37,7 @@ export function fakeProvider(
       byId.set(id, work);
       bodies.set(id, item.body);
       created.push({ ...item, id });
+
       return work;
     },
     updateItemBody(id, body) {

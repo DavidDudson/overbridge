@@ -11,14 +11,18 @@ export const MERGE_SWEEP_MS = 60_000;
  */
 export function claimSweep(now: number = Date.now(), intervalMs: number = MERGE_SWEEP_MS): boolean {
   const due = (at: number | undefined) => now - (at ?? 0) >= intervalMs;
+
   if (!due(readState().mergeSweepAt)) {
     return false;
   }
+
   return withState((s) => {
     if (!due(s.mergeSweepAt)) {
       return false;
     }
+
     s.mergeSweepAt = now;
+
     return true;
   });
 }
@@ -50,8 +54,10 @@ export function createSweepTrigger(deps: SweepTriggerDeps): () => void {
   let owned: boolean | undefined;
   let checkedAt = -Infinity;
   let checking = false;
+
   return () => {
     const now = deps.now();
+
     if (!checking && now - checkedAt >= SERVER_CHECK_MS) {
       checking = true;
       checkedAt = now;
@@ -67,6 +73,7 @@ export function createSweepTrigger(deps: SweepTriggerDeps): () => void {
           checking = false;
         });
     }
+
     if (owned === false && deps.claim(now)) deps.start();
   };
 }

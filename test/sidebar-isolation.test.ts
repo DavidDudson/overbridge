@@ -11,11 +11,14 @@ import { readTopCache, readTopCacheChecked, topCacheFault } from "../src/top";
 
 const plain = (rows: string[]) => rows.map((r) => r.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
 const cacheFile = (ws: string) => join(metaDir(), "top", `${ws}.json`);
+
 const writeCache = (ws: string, text: string) => {
   mkdirSync(join(metaDir(), "top"), { recursive: true });
   writeFileSync(cacheFile(ws), text);
 };
+
 const workspace = (title?: string) => ({ created: "now", repos: { r: { branch: "b" } }, ...(title ? { title } : {}) });
+
 /** A state whose records are raw JSON shapes, including malformed ones `State` forbids. */
 const malformedState = (workspaces: Record<string, unknown>): State => ({ version: 1, workspaces }) as unknown as State;
 const byTab = (list: Entry[]) => Object.fromEntries(list.filter((e) => e.section === Section.Workspaces).map((e) => [e.tab, e]));
@@ -36,6 +39,7 @@ afterEach(() => {
 describe("top cache shape", () => {
   test("a misshapen cache is the empty cache plus why; a missing one is the empty cache alone", () => {
     expect(readTopCacheChecked("none")).toEqual({ cache: { links: [], at: 0 } });
+
     for (const [text, why] of [
       ["null", "got null"],
       ["[]", "got an array"],
@@ -92,12 +96,14 @@ describe("workspace records", () => {
     const fallback: State = { version: 1, workspaces: { kept: workspace() } };
     expect(tryReadState(fallback)).toEqual({ state: { version: 1, workspaces: {} } });
     mkdirSync(metaDir(), { recursive: true });
+
     for (const text of ["{not json", "null", "[]", '{"version": 1}', '{"version": 1, "workspaces": null}']) {
       writeFileSync(join(metaDir(), "state.json"), text);
       const read = tryReadState(fallback);
       expect(read.state).toBe(fallback);
       expect(read.fault).toContain("state.json");
     }
+
     writeFileSync(join(metaDir(), "state.json"), JSON.stringify(fallback));
     expect(tryReadState()).toEqual({ state: fallback });
   });
@@ -163,11 +169,13 @@ describe("one bad workspace in the list", () => {
 
   test("a malformed removing record is left out of the cleanups in flight", () => {
     const since = new Date().toISOString();
+
     const state = malformedState({
       going: { ...workspace(), removing: { since } },
       broken: { ...workspace(), removing: {} },
       gone: null,
     });
+
     expect(inFlightCleanups(state).map((r) => r.label)).toEqual(["going"]);
   });
 });
@@ -175,6 +183,7 @@ describe("one bad workspace in the list", () => {
 describe("one poll of the sidebar", () => {
   const good: State = { version: 1, workspaces: { w1: workspace(), w2: workspace() } };
   const list = (state: State): Entry[] => Object.keys(state.workspaces).map((tab) => ({ tab, section: Section.Workspaces, glyph: "○", label: tab }));
+
   const okReaders = (): SidebarReaders => ({
     tabOrder: () => ["w1", "w2"],
     keepOrchestration: () => {},
@@ -185,6 +194,7 @@ describe("one poll of the sidebar", () => {
     status: () => ["🧹 next check 10s"],
     limits: () => undefined,
   });
+
   const throwing = (what: string) => () => {
     throw new Error(`${what} broke`);
   };
@@ -212,6 +222,7 @@ describe("one poll of the sidebar", () => {
 
   test("each reader that throws is reported once and the rest still run", () => {
     const last = gather(okReaders(), 26, EMPTY_MODEL);
+
     const cases: [keyof SidebarReaders, (m: Model) => void][] = [
       ["tabOrder", (m) => expect(m.list.map((e) => e.tab)).toEqual(["w1", "w2"])],
       ["keepOrchestration", (m) => expect(m.list).toHaveLength(2)],
@@ -222,6 +233,7 @@ describe("one poll of the sidebar", () => {
       ["status", (m) => expect(m.status).toEqual([])],
       ["limits", (m) => expect(m.limits).toBeUndefined()],
     ];
+
     for (const [name, check] of cases) {
       const readers: SidebarReaders = { ...okReaders(), [name]: throwing(name) };
       const model = gather(readers, 26, last);
@@ -237,6 +249,7 @@ describe("one poll of the sidebar", () => {
       sweeps.push("ran");
       throw new Error("JSON Parse error");
     };
+
     readers.readState = (fallback) => ({ state: fallback, fault: "state.json: JSON Parse error" });
     expect(gather(readers, 26, EMPTY_MODEL).fault).toBe("state.json: JSON Parse error");
     readers.readState = throwing("state");
@@ -258,6 +271,7 @@ describe("one poll of the sidebar", () => {
 
   test("the footer shows the user's prompt first, then the last key's fault, then the poll's, then the legend", () => {
     const prompt: Footer = { kind: FooterKind.Prompt, prompt: { text: "12" } };
+
     for (const [footer, input, poll, want] of [
       [LEGEND_FOOTER, undefined, undefined, LEGEND_FOOTER],
       [LEGEND_FOOTER, undefined, "state.json: bad", { kind: FooterKind.Error, message: "state.json: bad" }],
@@ -281,6 +295,7 @@ describe("cleanup records from state", () => {
   test("a record without a label or a time is left out, and so is a log that is not a list", () => {
     const now = 100_000;
     const good = { ws: "a", label: "#a fix", atMs: now - 1000, outcome: CleanupOutcome.Removed, cause: CleanupCause.Cleanup };
+
     const log = [
       good,
       { ws: "b", atMs: now - 1000, outcome: CleanupOutcome.Removed, cause: CleanupCause.Cleanup },
@@ -288,6 +303,7 @@ describe("cleanup records from state", () => {
       { ws: "d", label: 7, atMs: "then" },
       null,
     ];
+
     expect(cleanupRecords(log)).toEqual([good]);
     expect(cleanupRecords(undefined)).toEqual([]);
     expect(cleanupRecords({ a: good })).toEqual([]);

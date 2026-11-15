@@ -22,14 +22,18 @@ export function initReposFile() {
 
 export function loadRepos(): Record<string, RepoSpec> {
   if (!existsSync(reposFile())) return {};
+
   const data = Bun.TOML.parse(readFileSync(reposFile(), "utf8")) as {
     repos?: Record<string, { url?: string; default_branch?: string }>;
   };
+
   const out: Record<string, RepoSpec> = {};
+
   for (const [name, r] of Object.entries(data.repos ?? {})) {
     if (!r.url) fail(`repos.toml: repos.${name} has no url`);
     out[name] = { name, url: r.url, defaultBranch: r.default_branch };
   }
+
   return out;
 }
 
@@ -41,11 +45,14 @@ export function sidebarWidth(): number {
   if (!existsSync(reposFile())) return SIDEBAR_WIDTH;
   const data = Bun.TOML.parse(readFileSync(reposFile(), "utf8")) as { sidebar?: { width?: unknown } };
   const width = data.sidebar?.width;
+
   if (width === undefined) return SIDEBAR_WIDTH;
   const { min, max } = SIDEBAR_WIDTH_RANGE;
+
   if (typeof width !== "number" || !Number.isInteger(width) || width < min || width > max) {
     fail(`repos.toml: sidebar.width must be an integer from ${min} to ${max}`);
   }
+
   return width;
 }
 
@@ -57,6 +64,7 @@ export function appendRepo(spec: RepoSpec) {
   initReposFile();
   // JSON string literals are valid TOML basic strings.
   let block = `\n[repos.${spec.name}]\nurl = ${JSON.stringify(spec.url)}\n`;
+
   if (spec.defaultBranch) block += `default_branch = ${JSON.stringify(spec.defaultBranch)}\n`;
   appendFileSync(reposFile(), block);
 }

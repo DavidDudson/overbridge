@@ -13,6 +13,7 @@ export const isRateLimited = (text: string): boolean => LIMITED.test(text);
 
 /** Pause used until the reset time is known (or when it cannot be read). */
 export const DEFAULT_PAUSE_MS = 5 * 60_000;
+
 /** A reset closer than this is stretched, and one further than the longest window (an hour) is cut back. */
 export const MIN_PAUSE_MS = 30_000;
 export const MAX_PAUSE_MS = 65 * 60_000;
@@ -53,6 +54,7 @@ export class RateGate {
   /** Why `gh` is paused, worded for the pane's message row; undefined when it is not. */
   message(): string | undefined {
     const now = this.now();
+
     return now < this.untilMs ? `GitHub rate limit reached: gh calls paused until ${clock(this.untilMs)}, showing cached data` : undefined;
   }
 
@@ -63,8 +65,10 @@ export class RateGate {
    */
   allowForced(): boolean {
     if (this.message() === undefined) return true;
+
     if (this.forcedIn === this.trips) return false;
     this.forcedIn = this.trips;
+
     return true;
   }
 
@@ -75,6 +79,7 @@ export class RateGate {
   observe(text: string): boolean {
     if (!isRateLimited(text)) return false;
     const now = this.now();
+
     // a failure from a call that started before the pause says nothing new
     if (now < this.untilMs) return true;
     this.trips++;
@@ -88,11 +93,13 @@ export class RateGate {
       },
       (e: unknown) => this.log(`rate limit reset lookup failed: ${errorText(e)}`),
     );
+
     return true;
   }
 
   stats(): RateStats {
     const paused = this.message() !== undefined;
+
     return { paused, trips: this.trips, ...(paused ? { untilMs: this.untilMs, message: this.message()! } : {}) };
   }
 }
@@ -103,5 +110,6 @@ export async function ghResetLookup(): Promise<number | undefined> {
   const out = (await new Response(p.stdout).text()).trim();
   await p.exited;
   const seconds = Number(out);
+
   return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
 }

@@ -20,15 +20,19 @@ export interface SseFrame {
 export function parseSse(buffer: string): { frames: SseFrame[]; rest: string } {
   const parts = buffer.replace(/\r\n/g, "\n").split("\n\n");
   const rest = parts.pop() ?? "";
+
   const frames = parts.flatMap((part) => {
     let event = "message";
     const data: string[] = [];
+
     for (const line of part.split("\n")) {
       if (line.startsWith("event:")) event = line.slice(6).trim();
       else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
     }
+
     return data.length ? [{ event, data: data.join("\n") }] : [];
   });
+
   return { frames, rest };
 }
 
@@ -54,6 +58,7 @@ export function subscribeEvents(o: SubscribeOptions): Subscription {
   let current: { destroy: () => void } | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let backoff = o.reconnectMinMs ?? RECONNECT_MIN_MS;
+
   const setLive = (v: boolean) => {
     if (live === v) return;
     live = v;
@@ -65,15 +70,18 @@ export function subscribeEvents(o: SubscribeOptions): Subscription {
     let buffer = "";
     let watchdog: ReturnType<typeof setTimeout> | undefined;
     let closed = false;
+
     const closeUp = () => {
       if (closed) return;
       closed = true;
       clearTimeout(watchdog);
       setLive(false);
+
       if (stopped) return;
       retry = setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
     };
+
     try {
       const req = request(
         { socketPath: o.sock ?? socketPath(), method: "GET", path: "/events", agent: false, headers: { ...clientHeaders(), accept: "text/event-stream" } },
@@ -81,13 +89,17 @@ export function subscribeEvents(o: SubscribeOptions): Subscription {
           if (res.statusCode !== 200) {
             res.resume();
             req.destroy();
+
             return closeUp();
           }
+
           backoff = o.reconnectMinMs ?? RECONNECT_MIN_MS;
+
           const arm = () => {
             clearTimeout(watchdog);
             watchdog = setTimeout(() => req.destroy(), o.staleMs ?? STALE_STREAM_MS);
           };
+
           arm();
           setLive(true);
           res.setEncoding("utf8");
@@ -95,10 +107,13 @@ export function subscribeEvents(o: SubscribeOptions): Subscription {
             arm();
             const parsed = parseSse(buffer + chunk);
             buffer = parsed.rest;
+
             for (const f of parsed.frames) {
               if (f.event !== "changed") continue;
+
               try {
                 const key = (JSON.parse(f.data) as { key?: unknown }).key;
+
                 if (typeof key === "string") o.onChange(key);
               } catch {
                 // a malformed frame is skipped; the poll covers it
@@ -110,6 +125,7 @@ export function subscribeEvents(o: SubscribeOptions): Subscription {
           res.on("close", closeUp);
         },
       );
+
       req.on("error", closeUp);
       current = req;
       req.end();
@@ -119,6 +135,7 @@ export function subscribeEvents(o: SubscribeOptions): Subscription {
   }
 
   connect();
+
   return {
     live: () => live,
     stop: () => {

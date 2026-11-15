@@ -10,7 +10,9 @@ export const dim = (s: string) => `${ESC}[2m${s}${ESC}[0m`;
 export const bold = (s: string) => `${ESC}[1m${s}${ESC}[0m`;
 
 export const COLORS = { red: "31", green: "32", yellow: "33", blue: "34", purple: "35", cyan: "36", grey: "38;5;245" } as const;
+
 export type Color = keyof typeof COLORS;
+
 export const colorize = (s: string, color: Color) => `${ESC}[${COLORS[color]}m${s}${ESC}[0m`;
 
 /** Emoji below U+1F000 that terminals draw two columns wide. Every other emoji the panes use is astral. */
@@ -26,15 +28,19 @@ export const textWidth = (text: string): number => [...text].reduce((n, ch) => n
 export function fit(text: string, width: number): string {
   if (width <= 0) return "";
   const full = textWidth(text);
+
   if (full <= width) return text + " ".repeat(width - full);
   let out = "";
   let used = 0;
+
   for (const ch of text) {
     const w = cpWidth(ch.codePointAt(0)!);
+
     if (used + w > width - 1) break;
     out += ch;
     used += w;
   }
+
   return `${out}…${" ".repeat(width - 1 - used)}`;
 }
 
@@ -44,7 +50,9 @@ export function fit(text: string, width: number): string {
  */
 export function frame(rows: string[], height: number, width: number): string {
   let out = "";
+
   for (let y = 0; y < height; y++) out += `${ESC}[${y + 1};1H${rows[y] ?? " ".repeat(width)}`;
+
   return out;
 }
 
@@ -78,44 +86,58 @@ const CSI = /^\x1b\[[0-9;?]*[ -/]*[@-~]/;
 export function decodeInput(data: string): Input[] {
   const out: Input[] = [];
   let rest = data;
+
   while (rest) {
     const mouse = MOUSE.exec(rest);
+
     if (mouse) {
       const button = Number(mouse[1]);
+
       // plain left press: no wheel (64), motion (32) or other-button bits
       if (mouse[4] === "M" && (button & ~(4 | 8 | 16)) === 0) out.push({ kind: "click", col: Number(mouse[2]) - 1, row: Number(mouse[3]) - 1 });
       rest = rest.slice(mouse[0].length);
       continue;
     }
+
     const named = Object.keys(NAMED).find((seq) => seq.length > 1 && rest.startsWith(seq));
+
     if (named) {
       out.push({ kind: "key", key: NAMED[named]! });
       rest = rest.slice(named.length);
       continue;
     }
+
     if (rest.startsWith(ESC) && rest.length > 1) {
       rest = rest.slice(CSI.exec(rest)?.[0].length ?? 1);
       continue;
     }
+
     const ch = String.fromCodePoint(rest.codePointAt(0)!);
     out.push({ kind: "key", key: NAMED[ch] ?? ch });
     rest = rest.slice(ch.length);
   }
+
   return out;
 }
 
 /** Box-drawing for a rounded, dim frame around a pane. `width` is the full pane width. */
 const edge = (s: string) => colorize(s, "grey");
+
 export const boxTop = (title: string, width: number) => {
   const label = title ? ` ${fit(title, Math.max(1, width - 6)).trimEnd()} ` : "";
+
   return `${edge("╭─")}${bold(label)}${edge(`${"─".repeat(Math.max(0, width - 3 - textWidth(label)))}╮`)}`;
 };
+
 export const boxDivider = (width: number) => edge(`├${"─".repeat(Math.max(0, width - 2))}┤`);
+
 /** The bottom border, with an optional `label` set into it in `color` (yellow, for a message, by default). */
 export const boxBottom = (width: number, label = "", color: Color = "yellow") => {
   if (!label) return edge(`╰${"─".repeat(Math.max(0, width - 2))}╯`);
   const text = ` ${fit(label, Math.max(1, width - 6)).trimEnd()} `;
+
   return `${edge("╰─")}${colorize(text, color)}${edge(`${"─".repeat(Math.max(0, width - 3 - textWidth(text)))}╯`)}`;
 };
+
 /** A row of content (already styled, fitted to `width - 4`) between the side borders with one column of padding. */
 export const boxRow = (content: string) => `${edge("│")} ${content} ${edge("│")}`;

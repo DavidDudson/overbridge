@@ -31,6 +31,7 @@ function overbridge(args: string[]) {
   const p = Bun.spawnSync({ cmd: [process.execPath, CLI, ...args], cwd: tmp, env: env(), stdout: "pipe", stderr: "pipe" });
   const out = p.stdout.toString();
   const err = p.stderr.toString();
+
   return { code: p.exitCode, out, err, all: out + err };
 }
 
@@ -38,6 +39,7 @@ const app = (ws: string, ...args: string[]) => overbridge(["app", ...args, "--ws
 
 function sh(cmd: string[], cwd: string) {
   const p = Bun.spawnSync({ cmd, cwd, env: env(), stdout: "pipe", stderr: "pipe" });
+
   if (p.exitCode !== 0) throw new Error(`${cmd.join(" ")}: ${p.stderr}`);
 }
 
@@ -48,13 +50,16 @@ function freePorts(): [number, number] {
   const found: [number, number] = [a.port, b.port];
   a.stop(true);
   b.stop(true);
+
   return found;
 }
 
 const pidOf = (ws: string, id: string): number => JSON.parse(readFileSync(join(root, ws, ".overbridge", "apps", "app", `${id}.json`), "utf8")).pid;
+
 const alive = (pid: number) => {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch {
     return false;
@@ -74,6 +79,7 @@ beforeAll(() => {
 
   expect(overbridge(["init"]).code).toBe(0);
   expect(overbridge(["repo", "add", "app", remote]).code).toBe(0);
+
   for (const name of ["ws1", "ws2", "ws3"]) {
     expect(overbridge(["new", name, "-r", "app"]).code).toBe(0);
     const server = `${process.execPath} -e 'Bun.serve({ port: {port}, fetch: () => new Response("ok") })'`;

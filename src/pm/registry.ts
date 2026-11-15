@@ -12,10 +12,12 @@ export function registerProvider(name: PmName, factory: ProviderFactory) {
 /** The provider for a repo's config. `cwd` is a worktree of the repo. */
 export function providerFor(config: ProjectManagement, cwd: string): Provider {
   const factory = factories.get(config.name);
+
   if (!factory) {
     const known = PM_NAMES.filter((n) => factories.has(n));
     fail(`project-management provider '${config.name}' is not available${known.length ? ` (available: ${known.join(", ")})` : ""}`);
   }
+
   return factory(config, cwd);
 }
 

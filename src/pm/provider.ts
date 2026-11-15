@@ -9,6 +9,7 @@ export interface WorkItem {
 
 /** Whether an item still needs work. */
 export const ItemStatus = { Open: "open", Done: "done" } as const;
+
 export type ItemStatus = (typeof ItemStatus)[keyof typeof ItemStatus];
 
 /** What `createItem` needs to file a new item. */
@@ -62,8 +63,10 @@ export interface Provider {
 export function createTechDebtItem(provider: Provider, techDebt: string | undefined, item: NewItem): WorkItem {
   if (techDebt?.startsWith("label:")) {
     const label = techDebt.slice("label:".length).trim();
+
     return provider.createItem({ ...item, labels: [...(item.labels ?? []), ...(label ? [label] : [])] });
   }
+
   return provider.createItem({ ...item, ...(techDebt ? { parent: techDebt } : {}) });
 }
 
@@ -91,10 +94,13 @@ export function renderTemplate(template: string, vars: Record<string, string>): 
  */
 export function branchType(types: string[], map: Record<string, string> = {}): string {
   const lower = new Map(Object.entries(map).map(([k, v]) => [k.toLowerCase(), v]));
+
   for (const type of types) {
     const found = map[type] ?? lower.get(type.toLowerCase());
+
     if (found) return found;
   }
+
   return map.default ?? "feat";
 }
 
@@ -109,15 +115,18 @@ export function namer(
   itemTypes: (id: string) => string[],
 ) {
   const number = (id: string) => /(\d+)\s*$/.exec(id)?.[1] ?? id;
+
   return {
     branchName(item: { id: string; title: string }) {
       const template = config.branch ?? defaults.branch;
       const id = normalize(item.id);
       const type = template.includes("{type}") ? branchType(itemTypes(id), config.branchTypes) : "";
+
       return renderTemplate(template, { id, number: number(id), slug: slug(item.title), type });
     },
     workspaceName(id: string, repo: string) {
       const normalized = normalize(id);
+
       return renderTemplate(config.workspace ?? defaults.workspace, { id: normalized, number: number(normalized), repo });
     },
   };

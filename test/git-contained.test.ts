@@ -11,13 +11,17 @@ let wt: string;
 
 function git(cwd: string, ...args: string[]): string {
   const p = Bun.spawnSync({ cmd: ["git", ...args], cwd, env: ENV, stdout: "pipe", stderr: "pipe" });
+
   if (p.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${p.stderr}`);
+
   return p.stdout.toString().trim();
 }
+
 const commit = (dir: string, file: string, body: string) => {
   Bun.write(join(dir, file), body);
   git(dir, "add", file);
   git(dir, "commit", "-q", "-m", `${file} ${body}`);
+
   return git(dir, "rev-parse", "HEAD");
 };
 
@@ -31,6 +35,7 @@ beforeEach(() => {
   git(tmp, "clone", "-q", origin, wt);
   git(wt, "checkout", "-q", "feat");
 });
+
 afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
 describe("containedInPrHead", () => {

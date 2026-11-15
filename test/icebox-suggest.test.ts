@@ -35,14 +35,18 @@ describe("iceboxHint", () => {
   let tmp: string;
   const savedRoot = process.env.OVERBRIDGE_ROOT;
   const wt = () => join(tmp, "w1", "r");
+
   const commitAt = (ms: number) => {
     const date = new Date(ms).toISOString();
     const env = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t", GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date, GIT_CONFIG_GLOBAL: "/dev/null" };
+
     for (const cmd of [["git", "init", "-q", "-b", "main", "."], ["git", "commit", "-q", "--allow-empty", "-m", "x"]]) {
       const p = Bun.spawnSync({ cmd, cwd: wt(), env });
+
       if (p.exitCode !== 0) throw new Error(p.stderr.toString());
     }
   };
+
   const config = (yml: string) => writeFileSync(join(wt(), "overbridge.yml"), `version: 1\n${yml}`);
 
   beforeEach(() => {

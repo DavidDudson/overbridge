@@ -8,8 +8,11 @@ import { root, wsDir } from "../src/paths";
 
 const saved = { ...process.env };
 const tmp = mkdtempSync(join(tmpdir(), "overbridge-trust-"));
+
 Object.assign(process.env, { OVERBRIDGE_ROOT: join(tmp, "workspaces"), OVERBRIDGE_NAME: "", CLAUDE_CONFIG_DIR: join(tmp, "claude") });
+
 mkdirSync(join(tmp, "workspaces"), { recursive: true });
+
 mkdirSync(join(tmp, "claude"), { recursive: true });
 
 const readConfig = () => JSON.parse(readFileSync(claudeConfigPath(), "utf8"));
@@ -23,6 +26,7 @@ afterAll(() => {
       delete process.env[k];
     }
   }
+
   Object.assign(process.env, saved);
   rmSync(tmp, { recursive: true, force: true });
 });

@@ -254,6 +254,7 @@ describe("guardReason", () => {
   test("outside any workspace and tab there is no guard", () => {
     const saved = process.env.OVERBRIDGE_NAME;
     process.env.OVERBRIDGE_NAME = "";
+
     try {
       expect(guardReason({ ...writeInWs, cwd: "/tmp/not-a-workspace" }, {})).toBeUndefined();
     } finally {

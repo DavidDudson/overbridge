@@ -11,11 +11,14 @@ import { join } from "node:path";
 
 function stub(replies: Record<string, { ok?: boolean; stdout?: string; stderr?: string }>) {
   const calls: string[][] = [];
+
   const runner: Runner = (cmd) => {
     calls.push(cmd);
     const r = replies[`${cmd[1]} ${cmd[2]}`] ?? { ok: false, stderr: "unexpected call" };
+
     return { ok: r.ok ?? true, code: r.ok === false ? 1 : 0, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   };
+
   return { runner, calls };
 }
 
@@ -111,6 +114,7 @@ describe("registration and cache", () => {
     const tmp = mkdtempSync(join(tmpdir(), "overbridge-jira-"));
     const saved = process.env.OVERBRIDGE_ROOT;
     process.env.OVERBRIDGE_ROOT = tmp;
+
     try {
       const { runner } = stub({ "issue view": { stdout: JSON.stringify({ fields: { summary: "Cached" } }) } });
       const p = jiraProvider(cfg, "/w", runner);

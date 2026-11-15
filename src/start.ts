@@ -21,7 +21,9 @@ export { committedConfig };
 
 function providerForRepo(spec: RepoSpec): Provider {
   const pm = committedConfig(spec).projectManagement;
+
   if (!pm) fail(`${spec.name}: no project-management in ${CONFIG_FILE} on ${git.defaultBranch(spec)} or in the root ${ROOT_CONFIG_FILE}`);
+
   return providerFor(pm, barePath(spec.name));
 }
 
@@ -36,15 +38,20 @@ export function showTab(ws: string, prompts: TabPrompt = {}, mux: Mux = defaultM
   if (isIceboxed(readState().workspaces[ws])) {
     // an iceboxed workspace has no tab and its agent has a handoff to read, so asking for it thaws it
     thaw(ws, { open: (name, prompt) => requireTab(name, prompt, TabFocus.Foreground, mux, true) });
+
     return;
   }
+
   if (mux.inSession() && mux.tabs().includes(ws)) {
     switchTab(ws, mux);
+
     if (prompts.prompt) {
       log(`${ws} already has a tab; prompt not sent`);
     }
+
     return;
   }
+
   requireTab(ws, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Foreground, mux);
 }
 
@@ -69,6 +76,7 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
   const provider = deps.provider ?? providerForRepo(spec);
   const title = provider.title(id) ?? fail(`${id}: not found in ${provider.name}`);
   const name = provider.workspaceName(id, repo);
+
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}' for ${id}`);
   const branch = provider.branchName({ id, title });
   const prompts = { prompt, defaultPrompt: `/start-item ${id}` };
@@ -76,15 +84,20 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
   const state = readState();
   const ws = currentWorkspace();
   const claim = ws ? state.workspaces[ws]?.repos[repo] : undefined;
+
   if (ws && claim && claim.branch !== branch && (deps.here || isTaskClaim(claim))) {
     return rebind(ws, repo, id, branch, claim, prompt);
   }
+
   const holder = workspaceOf(state, repo, branch, provider);
+
   if (holder) {
     log(`${id} is in ${holder}`);
     showTab(holder, prompts, deps.mux);
+
     return console.log(holder);
   }
+
   openWorkspace(name, repo, branch, prompts, deps.mux);
 }
 
@@ -98,16 +111,21 @@ function rebind(ws: string, repo: string, id: string, branch: string, claim: Cla
   const wt = worktreePath(ws, repo);
   const old = claim.branch;
   const task = isTaskClaim(claim);
+
   if (!task && (git.isDirty(wt) || git.hasUnpushed(wt))) {
     fail(`${ws}/${repo} has uncommitted changes or unpushed commits${old ? ` on ${old}` : ""}; commit and push them, or run without --here`);
   }
+
   const reboundFrom = old ? { branch: old, ...(claim.pr !== undefined ? { pr: claim.pr } : {}) } : undefined;
   checkout([repo, branch], ws, { ...(task ? { base: "HEAD" } : {}), ...(reboundFrom ? { reboundFrom } : {}) });
+
   if (task && old) {
     if (run(["git", "-C", wt, "branch", "-d", old]).ok) log(`deleted ${old}`);
     else log(`kept ${old}: it has commits not on ${branch}`);
   }
+
   log(`${ws}/${repo} now on ${id}`);
+
   if (prompt) log(`${ws} already has its agent; prompt not sent`);
   console.log(ws);
 }
@@ -115,8 +133,10 @@ function rebind(ws: string, repo: string, id: string, branch: string, claim: Cla
 /** The workspace, if any, whose claim on `repo` is the item `branch` names; a workspace being removed does not count. */
 function workspaceOf(s: State, repo: string, branch: string, provider: Provider): string | undefined {
   const id = provider.idFromBranch(branch);
+
   for (const [ws, w] of Object.entries(s.workspaces)) {
     const b = w.repos[repo]?.branch;
+
     if (b && !isRemoving(w) && (b === branch || (id !== undefined && provider.idFromBranch(b) === id))) return ws;
   }
 }
@@ -128,6 +148,7 @@ function workspaceOf(s: State, repo: string, branch: string, provider: Provider)
  */
 export function startTask(repo: string, slug: string, prompt: string, deps: { mux?: Mux; plugins?: () => PluginProblems } = {}) {
   if (!NAME_RE.test(slug)) fail(`invalid task name '${slug}': use letters, digits, '.', '_' and '-'`);
+
   if (!prompt.trim()) fail("a task needs --prompt: say what the workspace's Claude should do");
   requirePlugins(deps.plugins);
   const spec = getRepo(repo);
@@ -138,6 +159,7 @@ export function startTask(repo: string, slug: string, prompt: string, deps: { mu
 /** Plugin problems plus any required skill (gh-stack) the new tab's Claude would lack. */
 function pluginAndSkillProblems(): PluginProblems {
   const p = pluginProblems();
+
   return { errors: [...p.errors, ...requiredSkillProblems()], warnings: p.warnings };
 }
 
@@ -162,30 +184,40 @@ export function startStack(
 ) {
   if (ids.length < 2) fail("a stack needs at least two items; use `overbridge start <repo> <id>` for one");
   const dup = ids.find((id, i) => ids.indexOf(id) !== i);
+
   if (dup) fail(`${dup} is listed twice in --stack`);
+
   if (!(deps.ghStack ?? hasGhStack)()) fail("gh-stack is not installed: run `gh extension install github/gh-stack`");
   requirePlugins(deps.plugins);
   const spec = getRepo(repo);
   git.fetch(spec);
   const provider = deps.provider ?? providerForRepo(spec);
+
   // resolve every item before anything exists, so a typo in the last id leaves nothing behind
   const items = ids.map((id) => {
     const title = provider.title(id) ?? fail(`${id}: not found in ${provider.name}`);
+
     return { id, branch: provider.branchName({ id, title }) };
   });
+
   const branches = items.map((i) => i.branch);
   const same = branches.find((b, i) => branches.indexOf(b) !== i);
+
   if (same) fail(`two items map to branch ${same}`);
 
   const name = opts.name ?? `${provider.workspaceName(ids[0]!, repo)}${STACK_SUFFIX}`;
+
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}'`);
+
   if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, {}, deps.mux);
 
   // layers must be new: a branch already on origin belongs to checking out its existing PR or stack
   const remote = branches.find((b) => hasRef(repo, `refs/remotes/origin/${b}`));
+
   if (remote) fail(`${remote} already exists on origin; pull an existing stack with \`overbridge checkout ${repo} '#<pr>'\``);
   const stacks = localStacks(repo);
   const owner = claimOwner(readState(), repo, cover(stacks, branches), holdings(repo, stacks), name);
+
   if (owner) fail(`${repo} ${branches.join(" <- ")} (or a stack or issue it touches) is claimed by workspace ${owner}`);
 
   const made = branches.filter((b) => !hasRef(repo, `refs/heads/${b}`));
@@ -215,15 +247,18 @@ export function startStack(
 function undoStack(repo: string, wt: string, made: string[]) {
   run(["git", "-C", wt, "switch", "--quiet", "--detach"]);
   run(["gh", "stack", "unstack", "--local"], { cwd: wt });
+
   for (const b of made) run(["git", "-C", barePath(repo), "branch", "-D", b]);
 }
 
 /** Stop before any workspace exists when its Claude could not load the overbridge skills; print the warnings. */
 function requirePlugins(check: () => PluginProblems = pluginAndSkillProblems) {
   const { errors, warnings } = check();
+
   if (errors.length) {
     fail(`the new tab's Claude would not have the overbridge skills, so a command such as /start-item would be unknown:\n${errors.join("\n")}`);
   }
+
   warnings.forEach((w) => log(w));
 }
 
@@ -235,10 +270,12 @@ function openWorkspace(name: string, repo: string, branch: string, prompts: TabP
   if (readState().workspaces[name]) {
     log(`${name} already exists`);
     showTab(name, prompts, mux);
+
     return console.log(name);
   }
 
   createWorkspace(name, [repo]);
+
   try {
     checkout([repo, branch], name);
     setup?.(worktreePath(name, repo));
@@ -247,6 +284,7 @@ function openWorkspace(name: string, repo: string, branch: string, prompts: TabP
     removeWorkspace(name, true);
     throw e;
   }
+
   scaffold(name);
   requireTab(name, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Background, mux);
   console.log(name);

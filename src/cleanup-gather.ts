@@ -49,12 +49,15 @@ export function cachedExec(exec: (cmd: string[], cwd: string) => RunResult, now:
     const key = `${cwd}\0${cmd.join(" ")}`;
     const t = now();
     const hit = store.get(key);
+
     if (hit && t - hit.at < PR_FACT_TTL_MS) return { ok: true, code: 0, stdout: hit.stdout, stderr: "" };
     const r = exec(cmd, cwd);
+
     if (r.ok) {
       for (const [k, v] of store) if (t - v.at >= PR_FACT_TTL_MS) store.delete(k);
       store.set(key, { at: t, stdout: r.stdout });
     }
+
     return r;
   };
 }
@@ -66,6 +69,7 @@ const defaultDeps = (): GatherDeps => ({
   provider: (repo, wt) => {
     try {
       const pm = loadRepoConfig(wt, repo).projectManagement;
+
       return pm ? providerFor(pm, wt) : undefined;
     } catch {
       return undefined;
@@ -97,11 +101,14 @@ interface RawPr {
 
 function prFact(raw: RawPr, provider: Provider | undefined): PrFact | undefined {
   const state = GH_STATES[raw.state ?? ""];
+
   if (raw.number === undefined || !state) {
     return undefined;
   }
+
   const branch = raw.headRefName ?? "";
   const item = provider?.idFromBranch(branch) ?? provider?.idFromBranch(raw.title ?? "");
+
   return { number: raw.number, state, branch, url: raw.url ?? "", ...(item ? { item } : {}) };
 }
 
@@ -118,6 +125,7 @@ interface Read<T> {
   value: T;
   problems: string[];
 }
+
 const read = <T>(value: T, ...problems: string[]): Read<T> => ({ value, problems });
 
 /** The PR `selector` (a number or a branch) names. A branch with no PR is not a problem; a PR number that can't be read is. */
@@ -125,22 +133,27 @@ function readPr(selector: string, wt: string, deps: GatherDeps, provider: Provid
   const r = deps.exec(["gh", "pr", "view", selector, "--json", PR_FIELDS], wt);
   const pr = r.ok ? prFact(parse<RawPr>(r.stdout, {}), provider) : undefined;
   const numbered = /^\d+$/.test(selector);
+
   return pr || !numbered ? read(pr) : read(pr, `PR #${selector} could not be read: ${r.stderr || "gh printed nothing usable"}`);
 }
 
 /** Every PR whose branch or title names item `id`, whatever branch it came from. */
 function readItemPrs(id: string, wt: string, deps: GatherDeps, provider: Provider): Read<PrFact[]> {
   const r = deps.exec(["gh", "pr", "list", "--state", "all", "--search", id, "--limit", String(PR_SEARCH_LIMIT), "--json", PR_FIELDS], wt);
+
   if (!r.ok) {
     return read([], `PRs for ${id} could not be listed: ${r.stderr || r.stdout}`);
   }
+
   const prs = parse<RawPr[]>(r.stdout, []).flatMap((raw) => prFact(raw, provider) ?? []);
+
   return read(prs.filter((pr) => pr.item === id));
 }
 
 /** Whether commit `sha` is part of a merged PR: a squash merge leaves the branch's commits on no remote branch. */
 function inMergedPr(sha: string, wt: string, deps: GatherDeps): boolean {
   const r = deps.exec(["gh", "api", `repos/{owner}/{repo}/commits/${sha}/pulls`], wt);
+
   return r.ok && parse<{ merged_at?: string | null }[]>(r.stdout, []).some((pr) => !!pr.merged_at);
 }
 
@@ -151,7 +164,9 @@ function stashesOn(branch: string | undefined, wt: string, deps: GatherDeps): nu
   if (!branch) {
     return 0;
   }
+
   const made = new RegExp(`^(?:WIP on|On) ${escapeRegex(branch)}:`);
+
   return deps
     .exec(["git", "-C", wt, "stash", "list", "--format=%gs"], wt)
     .stdout.split("\n")
@@ -166,11 +181,14 @@ function commitFacts(repo: string, wt: string, deps: GatherDeps): Read<Pick<Repo
   const aheadRun = gitIn(["rev-list", "--count", `${deps.defaultRef(repo)}..HEAD`]);
   const offRemote = gitIn(["rev-list", "--count", "HEAD", "--not", "--remotes"]);
   const base = { ...(head ? { head } : {}), dirty: !status.ok || status.stdout !== "" };
+
   if (!status.ok || !aheadRun.ok || !offRemote.ok || !/^\d+$/.test(aheadRun.stdout)) {
     return read({ ...base, ahead: 1, unpushed: true }, `${repo}: git could not read the worktree at ${wt}`);
   }
+
   const sha = gitIn(["rev-parse", "HEAD"]).stdout;
   const unpushed = offRemote.stdout !== "0" && !inMergedPr(sha, wt, deps);
+
   return read({ ...base, ahead: Number(aheadRun.stdout), unpushed });
 }
 
@@ -179,6 +197,7 @@ function repoFacts(repo: string, wt: string, claim: Claim, itemId: string | unde
   const selector = claim.pr !== undefined ? String(claim.pr) : claim.branch;
   const pr = selector ? readPr(selector, wt, deps, provider) : read(undefined);
   const searched = itemId && provider && pr.value?.state !== PrState.Merged ? readItemPrs(itemId, wt, deps, provider) : read([]);
+
   const facts: RepoFacts = {
     repo,
     ...(claim.branch ? { claim: claim.branch } : {}),
@@ -189,12 +208,14 @@ function repoFacts(repo: string, wt: string, claim: Claim, itemId: string | unde
     ...(pr.value ? { pr: pr.value } : {}),
     itemPrs: searched.value.filter((found) => found.number !== pr.value?.number),
   };
+
   return read(facts, ...commits.problems, ...pr.problems, ...searched.problems);
 }
 
 /** The item a workspace name stands for: the id the provider would name this workspace after. */
 export function namedItem(ws: string, repo: string, provider: Provider): string | undefined {
   const candidates = [provider.idFromBranch(ws), /(\d+)$/.exec(ws)?.[1]].flatMap((id) => id ?? []);
+
   return candidates.find((id) => {
     try {
       return provider.workspaceName(id, repo) === ws;
@@ -214,26 +235,34 @@ export interface Target {
 /** Read everything `classify` needs about one workspace or orphan folder. */
 export function gatherFacts(target: Target, deps: GatherDeps): WorkspaceFacts {
   const { ws, orphan } = target;
+
   const withProvider = target.repos.flatMap((r) => {
     const provider = deps.provider(r.repo, r.wt);
+
     return provider ? [{ ...r, provider }] : [];
   });
+
   const first = withProvider[0];
   const provider = first?.provider;
   const claimed = withProvider.find((r) => r.claim.branch);
   const itemId = claimed?.claim.branch ? claimed.provider.idFromBranch(claimed.claim.branch) : undefined;
   const namedId = first ? namedItem(ws, first.repo, first.provider) : undefined;
+
   const fact = (id: string | undefined): ItemFact | undefined => {
     if (!id || !provider) {
       return undefined;
     }
+
     const status = provider.status(id);
+
     return { id, ...(status ? { status } : {}) };
   };
+
   const item = fact(itemId);
   const named = namedId === itemId ? item : fact(namedId);
   const repos = target.repos.map((r) => repoFacts(r.repo, r.wt, r.claim, itemId ?? namedId, deps.provider(r.repo, r.wt), deps));
   const agent = orphan ? undefined : deps.agent(ws);
+
   return {
     ws,
     orphan,
@@ -253,7 +282,9 @@ export function targets(state: State): Target[] {
     .filter(([ws, w]) => !isOrchestrationTab(ws) && !isRemoving(w))
     .sort(([a], [b]) => naturalSort(a, b))
     .map(([ws, w]): Target => ({ ws, orphan: false, repos: Object.entries(w.repos).map(([repo, claim]) => ({ repo, wt: worktreePath(ws, repo), claim })) }));
+
   const orphans = orphanNames(state).map((ws): Target => ({ ws, orphan: true, repos: worktreesIn(ws).map((w) => ({ repo: w.repo, wt: w.path, claim: {} })) }));
+
   return [...tracked, ...orphans];
 }
 
@@ -284,9 +315,11 @@ export function scan(deps: GatherDeps = defaultDeps(), state: State = readState(
 
 /** Whether `--no-fetch` was passed: the scan then trusts the remote refs already on disk. */
 export const Fetch = { Yes: "yes", No: "no" } as const;
+
 export type Fetch = (typeof Fetch)[keyof typeof Fetch];
 
 export const Format = { Table: "table", Json: "json" } as const;
+
 export type Format = (typeof Format)[keyof typeof Format];
 
 /** `overbridge cleanup [--json] [--no-fetch]`: print every finding. Nothing is removed. */
@@ -302,11 +335,15 @@ export function cleanup(format: Format, fetch: Fetch) {
         }
       });
   }
+
   const findings = scan();
+
   if (format === Format.Json) {
     console.log(JSON.stringify(findings, null, 2));
+
     return;
   }
+
   table(
     ["ws", "verdict", "reason", "blockers", ""],
     findings.map((f) => [f.orphan ? `${f.ws} (orphan)` : f.ws, f.verdict, f.reason, [...new Set(f.blockers.map((b) => b.kind))].join(","), f.summary]),

@@ -4,8 +4,10 @@ import type { RunResult } from "../src/util";
 
 const ok = (stdout = ""): RunResult => ({ ok: true, code: 0, stdout, stderr: "" });
 const bad = (stderr: string): RunResult => ({ ok: false, code: 1, stdout: "", stderr });
+
 const recorder = (reply: (cmd: string[]) => RunResult) => {
   const calls: string[] = [];
+
   return { calls, exec: (cmd: string[], cwd: string) => (calls.push(`${cwd}: ${cmd.join(" ")}`), reply(cmd)) };
 };
 

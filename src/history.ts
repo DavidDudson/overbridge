@@ -13,10 +13,12 @@ import { metaDir } from "./paths";
 
 /** Claude Code hook events that are recorded. */
 export const CLAUDE_EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Notification", "Stop", "SessionEnd"] as const;
+
 export type ClaudeEvent = (typeof CLAUDE_EVENTS)[number];
 
 /** A coarse class for a command, so history never needs to keep a Claude Bash call's text. */
 export const COMMAND_CLASSES = ["test", "lint", "build", "typecheck", "format", "git", "other"] as const;
+
 export type CommandClass = (typeof COMMAND_CLASSES)[number];
 
 const CLASS_PATTERNS: readonly [CommandClass, RegExp][] = [
@@ -41,16 +43,19 @@ export function commandLabel(command: string): string {
   const words = command.trim().split(/\s+/);
   const start = words.findIndex((w) => !/^\w+=/.test(w));
   const label: string[] = [];
+
   for (const w of words.slice(start < 0 ? words.length : start)) {
     if (w.startsWith("-") || /[=:'"$]/.test(w) || label.length === 4) break;
     label.push(w);
   }
+
   return label.join(" ");
 }
 
 /** Words that name a secret: the value after one is never kept. */
 const SECRET_FLAG = String.raw`--?[\w-]*(?:token|secret|passw|key|auth|cred)[\w-]*`;
 const VALUE = String.raw`"[^"]*"|'[^']*'|[^\s'"]+`;
+
 const REDACTIONS: readonly [RegExp, string][] = [
   // https://user:pw@host
   [/(\b[a-z][a-z0-9+.-]{0,15}:\/\/)[^/\s@'"]+@/gi, "$1***@"],
@@ -81,21 +86,27 @@ export function redactCommand(command: string): string {
 
 /** Programs whose next word is the task they run: `just check`, `make lint`. */
 const TASK_RUNNERS = new Set(["just", "make", "task", "nx", "turbo", "mise"]);
+
 /** Package managers: `bun run lint`, `npm test`, `pnpm lint`. */
 const PACKAGE_MANAGERS = new Set(["bun", "npm", "pnpm", "yarn"]);
+
 /** Flags that take the next word as their value, so it is not the task: `just --justfile ci.just check`. */
 const VALUE_FLAGS = new Set(["-C", "-f", "-d", "-w", "--justfile", "--working-directory", "--directory", "-j", "-E", "-l", "--file", "--filter", "--cwd", "--prefix", "--workspace", "--set"]);
+
 /** Words after a package manager that run another program: `bun x vitest`. */
 const EXEC_WORDS = new Set(["run", "x", "exec", "dlx"]);
 
 /** The words after a runner that are not flags (nor flag values). */
 function runnerArgs(words: readonly string[]): string[] {
   const out: string[] = [];
+
   for (let i = 0; i < words.length; i++) {
     const w = words[i]!;
+
     if (VALUE_FLAGS.has(w)) i++;
     else if (!w.startsWith("-")) out.push(w);
   }
+
   return out;
 }
 
@@ -106,11 +117,14 @@ function runnerArgs(words: readonly string[]): string[] {
 export function commandGroup(command: string): string {
   const words = command.trim().split(/\s+/).filter((w) => !/^\w+=/.test(w));
   const at = words.findIndex((w) => TASK_RUNNERS.has(w) || PACKAGE_MANAGERS.has(w));
+
   if (at >= 0) {
     const rest = runnerArgs(words.slice(at + 1));
     const task = PACKAGE_MANAGERS.has(words[at]!) && rest[0] && EXEC_WORDS.has(rest[0]) ? rest[1] : rest[0];
+
     if (task && !/[='"$]/.test(task)) return task;
   }
+
   return commandLabel(words.join(" ")) || command.trim().split(/\s+/)[0] || "?";
 }
 
@@ -164,20 +178,24 @@ const safeName = (ws: string) => ws.replace(/[^\w@.-]/g, "_");
 /** One JSON line per record in `<dir>/<ws>.jsonl`. A line is one `appendFileSync`, so concurrent writers do not interleave. */
 export function fileStore(dir: string, maxBytes = MAX_FILE_BYTES): HistoryStore {
   const file = (ws: string) => join(dir, `${safeName(ws)}.jsonl`);
+
   const parse = (text: string): HistoryRecord[] =>
     text.split("\n").flatMap((line) => {
       if (!line) return [];
+
       try {
         return [JSON.parse(line) as HistoryRecord];
       } catch {
         return [];
       }
     });
+
   return {
     append(ws, record) {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       const path = file(ws);
       appendFileSync(path, JSON.stringify(record) + "\n", { mode: 0o600 });
+
       if (statSync(path).size > maxBytes) {
         const lines = readFileSync(path, "utf8").split("\n").filter(Boolean);
         writeFileSync(path, lines.slice(Math.floor(lines.length / 2)).join("\n") + "\n");
@@ -219,9 +237,11 @@ export interface HookPayload {
 /** The record for a Claude hook payload, or undefined for an event that is not recorded. */
 export function claudeRecord(input: HookPayload, at = Date.now()): ClaudeRecord | undefined {
   const event = CLAUDE_EVENTS.find((e) => e === input.hook_event_name);
+
   if (!event) return undefined;
   const tool = event === "PreToolUse" || event === "PostToolUse" || event === "PostToolUseFailure" ? input.tool_name : undefined;
   const command = tool === "Bash" && typeof input.tool_input?.command === "string" ? input.tool_input.command : undefined;
+
   return {
     kind: "claude",
     at,
@@ -274,16 +294,19 @@ export interface RepoSummary {
 /** Fold check records from every workspace into one summary per repo. Records need not be sorted. */
 export function summarizeRepos(records: readonly HistoryRecord[]): RepoSummary[] {
   const repos = new Map<string, RepoSummary>();
+
   for (const r of [...records].sort((a, b) => a.at - b.at)) {
     if (r.kind !== "check") continue;
     const t = repos.get(r.repo) ?? { repo: r.repo, count: 0, ms: 0, queuedMs: 0, failed: 0, groups: {} };
     t.count++;
     t.ms += r.runMs;
     t.queuedMs += r.queuedMs;
+
     if (r.exit !== 0) t.failed++;
     addCheck(t.groups, r);
     repos.set(r.repo, t);
   }
+
   return [...repos.values()];
 }
 
@@ -319,11 +342,13 @@ const bump = (t: Tally | undefined, ms: number): Tally => ({ count: (t?.count ??
 function unionMs(spans: [number, number][]): number {
   let total = 0;
   let end = -Infinity;
+
   for (const [from, to] of spans.sort((a, b) => a[0] - b[0])) {
     if (to <= end) continue;
     total += to - Math.max(from, end);
     end = to;
   }
+
   return total;
 }
 
@@ -336,6 +361,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
   const open = new Map<string, { at: number; tool: string; cls?: CommandClass }>();
   // parallel tool calls overlap, so tool time is the union of the intervals, not their sum
   const spans: [number, number][] = [];
+
   for (const r of [...records].sort((a, b) => a.at - b.at)) {
     if (r.kind === "check") {
       const prev = s.checks[r.cls];
@@ -343,6 +369,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
       addCheck(s.groups, r);
       continue;
     }
+
     switch (r.event) {
       case "SessionStart":
       case "SessionEnd":
@@ -352,9 +379,11 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
       case "UserPromptSubmit":
         if (lastStop !== undefined) {
           const gap = r.at - lastStop;
+
           if (gap <= awayAfterMs) s.userMs += gap;
           else s.awayMs += gap;
         }
+
         turnStart = r.at;
         lastStop = notifiedAt = undefined;
         open.clear();
@@ -369,6 +398,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
       case "PostToolUse":
       case "PostToolUseFailure": {
         const started = r.id ? open.get(r.id) : undefined;
+
         if (!started || r.id === undefined) break;
         open.delete(r.id);
         // a permission prompt raised during this call is time waiting on the user, not in the tool
@@ -378,21 +408,26 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
         s.permissionMs += wait;
         spans.push([started.at, started.at + ms]);
         s.tools[started.tool] = bump(s.tools[started.tool], ms);
+
         if (started.cls) s.bash[started.cls] = bump(s.bash[started.cls], ms);
         break;
       }
+
       case "Stop":
         if (turnStart !== undefined) {
           s.turns++;
           s.turnMs += r.at - turnStart;
           lastStop = r.at;
         }
+
         turnStart = notifiedAt = undefined;
         open.clear();
         break;
     }
   }
+
   s.toolMs = unionMs(spans);
   s.modelMs = Math.max(0, s.turnMs - s.toolMs - s.permissionMs);
+
   return s;
 }

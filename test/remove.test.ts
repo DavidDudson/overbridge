@@ -20,9 +20,11 @@ let root: string;
 
 function sh(cmd: string[], cwd: string) {
   const p = Bun.spawnSync({ cmd, cwd, env: process.env, stdout: "pipe", stderr: "pipe" });
+
   if (p.exitCode !== 0) {
     throw new Error(`${cmd.join(" ")}: ${p.stderr}`);
   }
+
   return p.stdout.toString().trim();
 }
 
@@ -34,22 +36,27 @@ const ok = (stdout = ""): RunResult => ({ ok: true, code: 0, stdout, stderr: "" 
 function fakeDeps(listTabs: string, focused = "") {
   const calls: string[][] = [];
   const spawned: string[] = [];
+
   const deps: RemovalDeps = {
     mux: zellijMux(
       (cmd) => {
         calls.push(cmd);
+
         if (cmd[2] === "list-tabs") {
           return ok(listTabs);
         }
+
         return cmd[2] === "current-tab-info" && focused ? ok(`name: ${focused}\n`) : ok();
       },
       { env: { ZELLIJ: "0" } },
     ),
     spawnWorker: (ws) => {
       spawned.push(ws);
+
       return process.pid;
     },
   };
+
   return { deps, calls, spawned };
 }
 
@@ -60,9 +67,11 @@ const markEmpty = (ws: string) => {
 
 async function until(check: () => boolean, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
+
   while (!check() && Date.now() < deadline) {
     await Bun.sleep(100);
   }
+
   return check();
 }
 
@@ -122,6 +131,7 @@ describe("watchState", () => {
   test("fires soon after any state write, so every sidebar redraws together", async () => {
     let fired = 0;
     const stop = watchState(() => fired++, 10);
+
     try {
       withState(() => undefined);
       expect(await until(() => fired > 0, 2_000)).toBe(true);
@@ -306,11 +316,14 @@ describe("a session closed on purpose", () => {
     endSession("i1", EndReason.PromptInputExit);
     endSession("i2", EndReason.PromptInputExit);
     writeFileSync(join(root, "i2", "app", "dirty.txt"), "x");
+
     const realSpawn = (ws: string) => {
       const proc = Bun.spawn({ cmd: [process.execPath, CLI, "rm", ws, `--${FINISH_FLAG}`], cwd: tmp, env: process.env, stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true });
       proc.unref();
+
       return proc.pid;
     };
+
     const deps: RemovalDeps = { mux: zellijMux(() => ok(), { env: {} }), spawnWorker: realSpawn };
     const reap = createReaper({ endedForGood: sessionEndedForGood, gitClean, remove: (ws) => beginRemoval(ws, { landing: Landing.IfFocused, deps }), now: Date.now });
 
@@ -331,8 +344,10 @@ describe("the background worker", () => {
   const realSpawn = (ws: string) => {
     const proc = Bun.spawn({ cmd: [process.execPath, CLI, "rm", ws, `--${FINISH_FLAG}`], cwd: tmp, env: process.env, stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true });
     proc.unref();
+
     return proc.pid;
   };
+
   const noZellij = (): RemovalDeps => ({ mux: zellijMux(() => ok(), { env: {} }), spawnWorker: realSpawn });
 
   test("finishes the removal after the caller returns", async () => {
@@ -349,12 +364,14 @@ describe("the background worker", () => {
     ob(["new", "f1", "-r", "app"]);
     markEmpty("f1");
     writeFileSync(join(root, "config.yml"), "defaults:\n  hooks:\n    pre-remove: 'exit 1'\n");
+
     try {
       expect(beginRemoval("f1", { deps: noZellij() })).toBeUndefined();
       expect(await until(() => readState().workspaces.f1?.removeError !== undefined)).toBe(true);
     } finally {
       rmSync(join(root, "config.yml"));
     }
+
     const w = readState().workspaces.f1!;
     expect(w.removing).toBeUndefined();
     expect(w.removeError).toContain("pre-remove hook for f1/app failed");

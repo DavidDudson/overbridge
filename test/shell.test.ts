@@ -10,6 +10,7 @@ const spec = (extra: Partial<ShellSpec> = {}): ShellSpec => ({ enter: "wrap", ke
 const readIfExists = (file: string) => (existsSync(file) ? readFileSync(file, "utf8") : undefined);
 
 const dirs: string[] = [];
+
 afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
 /**
@@ -21,9 +22,11 @@ function fake(files: Record<string, string> = {}, captured = "FOO=bar\0PATH=/x\0
   const state = { captures: 0, warnings: [] as string[] };
   const cache = mkdtempSync(join(tmpdir(), "shell-cache-"));
   dirs.push(cache);
+
   const deps: ShellDeps = {
     capture: () => {
       state.captures++;
+
       return captured;
     },
     read: (file) => (file.startsWith(cache) ? readIfExists(file) : store[file]),
@@ -32,6 +35,7 @@ function fake(files: Record<string, string> = {}, captured = "FOO=bar\0PATH=/x\0
     has: onPath,
     warn: (msg) => state.warnings.push(msg),
   };
+
   return { deps, store, state };
 }
 
@@ -85,6 +89,7 @@ describe("shellInvocation", () => {
       cwd: "/tmp",
       stdout: "pipe",
     });
+
     expect(p.stdout.toString().trim()).toBe("1 a b /");
   });
 
@@ -161,6 +166,7 @@ describe("resolveEnv", () => {
         throw new Error("shell.env `e` failed in /r:\nboom");
       },
     };
+
     expect(() => resolveEnv("app", "/r", spec({ env: "e" }), deps)).toThrow("boom");
   });
 });

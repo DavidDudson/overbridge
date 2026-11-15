@@ -18,10 +18,13 @@ export type Env = Record<string, string>;
 /** Parse NUL-separated `KEY=VALUE` pairs, as `env -0` prints them. Entries without `=` are dropped. */
 export function parseEnv0(text: string): Env {
   const env: Env = {};
+
   for (const entry of text.split("\0")) {
     const eq = entry.indexOf("=");
+
     if (eq > 0) env[entry.slice(0, eq)] = entry.slice(eq + 1);
   }
+
   return env;
 }
 
@@ -40,7 +43,9 @@ export function envDiff(before: Record<string, string | undefined>, after: Env):
 export function cacheKey(dir: string, spec: ShellSpec, read: (file: string) => string | undefined): string {
   const h = createHash("sha256");
   h.update(JSON.stringify([dir, spec.enter, spec.env ?? null]));
+
   for (const file of spec.key) h.update(`\0${file}\0${read(join(dir, file)) ?? "\0missing"}`);
+
   return h.digest("hex").slice(0, 16);
 }
 
@@ -61,7 +66,9 @@ export interface ShellDeps {
 const defaultDeps = (): ShellDeps => ({
   capture: (command, dir) => {
     const r = Bun.spawnSync({ cmd: ["sh", "-c", command], cwd: dir, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+
     if (r.exitCode !== 0) fail(`shell.env \`${command}\` failed in ${dir}:\n${r.stderr.toString().trim()}`);
+
     return r.stdout.toString();
   },
   read: readIfExists,
@@ -80,6 +87,7 @@ export function resolveEnv(repo: string, dir: string, spec: ShellSpec, deps: She
   if (!spec.env) return {};
   const file = join(deps.cacheDir(), `${repo}-${cacheKey(dir, spec, deps.read)}.json`);
   const hit = deps.read(file);
+
   if (hit !== undefined) {
     try {
       return JSON.parse(hit) as Env;
@@ -87,11 +95,13 @@ export function resolveEnv(repo: string, dir: string, spec: ShellSpec, deps: She
       // a torn or hand-edited file: capture again
     }
   }
+
   const env = envDiff(deps.base(), parseEnv0(deps.capture(spec.env, dir)));
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(env));
   renameSync(tmp, file);
+
   return env;
 }
 
@@ -104,6 +114,7 @@ const SHELL_WORDS = new Set(["if", "case", "for", "while", "until", "{", "(", "!
  */
 export function leadingProgram(command: string): string | undefined {
   const word = command.trim().split(/\s+/).find((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
+
   return word && !SHELL_WORDS.has(word) ? word : undefined;
 }
 
@@ -129,10 +140,14 @@ export function shellInvocation(
 ): ShellInvocation {
   if (!spec) return { cmd: argv, cwd, env: {} };
   const program = leadingProgram(spec.env ?? spec.enter);
+
   if (program && !deps.has(program)) {
     deps.warn(`${program} not on PATH; running without ${repo}'s dev shell`);
+
     return { cmd: argv, cwd, env: {} };
   }
+
   if (spec.env) return { cmd: argv, cwd, env: resolveEnv(repo, dir, spec, deps) };
+
   return through(spec.enter, dir, cwd, argv);
 }

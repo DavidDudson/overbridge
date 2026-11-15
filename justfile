@@ -5,6 +5,9 @@ check: typecheck test
 test:
     bun test
 
+lint:
+    bunx oxlint
+
 typecheck:
     bunx tsc --noEmit
 
