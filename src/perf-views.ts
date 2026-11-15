@@ -2,8 +2,11 @@ import type { Summary, Tally } from "./history";
 import { activeMs, checkTotals, type CommandRow, duration, pct, percent, topGroups } from "./history-report";
 import { bold, boxBottom, boxRow, boxTop, colorize, dim, fit, inverse } from "./term";
 
-/** Rows the dashboard and commands frames use besides the body: top border, header, detail (3), legend, bottom border. */
+/** Rows a list view's frame uses besides its body. */
 export const VIEW_CHROME = 7;
+
+/** Rows the dashboard frame uses besides its body: top border, legend, bottom border. */
+const DASHBOARD_CHROME = 3;
 
 /** The perf tab's views, in the order `v` cycles them. */
 export const VIEWS = ["dashboard", "sessions", "commands"] as const;
@@ -13,13 +16,13 @@ export type View = (typeof VIEWS)[number];
 /** The view after `view`. */
 export const nextView = (view: View): View => VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]!;
 
-const BAR = 20;
+const BAR_WIDTH_CELLS = 20;
 
-/** A bar `BAR` cells wide filled to `part` of `whole`. */
+/** A bar `BAR_WIDTH_CELLS` cells wide filled to `part` of `whole`. */
 export function bar(part: number, whole: number): string {
-  const cells = whole > 0 ? Math.round((Math.min(part, whole) / whole) * BAR) : 0;
+  const cells = whole > 0 ? Math.round((Math.min(part, whole) / whole) * BAR_WIDTH_CELLS) : 0;
 
-  return "█".repeat(cells) + "░".repeat(BAR - cells);
+  return "█".repeat(cells) + "░".repeat(BAR_WIDTH_CELLS - cells);
 }
 
 const byMs = <T extends Tally>(o: Record<string, T>) => Object.entries(o).sort(([a, x], [b, y]) => y.ms - x.ms || y.count - x.count || a.localeCompare(b));
@@ -28,14 +31,19 @@ const mean = (t: Tally) => (t.count > 0 ? t.ms / t.count : 0);
 
 const section = (title: string) => bold(title);
 
+/** One stat row: name, count, total time, share of `total` and mean. */
+const tallyRow = (name: string, nameWidth: number, t: Tally, total: number) => `  ${name.slice(0, nameWidth).padEnd(nameWidth)} ${String(t.count).padStart(6)} ${duration(t.ms).padStart(8)} ${pct(t.ms, total).padStart(6)} ${duration(mean(t)).padStart(8)}`;
+
 /** The dashboard as plain lines (colour aside): totals, where Claude's time went, then the top tools, Bash classes, checks, skills and slowest commands. */
 export function dashboardLines(s: Summary, workspaces: number, commands: readonly CommandRow[]): string[] {
   const active = activeMs(s);
   const checks = checkTotals(s);
   const lines: string[] = [];
 
+  if (s.turns === 0 && s.sessions === 0 && s.toolMs === 0 && checks.count === 0 && commands.length === 0) return [dim("no history yet: it fills as Claude and checks run")];
+
   lines.push(section("Totals"));
-  lines.push(`  ${workspaces} workspace${workspaces === 1 ? "" : "s"} · ${s.sessions} session${s.sessions === 1 ? "" : "s"} · ${s.turns} turn${s.turns === 1 ? "" : "s"} · ${duration(s.turnMs)} in turns · ${checks.count} check run${checks.count === 1 ? "" : "s"} (${duration(checks.ms)})`);
+  lines.push(`  ${workspaces} workspace${workspaces === 1 ? "" : "s"} · ${s.sessions} session start${s.sessions === 1 ? "" : "s"} · ${s.turns} turn${s.turns === 1 ? "" : "s"} · ${duration(s.turnMs)} in turns · ${checks.count} check run${checks.count === 1 ? "" : "s"} (${duration(checks.ms)})`);
   lines.push("");
   lines.push(section("Where Claude's time went"));
 
@@ -53,7 +61,7 @@ export function dashboardLines(s: Summary, workspaces: number, commands: readonl
   if (!tools.length) lines.push(dim("  none yet"));
   else lines.push(dim(`  ${"tool".padEnd(18)} ${"calls".padStart(6)} ${"time".padStart(8)} ${"share".padStart(6)} ${"mean".padStart(8)}`));
 
-  for (const [name, t] of tools.slice(0, 10)) lines.push(`  ${name.slice(0, 18).padEnd(18)} ${String(t.count).padStart(6)} ${duration(t.ms).padStart(8)} ${pct(t.ms, toolTotal).padStart(6)} ${duration(mean(t)).padStart(8)}`);
+  for (const [name, t] of tools.slice(0, 10)) lines.push(tallyRow(name, 18, t, toolTotal));
 
   const bash = byMs(s.bash as Record<string, Tally>);
 
@@ -61,7 +69,9 @@ export function dashboardLines(s: Summary, workspaces: number, commands: readonl
     lines.push("");
     lines.push(section("Bash by kind"));
 
-    for (const [cls, t] of bash) lines.push(`  ${cls.padEnd(18)} ${String(t.count).padStart(6)} ${duration(t.ms).padStart(8)} ${pct(t.ms, bash.reduce((n, [, x]) => n + x.ms, 0)).padStart(6)} ${duration(mean(t)).padStart(8)}`);
+    const bashTotal = bash.reduce((n, [, x]) => n + x.ms, 0);
+
+    for (const [cls, t] of bash) lines.push(tallyRow(cls, 18, t, bashTotal));
   }
 
   const groups = topGroups(s.groups);
@@ -70,7 +80,7 @@ export function dashboardLines(s: Summary, workspaces: number, commands: readonl
     lines.push("");
     lines.push(section("Checks"));
 
-    for (const [name, g] of groups.slice(0, 6)) lines.push(`  ${name.slice(0, 18).padEnd(18)} ${String(g.count).padStart(6)} ${duration(g.ms).padStart(8)} ${pct(g.ms, checks.ms).padStart(6)} ${duration(mean(g)).padStart(8)}${g.failed ? colorize(`  ${g.failed} failed`, "red") : ""}${g.queuedMs > 0 ? dim(`  queued ${duration(g.queuedMs)}`) : ""}`);
+    for (const [name, g] of groups.slice(0, 6)) lines.push(`${tallyRow(name, 18, g, checks.ms)}${g.failed ? colorize(`  ${g.failed} failed`, "red") : ""}${g.queuedMs > 0 ? dim(`  queued ${duration(g.queuedMs)}`) : ""}`);
   }
 
   const skills = byMs(s.skills ?? {});
@@ -84,7 +94,7 @@ export function dashboardLines(s: Summary, workspaces: number, commands: readonl
 
   if (commands.length) {
     lines.push("");
-    lines.push(section("Slowest commands (press v for all)"));
+    lines.push(section("Slowest commands (by worst run)"));
 
     for (const c of [...commands].sort((a, b) => b.maxMs - a.maxMs).slice(0, 5)) lines.push(`  ${c.label.slice(0, 28).padEnd(28)} ${c.source.padEnd(5)} ${c.cls.padEnd(9)} worst ${duration(c.maxMs).padStart(7)}  ${c.count}×`);
   }
@@ -92,24 +102,21 @@ export function dashboardLines(s: Summary, workspaces: number, commands: readonl
   return lines;
 }
 
-/** The dashboard as screen rows, scrolled by `offset`. Pure. */
-export function renderDashboard(s: Summary, workspaces: number, commands: readonly CommandRow[], offset: number, height: number, width: number, windowLabel: string, message = ""): string[] {
+/** The dashboard's `lines` as screen rows, scrolled by `offset`. */
+export function renderDashboard(lines: readonly string[], offset: number, height: number, width: number, windowLabel: string, message = ""): string[] {
   const inner = width - 4;
-  const body = Math.max(1, height - 3);
-  const lines = dashboardLines(s, workspaces, commands);
+  const body = Math.max(1, height - DASHBOARD_CHROME);
   const rows: string[] = [boxTop(`Performance dashboard · ${windowLabel}`, width)];
 
-  const empty = s.turns === 0 && s.sessions === 0 && s.toolMs === 0;
-
-  for (let i = 0; i < body; i++) rows.push(boxRow(empty && i === lines.length ? dim(fit("no history yet: it fills as Claude and checks run", inner)) : fit(lines[offset + i] ?? "", inner)));
+  for (let i = 0; i < body; i++) rows.push(boxRow(fit(lines[offset + i] ?? "", inner)));
   rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit("j/k scroll   v view   w window   r reload   q quit", inner))));
-  rows.push(boxBottom(width, empty ? "no history yet" : `${lines.length} lines`));
+  rows.push(boxBottom(width, `${lines.length} lines`));
 
   return rows;
 }
 
 /** Longest dashboard scroll for a height, so the pane can clamp the offset. */
-export const dashboardMaxOffset = (lineCount: number, height: number) => Math.max(0, lineCount - Math.max(1, height - 3));
+export const dashboardMaxOffset = (lineCount: number, height: number) => Math.max(0, lineCount - Math.max(1, height - DASHBOARD_CHROME));
 
 export type CommandSource = "all" | "bash" | "check";
 
@@ -128,10 +135,7 @@ export function listCommands(rows: readonly CommandRow[], source: CommandSource,
   return rows.filter((r) => source === "all" || r.source === source).sort((a, b) => key(b) - key(a) || a.label.localeCompare(b.label));
 }
 
-/**
- * Every command Claude's Bash tool or `overbridge check` ran, one row each: what it was (class), how often, total, mean and
- * worst time, failures. The selected row's whole command (check runs keep it; Bash keeps only its leading words) and queue wait are below. Pure.
- */
+/** The commands view as screen rows; the selected row's whole command (check runs only) and queue wait show below. */
 export function renderCommands(list: readonly CommandRow[], selected: number, offset: number, height: number, width: number, windowLabel: string, source: CommandSource, sort: CommandSort, message = ""): string[] {
   const inner = width - 4;
   const body = Math.max(1, height - VIEW_CHROME);

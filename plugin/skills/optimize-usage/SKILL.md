@@ -10,16 +10,16 @@ Read-only. It reads recorded history and proposes changes. It edits and files no
 ## 1. Gather (7 days)
 
 ```sh
-overbridge history --hours 168 --by total --json      # everything added up: tools, bash kinds, skills, checks, time split
-overbridge history --hours 168 --by commands --json   # every Bash and check command: label, kind, count, ms, maxMs, failed, fulls
+overbridge history --hours 168 --by total --json      # everything added up: tools, bash classes, skills, checks, time split
+overbridge history --hours 168 --by commands --json   # every Bash and check command: label, cls, count, ms, maxMs, failed, fulls
 overbridge history --hours 168 --json                 # per workspace, to see where a pattern concentrates
 ```
 
-Bash history keeps a command's leading words (`bun test`), never its arguments; check runs keep the whole line in `fulls`. Say the window you used. No history: say so and stop.
+Bash history keeps only a program and, for task runners and subcommand tools, the task (`bun test`, `git status`); every other word is dropped; check runs keep the whole line in `fulls`. Say the window you used. No history: say so and stop.
 
 ## 2. Skills
 
-List what exists: `ls plugin/skills plugin-review/skills` in the overbridge checkout (or the repo's own skills folder) and `wc -w` each `SKILL.md`.
+List the skills installed (the installed plugins' `skills/` folders and the current repo's `.claude/skills`, for example `plugin/skills` in an overbridge checkout) and `wc -w` each `SKILL.md`. If you cannot find a skills folder, say so rather than guess.
 
 | Signal | Proposal |
 | --- | --- |
@@ -38,7 +38,7 @@ From `--by commands`, rank by `ms` (total), then by `maxMs` (one bad run), then 
 | --- | --- |
 | Big total, `source` check | A cache, an affected-only run, or a faster subset locally; CI stays the full run. |
 | Big `maxMs` against a small mean | An outlier: cold cache, network, a hung call. Find what differed before tuning. |
-| Many runs, kind `git` or `other` | Batch into one call or one script; a `just` recipe if it is a fixed sequence. |
+| Many runs, `cls` `git` or `other` | Batch into one call or one script; a `just` recipe if it is a fixed sequence. |
 | Many runs of `test`/`lint`/`typecheck` through Bash | Should go through `overbridge check` (queued, timed, load-aware). |
 | High `failed` | A failed run that was rerun doubled its cost; run the cheaper check first. |
 | Label like `(other)` | Recorded before labels existed, or an unclassifiable command: ignore, do not guess. |

@@ -52,6 +52,36 @@ export function commandLabel(command: string): string {
   return label.join(" ");
 }
 
+/** Programs whose second word is a subcommand, not an argument: `git status`, `cargo build`. */
+const SUBCOMMAND_PROGRAMS = new Set(["git", "gh", "cargo", "nix", "docker", "kubectl", "systemctl", "go", "rustup", "brew", "terraform", "helm", "overbridge", "zellij", "tmux"]);
+
+const SUBCOMMAND = /^[a-z][a-z0-9:_-]*$/;
+
+/**
+ * What a Claude Bash call is, for display and kept in history: the program (its basename) and, for a task runner,
+ * package manager or a program in `SUBCOMMAND_PROGRAMS`, the task or subcommand. Every other word is an argument and is
+ * dropped, since a secret passed as a bare argument cannot be told from any other word. Only the command that runs is
+ * labelled: a leading `cd <dir> &&` is skipped and a pipeline or chain stops at its first command. Empty when unreadable.
+ */
+export function bashLabel(command: string): string {
+  const segments = command.split(/&&|\|\||;|\||\n/).map((x) => x.trim()).filter(Boolean);
+  const running = segments.find((x) => !/^cd(\s|$)/.test(x)) ?? segments[0] ?? "";
+  const words = running.split(/\s+/).filter((w) => !/^\w+=/.test(w));
+  const program = (words[0] ?? "").split("/").pop() ?? "";
+
+  if (!/^[\w.+-]+$/.test(program)) return "";
+
+  if (TASK_RUNNERS.has(program) || PACKAGE_MANAGERS.has(program)) {
+    const task = commandGroup(running);
+
+    return SUBCOMMAND.test(task) && task !== program ? `${program} ${task}` : program;
+  }
+
+  const sub = words[1];
+
+  return SUBCOMMAND_PROGRAMS.has(program) && sub && SUBCOMMAND.test(sub) ? `${program} ${sub}` : program;
+}
+
 /** Words that name a secret: the value after one is never kept. */
 const SECRET_FLAG = String.raw`--?[\w-]*(?:token|secret|passw|key|auth|cred)[\w-]*`;
 const VALUE = String.raw`"[^"]*"|'[^']*'|[^\s'"]+`;
@@ -139,7 +169,7 @@ export interface ClaudeRecord {
   id?: string;
   /** What a Bash call is, never its text. */
   cls?: CommandClass;
-  /** What the call ran, for display: `commandLabel` of a Bash command (its leading words, never arguments), the name of a Skill. */
+  /** What the call ran, for display: `bashLabel` of a Bash command (a program and at most a subcommand), the name of a Skill. */
   label?: string;
 }
 
@@ -244,7 +274,7 @@ export function claudeRecord(input: HookPayload, at = Date.now()): ClaudeRecord 
   const tool = event === "PreToolUse" || event === "PostToolUse" || event === "PostToolUseFailure" ? input.tool_name : undefined;
   const command = tool === "Bash" && typeof input.tool_input?.command === "string" ? input.tool_input.command : undefined;
   const skill = tool === "Skill" && typeof input.tool_input?.skill === "string" ? input.tool_input.skill.slice(0, 80) : undefined;
-  const label = command === undefined ? skill : commandLabel(command) || undefined;
+  const label = command === undefined ? skill : bashLabel(command) || undefined;
 
   return {
     kind: "claude",
@@ -327,7 +357,7 @@ export interface CommandTally extends Tally {
 }
 
 export interface Summary {
-  /** Claude sessions started. */
+  /** `SessionStart` events: a resume, clear or compaction starts one too. */
   sessions: number;
   turns: number;
   /** Prompt to stop, summed. */
@@ -355,6 +385,50 @@ export interface Summary {
   groups: Record<string, GroupTally>;
 }
 
+/** A summary with nothing in it. */
+export const emptySummary = (): Summary => ({ sessions: 0, turns: 0, turnMs: 0, modelMs: 0, toolMs: 0, permissionMs: 0, userMs: 0, awayMs: 0, tools: {}, bash: {}, commands: {}, skills: {}, checks: {}, groups: {} });
+
+const addTally = <T extends Tally>(into: Record<string, T>, key: string, t: T, join: (a: T, b: T) => T) => {
+  const prev = into[key];
+  into[key] = prev ? join(prev, t) : { ...t };
+};
+
+const plus = (a: Tally, b: Tally) => ({ count: a.count + b.count, ms: a.ms + b.ms });
+
+/** Sum summaries into one: the dashboard over every workspace. Tool time adds across workspaces, which run side by side. */
+export function mergeSummaries(list: readonly Summary[]): Summary {
+  const out = emptySummary();
+
+  for (const s of list) {
+    out.sessions += s.sessions ?? 0;
+    out.turns += s.turns;
+    out.turnMs += s.turnMs;
+    out.modelMs += s.modelMs;
+    out.toolMs += s.toolMs;
+    out.permissionMs += s.permissionMs;
+    out.userMs += s.userMs;
+    out.awayMs += s.awayMs;
+
+    for (const [k, t] of Object.entries(s.tools)) addTally(out.tools, k, t, plus);
+
+    for (const [k, t] of Object.entries(s.skills ?? {})) addTally(out.skills, k, t, plus);
+
+    for (const [k, t] of Object.entries(s.bash)) addTally(out.bash as Record<string, Tally>, k, t, plus);
+
+    for (const [k, t] of Object.entries(s.commands ?? {})) addTally(out.commands, k, t, (a, b): CommandTally => ({ ...plus(a, b), cls: a.cls, failed: a.failed + b.failed, maxMs: Math.max(a.maxMs, b.maxMs) }));
+
+    for (const [k, t] of Object.entries(s.checks)) {
+      if (t) addTally(out.checks as Record<string, NonNullable<typeof t>>, k, t, (a, b) => ({ ...plus(a, b), failed: a.failed + b.failed, queuedMs: a.queuedMs + b.queuedMs }));
+    }
+
+    for (const [k, g] of Object.entries(s.groups)) {
+      addTally(out.groups, k, g, (a, b): GroupTally => ({ ...plus(a, b), failed: a.failed + b.failed, queuedMs: a.queuedMs + b.queuedMs, cls: a.cls, maxMs: Math.max(a.maxMs ?? 0, b.maxMs ?? 0), fulls: [...new Set([...a.fulls, ...b.fulls])].slice(0, 3) }));
+    }
+  }
+
+  return out;
+}
+
 /** A gap between turns longer than this counts as away, not waiting. */
 export const AWAY_AFTER_MS = 30 * 60_000;
 
@@ -376,7 +450,7 @@ function unionMs(spans: [number, number][]): number {
 
 /** Fold a workspace's records into time totals. Records need not be sorted. */
 export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_AFTER_MS): Summary {
-  const s: Summary = { sessions: 0, turns: 0, turnMs: 0, modelMs: 0, toolMs: 0, permissionMs: 0, userMs: 0, awayMs: 0, tools: {}, bash: {}, commands: {}, skills: {}, checks: {}, groups: {} };
+  const s = emptySummary();
   let turnStart: number | undefined;
   let lastStop: number | undefined;
   let notifiedAt: number | undefined;

@@ -4,12 +4,9 @@ import { computePerf, loadPerf, type PerfViews, readPerfCache } from "./perf-cac
 import { serverRefreshPerf } from "./server-client";
 import { PERF_TAB } from "./sidebar";
 import { subscribeEvents } from "./events-client";
-import { COMMAND_SORTS, COMMAND_SOURCES, type CommandSort, type CommandSource, dashboardMaxOffset, dashboardLines, listCommands, nextOf, nextView, renderCommands, renderDashboard, type View } from "./perf-views";
+import { COMMAND_SORTS, COMMAND_SOURCES, type CommandSort, type CommandSource, dashboardMaxOffset, dashboardLines, listCommands, nextOf, nextView, renderCommands, renderDashboard, type View, VIEW_CHROME } from "./perf-views";
 import { createPainter, readView, shouldPoll } from "./zellij-view";
 import { bold, boxBottom, boxRow, boxTop, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN } from "./term";
-
-/** Rows the frame uses besides the workspace rows: top border, header, detail (3), legend, bottom border. */
-export const PERF_CHROME = 7;
 
 export { rankedRepos, WINDOWS };
 
@@ -34,7 +31,7 @@ const split = (part: number, whole: number) => pct(part, whole).padStart(6);
  */
 export function renderPerf(list: readonly WorkspaceSummary[], selected: number, offset: number, height: number, width: number, windowLabel: string, message = ""): string[] {
   const inner = width - 4;
-  const body = Math.max(1, height - PERF_CHROME);
+  const body = Math.max(1, height - VIEW_CHROME);
   const header = `${"workspace".padEnd(22)} ${"turns".padStart(5)} ${"in turns".padStart(8)}  ${"model".padStart(6)} ${"tools".padStart(6)} ${"perm".padStart(6)} ${"user".padStart(6)}  ${"checks".padStart(6)} ${"check time".padStart(10)}`;
   const rows: string[] = [boxTop(`Performance · ${windowLabel}`, width), boxRow(dim(fit(header, inner)))];
   const visible = list.slice(offset, offset + body);
@@ -67,7 +64,7 @@ export function renderPerf(list: readonly WorkspaceSummary[], selected: number, 
  */
 export function renderRepos(list: readonly RepoSummary[], selected: number, offset: number, height: number, width: number, windowLabel: string, message = ""): string[] {
   const inner = width - 4;
-  const body = Math.max(1, height - PERF_CHROME);
+  const body = Math.max(1, height - VIEW_CHROME);
   const header = `${"repo".padEnd(22)} ${"runs".padStart(5)} ${"run time".padStart(9)} ${"queued".padStart(9)} ${"failed".padStart(6)}  slowest group`;
   const rows: string[] = [boxTop(`Performance by repo · ${windowLabel}`, width), boxRow(dim(fit(header, inner)))];
   const visible = list.slice(offset, offset + body);
@@ -93,7 +90,7 @@ export function renderRepos(list: readonly RepoSummary[], selected: number, offs
 }
 
 /** The rows on screen, tagged with what they are, so the renderer needs no cast. */
-export type PerfList = { grouping: "repo"; rows: readonly RepoSummary[] } | { grouping: "workspace"; rows: readonly WorkspaceSummary[] } | { grouping: "commands"; rows: readonly CommandRow[] } | { grouping: "dashboard"; rows: readonly never[] };
+export type PerfList = { kind: "repo"; rows: readonly RepoSummary[] } | { kind: "workspace"; rows: readonly WorkspaceSummary[] } | { kind: "commands"; rows: readonly CommandRow[] } | { kind: "dashboard"; rows: readonly never[] };
 
 /** `overbridge perf`: the @perf tab's pane. */
 export async function perfPane() {
@@ -108,11 +105,11 @@ export async function perfPane() {
   let views: PerfViews = loadPerf();
   const window = () => views.windows[WINDOWS[windowAt]!.label] ?? { workspaces: [], repos: [], dashboard: emptySummary(), commands: [] };
   const rows = (): PerfList => {
-    if (view === "dashboard") return { grouping: "dashboard", rows: [] };
+    if (view === "dashboard") return { kind: "dashboard", rows: [] };
 
-    if (view === "commands") return { grouping: "commands", rows: listCommands(window().commands, source, sort) };
+    if (view === "commands") return { kind: "commands", rows: listCommands(window().commands, source, sort) };
 
-    return grouping === "repo" ? { grouping, rows: rankedRepos(window().repos) } : { grouping, rows: ranked(window().workspaces) };
+    return grouping === "repo" ? { kind: grouping, rows: rankedRepos(window().repos) } : { kind: grouping, rows: ranked(window().workspaces) };
   };
   let list = rows();
 
@@ -122,26 +119,33 @@ export async function perfPane() {
   let notice = "";
   const painter = createPainter((text) => process.stdout.write(text));
 
+  /** Back to the top of a rebuilt list. */
+  const reset = () => {
+    selected = offset = scroll = 0;
+    list = rows();
+  };
+
   const draw = () => {
     const height = process.stdout.rows ?? 24;
     const width = process.stdout.columns ?? 80;
     selected = Math.min(selected, Math.max(0, list.rows.length - 1));
     const label = WINDOWS[windowAt]!.label;
 
-    if (list.grouping === "dashboard") {
+    if (list.kind === "dashboard") {
       const w = window();
-      scroll = Math.max(0, Math.min(scroll, dashboardMaxOffset(dashboardLines(w.dashboard, w.workspaces.length, w.commands).length, height)));
-      painter.paint(frame(renderDashboard(w.dashboard, w.workspaces.length, w.commands, scroll, height, width, label, notice), height, width));
+      const lines = dashboardLines(w.dashboard, w.workspaces.length, w.commands);
+      scroll = Math.max(0, Math.min(scroll, dashboardMaxOffset(lines.length, height)));
+      painter.paint(frame(renderDashboard(lines, scroll, height, width, label, notice), height, width));
 
       return;
     }
 
-    const body = Math.max(1, height - PERF_CHROME);
+    const body = Math.max(1, height - VIEW_CHROME);
 
     if (selected < offset) offset = selected;
 
     if (selected >= offset + body) offset = selected - body + 1;
-    const screen = list.grouping === "commands" ? renderCommands(list.rows, selected, offset, height, width, label, source, sort, notice) : list.grouping === "repo" ? renderRepos(list.rows, selected, offset, height, width, label, notice) : renderPerf(list.rows, selected, offset, height, width, label, notice);
+    const screen = list.kind === "commands" ? renderCommands(list.rows, selected, offset, height, width, label, source, sort, notice) : list.kind === "repo" ? renderRepos(list.rows, selected, offset, height, width, label, notice) : renderPerf(list.rows, selected, offset, height, width, label, notice);
     painter.paint(frame(screen, height, width));
   };
 
@@ -197,20 +201,16 @@ export async function perfPane() {
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
       else if (input.key === "v") {
         view = nextView(view);
-        selected = offset = scroll = 0;
-        list = rows();
+        reset();
       } else if (input.key === "f" && view === "commands") {
         source = nextOf(COMMAND_SOURCES, source);
-        selected = offset = 0;
-        list = rows();
+        reset();
       } else if (input.key === "o" && view === "commands") {
         sort = nextOf(COMMAND_SORTS, sort);
-        selected = offset = 0;
-        list = rows();
+        reset();
       } else if (input.key === "g" && view === "sessions") {
         grouping = grouping === "repo" ? "workspace" : "repo";
-        selected = offset = 0;
-        list = rows();
+        reset();
       } else if (input.key === "w") {
         // every window is in the views already
         windowAt = (windowAt + 1) % WINDOWS.length;

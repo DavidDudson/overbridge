@@ -230,6 +230,11 @@ async function main(argv: string[]): Promise<number> {
 
       const rows = summaries(undefined, windowMs, values.ws);
 
+      if (!rows.length && !values.json) {
+        log("no history yet");
+        break;
+      }
+
       if (values.by === "total" || values.by === "commands") {
         const total = mergeSummaries(rows.map((r) => r.summary));
 
