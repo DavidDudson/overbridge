@@ -14,6 +14,7 @@ const HEADER = `# overbridge repo registry. Add with \`overbridge repo add <name
 #
 # [sidebar]
 # width = 60                # columns of the tab sidebar, 12 to 200
+# motion = "while-active"   # "while-active" animates the busy glyph, "off" keeps it still
 `;
 
 export function initReposFile() {
@@ -42,9 +43,7 @@ export const SIDEBAR_WIDTH_RANGE = { min: 12, max: 200 } as const;
 
 /** Columns of the tab sidebar: `[sidebar] width` in repos.toml, else the default. */
 export function sidebarWidth(): number {
-  if (!existsSync(reposFile())) return SIDEBAR_WIDTH;
-  const data = Bun.TOML.parse(readFileSync(reposFile(), "utf8")) as { sidebar?: { width?: unknown } };
-  const width = data.sidebar?.width;
+  const width = readSidebarSection().width;
 
   if (width === undefined) return SIDEBAR_WIDTH;
   const { min, max } = SIDEBAR_WIDTH_RANGE;
@@ -67,4 +66,29 @@ export function appendRepo(spec: RepoSpec) {
 
   if (spec.defaultBranch) block += `default_branch = ${JSON.stringify(spec.defaultBranch)}\n`;
   appendFileSync(reposFile(), block);
+}
+
+/** `[sidebar] motion` in repos.toml: `off` keeps every glyph still, `while-active` animates a card only while its agent works. */
+export const Motion = { Off: "off", WhileActive: "while-active" } as const;
+
+export type Motion = (typeof Motion)[keyof typeof Motion];
+
+type SidebarSection = { width?: unknown; motion?: unknown };
+
+/** The `[sidebar]` table of repos.toml; empty when the file or table is missing. */
+function readSidebarSection(): SidebarSection {
+  if (!existsSync(reposFile())) return {};
+  const data = Bun.TOML.parse(readFileSync(reposFile(), "utf8")) as { sidebar?: SidebarSection };
+
+  return data.sidebar ?? {};
+}
+
+/** Whether the tab sidebar animates: `[sidebar] motion` in repos.toml, else `while-active`. Read once when the pane starts. */
+export function sidebarMotion(): Motion {
+  const motion = readSidebarSection().motion;
+
+  if (motion === undefined) return Motion.WhileActive;
+  const modes = Object.values(Motion);
+
+  return modes.find((m) => m === motion) ?? fail(`repos.toml: sidebar.motion must be one of ${modes.map((m) => `"${m}"`).join(", ")}`);
 }

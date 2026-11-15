@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type AgentState, agentStatePath, TOOL_NAME, CONTINUING_END_REASONS, clearSubagent, clearSubagents, markSubagent, readAgentState } from "./agent-state";
+import { type AgentState, agentStatePath, TOOL_NAME, CONTINUING_END_REASONS, clearSubagent, clearSubagents, markSubagent, readAgentState, recordTurn } from "./agent-state";
 import { backgroundShells } from "./bg-tasks";
 import { claudeRecord, type HookPayload, type HistoryStore, historyStore } from "./history";
 import { envVar, ORCHESTRATION_ENV, root, selfCommand, silenceLegacyWarnings } from "./paths";
@@ -220,6 +220,12 @@ export async function hookMain(): Promise<number> {
 
     // after the compact restart above: a Stop the hook blocks does not end the turn
     recordHistory(ws, input);
+
+    try {
+      recordTurn(meta, ws, event, input.tool_name, input.source);
+    } catch {
+      // the receipt is best effort
+    }
 
     try {
       // a compaction or resume keeps the session, and so its subagents; no id means no marker to tell apart

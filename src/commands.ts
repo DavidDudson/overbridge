@@ -176,7 +176,7 @@ function removeFolder(ws: string) {
   untrustFolder(wsDir(ws));
   rmSync(wsDir(ws), { recursive: true, force: true });
   clearSubagents(metaDir(), ws);
-  [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("phase", `${ws}.json`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`)].forEach((f) =>
+  [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("agent", `${ws}.turn.json`), join("context", `${ws}.json`), join("phase", `${ws}.json`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`)].forEach((f) =>
     rmSync(join(metaDir(), f), { force: true }),
   );
 }

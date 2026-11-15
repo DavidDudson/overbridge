@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claimRefresh, EVENT_STATE, recordState, REFRESH_AFTER_MS } from "../src/agent-hook";
-import { AGENT_STATES, agentStatePath, EndReason, endedForGood, readAgentState, sessionEndedForGood, STALE_MS } from "../src/agent-state";
+import { AGENT_STATES, agentStatePath, turnPath, EndReason, endedForGood, readAgentState, sessionEndedForGood, STALE_MS } from "../src/agent-state";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 let tmp: string;
@@ -162,11 +162,34 @@ describe("overbridge hook", () => {
     expect(stateOf("w1").state).toBe("busy");
   });
 
-  test("ignores unlisted events and unbound sessions", () => {
+  test("an unbound session writes nothing", () => {
+    for (const hook_event_name of ["Stop", "UserPromptSubmit", "PreCompact"]) expect(hook(JSON.stringify({ hook_event_name }), undefined).code).toBe(0);
+    expect(existsSync(join(meta, "agent"))).toBe(false);
+  });
+
+  test("an unlisted event leaves the state alone and notes a compaction in the turn summary", () => {
     expect(hook(JSON.stringify({ hook_event_name: "PreCompact" }), "w2").code).toBe(0);
     expect(existsSync(agentStatePath(meta, "w2"))).toBe(false);
-    expect(hook(JSON.stringify({ hook_event_name: "Stop" }), undefined).code).toBe(0);
-    expect(existsSync(join(meta, "agent"))).toBe(false);
+    expect(existsSync(turnPath(meta, "w2"))).toBe(true);
+  });
+
+  test("the receipt survives a resume and is dropped by a clear, through the hook", () => {
+    const send = (hook_event_name: string, extra: object = {}) => hook(JSON.stringify({ hook_event_name, ...extra }), "w4");
+    send("UserPromptSubmit");
+    send("PostToolUseFailure", { tool_name: "Bash" });
+    send("Stop");
+    send("SessionStart", { source: "resume" });
+    const kept = JSON.parse(readFileSync(turnPath(meta, "w4"), "utf8"));
+    expect([kept.errors, typeof kept.endedAt]).toEqual([1, "number"]);
+    send("SessionStart", { source: "clear" });
+    expect(existsSync(turnPath(meta, "w4"))).toBe(false);
+  });
+
+  test("an edit tool call counts toward the turn receipt; other tool calls write nothing", () => {
+    hook(JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Bash" }), "w3");
+    expect(existsSync(turnPath(meta, "w3"))).toBe(false);
+    hook(JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Edit" }), "w3");
+    expect(JSON.parse(readFileSync(turnPath(meta, "w3"), "utf8")).edits).toBe(1);
   });
 
   test("records an orchestration tab's state under its tab name, without a top panel refresh", () => {
