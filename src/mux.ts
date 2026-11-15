@@ -56,7 +56,8 @@ export interface Mux {
   tabs(): string[];
   /** The focused tab; undefined when it cannot say. */
   currentTab(): string | undefined;
-  goToTab(name: string): MuxResult;
+  /** Focus the tab `name`, and `pane` in it when given, in one step so the screen repaints once. */
+  goToTab(name: string, pane?: string): MuxResult;
   /** Open `spec` as a new tab. Foreground leaves it focused; background returns focus to the tab you were on. */
   openTab(spec: TabSpec, focus: TabFocus): MuxResult;
   /** Close the tab named `name`, whichever tab has focus. */
@@ -126,7 +127,12 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
     ownPaneId: () => env.ZELLIJ_PANE_ID,
     tabs,
     currentTab,
-    goToTab: (name) => result(act("go-to-tab-name", name)),
+    goToTab(name, pane) {
+      const r = result(act("go-to-tab-name", name));
+      // focusing a pane that already has focus exits 2, which is fine here
+      if (r.ok && pane !== undefined) act("focus-pane-id", target(pane));
+      return r;
+    },
     openTab(spec, focus) {
       const dir = join(meta(), "tabs");
       mkdirSync(dir, { recursive: true });
@@ -210,9 +216,15 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
       const r = tmux("display-message", "-p", "-t", `=${session}:`, "#{window_name}");
       return r.ok ? r.stdout.trim() || undefined : undefined;
     },
-    goToTab(name) {
+    goToTab(name, pane) {
       const id = windowId(name);
-      return id === undefined ? { ok: false, error: `no tab ${name}` } : result(tmux("select-window", "-t", id));
+      if (id === undefined) return { ok: false, error: `no tab ${name}` };
+      // one tmux call with `;` between the commands: separate processes repaint the screen once each, which flickers
+      const select = ["select-window", "-t", id];
+      if (pane === undefined) return result(tmux(...select));
+      const both = tmux(...select, ";", "select-pane", "-t", pane);
+      // a stale pane id must not undo the switch: go to the tab alone
+      return both.ok ? { ok: true } : result(tmux(...select));
     },
     openTab(spec, focus) {
       const opened = tmux(...tabOpen(session, spec, { first: false, printId: true }));

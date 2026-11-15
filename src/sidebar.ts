@@ -664,14 +664,7 @@ const sidebarPane = (ws: string): string | undefined => {
  * that already has focus can fail, so its result is ignored.
  */
 export function switchTab(tab: string, mux: Mux = defaultMux()): boolean {
-  if (!mux.goToTab(tab).ok) {
-    return false;
-  }
-  const pane = sidebarPane(tab);
-  if (pane !== undefined) {
-    mux.focusPane(pane);
-  }
-  return true;
+  return mux.goToTab(tab, sidebarPane(tab)).ok;
 }
 
 /** Go from `self` to `tab`, picked any way but ← and →, recording the visit in the session's history. */
