@@ -66,6 +66,7 @@ function render(rows: readonly PrRow[], { selected, offset, height, width, messa
       cell(age(r.updatedAt, now), 4),
       r.title,
     ].join(" ");
+
     const text = fit(line, inner);
     const color = HEALTH_LOOK[healthOf(r)].color;
 
