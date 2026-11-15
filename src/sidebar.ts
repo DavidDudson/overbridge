@@ -10,6 +10,8 @@ import { readQueue, type Ticket } from "./check-queue";
 import { type CleanupInFlight, cleanupRecords, cleanupRows } from "./cleanup-log";
 import { Motion, sidebarMotion } from "./config";
 import { animate } from "./sidebar-motion";
+import { badgeColor, badgeLabel, badgeText, type TabBadge } from "./tab-badge";
+import { readBadge } from "./tab-badge-read";
 import { metaDir, selfCommand } from "./paths";
 import { type Gauge, gaugeText, readGauge, readReceipt, type Receipt, receiptText } from "./gauge";
 import { type Limits, limitRows, readLimits } from "./limits";
@@ -93,6 +95,8 @@ export interface Entry {
   gauge?: Gauge;
   /** The last finished turn, on the selected card only. */
   receipt?: Receipt;
+  /** A PR-listing tab: how many it lists and an icon per PR for what it needs. Replaces the status line. */
+  badge?: TabBadge;
 }
 
 export { sidebarLabel, stripConventional } from "./top";
@@ -102,9 +106,11 @@ export { currentTab, tabOrder };
 const entryFor = (tab: string, section: Section, label: string): Entry => {
   const detail = readAgentDetail(tab);
   const state = detail?.state;
+  const badge = section === Section.Orchestration ? readBadge(tab) : undefined;
 
   return {
-    tab, section, glyph: glyphFor(state), state, label,
+    tab, section, glyph: glyphFor(state), state, label: badge ? badgeLabel(label, badge) : label,
+    ...(badge ? { badge } : {}),
     ...(detail?.since === undefined ? {} : { since: detail.since }),
     ...(detail?.tool ? { tool: detail.tool } : {}),
     ...(detail?.agents ? { agents: detail.agents } : {}),
@@ -394,8 +400,8 @@ const statusRow = (text: string, gauge: string | undefined, inner: number): stri
 /** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line. */
 export function entryLines(e: Entry, index: number, selected: boolean, inner: number): string[] {
   const titles = titleRows(e, index, inner).map((l) => fit(l, inner));
-  const status = statusFor(e);
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
+  const status = e.badge ? { text: badgeText(e.badge, Math.max(1, inner - textWidth(indent))), color: badgeColor(e.badge) } : statusFor(e);
   const sub = statusRow(`${indent}${status?.text ?? ""}`, gaugeFor(e), inner);
   const stacks = (e.stacks ?? []).map((st) => fit(`${indent}${stackText(st)}`, inner));
   const receipt = e.receipt ? [fit(`${indent}${receiptText(e.receipt)}`, inner)] : [];

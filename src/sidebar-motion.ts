@@ -15,10 +15,16 @@ export const busyFrame = (nowMs: number): string => BUSY_FRAMES[Math.floor(nowMs
 /** A card that is working and shows the static busy glyph; a faulted card or one with another glyph stays as it is. */
 const isBusyCard = (e: Entry): boolean => e.state === "busy" && !e.fault && e.glyph === GLYPHS.busy;
 
-/** `list` with each busy card's glyph set to its frame at `nowMs`. With `Motion.Off`, or nothing busy, the same array comes back. */
+/** A card whose badge has a merge conflict, which pulses. */
+const hasConflict = (e: Entry): boolean => !e.fault && (e.badge?.icons.includes("conflict") ?? false);
+
+/**
+ * `list` with each busy card's glyph set to its frame at `nowMs`, and each badge with a conflict stamped with the clock
+ * so it pulses. With `Motion.Off`, or nothing moving, the same array comes back.
+ */
 export function animate(list: Entry[], nowMs: number, motion: Motion): Entry[] {
-  if (motion === Modes.Off || !list.some(isBusyCard)) return list;
+  if (motion === Modes.Off || !list.some((e) => isBusyCard(e) || hasConflict(e))) return list;
   const frame = busyFrame(nowMs);
 
-  return list.map((e) => (isBusyCard(e) ? { ...e, glyph: frame } : e));
+  return list.map((e) => (isBusyCard(e) ? { ...e, glyph: frame } : hasConflict(e) ? { ...e, badge: { ...e.badge!, at: nowMs } } : e));
 }

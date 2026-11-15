@@ -4,6 +4,7 @@ import { loadRootLayers } from "./project-config";
 import { metaDir, selfCommand } from "./paths";
 import { run, spawnCwd, type RunResult } from "./util";
 import { age, CHROME, type PrRow } from "./pr-rows";
+import { filterOrgs, mergeRows, reviewCommand, rowsFromReviews } from "./review-batch";
 import { prsView } from "./prs-view";
 import { reviewsView } from "./reviews-view";
 import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN } from "./term";
@@ -22,11 +23,11 @@ export interface PrListCache {
   error?: string;
 }
 
-const cacheFile = (kind: PrListKind) => join(metaDir(), `prlist-${kind}.json`);
+export const prListPath = (kind: PrListKind) => join(metaDir(), `prlist-${kind}.json`);
 
 export function readPrList(kind: PrListKind): PrListCache {
   try {
-    return JSON.parse(readFileSync(cacheFile(kind), "utf8"));
+    return JSON.parse(readFileSync(prListPath(kind), "utf8"));
   } catch {
     return { at: 0, rows: [] };
   }
@@ -34,9 +35,9 @@ export function readPrList(kind: PrListKind): PrListCache {
 
 function writePrList(kind: PrListKind, cache: PrListCache) {
   mkdirSync(metaDir(), { recursive: true });
-  const tmp = `${cacheFile(kind)}.${process.pid}.tmp`;
+  const tmp = `${prListPath(kind)}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(cache, null, 2) + "\n");
-  renameSync(tmp, cacheFile(kind));
+  renameSync(tmp, prListPath(kind));
 }
 
 export const SEARCH_FIELDS = "number,title,url,repository,author,isDraft,updatedAt";
@@ -79,8 +80,29 @@ export function rowsFromSearch(json: string): PrRow[] {
 
 type Runner = (cmd: string[]) => RunResult;
 
+const firstLine = (r: RunResult) => (r.stderr || r.stdout).trim().split("\n")[0];
+
+/** The reviews asked of me: one GraphQL search per owner, so each row carries its request, bots, CI and merge state. */
+export function readReviews(orgs: readonly string[], runner: Runner = run): PrRow[] {
+  const who = runner(["gh", "api", "user", "--jq", ".login"]);
+
+  if (!who.ok) throw new Error(`gh api user failed: ${firstLine(who)}`);
+  const me = who.stdout.trim();
+
+  const lists = (orgs.length ? orgs : [undefined]).map((org) => {
+    const r = runner(reviewCommand(me, org));
+
+    if (!r.ok) throw new Error(`gh api graphql failed: ${firstLine(r)}`);
+
+    return rowsFromReviews(r.stdout, me);
+  });
+
+  return filterOrgs(mergeRows(lists), orgs);
+}
+
 /** Read one list. Throws with `gh`'s message when the search fails. */
 export function readPrs(kind: PrListKind, orgs: readonly string[], runner: Runner = run): PrRow[] {
+  if (kind === "reviews") return readReviews(orgs, runner);
   const r = runner(searchCommand(kind, orgs));
 
   if (!r.ok) throw new Error(`gh search prs failed: ${(r.stderr || r.stdout).trim().split("\n")[0]}`);
