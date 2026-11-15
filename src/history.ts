@@ -223,6 +223,9 @@ export function fileStore(dir: string, maxBytes = MAX_FILE_BYTES): HistoryStore 
 
 export const historyDir = () => join(metaDir(), "history");
 
+/** The file `fileStore` keeps `ws`'s records in. */
+export const historyFile = (ws: string, dir = historyDir()) => join(dir, `${safeName(ws)}.jsonl`);
+
 /** The store in use. The server, when it lands, is returned here. */
 export const historyStore = (): HistoryStore => fileStore(historyDir());
 
