@@ -707,7 +707,7 @@ github-orgs: [DavidDudson]   # a work machine: [megaport]; leave out for every o
 (the `asked via` column names the team). Each row shows merge state (a conflict is red and pulses), CI, and Copilot and
 CodeRabbit status (a spinner while a reviewer is working, `💬 n` for its unresolved threads, `🚫` when rate limited).
 Its sidebar card shows the count and one icon per PR, worst first: 💥 conflict, 🔴 changes requested, ❌ checks failing,
-🟡 waiting, ⚪ draft, 🟢 ready. The sidebar's `motion: off` stops the pulse. The list comes from one GraphQL search per
+🟡 waiting, ⚪ draft, 🟢 ready. The sidebar's `motion = "off"` stops the pulse. The list comes from one GraphQL search per
 owner in `github-orgs`, so a refresh costs one `gh` call per owner plus one for your login.
 
 Under the list, up to three rows show workspaces being removed or removed in the last hour (see **Seeing what was
