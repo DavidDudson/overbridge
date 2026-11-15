@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveVersion } from "../src/version";
+import { parseBuildTime, resolveVersion } from "../src/version";
 
 describe("resolveVersion", () => {
   test("a real package.json version wins", () => {
@@ -17,5 +17,15 @@ describe("resolveVersion", () => {
   test("with neither, it is dev", () => {
     expect(resolveVersion("0.0.0-semantic-release", undefined)).toBe("dev");
     expect(resolveVersion(undefined, "")).toBe("dev");
+  });
+});
+
+describe("parseBuildTime", () => {
+  test("a positive number of seconds is a build time", () => {
+    expect(parseBuildTime("1763200000")).toBe(1763200000);
+  });
+
+  test("anything else is none", () => {
+    for (const raw of [undefined, "", "0", "-5", "soon", "NaN"]) expect(parseBuildTime(raw)).toBeUndefined();
   });
 });
