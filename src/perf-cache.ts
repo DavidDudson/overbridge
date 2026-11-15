@@ -36,9 +36,12 @@ export function writePerfCache(views: PerfViews, file = perfCacheFile()): void {
   renameSync(tmp, file);
 }
 
-/** A window holds its workspace and repo summaries; the summaries themselves are trusted, as `writePerfCache` alone writes the file. */
-const isWindowView = (value: JsonObject): value is JsonObject & WindowView => "workspaces" in value && Array.isArray(value.workspaces) && "repos" in value && Array.isArray(value.repos);
-
+/**
+ * A window holds its workspace and repo summaries, the dashboard and the commands; the summaries themselves are trusted, as
+ * `writePerfCache` alone writes the file. A file from before the dashboard and commands views lacks them: compute instead.
+ */
+const isWindowView = (value: JsonObject): value is JsonObject & WindowView =>
+  "workspaces" in value && Array.isArray(value.workspaces) && "repos" in value && Array.isArray(value.repos) && "dashboard" in value && isJsonObject(value.dashboard) && "commands" in value && Array.isArray(value.commands);
 
 /** The views in a parsed cache file, or undefined when it is not one. */
 function decodePerfViews(value: JsonValue): PerfViews | undefined {

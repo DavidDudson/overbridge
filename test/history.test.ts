@@ -48,7 +48,7 @@ describe("commandLabel", () => {
 describe("claudeRecord", () => {
   test("keeps tool name, id and the class of a Bash command, never its text", () => {
     const r = claudeRecord({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "t1", tool_input: { command: "bun test --secret=hunter2" } }, 5);
-    expect(r).toEqual({ kind: "claude", at: 5, event: "PreToolUse", tool: "Bash", id: "t1", cls: "test" });
+    expect(r).toEqual({ kind: "claude", at: 5, event: "PreToolUse", tool: "Bash", id: "t1", cls: "test", label: "bun test" });
     expect(JSON.stringify(r)).not.toContain("hunter2");
   });
   test("ignores events that are not recorded", () => {

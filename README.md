@@ -167,7 +167,7 @@ Run `overbridge help` for every command.
 
 `plugin/` ships skills: `workspace`, `ship-pr` (commit, PR, stacked PRs and splitting a branch into a stack,
 green build, mob-review panel and fixes, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
-`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`), `read-handoff` (continue from a handoff file after `/clear`), `perf-recommend` (read the performance history and rank where to get time back) `revisit` (from the orchestration tab: find workspaces whose branch is ahead of main and ask each one's Claude whether the commits are still relevant, continuing if so) and `whip` (from the
+`scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`), `read-handoff` (continue from a handoff file after `/clear`), `perf-recommend` (read the performance history and rank where to get time back), `optimize-usage` (read the last 7 days of history and propose skill reductions and faster Bash commands) `revisit` (from the orchestration tab: find workspaces whose branch is ahead of main and ask each one's Claude whether the commits are still relevant, continuing if so) and `whip` (from the
 orchestration tab: find every workspace with work still outstanding, such as a draft PR, a conflict with main,
 review feedback, a red build, uncommitted or unpushed work or an item not yet shipped, and message its Claude a
 plain "continue" naming what is left; done workspaces are skipped; it ends with a sent/skipped table and takes
@@ -631,7 +631,8 @@ then cut to the newest half). Two things write it:
 `overbridge history` (flags: `--ws`, `--hours`, `--by repo`, `--json`) folds that into time totals: turn time split into model,
 tool and permission-prompt time, time waiting on the user (a gap over 30 minutes counts as away), and the checks by
 group. Shares are exact, to one decimal (`12.4%`). `--by repo` totals the check runs of every workspace per repo.
-The `@perf` orchestration tab (`overbridge perf`) shows the same per workspace, busiest first: turns, time in
+Claude's Bash calls keep their command label (the program and, for task runners and tools with subcommands, the task such as `bun test`; every other word is dropped) and Skill calls their skill name, so history can say which commands were slow and which skills ran. `--by commands` lists every Bash and check command (kind, runs, total, mean, worst, failures) and `--by total` adds every workspace together.
+The `@perf` orchestration tab (`overbridge perf`) has three views, switched with `v`: the **dashboard** (home: sessions, turns, where Claude's time went, time in each tool, Bash by kind, checks, skills and the slowest commands across every workspace; `j`/`k` scroll), **sessions** (below) and **commands** (every Bash and check command with its kind, runs, total, mean and worst time; `f` filters Bash or check, `o` orders by total, runs, worst or mean). Sessions shows the same per workspace, busiest first: turns, time in
 turns, the model, tool, permission and user shares, and the check count and time, with the selected workspace's
 slowest tools and check groups below. `g` switches to one row per repo (check runs, run time, queue wait, failures, and
 for the selected repo each group's share of its check time and the full command of the slowest). `j`/`k` move, `w`
