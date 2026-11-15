@@ -1,5 +1,6 @@
 import type { ReviewerStatus } from "./reviewers";
 import type { CiState } from "./pr-look";
+import type { SortMode } from "./sort-mode";
 
 /** Rows the frame uses besides the PR rows: top border, header, legend, bottom border. */
 export const CHROME = 4;
@@ -47,4 +48,6 @@ export interface ViewState {
   width: number;
   message: string;
   now: number;
+  /** How the rows are ordered, for a view to name in its legend. */
+  sort?: SortMode;
 }

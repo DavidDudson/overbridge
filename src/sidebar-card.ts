@@ -1,3 +1,4 @@
+import type { SortMode } from "./sort-mode";
 import type { SidebarLayout } from "./config";
 import type { ToolCall } from "./history-tail";
 import type { Entry } from "./sidebar";
@@ -14,6 +15,8 @@ export const isCompact = (setting: SidebarLayout, width: number): boolean => set
 export interface CardView {
   compact?: boolean;
   expanded?: { tab: string; toolCalls: ToolCall[] | undefined; now: number };
+  /** How the workspaces are ordered, shown in the Workspaces title. */
+  sort?: SortMode;
 }
 
 /** The card's extra lines hold something to act on, so even a compact card keeps its status row. */

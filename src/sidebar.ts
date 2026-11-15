@@ -13,6 +13,7 @@ import { readQueue, type Ticket } from "./check-queue";
 import { type CleanupInFlight, cleanupRecords, cleanupRows } from "./cleanup-log";
 import { Motion, sidebarMotion } from "./config";
 import { animate } from "./sidebar-motion";
+import { nextSort, SORT_LABEL, type SortMode, sortBy } from "./sort-mode";
 import { badgeColor, badgeLabel, badgeText, type TabBadge } from "./tab-badge";
 import { readBadge } from "./tab-badge-read";
 import { metaDir, selfCommand } from "./paths";
@@ -36,6 +37,9 @@ import { overbridgeVersion } from "./version";
 
 /** The key that jumps to the performance tab, and the tab it reaches. */
 export const PERF_KEY = "p";
+
+/** Cycles how the workspaces are ordered: a-z, by status, by age. */
+export const SORT_KEY = "o";
 export const PERF_TAB = "@perf";
 
 /** How long a held digit waits for a second one before it goes to its one-digit tab. */
@@ -49,7 +53,7 @@ export function legend(count: number, pending = ""): string {
 
   const digits = count > 1 ? `1-${count} go  ` : count === 1 ? "1 go  " : "";
 
-  return `${digits}←→ back  ⌥w next  s new ws  p perf`;
+  return `${digits}←→ back  ⌥w next  s new ws  p perf  o sort`;
 }
 
 /**
@@ -252,6 +256,23 @@ export function entries(order: string[] = tabOrder(), state: State = readState()
   ];
 }
 
+/** Where a state sorts by status: the agents that want you first, then busy, then the rest. */
+const statusRank = (e: Entry): number => {
+  if (e.fault || e.error) return 0;
+
+  if (e.state && ATTENTION.includes(e.state)) return 1;
+
+  return e.state === "busy" ? 2 : 3;
+};
+
+/** The orchestration tabs as they are, then the workspaces ordered by `mode`: a name, how much each needs you, or how long it has been in its state. */
+export function sortEntries(list: Entry[], mode: SortMode): Entry[] {
+  const pinned = list.filter((e) => e.section === Section.Orchestration);
+  const rest = list.filter((e) => e.section !== Section.Orchestration);
+
+  return [...pinned, ...sortBy(rest, mode, (e) => ({ name: e.tab, rank: statusRank(e), since: e.since }))];
+}
+
 /** How many leading entries sit in the Orchestration frame, which never scrolls. */
 export const pinnedCount = (list: Entry[]) => list.filter((e) => e.section === Section.Orchestration).length;
 
@@ -369,10 +390,11 @@ export function stateText(e: Entry, now = Date.now()): StatusLine {
 }
 
 /** The Workspaces frame title: with how many agents want you (`ATTENTION` states) once any do. */
-export function workspacesTitle(list: Entry[]): string {
+export function workspacesTitle(list: Entry[], mode?: SortMode): string {
   const n = list.filter((e) => e.section === Section.Workspaces && e.state && ATTENTION.includes(e.state)).length;
+  const base = n ? `Workspaces · ${n} need you` : "Workspaces";
 
-  return n ? `Workspaces · ${n} need you` : "Workspaces";
+  return mode ? `${base} · ${SORT_LABEL[mode]}` : base;
 }
 
 /** `text` broken at spaces into lines of at most `width` columns; an over-long word is split. */
@@ -618,7 +640,7 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
 
   return [
     ...pinnedFrame,
-    boxTop(workspacesTitle(list), width),
+    boxTop(workspacesTitle(list, view.sort), width),
     ...body.slice(0, bodyRows).map(boxRow),
     boxDivider(width),
     ...queue.map(boxRow),
@@ -988,6 +1010,7 @@ export async function sidebar(wsOpt?: string) {
   /** Space shows this pane's own card in full. Nothing extra is read until it is on. */
   let expanded = false;
   let view: CardView = {};
+  let sortMode: SortMode = "alpha";
   let digitTimer: ReturnType<typeof setTimeout> | undefined;
 
   const hold = (digit: string) => {
@@ -1045,6 +1068,7 @@ export async function sidebar(wsOpt?: string) {
 
     try {
       last = gather(readers, inner, last);
+      last = { ...last, list: sortEntries(last.list, sortMode) };
     } catch (e) {
       last = { ...last, fault: `sidebar: ${errorMessage(e)}` };
     }
@@ -1053,7 +1077,7 @@ export async function sidebar(wsOpt?: string) {
       const { status } = last;
       const list = animate(last.list, Date.now(), motion);
       const current = Math.max(0, list.findIndex((e) => e.tab === self));
-      view = viewFor(layoutSetting, width, expanded ? self : undefined, recentToolCalls);
+      view = { ...viewFor(layoutSetting, width, expanded ? self : undefined, recentToolCalls), sort: sortMode };
       const heights = entryHeights(list, width, view);
       const pinned = pinnedCount(list);
       const workspaceHeights = heights.slice(pinned);
@@ -1164,6 +1188,14 @@ export async function sidebar(wsOpt?: string) {
             const perf = last.list.find((e) => e.tab === PERF_TAB);
 
             if (perf && perf.tab !== self) visitTab(self, perf.tab);
+
+            return;
+          }
+
+          if (input.kind === "key" && input.key === SORT_KEY) {
+            hold("");
+            sortMode = nextSort(sortMode);
+            last = { ...last, list: sortEntries(last.list, sortMode) };
 
             return;
           }
