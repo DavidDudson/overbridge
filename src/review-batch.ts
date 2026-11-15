@@ -1,3 +1,4 @@
+import { isNumber } from "./util";
 import { ciFromRollup } from "./pr-look";
 import type { PrRow } from "./pr-rows";
 import { reviewerStatuses, type ReviewerView, countUnresolved } from "./reviewers";
@@ -55,7 +56,7 @@ interface Context {
   targetUrl?: string;
 }
 
-interface Node {
+export interface Node {
   number: number;
   title: string;
   url: string;
@@ -72,20 +73,26 @@ interface Node {
   commits?: { nodes?: { commit?: { statusCheckRollup?: { state?: string; contexts?: { nodes?: Context[] } } | null } }[] };
 }
 
+export interface Requested {
+  direct: boolean;
+  teams: string[];
+}
+
 /** Whether `me` is named directly, and the teams (`org/slug`) that are. */
-export function requestedOf(node: Node, me: string): { direct: boolean; teams: string[] } {
+export function requestedOf(node: Node, me: string): Requested {
   const reviewers = (node.reviewRequests?.nodes ?? []).flatMap((n) => (n.requestedReviewer ? [n.requestedReviewer] : []));
 
-  return {
-    direct: reviewers.some((r) => r.login?.toLowerCase() === me.toLowerCase()),
-    teams: reviewers.filter((r) => r.slug).map((r) => `${r.organization?.login ?? ""}/${r.slug}`.replace(/^\//, "")),
-  };
+  const direct = reviewers.some((r) => r.login?.toLowerCase() === me.toLowerCase());
+  const teams = reviewers.flatMap((r) => (r.slug ? [`${r.organization?.login ?? ""}/${r.slug}`.replace(/^\//, "")] : []));
+
+  return { direct, teams };
 }
 
 /** One search result as a row. */
 export function rowFromNode(node: Node, me: string): PrRow {
-  const { direct, teams } = requestedOf(node, me);
+  const requested = requestedOf(node, me);
   const rollup = node.commits?.nodes?.[0]?.commit?.statusCheckRollup;
+
   const view: ReviewerView = {
     reviewRequests: (node.reviewRequests?.nodes ?? []).flatMap((n) => (n.requestedReviewer?.login ? [{ login: n.requestedReviewer.login }] : [])),
     latestReviews: node.latestReviews?.nodes ?? [],
@@ -94,7 +101,9 @@ export function rowFromNode(node: Node, me: string): PrRow {
     unresolved: countUnresolved(node.reviewThreads?.nodes ?? []),
   };
 
-  return {
+  const direct = requested.direct || requested.teams.length === 0;
+
+  const row: PrRow = {
     repo: node.repository.nameWithOwner,
     number: node.number,
     title: node.title,
@@ -102,20 +111,35 @@ export function rowFromNode(node: Node, me: string): PrRow {
     author: node.author?.login ?? "",
     draft: node.isDraft,
     updatedAt: node.updatedAt,
-    ...(node.mergeable ? { mergeable: node.mergeable } : {}),
     ci: ciFromRollup(rollup?.state),
-    ...(node.reviewDecision ? { decision: node.reviewDecision } : {}),
     bots: reviewerStatuses(view, node.url),
-    group: direct || teams.length === 0 ? "direct" : "team",
-    ...(direct || teams.length === 0 ? {} : { via: teams.join(", ") }),
+    group: direct ? "direct" : "team",
   };
+
+  if (node.mergeable) row.mergeable = node.mergeable;
+
+  if (node.reviewDecision) row.decision = node.reviewDecision;
+
+  if (!direct) row.via = requested.teams.join(", ");
+
+  return row;
 }
+
+/** Whether a search result is a pull request with what a row needs; other result kinds come back empty. */
+const isNode = (n: Partial<Node>): n is Node => isNumber(n.number) && !!n.repository;
 
 /** Rows from one `gh api graphql` response; a PR found by two searches is kept once by `mergeRows`. */
 export function rowsFromReviews(json: string, me: string): PrRow[] {
-  const nodes = (JSON.parse(json)?.data?.search?.nodes ?? []) as Partial<Node>[];
+  // SAFETY: the shape `REVIEW_QUERY` asks for; each node is checked for its number and repository before it is read
+  const nodes: Partial<Node>[] = JSON.parse(json)?.data?.search?.nodes ?? [];
 
-  return nodes.filter((n): n is Node => typeof n.number === "number" && !!n.repository).map((n) => rowFromNode(n, me));
+  const rows: PrRow[] = [];
+
+  for (const n of nodes) {
+    if (isNode(n)) rows.push(rowFromNode(n, me));
+  }
+
+  return rows;
 }
 
 /** Rows deduplicated by URL (a PR in two owners' searches), newest update first. */

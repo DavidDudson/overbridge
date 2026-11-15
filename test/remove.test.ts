@@ -111,7 +111,14 @@ afterAll(() => {
 });
 
 describe("isRemoving", () => {
-  const w = (removing?: WorkspaceState["removing"]): WorkspaceState => ({ created: "", repos: {}, ...(removing ? { removing } : {}) });
+  const w = (removing?: WorkspaceState["removing"]): WorkspaceState => {
+    const state: WorkspaceState = { created: "", repos: {} };
+
+    if (removing) state.removing = removing;
+
+    return state;
+  };
+
   const now = Date.parse("2026-01-01T00:00:00Z");
   test("unmarked is not removing", () => {
     expect(isRemoving(w(), now)).toBe(false);

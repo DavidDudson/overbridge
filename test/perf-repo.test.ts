@@ -130,6 +130,22 @@ describe("windows and the cache", () => {
     expect(v["7d"]!.workspaces.map((w) => w.ws)).toEqual(["a", "b"]);
   });
 
+  test("a perf.json from before the dashboard and commands views is not a cache", () => {
+    const file = join(dir, "perf.json");
+    const window = { workspaces: [], repos: [] };
+    const fresh = { ...window, dashboard: summarize([]), commands: [] };
+    const bad = [{ "1h": window }, { "1h": { ...window, dashboard: null, commands: [] } }, { "1h": { ...window, dashboard: summarize([]) } }, { "1h": fresh, "24h": window }];
+
+    for (const windows of bad) {
+      writeFileSync(file, JSON.stringify({ at: 1, windows }));
+      expect(readPerfCache(file)).toBeUndefined();
+    }
+
+    writeFileSync(file, JSON.stringify({ at: 1, windows: { "1h": fresh } }));
+    expect(readPerfCache(file)).toBeDefined();
+    expect(loadPerf({ read: () => undefined, compute: () => ({ at: 2, windows: {} }) }).at).toBe(2);
+  });
+
   test("perf.json is private, and a file whose windows is null is not a cache", () => {
     const file = join(dir, "perf.json");
     refreshPerf(fileStore(dir), 1, file);
@@ -156,9 +172,9 @@ describe("windows and the cache", () => {
     writeFileSync(join(meta, "a.jsonl"), line(run({ repo: "small", runMs: 1 })) + line(run({ repo: "big", runMs: 9 })));
     writeFileSync(join(meta, "b.jsonl"), line(run({ repo: "other", runMs: 99 })));
     const cli = (...args: string[]) => Bun.spawnSync([process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "history", ...args], { env: { ...process.env, OVERBRIDGE_ROOT: dir, OVERBRIDGE_NAME: "", OVERBRIDGE_NO_SERVER: "1" } });
-    const all = JSON.parse(cli("--by", "repo", "--json").stdout.toString()) as { repo: string }[];
+    const all: { repo: string }[] = JSON.parse(cli("--by", "repo", "--json").stdout.toString());
     expect(all.map((r) => r.repo)).toEqual(["other", "big", "small"]);
-    const onlyA = JSON.parse(cli("--by", "repo", "--json", "--ws", "a").stdout.toString()) as { repo: string }[];
+    const onlyA: { repo: string }[] = JSON.parse(cli("--by", "repo", "--json", "--ws", "a").stdout.toString());
     expect(onlyA.map((r) => r.repo)).toEqual(["big", "small"]);
     const bad = cli("--by", "nope");
     expect(bad.exitCode).not.toBe(0);

@@ -6,7 +6,7 @@ import { parseSse, subscribeEvents } from "../src/events-client";
 import { createHandler } from "../src/server";
 import { changedFrame, createEvents } from "../src/server-events";
 import { overbridgeVersion } from "../src/version";
-import { shouldPoll } from "../src/zellij-view";
+import { shouldPoll, type ZellijView } from "../src/zellij-view";
 
 describe("createEvents", () => {
   test("publishes a changed frame to every subscriber, and stops after unsubscribe", () => {
@@ -50,11 +50,11 @@ describe("parseSse", () => {
 });
 
 describe("shouldPoll", () => {
-  const hidden = { order: [], focused: "other" };
+  const hidden: ZellijView = { order: [], focused: "other", atMs: 0 };
   test("a hidden pane with a live stream never polls; a focused one always does", () => {
-    expect(shouldPoll("me", hidden as never, 0, 10 * 60_000, true)).toBe(false);
-    expect(shouldPoll("me", hidden as never, 0, 10 * 60_000, false)).toBe(true);
-    expect(shouldPoll("me", { order: [], focused: "me" } as never, 0, 0, true)).toBe(true);
+    expect(shouldPoll("me", hidden, 0, 10 * 60_000, true)).toBe(false);
+    expect(shouldPoll("me", hidden, 0, 10 * 60_000, false)).toBe(true);
+    expect(shouldPoll("me", { order: [], focused: "me", atMs: 0 }, 0, 0, true)).toBe(true);
   });
 });
 
@@ -66,7 +66,7 @@ describe("GET /events", () => {
 
   const handler = () =>
     createHandler({
-      refreshTop: async () => (refreshes++, { at: Date.now() }) as never,
+      refreshTop: async () => (refreshes++, { links: [], at: Date.now() }),
       refreshPerf: async () => Date.now(),
       workspaceExists: () => true,
       cacheFileAt: () => 0,
@@ -110,7 +110,7 @@ describe("GET /events", () => {
 
   test("a perf rebuild publishes perf, and a worklist rebuild publishes worklist once per build", async () => {
     let at = 1;
-    const wl = createHandler({ refreshTop: async () => ({}) as never, refreshPerf: async () => Date.now(), refreshWorklist: async () => at, workspaceExists: () => true, cacheFileAt: () => 0, version: overbridgeVersion(), onVersionMismatch: () => undefined });
+    const wl = createHandler({ refreshTop: async () => ({ links: [], at: 0 }), refreshPerf: async () => Date.now(), refreshWorklist: async () => at, workspaceExists: () => true, cacheFileAt: () => 0, version: overbridgeVersion(), onVersionMismatch: () => undefined });
     const keys: string[] = [];
     wl.handle(new Request("http://x/events")).then(async (res) => {
       const reader = res.body!.getReader();
@@ -136,7 +136,7 @@ describe("GET /events", () => {
 
   test("a subscriber holds off idle exit, and a dropped one releases it", async () => {
     let t = 0;
-    const idle = createHandler({ refreshTop: async () => ({}) as never, refreshPerf: async () => 0, workspaceExists: () => true, cacheFileAt: () => 0, version: overbridgeVersion(), onVersionMismatch: () => undefined, now: () => t });
+    const idle = createHandler({ refreshTop: async () => ({ links: [], at: 0 }), refreshPerf: async () => 0, workspaceExists: () => true, cacheFileAt: () => 0, version: overbridgeVersion(), onVersionMismatch: () => undefined, now: () => t });
     const res = await idle.handle(new Request("http://x/events"));
     t = 20 * 60_000;
     expect(idle.idleForMs()).toBe(0);

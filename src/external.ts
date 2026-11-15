@@ -55,12 +55,14 @@ export function externalCommands(path = process.env.PATH ?? ""): string[] {
   return [...names].sort();
 }
 
+export type ExternalEnv = { OVERBRIDGE_ROOT: string; OVERBRIDGE_SELF: string; OVERBRIDGE_NAME?: string };
+
 /**
  * What an external subcommand is told: the resolved root, how to call overbridge back, and the workspace
  * this process is bound to, if any.
  */
-export function externalEnv(): Record<string, string> {
-  const env: Record<string, string> = { OVERBRIDGE_ROOT: root(), OVERBRIDGE_SELF: selfCommand().join(" ") };
+export function externalEnv(): ExternalEnv {
+  const env: ExternalEnv = { OVERBRIDGE_ROOT: root(), OVERBRIDGE_SELF: selfCommand().join(" ") };
   const ws = currentWorkspace();
 
   if (ws) env.OVERBRIDGE_NAME = ws;

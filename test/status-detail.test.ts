@@ -108,7 +108,7 @@ describe("hook record", () => {
     expect(readAgentDetail("w")?.tool).toBeUndefined();
   });
   test("the hook records the tool only for a wait", () => {
-    const run = (input: object) => Bun.spawnSync({ cmd: [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "hook"], env: { ...process.env, OVERBRIDGE_ROOT: tmp, OVERBRIDGE_NAME: "w", OVERBRIDGE_SELF: "true" }, stdin: Buffer.from(JSON.stringify(input)), stdout: "pipe", stderr: "pipe" });
+    const run = (input: { hook_event_name: string; tool_name: string }) => Bun.spawnSync({ cmd: [process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "hook"], env: { ...process.env, OVERBRIDGE_ROOT: tmp, OVERBRIDGE_NAME: "w", OVERBRIDGE_SELF: "true" }, stdin: Buffer.from(JSON.stringify(input)), stdout: "pipe", stderr: "pipe" });
     run({ hook_event_name: "PermissionRequest", tool_name: "Bash" });
     expect(readAgentDetail("w")).toMatchObject({ state: "waiting", tool: "Bash" });
     run({ hook_event_name: "PostToolUse", tool_name: "Bash" });

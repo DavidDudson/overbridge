@@ -1,9 +1,22 @@
+import { isJsonObject, isJsonString, type JsonValue } from "../json";
 import type { ProjectManagement } from "../project-config";
 import { fail, run } from "../util";
 import type { Runner } from "./github";
 import { ItemStatus, namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
 
 const KEY_RE = /^[A-Z][A-Z0-9_]*$/;
+
+/** The string at `path` below a parsed JSON value, or undefined when any step is missing or the end is not a string. */
+const textAt = (root: JsonValue | undefined, path: string[]): string | undefined => {
+  let node = root;
+
+  for (const key of path) {
+    if (!isJsonObject(node)) return undefined;
+    node = node[key];
+  }
+
+  return isJsonString(node) ? node : undefined;
+};
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -22,21 +35,39 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
   const base = config.url?.replace(/\/+$/, "");
 
   const items = (json: string): { key: string; summary: string }[] => {
-    const rows = JSON.parse(json || "[]") as { key: string; fields?: { summary?: string } }[];
+    const rows: unknown = JSON.parse(json || "[]");
 
-    return rows.map((row) => ({ key: row.key, summary: row.fields?.summary ?? "" }));
+    return (Array.isArray(rows) ? rows : []).flatMap((row) => {
+      const rowKey = textAt(isJsonObject(row) ? row : undefined, ["key"]);
+
+      return rowKey === undefined ? [] : [{ key: rowKey, summary: textAt(isJsonObject(row) ? row : undefined, ["fields", "summary"]) ?? "" }];
+    });
   };
 
-  /** The ticket as `jira issue view --raw` prints it, or undefined when it can't be read. */
-  type Raw = { fields?: { summary?: string; issuetype?: { name?: string }; status?: { statusCategory?: { key?: string } } } };
+  /** The fields of a ticket as `jira issue view --raw` prints it that the provider reads. */
+  type Raw = { summary?: string; issueType?: string; statusCategory?: string };
 
+  /** The ticket, or undefined when it can't be read. */
   const view = (id: string): Raw | undefined => {
     const r = jira(["issue", "view", normalize(id), "--raw"]);
 
     if (!r.ok) return undefined;
 
     try {
-      return JSON.parse(r.stdout) as Raw;
+      const parsed: unknown = JSON.parse(r.stdout);
+      const root = isJsonObject(parsed) ? parsed : undefined;
+      const raw: Raw = {};
+      const summary = textAt(root, ["fields", "summary"]);
+      const issueType = textAt(root, ["fields", "issuetype", "name"]);
+      const statusCategory = textAt(root, ["fields", "status", "statusCategory", "key"]);
+
+      if (summary !== undefined) raw.summary = summary;
+
+      if (issueType !== undefined) raw.issueType = issueType;
+
+      if (statusCategory !== undefined) raw.statusCategory = statusCategory;
+
+      return raw;
     } catch {
       return undefined;
     }
@@ -60,16 +91,16 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
       return `${base}/browse/${normalize(id)}`;
     },
 
-    title: (id) => view(id)?.fields?.summary || undefined,
+    title: (id) => view(id)?.summary || undefined,
 
     itemTypes(id) {
-      const type = view(id)?.fields?.issuetype?.name;
+      const type = view(id)?.issueType;
 
       return type ? [type] : [];
     },
 
     status(id) {
-      const category = view(id)?.fields?.status?.statusCategory?.key;
+      const category = view(id)?.statusCategory;
 
       if (!category) {
         return undefined;

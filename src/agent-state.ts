@@ -1,5 +1,6 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isJsonNumber, isJsonObject, numberField, parseJson, stringField, type JsonValue } from "./json";
 import { metaDir } from "./paths";
 import { pidAlive } from "./proc";
 
@@ -126,7 +127,11 @@ export interface AgentRecord {
 
 function readAgentRecord(ws: string, now: number, alive: (pid: number) => boolean): AgentRecord | undefined {
   try {
-    const { state, at, bg, reason, since, tool } = JSON.parse(readFileSync(agentStateFile(ws), "utf8")) as { state?: string; at?: number; bg?: unknown; reason?: unknown; since?: unknown; tool?: unknown };
+    const raw = parseJson(readFileSync(agentStateFile(ws), "utf8"));
+
+    if (!isJsonObject(raw)) return undefined;
+    const { state, bg } = raw;
+    const at = numberField(raw, "at");
     const known = AGENT_STATES.find((s) => s === state);
 
     if (!known) {
@@ -135,17 +140,17 @@ function readAgentRecord(ws: string, now: number, alive: (pid: number) => boolea
 
     const subagents = runningSubagents(metaDir(), ws, now);
     const hasSubagents = subagents > 0;
-    const liveBg = Array.isArray(bg) ? bg.filter((p) => typeof p === "number" && alive(p)).length : 0;
-    const began = typeof since === "number" ? since : typeof at === "number" ? at : undefined;
+    const liveBg = Array.isArray(bg) ? bg.filter((p) => isJsonNumber(p) && alive(p)).length : 0;
+    const began = numberField(raw, "since") ?? at;
+    const tool = stringField(raw, "tool");
+    const detail: Omit<AgentRecord, "state" | "reason"> = { agents: subagents + liveBg };
 
-    const detail = {
-      agents: subagents + liveBg,
-      ...(began === undefined ? {} : { since: began }),
-      ...(typeof tool === "string" && known === "waiting" && TOOL_NAME.test(tool) ? { tool } : {}),
-    };
+    if (began !== undefined) detail.since = began;
+
+    if (tool !== undefined && known === "waiting" && TOOL_NAME.test(tool)) detail.tool = tool;
 
     // a subagent can run for longer than a turn goes without a tool call, so it keeps `busy` alive
-    if (typeof at === "number" && now - at > STALE_MS[known] && !(known === "busy" && hasSubagents)) {
+    if (at !== undefined && now - at > STALE_MS[known] && !(known === "busy" && hasSubagents)) {
       return undefined;
     }
 
@@ -153,7 +158,9 @@ function readAgentRecord(ws: string, now: number, alive: (pid: number) => boolea
       return { state: "bg", ...detail };
     }
 
-    return typeof reason === "string" ? { state: known, reason, ...detail } : { state: known, ...detail };
+    const reason = stringField(raw, "reason");
+
+    return reason === undefined ? { state: known, ...detail } : { state: known, reason, ...detail };
   } catch {
     return undefined;
   }
@@ -181,9 +188,9 @@ export const glyphFor = (state: AgentState | undefined): string => (state ? GLYP
 /** When the agent hook last recorded anything for `ws` (ms), however old; undefined when there is no record. */
 export function readAgentAt(ws: string): number | undefined {
   try {
-    const { at } = JSON.parse(readFileSync(agentStateFile(ws), "utf8")) as { at?: unknown };
+    const raw = parseJson(readFileSync(agentStateFile(ws), "utf8"));
 
-    return typeof at === "number" && Number.isFinite(at) ? at : undefined;
+    return isJsonObject(raw) ? numberField(raw, "at") : undefined;
   } catch {
     return undefined;
   }
@@ -201,6 +208,23 @@ export interface TurnSummary {
   compactedAt?: number;
 }
 
+const TURN_KEYS = ["startedAt", "endedAt", "edits", "errors", "compactedAt"] as const;
+
+/** The turn summary a file holds: its numeric fields, and nothing for anything else. */
+function turnFrom(raw: JsonValue): TurnSummary {
+  const turn: TurnSummary = {};
+
+  if (!isJsonObject(raw)) return turn;
+
+  for (const key of TURN_KEYS) {
+    const value = numberField(raw, key);
+
+    if (value !== undefined) turn[key] = value;
+  }
+
+  return turn;
+}
+
 export const turnPath = (meta: string, ws: string) => join(meta, "agent", `${ws}.turn.json`);
 
 /** Tools whose successful call counts as an edit. */
@@ -212,7 +236,17 @@ export function turnChange(event: string, tool: string | undefined, source: stri
     case "SessionStart":
       return source === "resume" || source === "compact" ? undefined : "reset";
     case "UserPromptSubmit":
-      return (t) => ({ ...(t.compactedAt === undefined ? {} : { compactedAt: t.compactedAt }), startedAt: now, edits: 0, errors: 0 });
+      return (t) => {
+        const next: TurnSummary = {};
+
+        if (t.compactedAt !== undefined) next.compactedAt = t.compactedAt;
+        next.startedAt = now;
+        next.edits = 0;
+        next.errors = 0;
+
+        return next;
+      };
+
     case "PostToolUse":
       return tool !== undefined && EDIT_TOOLS.includes(tool) ? (t) => ({ ...t, edits: (t.edits ?? 0) + 1 }) : undefined;
     case "PostToolUseFailure":
@@ -237,9 +271,7 @@ export function recordTurn(meta: string, ws: string, event: string, tool: string
   let old: TurnSummary = {};
 
   try {
-    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
-
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) old = parsed as TurnSummary;
+    old = turnFrom(parseJson(readFileSync(file, "utf8")));
   } catch {
     // none yet, or unreadable: start fresh
   }

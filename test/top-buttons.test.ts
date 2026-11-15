@@ -35,7 +35,7 @@ describe("config", () => {
     try {
       parseConfig(yaml, "f.yml");
     } catch (e) {
-      return (e as Error).message;
+      return e instanceof Error ? e.message : String(e);
     }
 
     return "";
@@ -80,10 +80,17 @@ describe("buttons", () => {
   test("pressing one opens its URL or runs its command in the worktree", () => {
     const calls: string[] = [];
 
-    const deps = {
-      open: (u: string) => void calls.push(`open ${u}`),
-      run: (cmd: string, dir: string, env: Record<string, string>) => void calls.push(`run ${cmd} in ${dir} branch=${env.OVERBRIDGE_BRANCH}`),
-    } as unknown as ActDeps;
+    const deps: ActDeps = {
+      open: (u) => void calls.push(`open ${u}`),
+      run: (cmd, dir, env) => void calls.push(`run ${cmd} in ${dir} branch=${env.OVERBRIDGE_BRANCH}`),
+      spawn: () => undefined,
+      start: () => undefined,
+      stop: () => undefined,
+      pane: () => undefined,
+      cleanup: () => undefined,
+      ready: () => undefined,
+      merge: () => undefined,
+    };
 
     activate({ label: "u", action: { kind: "custom", button: custom() } }, deps);
     activate({ label: "r", action: { kind: "custom", button: custom({ spec: spec({ url: undefined, run: "make docs" }) }) } }, deps);

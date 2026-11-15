@@ -130,14 +130,14 @@ export function layoutSpecs(workspaces: string[], self: string[], opts: LayoutOp
 
   return [
     ...orchestration,
-    ...workspaces.map((ws, i) =>
-      workspaceTabSpec(ws, self, {
-        resume: opts.resume?.has(ws) ?? false,
-        ...width,
-        focus: orchestration.length + i === 0,
-        ...(opts.agentDirs?.[ws] ? { agentCwd: opts.agentDirs[ws] } : {}),
-      }),
-    ),
+    ...workspaces.map((ws, i) => {
+      const tabOpts: TabOptions = { resume: opts.resume?.has(ws) ?? false, ...width, focus: orchestration.length + i === 0 };
+      const agentCwd = opts.agentDirs?.[ws];
+
+      if (agentCwd) tabOpts.agentCwd = agentCwd;
+
+      return workspaceTabSpec(ws, self, tabOpts);
+    }),
   ];
 }
 

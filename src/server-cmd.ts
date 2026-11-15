@@ -56,7 +56,7 @@ const ago = (at: number | undefined, now: number) => (at ? `${duration(now - at)
 
 /** The per-key rows, across every cache the server keeps, sorted by key. */
 export function keyRows(s: ServerStatus): Array<[string, KeyCounters]> {
-  const all: Keys = { ...s.keys, ...s.perf?.keys, ...s.prBatch?.cache?.keys, ...s.worklist?.run?.keys, ...s.worklist?.boards?.keys };
+  const all = { ...s.keys, ...s.perf?.keys, ...s.prBatch?.cache?.keys, ...s.worklist?.run?.keys, ...s.worklist?.boards?.keys };
 
   return Object.entries(all).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 }
@@ -89,11 +89,15 @@ export function formatStatus(s: ServerStatus, now: number = Date.now()): string 
 /** Ask the running server for its status; undefined when none answers. */
 export async function readStatus(sock?: string): Promise<ServerStatus | undefined> {
   // no version: a server of another version still answers, and this look must never make it drain
-  const r = await call("GET", "/status", { timeoutMs: 3_000, version: "", ...(sock ? { sock } : {}) });
+  const options: Parameters<typeof call>[2] = { timeoutMs: 3_000, version: "" };
+
+  if (sock) options.sock = sock;
+  const r = await call("GET", "/status", options);
 
   if (!r || r.status !== 200) return undefined;
 
   try {
+    // SAFETY: the body is the running server's own `/status` JSON, which `ServerStatus` mirrors; every field is optional.
     return JSON.parse(r.body) as ServerStatus;
   } catch {
     return undefined;

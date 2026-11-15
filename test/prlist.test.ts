@@ -29,11 +29,11 @@ describe("pr lists", () => {
   });
 });
 
-import { mergeRows, filterOrgs, requestedOf, rowFromNode, rowsFromReviews, searchString } from "../src/review-batch";
+import { type Node, mergeRows, filterOrgs, requestedOf, rowFromNode, rowsFromReviews, searchString } from "../src/review-batch";
 import { allocate, cellsFor, columnsFor, split, windowStart } from "../src/reviews-view";
 import { textWidth } from "../src/term";
 
-const node = (over: object = {}) => ({
+const node = (over: Partial<Node> = {}): Node => ({
   number: 9, title: "Add thing", url: "https://github.com/DavidDudson/r/pull/9", isDraft: false, updatedAt: "2026-11-11T00:00:00Z",
   mergeable: "CONFLICTING", reviewDecision: "REVIEW_REQUIRED", author: { login: "bob" }, repository: { nameWithOwner: "DavidDudson/r" },
   reviewRequests: { nodes: [{ requestedReviewer: { __typename: "Team", slug: "core", organization: { login: "DavidDudson" } } }, { requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" } }] },
@@ -48,16 +48,17 @@ describe("reviews data", () => {
     expect(searchString("me")).not.toContain("org:");
   });
   test("a team request is a team row; naming me makes it direct", () => {
-    const team = rowFromNode(node() as never, "me");
+    const team = rowFromNode(node(), "me");
     expect(team).toMatchObject({ group: "team", via: "DavidDudson/core", mergeable: "CONFLICTING", ci: "failure", decision: "REVIEW_REQUIRED" });
     expect(team.bots?.find((b) => b.name === "Copilot")?.state).toBe("reviewing");
     const direct = { reviewRequests: { nodes: [{ requestedReviewer: { __typename: "User", login: "Me" } }] } };
-    expect(rowFromNode(node(direct) as never, "me").group).toBe("direct");
-    expect(requestedOf(node(direct) as never, "me")).toEqual({ direct: true, teams: [] });
+    expect(rowFromNode(node(direct), "me").group).toBe("direct");
+    expect(requestedOf(node(direct), "me")).toEqual({ direct: true, teams: [] });
   });
   test("rows from a response, deduped and filtered to the org", () => {
     const json = JSON.stringify({ data: { search: { nodes: [node(), {}, node({ number: 10, url: "https://github.com/other/x/pull/10", repository: { nameWithOwner: "other/x" } })] } } });
     const rows = rowsFromReviews(json, "me");
+
     expect(rows).toHaveLength(2);
     expect(mergeRows([rows, rows])).toHaveLength(2);
     expect(filterOrgs(rows, ["DavidDudson"]).map((r) => r.number)).toEqual([9]);
@@ -65,11 +66,13 @@ describe("reviews data", () => {
   });
   test("readPrs reviews: one search per org, login first", () => {
     const calls: string[][] = [];
+
     const rows = readPrs("reviews", ["DavidDudson"], (cmd) => {
       calls.push(cmd);
 
       return { ok: true, code: 0, stdout: cmd[2] === "user" ? "me\n" : JSON.stringify({ data: { search: { nodes: [node()] } } }), stderr: "" };
     });
+
     expect(rows).toHaveLength(1);
     expect(calls).toHaveLength(2);
     expect(calls[1]!.join(" ")).toContain("org:DavidDudson");
@@ -77,7 +80,7 @@ describe("reviews data", () => {
 });
 
 describe("reviews view", () => {
-  const mk = (n: number, group: "direct" | "team") => ({ ...rowFromNode(node({ number: n }) as never, "me"), group });
+  const mk = (n: number, group: "direct" | "team") => ({ ...rowFromNode(node({ number: n }), "me"), group });
 
   test("split and allocation", () => {
     expect(split([mk(1, "direct"), mk(2, "team"), mk(3, "team")])).toMatchObject({ direct: [{ number: 1 }], team: [{ number: 2 }, { number: 3 }] });

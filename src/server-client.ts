@@ -1,3 +1,4 @@
+import { isJsonObject, parseJson, stringField } from "./json";
 import { call, startServer } from "./server-net";
 
 /**
@@ -18,7 +19,7 @@ export interface ServerRefresh {
 
 /** Refresh `ws`'s top cache through the server and wait for it; the server writes the same `top/<ws>.json`. */
 export async function serverRefresh(ws: string, o: { force?: boolean; sock?: string; start?: boolean } = {}): Promise<ServerRefresh | undefined> {
-  const r = await call("POST", `/refresh/top/${encodeURIComponent(ws)}${o.force ? "?force=1" : ""}`, { timeoutMs: REFRESH_TIMEOUT_MS, ...(o.sock ? { sock: o.sock } : {}) });
+  const r = await call("POST", `/refresh/top/${encodeURIComponent(ws)}${o.force ? "?force=1" : ""}`, { timeoutMs: REFRESH_TIMEOUT_MS, sock: o.sock });
 
   if (!r && o.start !== false) startServer();
 
@@ -26,9 +27,14 @@ export async function serverRefresh(ws: string, o: { force?: boolean; sock?: str
   if (!r || (r.status !== 200 && r.status !== 502)) return undefined;
 
   try {
-    const body = JSON.parse(r.body) as { ws?: string; served?: string; error?: string };
+    const body = parseJson(r.body);
+    const reply = isJsonObject(body) ? body : {};
+    const result: ServerRefresh = { ws, served: stringField(reply, "served") ?? "failed" };
+    const error = stringField(reply, "error");
 
-    return { ws, served: body.served ?? "failed", ...(body.error ? { error: body.error } : {}) };
+    if (error) result.error = error;
+
+    return result;
   } catch {
     return undefined;
   }
@@ -43,7 +49,7 @@ export async function serverRefreshAll(workspaces: string[], o: { sock?: string;
 
 /** Ask the server to rebuild `perf.json` (every perf view) and wait for it; false when the server cannot be used, so the pane computes the views itself. */
 export async function serverRefreshPerf(o: { force?: boolean; sock?: string; start?: boolean } = {}): Promise<boolean> {
-  const r = await call("POST", `/refresh/perf${o.force ? "?force=1" : ""}`, { timeoutMs: 30_000, ...(o.sock ? { sock: o.sock } : {}) });
+  const r = await call("POST", `/refresh/perf${o.force ? "?force=1" : ""}`, { timeoutMs: 30_000, sock: o.sock });
 
   if (!r && o.start !== false) startServer();
 
@@ -58,16 +64,16 @@ const WORKLIST_TIMEOUT_MS = 10 * 60_000;
  * the server cannot be used, so the pane runs `overbridge worklist refresh` in a child instead.
  */
 export async function serverRefreshWorklist(o: { force?: boolean; sock?: string; start?: boolean } = {}): Promise<{ ok: boolean; error: string } | undefined> {
-  const r = await call("POST", `/refresh/worklist${o.force ? "?force=1" : ""}`, { timeoutMs: WORKLIST_TIMEOUT_MS, ...(o.sock ? { sock: o.sock } : {}) });
+  const r = await call("POST", `/refresh/worklist${o.force ? "?force=1" : ""}`, { timeoutMs: WORKLIST_TIMEOUT_MS, sock: o.sock });
 
   if (!r && o.start !== false) startServer();
 
   if (!r || (r.status !== 200 && r.status !== 502)) return undefined;
 
   try {
-    const body = JSON.parse(r.body) as { error?: string };
+    const body = parseJson(r.body);
 
-    return { ok: r.status === 200, error: body.error ?? "" };
+    return { ok: r.status === 200, error: (isJsonObject(body) ? stringField(body, "error") : undefined) ?? "" };
   } catch {
     return undefined;
   }
@@ -78,7 +84,7 @@ export async function serverRefreshWorklist(o: { force?: boolean; sock?: string;
  * a request, so the server stays up while a sidebar is open. False means the sidebar sweeps itself.
  */
 export async function serverOwnsSweep(o: { sock?: string; start?: boolean } = {}): Promise<boolean> {
-  const r = await call("GET", "/sweep", { timeoutMs: 5_000, ...(o.sock ? { sock: o.sock } : {}) });
+  const r = await call("GET", "/sweep", { timeoutMs: 5_000, sock: o.sock });
 
   if (!r && o.start !== false) startServer();
 

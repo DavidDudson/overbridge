@@ -74,7 +74,11 @@ function aheadRow(deps: AheadDeps, ws: string, repo: string, pr: number | undefi
   const subjects = (deps.git(wt, ["log", `-${MAX_SUBJECTS}`, "--format=%s", `${base}..HEAD`]) ?? "").split("\n").filter(Boolean);
   const lastCommit = deps.git(wt, ["log", "-1", "--format=%aI"]) ?? "";
 
-  return { ws, repo, branch, session: ws, base, ahead, behind, subjects, lastCommit, ...(pr === undefined ? {} : { pr }), dirty: deps.dirty(wt) };
+  const row: AheadRow = { ws, repo, branch, session: ws, base, ahead, behind, subjects, lastCommit, dirty: deps.dirty(wt) };
+
+  if (pr !== undefined) row.pr = pr;
+
+  return row;
 }
 
 /**

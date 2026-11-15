@@ -4,7 +4,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 
 - `src/cli.ts` is a thin entry with no static imports; `src/main.ts` holds arg dispatch → `src/commands.ts`.
   `overbridge hook` (`src/agent-hook.ts`) runs on every tool call, so it is dispatched before `main.ts`
-  loads; keep its imports to `paths.ts`, `agent-state.ts`, `bg-tasks.ts`, `proc.ts`, `server-net.ts`, `version.ts` and node builtins.
+  loads; keep its imports to `paths.ts`, `agent-state.ts`, `bg-tasks.ts`, `proc.ts`, `server-net.ts`, `version.ts`, `json.ts`, `history.ts` and node builtins.
   Process lookups go through `src/proc.ts` (`/proc` on Linux, `ps` on macOS); never read `/proc` directly.
 - Per-repo config: `src/project-config.ts` parses and validates `overbridge.yml` (`overbridge.schema.json` and
   `overbridge.example.yml` must track its keys). The root `config.yml` layers over it (`loadRootLayers`, `resolveConfig`:
@@ -93,9 +93,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   each run, to `<meta>/history/<ws>.jsonl` behind `HistoryStore` (the seam for the bun server the refresh spike proposes; `historyStore()` picks
   the implementation). It stores Claude's tool names and a command class, never prompt or Bash text; only `overbridge check` records keep a command line, through best-effort `redactCommand` (a secret passed as a bare positional argument is kept). `summarize` is the pure fold into turn/model/tool/
   permission/user time, and `summarizeRepos` the fold of check runs per repo (groups from `commandGroup`; check records keep the full command, blanked by `redactCommand`);
-  `src/history-report.ts` formats it (`overbridge history`) and `src/perf-run.ts` is the `@perf` tab (`p` in the sidebar; `g` toggles workspace/repo).
+  `src/history-report.ts` formats it (`overbridge history`) and `src/perf-run.ts` is the `@perf` tab (`p` in the sidebar; `v` cycles dashboard/sessions/commands, `g` toggles workspace/repo in sessions) over the pure renderers in `src/perf-views.ts`. Claude Bash calls store `label` (`bashLabel`: program plus task/subcommand, no other words) and Skill calls the skill name; `perf.json` without a `dashboard` per window is stale and recomputed.
   `src/perf-cache.ts` computes every window x grouping into `<meta>/perf.json` (0600): the server writes it from a worker (`POST /refresh/perf`), the tab reads it while young and computes itself otherwise.
-  Like the hook, `history.ts` imports node builtins and `paths.ts` only.
+  Like the hook, `history.ts` imports node builtins, `paths.ts` and `json.ts` only.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors. The root `config.yml`'s `guard` block (`GuardConfig`) adds
   `read-paths` (reads only) and `deny` rules; it is never read from a repo file, so a branch can't loosen the guard.

@@ -22,7 +22,7 @@ const problems = (yaml: string) => {
   try {
     parseConfig(yaml, "f.yml");
   } catch (e) {
-    return (e as Error).message;
+    return e instanceof Error ? e.message : String(e);
   }
 
   return "";

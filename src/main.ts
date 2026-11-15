@@ -9,7 +9,7 @@ import { icebox, thaw } from "./icebox";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
 import { historyStore } from "./history";
-import { repoLines, repoSummaries, summaries, summaryLines } from "./history-report";
+import { commandLine, commandRows, mergeSummaries, repoLines, repoSummaries, summaries, summaryLines } from "./history-report";
 import { defaultMux } from "./mux";
 import { next } from "./next";
 import { diff } from "./panes";
@@ -24,7 +24,7 @@ import { prListPane, refreshPrList, type PrListKind } from "./prlist-run";
 import { readWorklist, refreshWorklist, showWorklist, worklistPane } from "./worklist-run";
 import { silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
-import { exec, log, OverbridgeError } from "./util";
+import { errorMessage, exec, log, OverbridgeError } from "./util";
 
 const START_USAGE =
   "usage: overbridge start <repo> <id> [--prompt text] [--here] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] | overbridge start <repo> --task <slug> --prompt <text>";
@@ -55,8 +55,8 @@ Setup
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
   overbridge worklist [refresh|show]            work list pane (the @work tab); refresh reads every board into its cache; show prints it
   overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
-  overbridge perf                               performance pane (the @perf tab): the history per workspace
-  overbridge history [--ws name] [--hours n] [--by repo] [--json]   where time went: Claude turns, tools, waiting, checks
+  overbridge perf                               performance pane (the @perf tab): dashboard, sessions, commands (v switches)
+  overbridge history [--ws name] [--hours n] [--by repo|commands|total] [--json]   where time went: Claude turns, tools, waiting, checks
 
 Work items (the repo's project-management provider)
   overbridge item view|from-branch|branch|assigned|create|edit   see 'overbridge item' for flags
@@ -210,11 +210,11 @@ async function main(argv: string[]): Promise<number> {
     case "history": {
       const { values } = opts(rest, { ...ws, hours: { type: "string" }, by: { type: "string" }, json: { type: "boolean" } });
       const hours = values.hours === undefined ? undefined : Number(values.hours);
-      const usage = "usage: overbridge history [--ws name] [--hours n] [--by repo] [--json]";
+      const usage = "usage: overbridge history [--ws name] [--hours n] [--by repo|commands|total] [--json]";
 
       if (hours !== undefined && !(hours > 0)) throw new OverbridgeError(usage);
 
-      if (values.by !== undefined && values.by !== "repo") throw new OverbridgeError(usage);
+      if (values.by !== undefined && !["repo", "commands", "total"].includes(values.by)) throw new OverbridgeError(usage);
 
       if (values.ws && !historyStore().workspaces().includes(values.ws)) throw new OverbridgeError(`no history for ${values.ws}`);
       const windowMs = hours === undefined ? undefined : hours * 3600_000;
@@ -229,6 +229,20 @@ async function main(argv: string[]): Promise<number> {
       }
 
       const rows = summaries(undefined, windowMs, values.ws);
+
+      if (!rows.length && !values.json) {
+        log("no history yet");
+        break;
+      }
+
+      if (values.by === "total" || values.by === "commands") {
+        const total = mergeSummaries(rows.map((r) => r.summary));
+
+        if (values.by === "total") console.log(values.json ? JSON.stringify(total, null, 2) : summaryLines({ ws: `all ${rows.length} workspaces`, summary: total }).join("\n"));
+        else if (values.json) console.log(JSON.stringify(commandRows(total), null, 2));
+        else for (const c of commandRows(total)) console.log(commandLine(c));
+        break;
+      }
 
       if (values.json) console.log(JSON.stringify(rows, null, 2));
       else if (!rows.length) log("no history yet");
@@ -531,8 +545,8 @@ export async function run(argv: string[]): Promise<never> {
   try {
     process.exit(await main(argv));
   } catch (e) {
-    if (e instanceof OverbridgeError || (e as any)?.code?.startsWith?.("ERR_PARSE_ARGS")) {
-      console.error(`overbridge: ${(e as Error).message}`);
+    if (e instanceof OverbridgeError || (e instanceof Error && "code" in e && String(e.code).startsWith("ERR_PARSE_ARGS"))) {
+      console.error(`overbridge: ${errorMessage(e)}`);
       process.exit(1);
     }
 
