@@ -1,4 +1,4 @@
-import { historyStore, type HistoryStore, type RepoSummary, type Summary, summarize, summarizeRepos } from "./history";
+import { type CommandClass, type CommandTally, type GroupTally, historyStore, type HistoryStore, type RepoSummary, type Summary, summarize, summarizeRepos, type Tally } from "./history";
 
 /** `1h05m`, `4m12s`, `3.4s`, `120ms`: the shortest honest form of a duration. */
 export function duration(ms: number): string {
@@ -63,10 +63,82 @@ export const WINDOWS: readonly { label: string; ms: number | undefined }[] = [
   { label: "all", ms: undefined },
 ];
 
+/** A summary with nothing in it. */
+export const emptySummary = (): Summary => ({ sessions: 0, turns: 0, turnMs: 0, modelMs: 0, toolMs: 0, permissionMs: 0, userMs: 0, awayMs: 0, tools: {}, bash: {}, commands: {}, skills: {}, checks: {}, groups: {} });
+
+const addTally = <T extends Tally>(into: Record<string, T>, key: string, t: T, join: (a: T, b: T) => T) => {
+  const prev = into[key];
+  into[key] = prev ? join(prev, t) : { ...t };
+};
+
+const plus = (a: Tally, b: Tally) => ({ count: a.count + b.count, ms: a.ms + b.ms });
+
+/** Sum summaries into one: the dashboard over every workspace. Tool time adds across workspaces, which run side by side. */
+export function mergeSummaries(list: readonly Summary[]): Summary {
+  const out = emptySummary();
+
+  for (const s of list) {
+    out.sessions += s.sessions ?? 0;
+    out.turns += s.turns;
+    out.turnMs += s.turnMs;
+    out.modelMs += s.modelMs;
+    out.toolMs += s.toolMs;
+    out.permissionMs += s.permissionMs;
+    out.userMs += s.userMs;
+    out.awayMs += s.awayMs;
+
+    for (const [k, t] of Object.entries(s.tools)) addTally(out.tools, k, t, plus);
+
+    for (const [k, t] of Object.entries(s.skills ?? {})) addTally(out.skills, k, t, plus);
+
+    for (const [k, t] of Object.entries(s.bash)) addTally(out.bash as Record<string, Tally>, k, t, plus);
+
+    for (const [k, t] of Object.entries(s.commands ?? {})) addTally(out.commands, k, t, (a, b): CommandTally => ({ ...plus(a, b), cls: a.cls, failed: a.failed + b.failed, maxMs: Math.max(a.maxMs, b.maxMs) }));
+
+    for (const [k, t] of Object.entries(s.checks)) {
+      if (t) addTally(out.checks as Record<string, NonNullable<typeof t>>, k, t, (a, b) => ({ ...plus(a, b), failed: a.failed + b.failed, queuedMs: a.queuedMs + b.queuedMs }));
+    }
+
+    for (const [k, g] of Object.entries(s.groups)) {
+      addTally(out.groups, k, g, (a, b): GroupTally => ({ ...plus(a, b), failed: a.failed + b.failed, queuedMs: a.queuedMs + b.queuedMs, cls: a.cls, maxMs: Math.max(a.maxMs ?? 0, b.maxMs ?? 0), fulls: [...new Set([...a.fulls, ...b.fulls])].slice(0, 3) }));
+    }
+  }
+
+  return out;
+}
+
+/** One kind of command, from Claude's Bash tool or from `overbridge check`. */
+export interface CommandRow {
+  source: "bash" | "check";
+  /** `bun test` for Bash, the group (`check`) for a check run. */
+  label: string;
+  cls: CommandClass;
+  count: number;
+  ms: number;
+  maxMs: number;
+  failed: number;
+  /** Check queue wait; always 0 for Bash. */
+  queuedMs: number;
+  /** Whole command lines, check runs only. */
+  fulls: string[];
+}
+
+/** Every command in the summary, Bash and check alike, slowest total first. */
+export function commandRows(s: Summary): CommandRow[] {
+  const bash = Object.entries(s.commands ?? {}).map(([label, c]): CommandRow => ({ source: "bash", label, cls: c.cls, count: c.count, ms: c.ms, maxMs: c.maxMs, failed: c.failed, queuedMs: 0, fulls: [] }));
+  const checks = Object.entries(s.groups).map(([label, g]): CommandRow => ({ source: "check", label, cls: g.cls, count: g.count, ms: g.ms, maxMs: g.maxMs ?? 0, failed: g.failed, queuedMs: g.queuedMs, fulls: g.fulls }));
+
+  return [...bash, ...checks].sort((a, b) => b.ms - a.ms || a.label.localeCompare(b.label));
+}
+
 /** Every view of the history for one window. */
 export interface WindowView {
   workspaces: WorkspaceSummary[];
   repos: RepoSummary[];
+  /** Every workspace's summary added up. */
+  dashboard: Summary;
+  /** Every command, Bash and check, slowest first. */
+  commands: CommandRow[];
 }
 
 /** All windows' views from one read of each workspace's history. Pure over `store`. */
@@ -78,7 +150,10 @@ export function computeViews(store: HistoryStore = historyStore(), now = Date.no
       const since = ms === undefined ? 0 : now - ms;
       const within = all.map(({ ws, records }) => ({ ws, records: records.filter((r) => r.at >= since) }));
 
-      return [label, { workspaces: within.map(({ ws, records }) => ({ ws, summary: summarize(records) })), repos: summarizeRepos(within.flatMap((w) => w.records)) }];
+      const workspaces = within.map(({ ws, records }) => ({ ws, summary: summarize(records) }));
+      const dashboard = mergeSummaries(workspaces.map((w) => w.summary));
+
+      return [label, { workspaces, repos: summarizeRepos(within.flatMap((w) => w.records)), dashboard, commands: commandRows(dashboard) }];
     }),
   );
 }
@@ -115,4 +190,9 @@ export function summaryLines({ ws, summary: s }: WorkspaceSummary): string[] {
   }
 
   return lines;
+}
+
+/** One plain-text line for a command row. */
+export function commandLine(c: CommandRow): string {
+  return `${c.label.padEnd(28)} ${c.source.padEnd(5)} ${c.cls.padEnd(9)} ${String(c.count).padStart(5)}× total ${duration(c.ms)} mean ${duration(c.count ? c.ms / c.count : 0)} worst ${duration(c.maxMs)}${c.failed ? ` ${c.failed} failed` : ""}${c.fulls[0] ? `  ${c.fulls[0]}` : ""}`;
 }

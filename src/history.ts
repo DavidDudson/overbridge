@@ -139,6 +139,8 @@ export interface ClaudeRecord {
   id?: string;
   /** What a Bash call is, never its text. */
   cls?: CommandClass;
+  /** What the call ran, for display: `commandLabel` of a Bash command (its leading words, never arguments), the name of a Skill. */
+  label?: string;
 }
 
 export interface CheckRecord {
@@ -231,7 +233,7 @@ export interface HookPayload {
   hook_event_name?: string;
   tool_name?: string;
   tool_use_id?: string;
-  tool_input?: { command?: unknown };
+  tool_input?: { command?: unknown; skill?: unknown };
 }
 
 /** The record for a Claude hook payload, or undefined for an event that is not recorded. */
@@ -241,6 +243,8 @@ export function claudeRecord(input: HookPayload, at = Date.now()): ClaudeRecord 
   if (!event) return undefined;
   const tool = event === "PreToolUse" || event === "PostToolUse" || event === "PostToolUseFailure" ? input.tool_name : undefined;
   const command = tool === "Bash" && typeof input.tool_input?.command === "string" ? input.tool_input.command : undefined;
+  const skill = tool === "Skill" && typeof input.tool_input?.skill === "string" ? input.tool_input.skill.slice(0, 80) : undefined;
+  const label = command === undefined ? skill : commandLabel(command) || undefined;
 
   return {
     kind: "claude",
@@ -249,6 +253,7 @@ export function claudeRecord(input: HookPayload, at = Date.now()): ClaudeRecord 
     ...(tool ? { tool } : {}),
     ...(tool && input.tool_use_id ? { id: input.tool_use_id } : {}),
     ...(command === undefined ? {} : { cls: classifyCommand(command) }),
+    ...(label ? { label } : {}),
   };
 }
 
@@ -262,6 +267,8 @@ export interface GroupTally extends Tally {
   failed: number;
   queuedMs: number;
   cls: CommandClass;
+  /** The slowest single run. */
+  maxMs: number;
   /** The distinct full command lines, newest first, at most three. */
   fulls: string[];
 }
@@ -277,6 +284,7 @@ export function addCheck(groups: Record<string, GroupTally>, r: CheckRecord): vo
     failed: (prev?.failed ?? 0) + (r.exit === 0 ? 0 : 1),
     queuedMs: (prev?.queuedMs ?? 0) + r.queuedMs,
     cls: r.cls,
+    maxMs: Math.max(prev?.maxMs ?? 0, r.runMs),
     fulls: [full, ...(prev?.fulls ?? []).filter((f) => f !== full)].slice(0, 3),
   };
 }
@@ -310,7 +318,17 @@ export function summarizeRepos(records: readonly HistoryRecord[]): RepoSummary[]
   return [...repos.values()];
 }
 
+/** Claude Bash calls of one command label: what it was (`cls`), how often, how long. */
+export interface CommandTally extends Tally {
+  cls: CommandClass;
+  failed: number;
+  /** The slowest single call. */
+  maxMs: number;
+}
+
 export interface Summary {
+  /** Claude sessions started. */
+  sessions: number;
   turns: number;
   /** Prompt to stop, summed. */
   turnMs: number;
@@ -327,6 +345,10 @@ export interface Summary {
   tools: Record<string, Tally>;
   /** Bash tool time by command class. */
   bash: Partial<Record<CommandClass, Tally>>;
+  /** Bash tool time by command label (`bun test`), never the arguments. Calls recorded before labels existed are `(<class>)`. */
+  commands: Record<string, CommandTally>;
+  /** Skill invocations by skill name. */
+  skills: Record<string, Tally>;
   /** `overbridge check` runs by class: count, and run time. */
   checks: Partial<Record<CommandClass, Tally & { failed: number; queuedMs: number }>>;
   /** `overbridge check` runs by group (`check`, `lint`): what the user can optimise. */
@@ -354,11 +376,11 @@ function unionMs(spans: [number, number][]): number {
 
 /** Fold a workspace's records into time totals. Records need not be sorted. */
 export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_AFTER_MS): Summary {
-  const s: Summary = { turns: 0, turnMs: 0, modelMs: 0, toolMs: 0, permissionMs: 0, userMs: 0, awayMs: 0, tools: {}, bash: {}, checks: {}, groups: {} };
+  const s: Summary = { sessions: 0, turns: 0, turnMs: 0, modelMs: 0, toolMs: 0, permissionMs: 0, userMs: 0, awayMs: 0, tools: {}, bash: {}, commands: {}, skills: {}, checks: {}, groups: {} };
   let turnStart: number | undefined;
   let lastStop: number | undefined;
   let notifiedAt: number | undefined;
-  const open = new Map<string, { at: number; tool: string; cls?: CommandClass }>();
+  const open = new Map<string, { at: number; tool: string; cls?: CommandClass; label?: string }>();
   // parallel tool calls overlap, so tool time is the union of the intervals, not their sum
   const spans: [number, number][] = [];
 
@@ -373,6 +395,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
     switch (r.event) {
       case "SessionStart":
       case "SessionEnd":
+        if (r.event === "SessionStart") s.sessions++;
         turnStart = lastStop = notifiedAt = undefined;
         open.clear();
         break;
@@ -389,7 +412,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
         open.clear();
         break;
       case "PreToolUse":
-        if (turnStart !== undefined && r.id) open.set(r.id, { at: r.at, tool: r.tool ?? "?", ...(r.cls ? { cls: r.cls } : {}) });
+        if (turnStart !== undefined && r.id) open.set(r.id, { at: r.at, tool: r.tool ?? "?", ...(r.cls ? { cls: r.cls } : {}), ...(r.label ? { label: r.label } : {}) });
         break;
       case "Notification":
         // an idle notification after the turn ended waits on nobody
@@ -409,7 +432,14 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
         spans.push([started.at, started.at + ms]);
         s.tools[started.tool] = bump(s.tools[started.tool], ms);
 
-        if (started.cls) s.bash[started.cls] = bump(s.bash[started.cls], ms);
+        if (started.cls) {
+          s.bash[started.cls] = bump(s.bash[started.cls], ms);
+          const key = started.label ?? `(${started.cls})`;
+          const prev = s.commands[key];
+          s.commands[key] = { ...bump(prev, ms), cls: started.cls, failed: (prev?.failed ?? 0) + (r.event === "PostToolUseFailure" ? 1 : 0), maxMs: Math.max(prev?.maxMs ?? 0, ms) };
+        }
+
+        if (started.tool === "Skill" && started.label) s.skills[started.label] = bump(s.skills[started.label], ms);
         break;
       }
 

@@ -93,7 +93,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   each run, to `<meta>/history/<ws>.jsonl` behind `HistoryStore` (the seam for the bun server the refresh spike proposes; `historyStore()` picks
   the implementation). It stores Claude's tool names and a command class, never prompt or Bash text; only `overbridge check` records keep a command line, through best-effort `redactCommand` (a secret passed as a bare positional argument is kept). `summarize` is the pure fold into turn/model/tool/
   permission/user time, and `summarizeRepos` the fold of check runs per repo (groups from `commandGroup`; check records keep the full command, blanked by `redactCommand`);
-  `src/history-report.ts` formats it (`overbridge history`) and `src/perf-run.ts` is the `@perf` tab (`p` in the sidebar; `g` toggles workspace/repo).
+  `src/history-report.ts` formats it (`overbridge history`) and `src/perf-run.ts` is the `@perf` tab (`p` in the sidebar; `v` cycles dashboard/sessions/commands, `g` toggles workspace/repo in sessions) over the pure renderers in `src/perf-views.ts`. Claude Bash calls store `label` (`commandLabel`, never arguments) and Skill calls the skill name; `perf.json` without a `dashboard` per window is stale and recomputed.
   `src/perf-cache.ts` computes every window x grouping into `<meta>/perf.json` (0600): the server writes it from a worker (`POST /refresh/perf`), the tab reads it while young and computes itself otherwise.
   Like the hook, `history.ts` imports node builtins and `paths.ts` only.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.

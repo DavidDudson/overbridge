@@ -38,7 +38,10 @@ export function writePerfCache(views: PerfViews, file = perfCacheFile()): void {
 function isPerfViews(v: unknown): v is PerfViews {
   const o = v as { at?: unknown; windows?: unknown } | null;
 
-  return typeof o === "object" && o !== null && typeof o.at === "number" && typeof o.windows === "object" && o.windows !== null;
+  if (typeof o !== "object" || o === null || typeof o.at !== "number" || typeof o.windows !== "object" || o.windows === null) return false;
+
+  // a file from before the dashboard and command views lacks them: compute instead
+  return Object.values(o.windows).every((w) => typeof (w as { dashboard?: unknown } | null)?.dashboard === "object");
 }
 
 /** The cache file, or undefined when it is missing or not a valid one. */
