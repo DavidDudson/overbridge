@@ -200,6 +200,7 @@ describe("orchestrator: bash", () => {
     "gh search issues orchestrator",
     "gh stack view",
     "overbridge status --all",
+    "overbridge ahead --json",
     "overbridge whoami",
     "overbridge worklist show",
     "overbridge repo ls",

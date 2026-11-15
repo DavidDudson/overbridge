@@ -33,9 +33,9 @@ overbridge status --all --json       # ws, repo, branch (claim), pr, head, dirty
 overbridge repo ls                   # repo name → URL; take OWNER/REPO from the URL
 ```
 
-Then call `ListAgents`. A workspace's session row is named for the workspace, sometimes with a two-character
-suffix: `ws5-37`, `trim-initial-web-bundle`, `gh-stack-support-d2`. Match each workspace to its rows by
-name (exact, or name plus `-<two hex chars>`). Several rows for one workspace are separate sessions: pick
+Then call `ListAgents`. A workspace's session is named for the workspace (its launcher passes
+`--name <ws>`). Match each workspace to its rows by that name. A session started before that carries an
+auto name, sometimes the workspace plus a two-character suffix (`ws5-37`): accept `<ws>-<two hex chars>` too. Several rows for one workspace are separate sessions: pick
 the one started most recently, and note the others.
 
 ## 2. Query each repo once
