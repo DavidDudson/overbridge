@@ -2,16 +2,11 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { metaDir } from "./paths";
 import { type TurnSummary, turnPath } from "./agent-state";
+import { duration } from "./history-report";
 
-/**
- * Two per-card extras the sidebar shows: a context gauge on busy cards and a last-turn receipt on the selected card.
- * Both come from tiny per-workspace files and are read through `cachedRead`, so a poll with nothing new costs one stat.
- *
- * `<meta>/context/<ws>.json` is written by Claude's statusline: `{"at": <ms>, "pct": 62}` (percent of the context window used).
- * `<meta>/agent/<ws>.turn.json` is kept by the agent hook (`TurnSummary`).
- */
+/** Per-card context gauge and last-turn receipt, both read through `cachedRead`: the formats are in the README. */
 
-/** A context reading older than this is not shown: the statusline refreshes it while the agent works. */
+/** A context reading older than this is not shown. */
 export const CONTEXT_STALE_MS = 10 * 60_000;
 /** A compaction this recent shows the marker. */
 export const COMPACT_SHOWN_MS = 30 * 60_000;
@@ -58,14 +53,11 @@ const parseContext = (raw: unknown): { at: number; pct: number } | undefined => 
   return at === undefined || pct === undefined ? undefined : { at, pct: Math.min(100, Math.max(0, Math.round(pct))) };
 };
 
+const TURN_KEYS = ["startedAt", "endedAt", "edits", "errors", "compactedAt"] as const;
+
 const parseTurn = (raw: unknown): TurnSummary => {
   const r = (raw ?? {}) as Record<string, unknown>;
-  const out: TurnSummary = {};
-  for (const k of ["startedAt", "endedAt", "edits", "errors", "compactedAt"] as const) {
-    const v = num(r[k]);
-    if (v !== undefined) out[k] = v;
-  }
-  return out;
+  return Object.fromEntries(TURN_KEYS.flatMap((k) => (num(r[k]) === undefined ? [] : [[k, r[k]]])));
 };
 
 /** The turn summary of `ws`, if the hook has written one. */
@@ -98,11 +90,6 @@ export function readReceipt(ws: string, meta = metaDir()): Receipt | undefined {
   if (t?.startedAt === undefined || t.endedAt === undefined || t.endedAt < t.startedAt) return undefined;
   return { ms: t.endedAt - t.startedAt, edits: t.edits ?? 0, errors: t.errors ?? 0 };
 }
-
-const duration = (ms: number): string => {
-  const s = Math.round(ms / 1000);
-  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s` : `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
-};
 
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 

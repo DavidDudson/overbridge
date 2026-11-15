@@ -223,12 +223,18 @@ export function recordTurn(meta: string, ws: string, event: string, tool: string
   if (change === "reset") return rmSync(file, { force: true });
   let old: TurnSummary = {};
   try {
-    old = JSON.parse(readFileSync(file, "utf8")) as TurnSummary;
+    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) old = parsed as TurnSummary;
   } catch {
-    // none yet
+    // none yet, or unreadable: start fresh
   }
   mkdirSync(join(meta, "agent"), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(change(old)));
-  renameSync(tmp, file);
+  try {
+    writeFileSync(tmp, JSON.stringify(change(old)));
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
 }

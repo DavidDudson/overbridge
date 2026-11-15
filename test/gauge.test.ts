@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recordTurn, turnPath } from "../src/agent-state";
-import { CONTEXT_STALE_MS, cachedRead, contextPath, gaugeText, readGauge, readReceipt, receiptText } from "../src/gauge";
+import { COMPACT_SHOWN_MS, CONTEXT_STALE_MS, cachedRead, contextPath, gaugeText, readGauge, readReceipt, receiptText } from "../src/gauge";
 import { type Entry, entryHeight, entryLines, Section, withReceipt } from "../src/sidebar";
 
 let meta: string;
@@ -77,6 +77,14 @@ describe("readGauge", () => {
     expect(readGauge("w", 5000, meta)?.pct).toBe(100);
   });
 
+  test("the compaction marker lapses after its window", () => {
+    const at = 1_000_000;
+    recordTurn(meta, "w", "PreCompact", undefined, undefined, at);
+    writeContext("w", 40, at + COMPACT_SHOWN_MS);
+    expect(readGauge("w", at + COMPACT_SHOWN_MS - 1, meta)?.compacted).toBe(true);
+    expect(readGauge("w", at + COMPACT_SHOWN_MS + 1, meta)?.compacted).toBe(false);
+  });
+
   test("a stale, missing or malformed reading is none", () => {
     writeContext("w", 62, 5000);
     expect(readGauge("w", 5000 + CONTEXT_STALE_MS + 1, meta)).toBeUndefined();
@@ -125,6 +133,19 @@ describe("text", () => {
     expect(receiptText({ ms: 40_000, edits: 1, errors: 0 })).toBe("last turn 40s · 1 edit");
     expect(receiptText({ ms: 40_000, edits: 0, errors: 0 })).toBe("last turn 40s");
   });
+
+  test("durations step from seconds to minutes to hours", () => {
+    const at = (ms: number) => receiptText({ ms, edits: 0, errors: 0 });
+    expect(at(59_000)).toBe("last turn 59s");
+    expect(at(60_000)).toBe("last turn 1m00s");
+    expect(at(3_599_000)).toBe("last turn 59m59s");
+    expect(at(3_600_000)).toBe("last turn 1h00m");
+  });
+
+  test("a turn that ends before it starts has no receipt", () => {
+    writeFileSync(turnPath(meta, "w"), JSON.stringify({ startedAt: 9000, endedAt: 1000 }));
+    expect(readReceipt("w", meta)).toBeUndefined();
+  });
 });
 
 describe("card rendering", () => {
@@ -141,6 +162,11 @@ describe("card rendering", () => {
     expect(plain(sub!).endsWith("▕███░░▏62%")).toBe(true);
   });
 
+  test("a narrow pane drops the right-aligned gauge", () => {
+    const [, sub] = entryLines(card({ state: "busy", gauge: { pct: 62, compacted: false } }), 0, false, 14);
+    expect(plain(sub!)).not.toContain("▕");
+  });
+
   test("another status keeps the line", () => {
     const [, sub] = entryLines(card({ state: "busy", gauge: { pct: 62, compacted: false }, unsaved: true }), 0, false, 40);
     expect(plain(sub!)).not.toContain("▕");
@@ -150,7 +176,7 @@ describe("card rendering", () => {
     const e = card({ state: "done", receipt: { ms: 5000, edits: 2, errors: 0 } });
     const rows = entryLines(e, 0, true, 40);
     expect(rows).toHaveLength(entryHeight(e, 0, 40));
-    expect(plain(rows.at(-1)!).trim()).toBe("last turn 5s · 2 edits");
+    expect(plain(rows.at(-1)!).trim()).toBe("last turn 5.0s · 2 edits");
   });
 
   test("withReceipt reads only the selected, resting, readable card", () => {

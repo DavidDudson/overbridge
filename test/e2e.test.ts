@@ -187,7 +187,7 @@ describe("workflow", () => {
 
   test("rm clears per-workspace files kept outside the workspace dir", () => {
     expect(ws(["new", "gone", "-r", "app"]).code).toBe(0);
-    const files = ["top/gone.json", "agent/gone.json", "sidebars/gone", "tabs/gone.kdl"].map((f) => join(root, ".overbridge", f));
+    const files = ["top/gone.json", "agent/gone.json", "agent/gone.turn.json", "context/gone.json", "sidebars/gone", "tabs/gone.kdl"].map((f) => join(root, ".overbridge", f));
     for (const f of files) {
       mkdirSync(join(f, ".."), { recursive: true });
       writeFileSync(f, "x");

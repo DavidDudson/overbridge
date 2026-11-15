@@ -161,13 +161,27 @@ describe("overbridge hook", () => {
     expect(stateOf("w1").state).toBe("busy");
   });
 
-  test("ignores unlisted events and unbound sessions", () => {
+  test("an unbound session writes nothing", () => {
+    for (const hook_event_name of ["Stop", "UserPromptSubmit", "PreCompact"]) expect(hook(JSON.stringify({ hook_event_name }), undefined).code).toBe(0);
+    expect(existsSync(join(meta, "agent"))).toBe(false);
+  });
+
+  test("an unlisted event leaves the state alone and notes a compaction in the turn summary", () => {
     expect(hook(JSON.stringify({ hook_event_name: "PreCompact" }), "w2").code).toBe(0);
     expect(existsSync(agentStatePath(meta, "w2"))).toBe(false);
-    // the compaction is noted in the turn summary, not the state
     expect(existsSync(turnPath(meta, "w2"))).toBe(true);
-    expect(hook(JSON.stringify({ hook_event_name: "Stop" }), undefined).code).toBe(0);
-    expect(existsSync(agentStatePath(meta, "undefined"))).toBe(false);
+  });
+
+  test("the receipt survives a resume and is dropped by a clear, through the hook", () => {
+    const send = (hook_event_name: string, extra: object = {}) => hook(JSON.stringify({ hook_event_name, ...extra }), "w4");
+    send("UserPromptSubmit");
+    send("PostToolUseFailure", { tool_name: "Bash" });
+    send("Stop");
+    send("SessionStart", { source: "resume" });
+    const kept = JSON.parse(readFileSync(turnPath(meta, "w4"), "utf8"));
+    expect([kept.errors, typeof kept.endedAt]).toEqual([1, "number"]);
+    send("SessionStart", { source: "clear" });
+    expect(existsSync(turnPath(meta, "w4"))).toBe(false);
   });
 
   test("an edit tool call counts toward the turn receipt; other tool calls write nothing", () => {
