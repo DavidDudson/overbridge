@@ -36,7 +36,7 @@ describe("sidebar on screen", () => {
 
   test("a rounded frame with a padded two-line card per workspace; the current card is inverse", () => {
     const s = draw(1, 0, 16, 34);
-    expect(s.line(0)).toMatch(/^╭─ Workspaces ─+╮$/);
+    expect(s.line(0)).toMatch(/^╭─ Workspaces · 2 need you ─+╮$/);
     expect(s.line(1)).toMatch(/^│ ⌥1 ● 12 Add dark mode +│$/);
     expect(s.line(2)).toMatch(/^│ +working +│$/);
     expect(s.line(3)).toMatch(/^│ ⌥2 \? ws2 +│$/);

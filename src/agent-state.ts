@@ -63,7 +63,7 @@ export const STALE_MS: Record<AgentState, number> = {
   end: Infinity,
 };
 
-/** `<meta>/agent/<ws>.json`, written by the agent hook as `{"state": "...", "at": <ms>, "bg": [pid...], "reason": "..."}`. */
+/** `<meta>/agent/<ws>.json`, written by the agent hook as `{"state": "...", "at": <ms>, "since": <ms>, "bg": [pid...], "reason": "...", "tool": "..."}`. */
 export const agentStatePath = (meta: string, ws: string) => join(meta, "agent", `${ws}.json`);
 export const agentStateFile = (ws: string) => agentStatePath(metaDir(), ws);
 
@@ -105,28 +105,46 @@ export function runningSubagents(meta: string, ws: string, now = Date.now()): nu
   }
 }
 
-interface AgentRecord {
+/** A tool name safe to draw in a terminal: no control characters, bounded. */
+export const TOOL_NAME = /^[\w.:-]{1,64}$/;
+
+export interface AgentRecord {
   state: AgentState;
   /** The SessionEnd reason, recorded with `end` only. */
   reason?: string;
+  /** When the state began (ms): the hook keeps it while the same state is rewritten. Older records fall back to `at`. */
+  since?: number;
+  /** The tool a `waiting` state is blocked on. */
+  tool?: string;
+  /** Running subagents plus live background shells. */
+  agents: number;
 }
+
 
 function readAgentRecord(ws: string, now: number, alive: (pid: number) => boolean): AgentRecord | undefined {
   try {
-    const { state, at, bg, reason } = JSON.parse(readFileSync(agentStateFile(ws), "utf8")) as { state?: string; at?: number; bg?: unknown; reason?: unknown };
+    const { state, at, bg, reason, since, tool } = JSON.parse(readFileSync(agentStateFile(ws), "utf8")) as { state?: string; at?: number; bg?: unknown; reason?: unknown; since?: unknown; tool?: unknown };
     const known = AGENT_STATES.find((s) => s === state);
     if (!known) {
       return undefined;
     }
-    const hasSubagents = runningSubagents(metaDir(), ws, now) > 0;
+    const subagents = runningSubagents(metaDir(), ws, now);
+    const hasSubagents = subagents > 0;
+    const liveBg = Array.isArray(bg) ? bg.filter((p) => typeof p === "number" && alive(p)).length : 0;
+    const began = typeof since === "number" ? since : typeof at === "number" ? at : undefined;
+    const detail = {
+      agents: subagents + liveBg,
+      ...(began === undefined ? {} : { since: began }),
+      ...(typeof tool === "string" && known === "waiting" && TOOL_NAME.test(tool) ? { tool } : {}),
+    };
     // a subagent can run for longer than a turn goes without a tool call, so it keeps `busy` alive
     if (typeof at === "number" && now - at > STALE_MS[known] && !(known === "busy" && hasSubagents)) {
       return undefined;
     }
-    if (known === "done" && (hasSubagents || (Array.isArray(bg) && bg.some((p) => typeof p === "number" && alive(p))))) {
-      return { state: "bg" };
+    if (known === "done" && (hasSubagents || liveBg > 0)) {
+      return { state: "bg", ...detail };
     }
-    return typeof reason === "string" ? { state: known, reason } : { state: known };
+    return typeof reason === "string" ? { state: known, reason, ...detail } : { state: known, ...detail };
   } catch {
     return undefined;
   }
@@ -138,6 +156,9 @@ function readAgentRecord(ws: string, now: number, alive: (pid: number) => boolea
  */
 export const readAgentState = (ws: string, now = Date.now(), alive: (pid: number) => boolean = pidAlive): AgentState | undefined =>
   readAgentRecord(ws, now, alive)?.state;
+
+/** `readAgentState` plus the rest of the record, from the same single file read. */
+export const readAgentDetail = (ws: string, now = Date.now(), alive: (pid: number) => boolean = pidAlive): AgentRecord | undefined => readAgentRecord(ws, now, alive);
 
 /** Whether `ws`'s session ended and the user closed it on purpose (`endedForGood`). */
 export function sessionEndedForGood(ws: string, now = Date.now()): boolean {
