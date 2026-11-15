@@ -5,7 +5,7 @@ import { ciOf, graphqlCommand, readMyPrs, rowsFromGraphql, searchQuery } from ".
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
-const node = (over: Record<string, unknown> = {}) => ({
+const node = (over: { number?: number; mergeable?: string } = {}) => ({
   number: 7,
   url: "https://github.com/o/r/pull/7",
   title: "Fix",

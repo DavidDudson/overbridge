@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { committedConfig } from "./committed-config";
 import { loadRepos } from "./config";
+import { loadRootLayers } from "./project-config";
 import { metaDir } from "./paths";
 import { githubRows, parseProject, projectRows, slugFromUrl, type ProjectBoard, type WorklistScope } from "./pm/board-github";
 import { jiraRows } from "./pm/board-jira";
@@ -169,6 +170,17 @@ export function keepLastGood(previous: readonly WorkRow[], fresh: readonly WorkR
   return [...fresh, ...previous.filter((r) => failed.has(r.repo) && !have.has(keyOf(r)))];
 }
 
+/**
+ * Keep the GitHub boards owned by one of `orgs` (case-insensitive); no orgs keeps every source. Jira sources have no
+ * GitHub owner, so they stay.
+ */
+export function filterOrgs(sources: readonly BoardSource[], orgs: readonly string[]): BoardSource[] {
+  if (orgs.length === 0) return [...sources];
+  const owners = new Set(orgs.map((o) => o.toLowerCase()));
+
+  return sources.filter((s) => s.kind !== "github" || owners.has((s.slug.split("/")[0] ?? "").toLowerCase()));
+}
+
 /** The reads a refresh makes, and the notes for repos whose config cannot be read: one line per repo. */
 export function planWorklist(): { sources: BoardSource[]; notes: string[] } {
   const configs = Object.values(loadRepos()).map((spec): RepoBoard | string => {
@@ -184,7 +196,7 @@ export function planWorklist(): { sources: BoardSource[]; notes: string[] } {
 
   const planned = boardSources(configs.filter((c): c is RepoBoard => typeof c !== "string"));
 
-  return { sources: planned.sources, notes: [...configs.filter((c): c is string => typeof c === "string"), ...planned.notes] };
+  return { sources: filterOrgs(planned.sources, loadRootLayers().githubOrgs), notes: [...configs.filter((c): c is string => typeof c === "string"), ...planned.notes] };
 }
 
 /** Write the cache from a plan's notes and what its reads returned, keeping the last good rows of a failed repo. */

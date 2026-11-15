@@ -68,12 +68,14 @@ function render(rows: readonly PrRow[], { selected, offset, height, width, messa
     ].join(" ");
     const text = fit(line, inner);
     const color = HEALTH_LOOK[healthOf(r)].color;
+
     out.push(boxRow(offset + i === selected ? inverse(text) : r.draft ? dim(text) : color === "red" ? colorize(text, "red") : text));
   }
 
   for (let i = visible.length; i < body; i++) out.push(boxRow(rows.length === 0 && i === 0 ? dim(fit(EMPTY, inner)) : fit("", inner)));
   out.push(boxRow(message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit(LEGEND, inner))));
   const conflicts = rows.filter(isConflict).length;
+
   out.push(boxBottom(width, conflicts > 0 ? `${rows.length} open · ${conflicts} conflicting` : `${rows.length} open`, conflicts > 0 ? "red" : "yellow"));
 
   return out;
