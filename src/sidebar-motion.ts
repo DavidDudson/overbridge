@@ -20,12 +20,12 @@ const isBusyCard = (e: Entry): boolean => e.state === "busy" && !e.fault && e.gl
 const hasConflict = (e: Entry): boolean => !e.fault && (e.badge?.icons.includes("conflict") ?? false);
 
 /** A card with a claimed PR in conflict: its chip pulses. */
-const prConflicts = (e: Entry): boolean => e.prs?.some((p) => p.status === "conflict") ?? false;
+const hasPrConflict = (e: Entry): boolean => e.prs?.some((p) => p.status === "conflict") ?? false;
 
 /** A card whose glyph pulses: one that wants input, runs background work, or ended with unsaved work. */
 const isPulsing = (e: Entry): boolean => !e.fault && pulses(e.state, e.glyph, Boolean(e.unsaved));
 
-const moves = (e: Entry): boolean => isBusyCard(e) || hasConflict(e) || prConflicts(e) || isPulsing(e);
+const isMoving = (e: Entry): boolean => isBusyCard(e) || hasConflict(e) || hasPrConflict(e) || isPulsing(e);
 
 /**
  * `list` with each busy card's glyph set to its frame at `nowMs`, each waiting, background or unsaved card's glyph
@@ -33,16 +33,16 @@ const moves = (e: Entry): boolean => isBusyCard(e) || hasConflict(e) || prConfli
  * moving, the same array comes back.
  */
 export function animate(list: Entry[], nowMs: number, motion: Motion): Entry[] {
-  if (motion === Modes.Off || !list.some(moves)) return list;
+  if (motion === Modes.Off || !list.some(isMoving)) return list;
   const frame = busyFrame(nowMs);
 
   return list.map((e) => {
-    if (isBusyCard(e)) return prConflicts(e) ? { ...e, glyph: frame, at: nowMs } : { ...e, glyph: frame };
+    if (isBusyCard(e)) return hasPrConflict(e) ? { ...e, glyph: frame, at: nowMs } : { ...e, glyph: frame };
 
     if (hasConflict(e)) return { ...e, badge: { ...e.badge!, at: nowMs } };
 
     if (isPulsing(e)) return { ...e, glyph: pulseGlyph(e.state, e.glyph, Boolean(e.unsaved), nowMs), at: nowMs };
 
-    return prConflicts(e) ? { ...e, at: nowMs } : e;
+    return hasPrConflict(e) ? { ...e, at: nowMs } : e;
   });
 }

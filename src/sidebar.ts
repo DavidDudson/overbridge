@@ -28,7 +28,7 @@ import { isIceboxed, isRemoving, isWorkspaceState, RemovalBlock, readState, type
 import { subscribeEvents } from "./events-client";
 import { serverOwnsSweep } from "./server-client";
 import { claimSweep, createSweepTrigger, startSweep } from "./sweep-trigger";
-import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
+import { bold, boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache, readTopCacheChecked, sidebarLabel, type PrStatus, type TopCache } from "./top";
 import { defaultMux, type Mux } from "./mux";
 import { currentTab, tabOrder } from "./tab";
@@ -99,7 +99,7 @@ export interface Entry {
   since?: number;
   tool?: string;
   agents?: number;
-  /** The clock `animate` stamped, so a PR chip in conflict pulses; unset draws it still. */
+  /** The clock `animate` stamped on a card that moves; unset draws it still. */
   at?: number;
   /** Its top cache is older than `STALE_CACHE_MS`: the card is dimmed. */
   stale?: boolean;
@@ -477,7 +477,9 @@ function expandedLines(e: Entry, index: number, selected: boolean, inner: number
 
   if (selected) return [...titles, ...statusRow, ...details].map(inverse);
 
-  return [...titles, ...statusRow.map((r) => paintStatus(r, status!)), ...details];
+  const painted = status ? statusRow.map((r) => paintStatus(r, status)) : [];
+
+  return [...titles, ...painted, ...details];
 }
 
 /** Narrowest text a status row keeps when a gauge shares it. */
@@ -510,19 +512,26 @@ const CHIP_COLS = 7;
 
 /** The claimed PRs as health icons, worst first, for the right edge of the status row: the same icons the PR tabs show. A conflict pulses once `animate` has stamped the card. */
 function prChips(e: Entry): string | undefined {
-  if (!e.prs?.length || e.badge) return undefined;
+  const inputs = (e.prs ?? []).flatMap((p) => prHealthInput(p.status) ?? []);
 
-  return badgeText(badgeOf(e.prs.map((p) => prHealthInput(p.status))), CHIP_COLS, e.at, e.at !== undefined);
+  if (!inputs.length || e.badge) return undefined;
+
+  return badgeText(badgeOf(inputs), CHIP_COLS, e.at, e.at !== undefined);
 }
 
 /** A card has a problem when its status line is an error, a failed cleanup, a kept merge or unsaved work. */
 const hasProblem = (e: Entry): boolean => Boolean(e.fault || e.error || e.blocked || e.unsaved);
 
-/** The title rows painted by the card's tone: yellow waiting for you, green done, red problem, dim when idle. */
+/** The title rows painted by the card's tone: bold yellow waiting for you, green done, red problem, dim when idle. */
 function toneRows(rows: string[], e: Entry): string[] {
   const tone = titleTone(e.state, Boolean(e.task), hasProblem(e));
 
-  return tone === undefined ? rows : rows.map((r) => (tone === "dim" ? dim(r) : colorize(r, tone)));
+  if (tone === undefined) return rows;
+
+  if (tone === "dim") return rows.map(dim);
+  const paint = e.state === "waiting" ? (r: string) => bold(colorize(r, tone)) : (r: string) => colorize(r, tone);
+
+  return rows.map(paint);
 }
 
 /** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line; `view` can make it compact or the expanded card. */

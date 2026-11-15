@@ -4,27 +4,28 @@ import { healthOf } from "../src/pr-look";
 import { type Entry, entryLines, Section } from "../src/sidebar";
 import { animate } from "../src/sidebar-motion";
 import { Motion } from "../src/config";
+import { detailRows } from "../src/sidebar-card";
 import { textWidth } from "../src/term";
 
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
-const MIN = 60_000;
+const MINUTE_MS = 60_000;
 const entry = (over: Partial<Entry> = {}): Entry => ({ tab: "a", section: Section.Workspaces, glyph: "❓", label: "a", state: "waiting", ...over });
 
 describe("timeTint", () => {
   test("a wait turns red after ten minutes", () => {
-    expect(timeTint("waiting", 2 * MIN)).toBe("yellow");
-    expect(timeTint("waiting", 10 * MIN)).toBe("red");
+    expect(timeTint("waiting", 2 * MINUTE_MS)).toBe("yellow");
+    expect(timeTint("waiting", 10 * MINUTE_MS)).toBe("red");
   });
 
   test("a long run warns amber then red", () => {
-    expect(timeTint("busy", 5 * MIN)).toBeUndefined();
-    expect(timeTint("busy", 10 * MIN)).toBe("yellow");
-    expect(timeTint("busy", 30 * MIN)).toBe("red");
+    expect(timeTint("busy", 5 * MINUTE_MS)).toBeUndefined();
+    expect(timeTint("busy", 10 * MINUTE_MS)).toBe("yellow");
+    expect(timeTint("busy", 30 * MINUTE_MS)).toBe("red");
   });
 
   test("an old finish fades to grey; no state has no tint", () => {
-    expect(timeTint("done", 2 * 60 * MIN)).toBe("grey");
-    expect(timeTint(undefined, 99 * MIN)).toBeUndefined();
+    expect(timeTint("done", 2 * 60 * MINUTE_MS)).toBe("grey");
+    expect(timeTint(undefined, 99 * MINUTE_MS)).toBeUndefined();
   });
 });
 
@@ -70,18 +71,19 @@ describe("titleTone", () => {
 
 describe("prHealthInput", () => {
   test("maps each PR status to the shared health", () => {
-    expect(healthOf(prHealthInput("conflict"))).toBe("conflict");
-    expect(healthOf(prHealthInput("failing"))).toBe("failing");
-    expect(healthOf(prHealthInput("pending"))).toBe("waiting");
-    expect(healthOf(prHealthInput("blocked"))).toBe("waiting");
-    expect(healthOf(prHealthInput("mergeable"))).toBe("ready");
-    expect(healthOf(prHealthInput("unknown"))).toBe("draft");
+    expect(healthOf(prHealthInput("conflict")!)).toBe("conflict");
+    expect(healthOf(prHealthInput("failing")!)).toBe("failing");
+    expect(healthOf(prHealthInput("pending")!)).toBe("waiting");
+    expect(healthOf(prHealthInput("blocked")!)).toBe("waiting");
+    expect(healthOf(prHealthInput("mergeable")!)).toBe("ready");
+
+    for (const none of ["unknown", "closed", "merged"] as const) expect(prHealthInput(none)).toBeUndefined();
   });
 });
 
 describe("card rendering", () => {
   test("a long wait colours the elapsed time red inside a yellow line", () => {
-    const e = entry({ since: Date.now() - 15 * MIN });
+    const e = entry({ since: Date.now() - 15 * MINUTE_MS });
     const text = entryLines(e, 0, false, 40).join("\n");
 
     expect(text).toContain("\x1b[31m15m\x1b[0m");
@@ -99,5 +101,47 @@ describe("card rendering", () => {
   test("an idle card is dimmed, a waiting one coloured", () => {
     expect(entryLines(entry({ state: "idle", glyph: "💤" }), 0, false, 30)[0]).toContain("\x1b[2m");
     expect(entryLines(entry(), 0, false, 30)[0]).toContain("\x1b[33m");
+  });
+});
+
+describe("untested arms", () => {
+  test("a long background run turns yellow", () => {
+    expect(timeTint("bg", 30 * MINUTE_MS)).toBe("yellow");
+  });
+
+  test("tone for background, empty and a task with no session", () => {
+    expect(titleTone("bg", false, false)).toBe("cyan");
+    expect(titleTone("empty", false, false)).toBe("dim");
+    expect(titleTone(undefined, true, false)).toBe("dim");
+    expect(titleTone(undefined, false, false)).toBeUndefined();
+  });
+
+  test("animate stamps a done card with a conflicting PR, and leaves a faulted waiting card still", () => {
+    const done = entry({ state: "done", glyph: "✅", prs: [{ number: 1, status: "conflict" }] });
+    const faulted = entry({ fault: "bad cache" });
+
+    expect(animate([done], 700, Motion.WhileActive)[0]?.at).toBe(700);
+    expect(animate([faulted], 500, Motion.WhileActive)[0]?.glyph).toBe("❓");
+  });
+
+  test("an error card's title is red", () => {
+    expect(entryLines(entry({ error: "rm failed" }), 0, false, 30)[0]).toContain("\x1b[31m");
+  });
+
+  test("a waiting title is bold", () => {
+    expect(entryLines(entry(), 0, false, 30)[0]).toContain("\x1b[1m");
+  });
+
+  test("the gauge keeps the right edge while working; a badge card shows no chips", () => {
+    const busy = entry({ state: "busy", glyph: "🔄", gauge: { pct: 50, compacted: false }, prs: [{ number: 1, status: "failing" }] });
+
+    expect(plain(entryLines(busy, 0, false, 40)[1] ?? "")).not.toContain("❌");
+    const badged = entry({ state: "done", glyph: "✅", badge: { count: 1, icons: ["ready"] }, prs: [{ number: 1, status: "failing" }] });
+
+    expect(plain(entryLines(badged, 0, false, 40)[1] ?? "")).not.toContain("❌");
+  });
+
+  test("the expanded card shows the health icon after each PR", () => {
+    expect(detailRows(entry({ prs: [{ number: 1, status: "failing" }] }), [], 0)).toContain("PR #1 · failing ❌");
   });
 });
