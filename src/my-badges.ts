@@ -43,7 +43,7 @@ export const prListBadge = (kind: PrListKind): TabBadge | undefined => cachedRea
 const STATUSES: readonly string[] = ["todo", "in-progress", "blocked", "done"];
 
 /** A cached work row with the fields `rank` reads. */
-const isWorkRow = (v: unknown): v is WorkRow =>
+const isWorkRow = (v: Json): v is Json & WorkRow =>
   isRecord(v) && isString(v.repo) && isString(v.id) && isString(v.status) && STATUSES.includes(v.status) && Array.isArray(v.blockedBy) && Array.isArray(v.labels);
 
 /** The work list cache as its badge: open items only, since a done item needs nothing. */
