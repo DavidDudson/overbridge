@@ -106,7 +106,9 @@ export function readReviews(orgs: readonly string[], runner: Runner = run): PrRo
 /** Read one list. Throws with `gh`'s message when the search fails. */
 export function readPrs(kind: PrListKind, orgs: readonly string[], runner: Runner = run): PrRow[] {
   if (kind === "reviews") return readReviews(orgs, runner);
+
   if (kind === "prs") return readMyPrs(orgs, runner);
+
   const r = runner(searchCommand(kind, orgs));
 
   if (!r.ok) throw new Error(`gh search prs failed: ${(r.stderr || r.stdout).trim().split("\n")[0]}`);

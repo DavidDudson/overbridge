@@ -1,19 +1,23 @@
 import { cachedRead } from "./gauge";
 import { rank } from "./pm/worklist";
-import { prListPath, type PrListCache } from "./prlist-run";
+import { prListPath, type PrListCache, type PrListKind } from "./prlist-run";
 import { badgeOf, type TabBadge } from "./tab-badge";
 import type { WorklistCache } from "./worklist-data";
 import { worklistPath } from "./worklist-data";
 import { workInput } from "./worklist-look";
 
 /**
- * The sidebar badges for the `@prs` and `@work` tabs, read from the caches their panes keep. They go through
+ * The sidebar badges for the PR list tabs and `@work`, read from the caches their panes keep. They go through
  * `cachedRead`, so the sidebar's poll re-parses a file only when it changed. Plain `TabBadge`s, so the sidebar
  * needs no knowledge of either list.
  */
 
-export const prsBadge = (): TabBadge | undefined => cachedRead<TabBadge>(prListPath("prs"), (raw) => ((raw as PrListCache).rows ? badgeOf((raw as PrListCache).rows) : undefined));
+/** The badge of a PR list tab (`prs` or `reviews`). */
+export const prListBadge = (kind: PrListKind): TabBadge | undefined =>
+  // SAFETY: the file is written by `writePrList` as a `PrListCache`; a file without `rows` reads as no badge.
+  cachedRead<TabBadge>(prListPath(kind), (raw) => ((raw as PrListCache).rows ? badgeOf((raw as PrListCache).rows) : undefined));
 
 /** Open items only: a done item needs nothing, so it is not counted. */
 export const workBadge = (): TabBadge | undefined =>
+  // SAFETY: the file is written by `writeWorklist` as a `WorklistCache`; a file without `rows` reads as no badge.
   cachedRead<TabBadge>(worklistPath(), (raw) => ((raw as WorklistCache).rows ? badgeOf(rank((raw as WorklistCache).rows).filter((r) => r.status !== "done").map(workInput)) : undefined));
