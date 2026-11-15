@@ -1,6 +1,5 @@
 import { request } from "node:http";
-import { CLIENT_START_HEADER, serverDisabled, socketPath, VERSION_HEADER } from "./server-net";
-import { overbridgeVersion } from "./version";
+import { clientHeaders, serverDisabled, socketPath } from "./server-net";
 
 /**
  * The pane side of `GET /events`. A pane keeps every poll and file watch it has; this only makes it redraw sooner while the
@@ -77,7 +76,7 @@ export function subscribeEvents(o: SubscribeOptions): Subscription {
     };
     try {
       const req = request(
-        { socketPath: o.sock ?? socketPath(), method: "GET", path: "/events", agent: false, headers: { [VERSION_HEADER]: overbridgeVersion(), [CLIENT_START_HEADER]: String(Date.now() - process.uptime() * 1000), accept: "text/event-stream" } },
+        { socketPath: o.sock ?? socketPath(), method: "GET", path: "/events", agent: false, headers: { ...clientHeaders(), accept: "text/event-stream" } },
         (res) => {
           if (res.statusCode !== 200) {
             res.resume();

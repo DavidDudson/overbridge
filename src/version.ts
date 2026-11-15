@@ -19,3 +19,15 @@ const readPackageVersion = (): string | undefined => {
 
 /** The version of the code this process runs. */
 export const overbridgeVersion = (): string => resolveVersion(readPackageVersion(), process.env.OVERBRIDGE_VERSION);
+
+/** Reads a build time (seconds since epoch) from the environment; anything that is not a positive number is no build time. */
+export const parseBuildTime = (raw: string | undefined): number | undefined => {
+  const n = Number(raw);
+  return raw && Number.isFinite(n) && n > 0 ? n : undefined;
+};
+
+/**
+ * When this build's source was committed, which the nix build injects. Revs cannot be ordered, so this is what tells a
+ * newer build from an older one. A build without it (a dev checkout) is never newer than anything.
+ */
+export const overbridgeBuildTime = (): number | undefined => parseBuildTime(process.env.OVERBRIDGE_BUILD_TIME);

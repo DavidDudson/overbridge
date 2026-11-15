@@ -4,7 +4,7 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { root, selfCommand } from "./paths";
-import { overbridgeVersion } from "./version";
+import { overbridgeBuildTime, overbridgeVersion } from "./version";
 
 /**
  * The client half of the server, on node builtins only: the agent hook imports it, and the hook runs on every tool
@@ -16,8 +16,20 @@ const SOCKET_PATH_MAX = 104;
 /** A client starts the server at most this often. */
 export const START_LOCK_MS = 30_000;
 export const VERSION_HEADER = "x-overbridge-version";
-/** When the calling process started (ms since epoch): only a client newer than the server may replace it. */
+/** When the calling process started (ms since epoch). Servers of older builds used it to decide who may replace them; kept so they still can. */
 export const CLIENT_START_HEADER = "x-overbridge-client-start";
+/** The caller's build time (seconds since epoch), sent only when it has one: only a client of a newer build may replace the server. */
+export const BUILD_HEADER = "x-overbridge-build";
+
+/** The identity headers every client sends. */
+export function clientHeaders(o: { version?: string; startedAtMs?: number; buildTime?: number } = {}): Record<string, string> {
+  const build = "buildTime" in o ? o.buildTime : overbridgeBuildTime();
+  return {
+    [VERSION_HEADER]: o.version ?? overbridgeVersion(),
+    [CLIENT_START_HEADER]: String(o.startedAtMs ?? PROCESS_START_MS),
+    ...(build === undefined ? {} : { [BUILD_HEADER]: String(build) }),
+  };
+}
 /** Set to anything non-empty to keep every caller on its own refresh and never start the server. */
 export const serverDisabled = (): boolean => !!process.env.OVERBRIDGE_NO_SERVER;
 
@@ -46,7 +58,7 @@ export interface Reply {
  * One HTTP call over the server's socket. Resolves `undefined` when nothing answers (no socket, refused, timed out),
  * so the caller falls back to its local path.
  */
-export function call(method: string, path: string, o: { timeoutMs: number; sock?: string; version?: string; startedAtMs?: number }): Promise<Reply | undefined> {
+export function call(method: string, path: string, o: { timeoutMs: number; sock?: string; version?: string; startedAtMs?: number; buildTime?: number }): Promise<Reply | undefined> {
   if (serverDisabled()) return Promise.resolve(undefined);
   return new Promise((resolve) => {
     let settled = false;
@@ -57,7 +69,7 @@ export function call(method: string, path: string, o: { timeoutMs: number; sock?
     };
     try {
       const req = request(
-        { socketPath: o.sock ?? socketPath(), method, path, agent: false, headers: { [VERSION_HEADER]: o.version ?? overbridgeVersion(), [CLIENT_START_HEADER]: String(o.startedAtMs ?? PROCESS_START_MS), connection: "close" }, timeout: o.timeoutMs },
+        { socketPath: o.sock ?? socketPath(), method, path, agent: false, headers: { ...clientHeaders(o), connection: "close" }, timeout: o.timeoutMs },
         (res) => {
           const chunks: Buffer[] = [];
           res.on("data", (c: Buffer) => chunks.push(c));
