@@ -2,13 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { errorMessage } from "../src/util";
 import { defaultConfig, getConfigValue, loadRepoConfig, parseConfig, suggest } from "../src/project-config";
 
 const err = (yaml: string): string => {
   try {
     parseConfig(yaml, "overbridge.yml");
   } catch (e) {
-    return (e as Error).message;
+    return errorMessage(e);
   }
 
   throw new Error("expected parseConfig to throw");

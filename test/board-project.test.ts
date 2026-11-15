@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { parseProject, projectRows, rowsFromProject } from "../src/pm/board-github";
 import { boardSources } from "../src/worklist-run";
 import { parseConfig } from "../src/project-config";
+import type { JsonObject } from "../src/util";
 
-const item = (n: number, status: string, over: Record<string, unknown> = {}) => ({
+const item = (n: number, status: string, over: JsonObject = {}) => ({
   status,
   labels: ["p1"],
   title: `t${n}`,

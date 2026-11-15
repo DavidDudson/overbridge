@@ -1,4 +1,4 @@
-import { Cache, errorText, type CacheStats } from "./server-cache";
+import { Cache, type CacheOptions, errorText } from "./server-cache";
 import { type BoardSource, mergeReads, type SourceRead, sourceKey, WORKLIST_REFRESH_MS } from "./worklist-data";
 
 /**
@@ -19,8 +19,16 @@ export interface WorklistDeps {
 }
 
 export function createWorklistRefresher(deps: WorklistDeps) {
-  const boards = new Cache<SourceRead>({ maxInFlight: 4, ...(deps.now ? { now: deps.now } : {}) });
-  const run = new Cache<number>({ maxInFlight: 1, ...(deps.now ? { now: deps.now } : {}) });
+  const options = (maxInFlight: number): CacheOptions => {
+    const o: CacheOptions = { maxInFlight };
+
+    if (deps.now) o.now = deps.now;
+
+    return o;
+  };
+
+  const boards = new Cache<SourceRead>(options(4));
+  const run = new Cache<number>(options(1));
   const now = deps.now ?? Date.now;
 
   async function once(force: boolean): Promise<number> {
@@ -58,7 +66,7 @@ export function createWorklistRefresher(deps: WorklistDeps) {
   return {
     /** Refresh the list. Concurrent callers share one run; `force` starts a run after the call. */
     refresh: (force = false) => run.get("worklist", () => once(force), { ttlMs: BOARD_TTL_MS, staleMs: BOARD_STALE_MS, force }),
-    stats: (): { run: CacheStats; boards: CacheStats } => ({ run: run.stats(), boards: boards.stats() }),
+    stats: () => ({ run: run.stats(), boards: boards.stats() }),
     get busy() {
       return run.busy || boards.busy;
     },

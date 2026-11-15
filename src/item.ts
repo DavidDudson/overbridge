@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { currentBranch } from "./git";
 import { providerFor } from "./pm";
-import { createTechDebtItem, type Provider } from "./pm/provider";
+import { createTechDebtItem, type NewItem, type Provider } from "./pm/provider";
 import { loadRepoConfig, type ProjectManagement } from "./project-config";
 import { fail, run } from "./util";
 
@@ -29,7 +29,7 @@ const body = (values: { body?: string; "body-file"?: string }): string => {
  */
 export function runItem(provider: Provider, pm: ProjectManagement, argv: string[], branch: () => string): string | undefined {
   const [action, ...rest] = argv;
-  const json = (v: unknown) => JSON.stringify(v);
+  const json = <T>(v: T) => JSON.stringify(v);
 
   const { values, positionals } = parseArgs({
     args: rest,
@@ -77,7 +77,9 @@ export function runItem(provider: Provider, pm: ProjectManagement, argv: string[
       return json(provider.assigned());
     case "create": {
       if (!values.title) fail("overbridge item create: --title is required");
-      const item = { title: values.title, body: body(values), labels: values.label ?? [], ...(values.parent ? { parent: values.parent } : {}) };
+      const item: NewItem = { title: values.title, body: body(values), labels: values.label ?? [] };
+
+      if (values.parent) item.parent = values.parent;
 
       return json(values["tech-debt"] ? createTechDebtItem(provider, pm.techDebt, item) : provider.createItem(item));
     }

@@ -11,7 +11,7 @@ import { entries, switchTab } from "./sidebar";
 import { openTab, tabCommand } from "./tab";
 import { getWorkspace, isRemoving, readState, withState } from "./state";
 import { cleanable, noUnsavedWork, readTopCache, refreshTop, sidebarLabel, snapshotTop } from "./top";
-import { fail, log } from "./util";
+import { errorMessage, fail, log } from "./util";
 
 /** The internal `rm` flag that runs `finishRemoval` in the detached worker. */
 export const FINISH_FLAG = "background-finish";
@@ -168,7 +168,7 @@ export async function finishRemoval(ws: string): Promise<void> {
     removeWorkspace(ws, false);
     recordCleanup({ ws, label, atMs: Date.now(), outcome: CleanupOutcome.Removed, cause });
   } catch (e) {
-    restore(ws, (e as Error).message);
+    restore(ws, errorMessage(e));
     recordCleanup({ ws, label, atMs: Date.now(), outcome: CleanupOutcome.Failed, cause });
     throw e;
   }
@@ -210,7 +210,7 @@ function restore(ws: string, error: string) {
           if (w) s.workspaces[ws] = { ...w, removeError: `${error} (${hint})` };
         });
       } catch (e) {
-        log(`could not record the recovery hint: ${(e as Error).message}`);
+        log(`could not record the recovery hint: ${errorMessage(e)}`);
       }
     }
   }

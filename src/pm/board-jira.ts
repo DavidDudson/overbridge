@@ -7,9 +7,18 @@ type Runner = (cmd: string[]) => RunResult;
 export const DEFAULT_WORKLIST_JQL = `(sprint in openSprints() OR statusCategory = "In Progress")`;
 
 /** Jira's priority names to the work list's p0..p3. Unknown names leave the priority unset. */
-const PRIORITY: Record<string, number> = { highest: 0, blocker: 0, critical: 0, high: 1, medium: 2, low: 3, lowest: 3, trivial: 3 };
+const PRIORITY = new Map([
+  ["highest", 0],
+  ["blocker", 0],
+  ["critical", 0],
+  ["high", 1],
+  ["medium", 2],
+  ["low", 3],
+  ["lowest", 3],
+  ["trivial", 3],
+]);
 
-export const priorityFromJira = (name: string | undefined): number | undefined => (name ? PRIORITY[name.trim().toLowerCase()] : undefined);
+export const priorityFromJira = (name: string | undefined): number | undefined => (name ? PRIORITY.get(name.trim().toLowerCase()) : undefined);
 
 interface LinkedIssue {
   key: string;
@@ -47,6 +56,7 @@ function openBlockers(issue: RawIssue): string[] {
  * labelled with the project key, and carries every repo it could be started in.
  */
 export function rowsFromJiraRaw(reply: string, project: string, repos: string[], site?: string): WorkRow[] {
+  // SAFETY: `jira issue list --raw` prints a JSON array of issues; RawIssue marks every field except `key` optional, so absent fields are tolerated, but the array and `key` are trusted from the CLI.
   const issues = JSON.parse(reply.trim() || "[]") as RawIssue[];
   const base = site?.replace(/\/+$/, "");
 
@@ -54,7 +64,7 @@ export function rowsFromJiraRaw(reply: string, project: string, repos: string[],
     const f = i.fields ?? {};
     const priority = priorityFromJira(f.priority?.name ?? undefined);
 
-    return {
+    const row: WorkRow = {
       repo: project,
       repos,
       id: i.key,
@@ -63,10 +73,14 @@ export function rowsFromJiraRaw(reply: string, project: string, repos: string[],
       status: statusFromColumn(f.status?.name),
       labels: f.labels ?? [],
       blockedBy: openBlockers(i),
-      ...(f.parent?.key ? { parent: f.parent.key } : {}),
-      ...(priority !== undefined ? { priority } : {}),
       updatedAt: f.updated ?? "",
     };
+
+    if (f.parent?.key) row.parent = f.parent.key;
+
+    if (priority !== undefined) row.priority = priority;
+
+    return row;
   });
 }
 

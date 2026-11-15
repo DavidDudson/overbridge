@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { isJsonObject, objectField, parseJson } from "../src/json";
 import { HELD_ENV } from "../src/check-queue";
 import { CleanupReason, CleanupVerdict, type Finding } from "../src/cleanup-scan";
 
@@ -45,14 +46,17 @@ const statePath = () => join(root, ".overbridge", "state.json");
 /** A workspace that state has forgotten: its folder and registered worktree stay behind. */
 function orphan(name: string): string {
   expect(ob(["new", name, "-r", "app"]).code).toBe(0);
-  const state = JSON.parse(readFileSync(statePath(), "utf8")) as { workspaces: Record<string, unknown> };
-  const { [name]: _dropped, ...workspaces } = state.workspaces;
+  const parsed = parseJson(readFileSync(statePath(), "utf8"));
+  const state = isJsonObject(parsed) ? parsed : {};
+  const { [name]: _dropped, ...workspaces } = objectField(state, "workspaces") ?? {};
   writeFileSync(statePath(), JSON.stringify({ ...state, workspaces }));
 
   return join(root, name);
 }
 
 const registered = () => sh(["git", "-C", join(root, ".bare", "app.git"), "worktree", "list"], tmp);
+
+// SAFETY: `cleanup --json` prints exactly the `Finding[]` its scan built.
 const findings = () => JSON.parse(ob(["cleanup", "--json", "--no-fetch"]).out) as Finding[];
 const finding = (ws: string) => findings().find((f) => f.ws === ws);
 

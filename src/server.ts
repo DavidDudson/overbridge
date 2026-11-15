@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { NAME_RE, metaDir, selfCommand } from "./paths";
 import { pidAlive } from "./proc";
-import { Cache, errorText } from "./server-cache";
+import { Cache, type CacheStats, errorText, type Served } from "./server-cache";
 import { CONNECTED_FRAME, createEvents, HEARTBEAT_FRAME, HEARTBEAT_MS } from "./server-events";
 import { BUILD_HEADER, pidFile, stoppingFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
 import { defaultSweepDeps, staleCandidates, sweepMerged } from "./merge-sweep";
@@ -47,19 +47,19 @@ export interface HandlerDeps {
   refreshPerf: () => Promise<number>;
   /** Refresh the work list (`worklist.json`); resolves with when. Absent: the route answers 404 and the pane runs a child. */
   refreshWorklist?: (force: boolean) => Promise<number>;
-  worklistStats?: () => unknown;
+  worklistStats?: () => object;
   workspaceExists: (ws: string) => boolean;
   /** When `ws`'s top cache file was last written (ms since epoch), 0 when it has none. */
   cacheFileAt: (ws: string) => number;
   version: string;
   /** What the PR batcher has done, for `/status`. */
-  prBatch?: () => unknown;
+  prBatch?: () => object;
   prBusy?: () => boolean;
   worklistBusy?: () => boolean;
   /** The rate-limit gate's state for `/status`. */
-  rateStats?: () => unknown;
+  rateStats?: () => object;
   /** The sweep timer's counters; present when the server runs the merged-PR sweep. `GET /sweep` answers 404 without it. */
-  sweepStats?: () => unknown;
+  sweepStats?: () => object;
   sweepBusy?: () => boolean;
   /** This build's time (seconds since epoch), when it has one; a server without it is never replaced. */
   buildTime?: number;
@@ -73,7 +73,36 @@ export interface HandlerDeps {
 /** A client replaces the server only when both have a build time and the client's is strictly later. */
 const isNewerBuild = (client: number, server: number | undefined): boolean => server !== undefined && client > server;
 
-const json = (status: number, body: unknown) => Response.json(body, { status });
+/** The body of `GET /status`: the server's counters and what each optional part reports. */
+interface StatusBody extends CacheStats {
+  version: string;
+  pid: number;
+  uptimeMs: number;
+  draining: boolean;
+  subscribers: number;
+  perf: CacheStats;
+  prBatch?: object;
+  worklist?: object;
+  sweep?: object;
+  rateLimit?: object;
+}
+
+/** The reply to a forced or queued refresh: when the served value was built, and the error that left it stale. */
+interface ServedBody {
+  ws?: string;
+  served: Served;
+  error?: string;
+}
+
+const servedBody = (served: Served, error: string | undefined, ws?: string): ServedBody => {
+  const body: ServedBody = ws === undefined ? { served } : { ws, served };
+
+  if (error) body.error = error;
+
+  return body;
+};
+
+const json = <Body extends object>(status: number, body: Body) => Response.json(body, { status });
 
 /** The routes, apart from the socket, so tests call them directly. */
 export function createHandler(deps: HandlerDeps) {
@@ -172,7 +201,17 @@ export function createHandler(deps: HandlerDeps) {
     }
 
     if (req.method === "GET" && url.pathname === "/status") {
-      return json(200, { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, subscribers: events.count, ...cache.stats(), perf: perf.stats(), ...(deps.prBatch ? { prBatch: deps.prBatch() } : {}), ...(deps.worklistStats ? { worklist: deps.worklistStats() } : {}), ...(deps.sweepStats ? { sweep: deps.sweepStats() } : {}), ...(deps.rateStats ? { rateLimit: deps.rateStats() } : {}) });
+      const status: StatusBody = { version: deps.version, pid: process.pid, uptimeMs: now() - startedAt, draining, subscribers: events.count, ...cache.stats(), perf: perf.stats() };
+
+      if (deps.prBatch) status.prBatch = deps.prBatch();
+
+      if (deps.worklistStats) status.worklist = deps.worklistStats();
+
+      if (deps.sweepStats) status.sweep = deps.sweepStats();
+
+      if (deps.rateStats) status.rateLimit = deps.rateStats();
+
+      return json(200, status);
     }
 
     if (req.method === "GET" && url.pathname === "/events") {
@@ -181,7 +220,7 @@ export function createHandler(deps: HandlerDeps) {
 
     if (req.method === "GET" && url.pathname === "/sweep" && deps.sweepStats) {
       // a sidebar asks this to learn the server runs the sweep, so it skips its own
-      return json(200, { owner: true, ...(deps.sweepStats() as object) });
+      return json(200, { owner: true, ...deps.sweepStats() });
     }
 
     if (req.method === "POST" && url.pathname === "/refresh/perf") {
@@ -201,7 +240,7 @@ export function createHandler(deps: HandlerDeps) {
       try {
         const { served, error } = await got;
 
-        return json(200, { served, ...(error ? { error } : {}) });
+        return json(200, servedBody(served, error));
       } catch (e) {
         return json(502, { error: errorText(e) });
       }
@@ -247,7 +286,7 @@ export function createHandler(deps: HandlerDeps) {
       try {
         const { served, error } = await got;
 
-        return json(200, { ws, served, ...(error ? { error } : {}) });
+        return json(200, servedBody(served, error, ws));
       } catch (e) {
         return json(502, { error: errorText(e) });
       }
@@ -287,7 +326,7 @@ interface WorkerReply {
  * One job in a worker thread of `file`: resolves with `pick` of its reply, or rejects with the error text it sent, with
  * `fallback` when it sent none, or on timeout (`label` names the job). The worker is gone by the time this settles.
  */
-function workerJob<T>(file: string, message: unknown, o: { timeoutMs: number; label: string; fallback: string; pick: (r: WorkerReply) => T | undefined }): Promise<T> {
+function workerJob<T, Message extends object>(file: string, message: Message, o: { timeoutMs: number; label: string; fallback: string; pick: (r: WorkerReply) => T | undefined }): Promise<T> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL(file, import.meta.url).href);
 
@@ -318,9 +357,24 @@ function workerJob<T>(file: string, message: unknown, o: { timeoutMs: number; la
   });
 }
 
+/** What the refresh worker is told: the workspace, the PRs fetched ahead for it, and why gh calls are paused, if they are. */
+interface RefreshJob {
+  ws: string;
+  prefetched: PrefetchedPrs;
+  paused?: string;
+}
+
+const refreshJob = (ws: string, prefetched: PrefetchedPrs, paused?: string): RefreshJob => {
+  const job: RefreshJob = { ws, prefetched };
+
+  if (paused) job.paused = paused;
+
+  return job;
+};
+
 /** Run `refreshTop` in a worker thread, so the server stays responsive while `gh` runs. */
 export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000, paused?: string, onLimited?: (text: string) => void): Promise<TopCache> =>
-  workerJob("./server-worker.ts", { ws, prefetched, ...(paused ? { paused } : {}) }, {
+  workerJob("./server-worker.ts", refreshJob(ws, prefetched, paused), {
     timeoutMs,
     label: `refresh of ${ws}`,
     fallback: "refresh failed",
@@ -336,8 +390,14 @@ export const refreshPerfInWorker = (timeoutMs = 30_000): Promise<number> =>
   workerJob("./server-perf-worker.ts", {}, { timeoutMs, label: "perf refresh", fallback: "perf refresh failed", pick: (r) => r.at });
 
 /** One job in a worker thread of `file`: its `{ok, value}` reply, or a rejection with the error text or on timeout. */
-export const workerCall = <T>(file: string, message: unknown, timeoutMs = 120_000): Promise<T> =>
-  workerJob(file, message, { timeoutMs, label: file, fallback: "job failed", pick: (r) => r.value as T | undefined });
+export const workerCall = <T, Message extends object>(file: string, message: Message, timeoutMs = 120_000): Promise<T> =>
+  workerJob(file, message, {
+    timeoutMs,
+    label: file,
+    fallback: "job failed",
+    // SAFETY: the caller names T for this worker file; the worker's reply value is not checked here, so T is the caller's contract with that worker
+    pick: (r) => r.value as T | undefined,
+  });
 
 /** `overbridge serve`: runs until idle, killed or a client of another version calls. */
 export async function serve(): Promise<void> {
@@ -387,7 +447,7 @@ export async function serve(): Promise<void> {
     finish: (notes, read) => finishWorklist(notes, read),
   });
 
-  let refreshForSweep: (ws: string) => Promise<unknown> = () => Promise.resolve();
+  let refreshForSweep: (ws: string) => Promise<void> = () => Promise.resolve();
 
   const sweeper = createSweeper({
     claim: claimSweep,

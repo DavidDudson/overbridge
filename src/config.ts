@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { reposFile } from "./paths";
-import { fail } from "./util";
+import { fail, isNumber, isRecord, isString, type Json } from "./util";
 
 export type RepoSpec = { name: string; url: string; defaultBranch?: string };
 
@@ -15,6 +15,7 @@ const HEADER = `# overbridge repo registry. Add with \`overbridge repo add <name
 # [sidebar]
 # width = 60                # columns of the tab sidebar, 12 to 200
 # motion = "while-active"   # "while-active" animates the busy glyph, "off" keeps it still
+# layout = "auto"           # auto (compact when narrow), compact or wide
 `;
 
 export function initReposFile() {
@@ -24,18 +25,16 @@ export function initReposFile() {
 export function loadRepos(): Record<string, RepoSpec> {
   if (!existsSync(reposFile())) return {};
 
-  const data = Bun.TOML.parse(readFileSync(reposFile(), "utf8")) as {
-    repos?: Record<string, { url?: string; default_branch?: string }>;
-  };
+  const data = Bun.TOML.parse(readFileSync(reposFile(), "utf8"));
+  const repos = isRecord(data) && isRecord(data.repos) ? data.repos : {};
 
-  const out: Record<string, RepoSpec> = {};
+  const specs = Object.entries(repos).map(([name, r]): [string, RepoSpec] => {
+    if (!isRecord(r) || !isString(r.url) || !r.url) fail(`repos.toml: repos.${name} has no url`);
 
-  for (const [name, r] of Object.entries(data.repos ?? {})) {
-    if (!r.url) fail(`repos.toml: repos.${name} has no url`);
-    out[name] = { name, url: r.url, defaultBranch: r.default_branch };
-  }
+    return [name, { name, url: r.url, defaultBranch: isString(r.default_branch) ? r.default_branch : undefined }];
+  });
 
-  return out;
+  return Object.fromEntries(specs);
 }
 
 export const SIDEBAR_WIDTH = 60;
@@ -48,7 +47,7 @@ export function sidebarWidth(): number {
   if (width === undefined) return SIDEBAR_WIDTH;
   const { min, max } = SIDEBAR_WIDTH_RANGE;
 
-  if (typeof width !== "number" || !Number.isInteger(width) || width < min || width > max) {
+  if (!isNumber(width) || !Number.isInteger(width) || width < min || width > max) {
     fail(`repos.toml: sidebar.width must be an integer from ${min} to ${max}`);
   }
 
@@ -73,14 +72,15 @@ export const Motion = { Off: "off", WhileActive: "while-active" } as const;
 
 export type Motion = (typeof Motion)[keyof typeof Motion];
 
-type SidebarSection = { width?: unknown; motion?: unknown };
+type SidebarSection = { width?: Json; motion?: Json; layout?: Json };
 
 /** The `[sidebar]` table of repos.toml; empty when the file or table is missing. */
 function readSidebarSection(): SidebarSection {
   if (!existsSync(reposFile())) return {};
-  const data = Bun.TOML.parse(readFileSync(reposFile(), "utf8")) as { sidebar?: SidebarSection };
+  const data = Bun.TOML.parse(readFileSync(reposFile(), "utf8"));
+  const sidebar = isRecord(data) ? data.sidebar : undefined;
 
-  return data.sidebar ?? {};
+  return isRecord(sidebar) ? sidebar : {};
 }
 
 /** Whether the tab sidebar animates: `[sidebar] motion` in repos.toml, else `while-active`. Read once when the pane starts. */
@@ -91,4 +91,18 @@ export function sidebarMotion(): Motion {
   const modes = Object.values(Motion);
 
   return modes.find((m) => m === motion) ?? fail(`repos.toml: sidebar.motion must be one of ${modes.map((m) => `"${m}"`).join(", ")}`);
+}
+
+export const SIDEBAR_LAYOUTS = ["auto", "compact", "wide"] as const;
+
+export type SidebarLayout = (typeof SIDEBAR_LAYOUTS)[number];
+
+/** `[sidebar] layout` in repos.toml: `auto` (the default) picks compact for a narrow pane, the others force one. */
+export function sidebarLayout(): SidebarLayout {
+  const layout = readSidebarSection().layout;
+
+  if (layout === undefined) return "auto";
+  const known = SIDEBAR_LAYOUTS.find((l) => l === layout);
+
+  return known ?? fail(`repos.toml: sidebar.layout must be one of ${SIDEBAR_LAYOUTS.join(", ")}`);
 }

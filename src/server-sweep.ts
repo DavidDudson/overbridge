@@ -7,7 +7,7 @@ export interface SweeperDeps {
   /** Workspaces whose top cache is old enough to refresh. */
   stale: (now: number) => string[];
   /** Refresh one workspace's top cache through the server's own cache and batcher. */
-  refresh: (ws: string) => Promise<unknown>;
+  refresh: (ws: string) => Promise<void>;
   /**
    * The sweep itself (`sweepMerged`): decides from the caches, reads git directly and removes through `beginRemoval`.
    * `failed` holds the workspaces whose refresh threw, which the sweep must keep rather than judge from an old cache.
@@ -56,11 +56,13 @@ export function createSweeper(deps: SweeperDeps) {
     try {
       const failed = new Map<string, Error>();
       await Promise.all(
-        deps.stale(started).map((ws) =>
-          deps.refresh(ws).catch((e: unknown) => {
+        deps.stale(started).map(async (ws) => {
+          try {
+            await deps.refresh(ws);
+          } catch (e) {
             failed.set(ws, e instanceof Error ? e : new Error(String(e)));
-          }),
-        ),
+          }
+        }),
       );
       stats.lastChecked = Object.keys(deps.sweep(failed)).length;
       delete stats.lastError;

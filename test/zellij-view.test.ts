@@ -99,7 +99,13 @@ describe("readView", () => {
 });
 
 describe("focus gating", () => {
-  const view = (focused?: string): ZellijView => ({ order: ["a", "b"], ...(focused === undefined ? {} : { focused }), atMs: NOW_MS });
+  const view = (focused?: string): ZellijView => {
+    const v: ZellijView = { order: ["a", "b"], atMs: NOW_MS };
+
+    if (focused !== undefined) v.focused = focused;
+
+    return v;
+  };
 
   test("the focused tab polls every tick", () => {
     expect(shouldPoll("a", view("a"), NOW_MS - 1, NOW_MS)).toBe(true);

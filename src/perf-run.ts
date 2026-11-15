@@ -103,7 +103,9 @@ export async function perfPane() {
   let source: CommandSource = "all";
   let sort: CommandSort = "time";
   let views: PerfViews = loadPerf();
+
   const window = () => views.windows[WINDOWS[windowAt]!.label] ?? { workspaces: [], repos: [], dashboard: emptySummary(), commands: [] };
+
   const rows = (): PerfList => {
     if (view === "dashboard") return { kind: "dashboard", rows: [] };
 
@@ -111,6 +113,7 @@ export async function perfPane() {
 
     return grouping === "repo" ? { kind: grouping, rows: rankedRepos(window().repos) } : { kind: grouping, rows: ranked(window().workspaces) };
   };
+
   let list = rows();
 
   let reloadedAtMs = Date.now();

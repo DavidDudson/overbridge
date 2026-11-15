@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type JsonObject, type JsonValue } from "../src/json";
 import { agentStateFile, UNKNOWN_GLYPH } from "../src/agent-state";
 import { CleanupCause, CleanupOutcome, cleanupRecords, cleanupRows } from "../src/cleanup-log";
 import { metaDir } from "../src/paths";
 import { EMPTY_MODEL, type Entry, entries, entryLines, type Footer, FooterKind, footerToDraw, gather, inFlightCleanups, LEGEND_FOOTER, type Model, renderSidebar, Section, type SidebarReaders } from "../src/sidebar";
-import { type State, tryReadState, withState, workspaceFault } from "../src/state";
+import { type State, tryReadState, withState, type WorkspaceState, workspaceFault } from "../src/state";
 import { readTopCache, readTopCacheChecked, topCacheFault } from "../src/top";
 
 const plain = (rows: string[]) => rows.map((r) => r.replace(/\x1b\[[0-9;]*m/g, "").trimEnd());
@@ -17,11 +18,14 @@ const writeCache = (ws: string, text: string) => {
   writeFileSync(cacheFile(ws), text);
 };
 
-const workspace = (title?: string) => ({ created: "now", repos: { r: { branch: "b" } }, ...(title ? { title } : {}) });
+const workspace = () => ({ created: "now", repos: { r: { branch: "b" } } });
+
+/** `value` as `readState` would get it back from the file, whatever shape it has: a malformed record is one `State` forbids. */
+const asRead = <T>(value: JsonValue): T => JSON.parse(JSON.stringify(value));
 
 /** A state whose records are raw JSON shapes, including malformed ones `State` forbids. */
-const malformedState = (workspaces: Record<string, unknown>): State => ({ version: 1, workspaces }) as unknown as State;
-const byTab = (list: Entry[]) => Object.fromEntries(list.filter((e) => e.section === Section.Workspaces).map((e) => [e.tab, e]));
+const malformedState = (workspaces: JsonObject): State => asRead<State>({ version: 1, workspaces });
+const byTab = (list: Entry[]) => Object.fromEntries(list.flatMap((e): [string, Entry][] => (e.section === Section.Workspaces ? [[e.tab, e]] : [])));
 
 let tmp: string;
 const savedRoot = process.env.OVERBRIDGE_ROOT;
@@ -137,7 +141,7 @@ describe("one bad workspace in the list", () => {
   test("a malformed state record marks only its own card, and never hides it as removing", () => {
     for (const bad of [null, "ws", { created: "now" }, { created: "now", repos: {}, removing: null }, { created: "now", repos: {}, removing: {} }]) {
       withState((s) => {
-        (s.workspaces as Record<string, unknown>).bad = bad;
+        s.workspaces.bad = asRead<WorkspaceState>(bad);
       });
       const cards = byTab(entries([]));
       expect(cards.bad).toMatchObject({ label: "bad", glyph: UNKNOWN_GLYPH });

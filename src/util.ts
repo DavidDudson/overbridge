@@ -68,23 +68,42 @@ export function shellQuote(arg: string): string {
 
 export const naturalSort = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
 
+/** A value a JSON or YAML document can hold. */
+export type Json = string | number | boolean | null | Json[] | JsonObject;
+
+/** A mapping in a JSON or YAML document. */
+export interface JsonObject {
+  [key: string]: Json;
+}
+
+const tagOf = (tag: string) => `[object ${tag}]`;
+
 /** A plain object: what a JSON mapping parses to. */
-export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+export const isRecord = (v: unknown): v is JsonObject => Object.prototype.toString.call(v) === tagOf("Object");
+
+/** A string, as a document scalar. */
+export const isString = (v: unknown): v is string => Object.prototype.toString.call(v) === tagOf("String");
+
+/** A number, as a document scalar. */
+export const isNumber = (v: unknown): v is number => Object.prototype.toString.call(v) === tagOf("Number");
+
+/** A boolean, as a document scalar. */
+export const isBoolean = (v: unknown): v is boolean => Object.prototype.toString.call(v) === tagOf("Boolean");
 
 /** What `v` is, for an error about a value that should have been something else: `null`, `missing`, `an array`, `a number`. */
-export function describeValue(v: unknown): string {
+export function describeValue<T>(v: T): string {
   if (v === null) return "null";
 
   if (v === undefined) return "missing";
 
   if (Array.isArray(v)) return "an array";
-  const type = typeof v;
+  const type = Object.prototype.toString.call(v).slice(8, -1).toLowerCase();
 
   return `${/^[aeiou]/.test(type) ? "an" : "a"} ${type}`;
 }
 
 /** The message of whatever was thrown; a non-Error throw is stringified. */
-export const errorMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+export const errorMessage = <T>(e: T): string => (e instanceof Error ? e.message : String(e));
 
 export function log(msg: string) {
   console.error(msg);

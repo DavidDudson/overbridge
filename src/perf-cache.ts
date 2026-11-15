@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { historyStore, type HistoryStore } from "./history";
 import { computeViews, type WindowView } from "./history-report";
+import { isJsonObject, type JsonObject, type JsonValue, numberField, objectField, parseJson } from "./json";
 import { metaDir } from "./paths";
 
 /**
@@ -35,25 +36,35 @@ export function writePerfCache(views: PerfViews, file = perfCacheFile()): void {
   renameSync(tmp, file);
 }
 
-function isPerfViews(v: unknown): v is PerfViews {
-  const o = v as { at?: unknown; windows?: unknown } | null;
+/**
+ * A window holds its workspace and repo summaries, the dashboard and the commands; the summaries themselves are trusted, as
+ * `writePerfCache` alone writes the file. A file from before the dashboard and commands views lacks them: compute instead.
+ */
+const isWindowView = (value: JsonObject): value is JsonObject & WindowView =>
+  "workspaces" in value && Array.isArray(value.workspaces) && "repos" in value && Array.isArray(value.repos) && "dashboard" in value && isJsonObject(value.dashboard) && "commands" in value && Array.isArray(value.commands);
 
-  if (typeof o !== "object" || o === null || typeof o.at !== "number" || typeof o.windows !== "object" || o.windows === null) return false;
+/** The views in a parsed cache file, or undefined when it is not one. */
+function decodePerfViews(value: JsonValue): PerfViews | undefined {
+  if (!isJsonObject(value)) return undefined;
+  const at = numberField(value, "at");
+  const windows = objectField(value, "windows");
 
-  // a file from before the dashboard and command views lacks them: compute instead
-  return Object.values(o.windows).every((w) => {
-    const v = w as { dashboard?: unknown; commands?: unknown } | null;
+  if (at === undefined || !windows) return undefined;
 
-    return typeof v?.dashboard === "object" && v.dashboard !== null && Array.isArray(v.commands);
-  });
+  const views: Record<string, WindowView> = {};
+
+  for (const [label, view] of Object.entries(windows)) {
+    if (!isJsonObject(view) || !isWindowView(view)) return undefined;
+    views[label] = view;
+  }
+
+  return { at, windows: views };
 }
 
 /** The cache file, or undefined when it is missing or not a valid one. */
 export function readPerfCache(file = perfCacheFile()): PerfViews | undefined {
   try {
-    const v: unknown = JSON.parse(readFileSync(file, "utf8"));
-
-    return isPerfViews(v) ? v : undefined;
+    return decodePerfViews(parseJson(readFileSync(file, "utf8")));
   } catch {
     // missing or half written: compute instead
     return undefined;

@@ -7,7 +7,7 @@
  */
 
 import { boxBottom, boxRow, boxTop, fit, inverse, textWidth } from "../term";
-import { naturalSort } from "../util";
+import { isString, naturalSort } from "../util";
 
 /** A board column or status, normalised across providers. */
 export const BoardStatus = { Backlog: "backlog", Ready: "ready", InProgress: "in-progress", InReview: "in-review", Done: "done", Unknown: "unknown" } as const;
@@ -207,10 +207,15 @@ export const RULES: readonly Rule[] = [
   { name: "id", key: (r) => r.item.id, text: (r) => r.item.id },
 ];
 
-const compareKeys = (a: number | string, b: number | string) => (typeof a === "string" && typeof b === "string" ? naturalSort(a, b) : a < b ? -1 : a > b ? 1 : 0);
+const compareKeys = (a: number | string, b: number | string) => (isString(a) && isString(b) ? naturalSort(a, b) : a < b ? -1 : a > b ? 1 : 0);
+
+interface Decision {
+  rule: number;
+  sign: number;
+}
 
 /** The index of the first rule that orders `a` and `b`, and its sign; the id rule always decides at the latest. */
-function decide(a: Omit<Ranked, "rank">, b: Omit<Ranked, "rank">): { rule: number; sign: number } {
+function decide(a: Omit<Ranked, "rank">, b: Omit<Ranked, "rank">): Decision {
   for (const [i, rule] of RULES.entries()) {
     const sign = compareKeys(rule.key(a), rule.key(b));
 
@@ -254,7 +259,7 @@ export interface Recommendation {
  * when nothing else is left, with a reason saying so.
  */
 export function recommend(ranked: readonly Ranked[], freeSlots: number): Recommendation[] {
-  const active = new Set(ranked.filter((r) => r.readiness === Readiness.Active).map((r) => r.stream));
+  const active = new Set(ranked.flatMap((r) => (r.readiness === Readiness.Active ? [r.stream] : [])));
   const ready = ranked.filter((r) => r.readiness === Readiness.Ready);
   const out: Recommendation[] = [];
   const taken = new Set<string>();

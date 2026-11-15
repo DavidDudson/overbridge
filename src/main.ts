@@ -24,7 +24,7 @@ import { prListPane, refreshPrList, type PrListKind } from "./prlist-run";
 import { readWorklist, refreshWorklist, showWorklist, worklistPane } from "./worklist-run";
 import { silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
-import { exec, log, OverbridgeError } from "./util";
+import { errorMessage, exec, log, OverbridgeError } from "./util";
 
 const START_USAGE =
   "usage: overbridge start <repo> <id> [--prompt text] [--here] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] | overbridge start <repo> --task <slug> --prompt <text>";
@@ -545,8 +545,8 @@ export async function run(argv: string[]): Promise<never> {
   try {
     process.exit(await main(argv));
   } catch (e) {
-    if (e instanceof OverbridgeError || (e as any)?.code?.startsWith?.("ERR_PARSE_ARGS")) {
-      console.error(`overbridge: ${(e as Error).message}`);
+    if (e instanceof OverbridgeError || (e instanceof Error && "code" in e && String(e.code).startsWith("ERR_PARSE_ARGS"))) {
+      console.error(`overbridge: ${errorMessage(e)}`);
       process.exit(1);
     }
 

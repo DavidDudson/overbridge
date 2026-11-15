@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isJsonObject, isJsonString, numberField, parseJson, type JsonObject, type JsonValue } from "./json";
 import { metaDir } from "./paths";
 
 /**
@@ -207,16 +208,22 @@ export const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 const safeName = (ws: string) => ws.replace(/[^\w@.-]/g, "_");
 
+/** A parsed line is ours when it has a numeric `at` and a known kind; the other fields come from `append`, which serialises a HistoryRecord. */
+const isHistoryRecord = (raw: JsonValue): raw is JsonObject & HistoryRecord =>
+  isJsonObject(raw) && numberField(raw, "at") !== undefined && (raw.kind === "claude" || raw.kind === "check");
+
 /** One JSON line per record in `<dir>/<ws>.jsonl`. A line is one `appendFileSync`, so concurrent writers do not interleave. */
 export function fileStore(dir: string, maxBytes = MAX_FILE_BYTES): HistoryStore {
-  const file = (ws: string) => join(dir, `${safeName(ws)}.jsonl`);
+  const file = (ws: string) => historyFile(ws, dir);
 
   const parse = (text: string): HistoryRecord[] =>
     text.split("\n").flatMap((line) => {
       if (!line) return [];
 
       try {
-        return [JSON.parse(line) as HistoryRecord];
+        const raw = parseJson(line);
+
+        return isHistoryRecord(raw) ? [raw] : [];
       } catch {
         return [];
       }
@@ -255,6 +262,9 @@ export function fileStore(dir: string, maxBytes = MAX_FILE_BYTES): HistoryStore 
 
 export const historyDir = () => join(metaDir(), "history");
 
+/** The file `fileStore` keeps `ws`'s records in. */
+export const historyFile = (ws: string, dir = historyDir()) => join(dir, `${safeName(ws)}.jsonl`);
+
 /** The store in use. The server, when it lands, is returned here. */
 export const historyStore = (): HistoryStore => fileStore(historyDir());
 
@@ -263,7 +273,7 @@ export interface HookPayload {
   hook_event_name?: string;
   tool_name?: string;
   tool_use_id?: string;
-  tool_input?: { command?: unknown; skill?: unknown };
+  tool_input?: JsonObject;
 }
 
 /** The record for a Claude hook payload, or undefined for an event that is not recorded. */
@@ -272,19 +282,40 @@ export function claudeRecord(input: HookPayload, at = Date.now()): ClaudeRecord 
 
   if (!event) return undefined;
   const tool = event === "PreToolUse" || event === "PostToolUse" || event === "PostToolUseFailure" ? input.tool_name : undefined;
-  const command = tool === "Bash" && typeof input.tool_input?.command === "string" ? input.tool_input.command : undefined;
-  const skill = tool === "Skill" && typeof input.tool_input?.skill === "string" ? input.tool_input.skill.slice(0, 80) : undefined;
+  const text = input.tool_input?.command;
+  const command = tool === "Bash" && isJsonString(text) ? text : undefined;
+  const skillName = input.tool_input?.skill;
+  const skill = tool === "Skill" && isJsonString(skillName) ? skillName.slice(0, 80) : undefined;
   const label = command === undefined ? skill : bashLabel(command) || undefined;
+  const record: ClaudeRecord = { kind: "claude", at, event };
 
-  return {
-    kind: "claude",
-    at,
-    event,
-    ...(tool ? { tool } : {}),
-    ...(tool && input.tool_use_id ? { id: input.tool_use_id } : {}),
-    ...(command === undefined ? {} : { cls: classifyCommand(command) }),
-    ...(label ? { label } : {}),
-  };
+  if (tool) record.tool = tool;
+
+  if (tool && input.tool_use_id) record.id = input.tool_use_id;
+
+  if (command !== undefined) record.cls = classifyCommand(command);
+
+  if (label) record.label = label;
+
+  return record;
+}
+
+/** A tool call that has started and not yet finished. */
+interface OpenCall {
+  at: number;
+  tool: string;
+  cls?: CommandClass;
+  label?: string;
+}
+
+function openCall(r: ClaudeRecord): OpenCall {
+  const call: OpenCall = { at: r.at, tool: r.tool ?? "?" };
+
+  if (r.cls) call.cls = r.cls;
+
+  if (r.label) call.label = r.label;
+
+  return call;
 }
 
 export interface Tally {
@@ -388,7 +419,7 @@ export interface Summary {
 /** A summary with nothing in it. */
 export const emptySummary = (): Summary => ({ sessions: 0, turns: 0, turnMs: 0, modelMs: 0, toolMs: 0, permissionMs: 0, userMs: 0, awayMs: 0, tools: {}, bash: {}, commands: {}, skills: {}, checks: {}, groups: {} });
 
-const addTally = <T extends Tally>(into: Record<string, T>, key: string, t: T, join: (a: T, b: T) => T) => {
+const addTally = <T extends Tally>(into: Partial<Record<string, T>>, key: string, t: T, join: (a: T, b: T) => T) => {
   const prev = into[key];
   into[key] = prev ? join(prev, t) : { ...t };
 };
@@ -400,7 +431,7 @@ export function mergeSummaries(list: readonly Summary[]): Summary {
   const out = emptySummary();
 
   for (const s of list) {
-    out.sessions += s.sessions ?? 0;
+    out.sessions += s.sessions;
     out.turns += s.turns;
     out.turnMs += s.turnMs;
     out.modelMs += s.modelMs;
@@ -411,14 +442,14 @@ export function mergeSummaries(list: readonly Summary[]): Summary {
 
     for (const [k, t] of Object.entries(s.tools)) addTally(out.tools, k, t, plus);
 
-    for (const [k, t] of Object.entries(s.skills ?? {})) addTally(out.skills, k, t, plus);
+    for (const [k, t] of Object.entries(s.skills)) addTally(out.skills, k, t, plus);
 
-    for (const [k, t] of Object.entries(s.bash)) addTally(out.bash as Record<string, Tally>, k, t, plus);
+    for (const [k, t] of Object.entries(s.bash)) addTally(out.bash, k, t, plus);
 
-    for (const [k, t] of Object.entries(s.commands ?? {})) addTally(out.commands, k, t, (a, b): CommandTally => ({ ...plus(a, b), cls: a.cls, failed: a.failed + b.failed, maxMs: Math.max(a.maxMs, b.maxMs) }));
+    for (const [k, t] of Object.entries(s.commands)) addTally(out.commands, k, t, (a, b): CommandTally => ({ ...plus(a, b), cls: a.cls, failed: a.failed + b.failed, maxMs: Math.max(a.maxMs, b.maxMs) }));
 
     for (const [k, t] of Object.entries(s.checks)) {
-      if (t) addTally(out.checks as Record<string, NonNullable<typeof t>>, k, t, (a, b) => ({ ...plus(a, b), failed: a.failed + b.failed, queuedMs: a.queuedMs + b.queuedMs }));
+      if (t) addTally(out.checks, k, t, (a, b) => ({ ...plus(a, b), failed: a.failed + b.failed, queuedMs: a.queuedMs + b.queuedMs }));
     }
 
     for (const [k, g] of Object.entries(s.groups)) {
@@ -454,7 +485,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
   let turnStart: number | undefined;
   let lastStop: number | undefined;
   let notifiedAt: number | undefined;
-  const open = new Map<string, { at: number; tool: string; cls?: CommandClass; label?: string }>();
+  const open = new Map<string, OpenCall>();
   // parallel tool calls overlap, so tool time is the union of the intervals, not their sum
   const spans: [number, number][] = [];
 
@@ -486,7 +517,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
         open.clear();
         break;
       case "PreToolUse":
-        if (turnStart !== undefined && r.id) open.set(r.id, { at: r.at, tool: r.tool ?? "?", ...(r.cls ? { cls: r.cls } : {}), ...(r.label ? { label: r.label } : {}) });
+        if (turnStart !== undefined && r.id) open.set(r.id, openCall(r));
         break;
       case "Notification":
         // an idle notification after the turn ended waits on nobody

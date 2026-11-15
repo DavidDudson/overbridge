@@ -67,7 +67,11 @@ export function createTechDebtItem(provider: Provider, techDebt: string | undefi
     return provider.createItem({ ...item, labels: [...(item.labels ?? []), ...(label ? [label] : [])] });
   }
 
-  return provider.createItem({ ...item, ...(techDebt ? { parent: techDebt } : {}) });
+  const filed: NewItem = { ...item };
+
+  if (techDebt) filed.parent = techDebt;
+
+  return provider.createItem(filed);
 }
 
 /** Builds a provider for a repo's `project-management` block; `cwd` is a worktree of that repo. */

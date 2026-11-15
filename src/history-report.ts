@@ -1,4 +1,4 @@
-import { type CommandClass, emptySummary, historyStore, mergeSummaries, type HistoryStore, type RepoSummary, type Summary, summarize, summarizeRepos } from "./history";
+import { type CommandClass, historyStore, mergeSummaries, type HistoryStore, type RepoSummary, type Summary, summarize, summarizeRepos } from "./history";
 
 export { emptySummary, mergeSummaries } from "./history";
 
@@ -83,7 +83,7 @@ export interface CommandRow {
 
 /** Every command in the summary, Bash and check alike, slowest total first. */
 export function commandRows(s: Summary): CommandRow[] {
-  const bash = Object.entries(s.commands ?? {}).map(([label, c]): CommandRow => ({ source: "bash", label, cls: c.cls, count: c.count, ms: c.ms, maxMs: c.maxMs, failed: c.failed, queuedMs: 0, fulls: [] }));
+  const bash = Object.entries(s.commands).map(([label, c]): CommandRow => ({ source: "bash", label, cls: c.cls, count: c.count, ms: c.ms, maxMs: c.maxMs, failed: c.failed, queuedMs: 0, fulls: [] }));
   const checks = Object.entries(s.groups).map(([label, g]): CommandRow => ({ source: "check", label, cls: g.cls, count: g.count, ms: g.ms, maxMs: g.maxMs ?? 0, failed: g.failed, queuedMs: g.queuedMs, fulls: g.fulls }));
 
   return [...bash, ...checks].sort((a, b) => b.ms - a.ms || a.label.localeCompare(b.label));

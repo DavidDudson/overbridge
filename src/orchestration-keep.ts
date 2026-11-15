@@ -126,12 +126,18 @@ export const QUICK_EXIT_MS = 5_000;
 const QUICK_EXITS_BEFORE_BACKOFF = 3;
 const MAX_BACKOFF_MS = 30_000;
 
+/** The streak of quick exits so far and the pause before the next session starts. */
+export interface RestartPlan {
+  streak: number;
+  delayMs: number;
+}
+
 /**
  * After an orchestration tab's Claude exits having run `elapsedMs`, following `streak` quick exits in a
  * row: the new streak and how long to wait before starting a fresh session. A crashing `claude` backs off
  * (1s, 2s, 4s, up to 30s) instead of spinning.
  */
-export function restartAfter(elapsedMs: number, streak: number): { streak: number; delayMs: number } {
+export function restartAfter(elapsedMs: number, streak: number): RestartPlan {
   const next = elapsedMs < QUICK_EXIT_MS ? streak + 1 : 0;
 
   if (next < QUICK_EXITS_BEFORE_BACKOFF) {

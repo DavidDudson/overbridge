@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { gatherFacts, type GatherDeps, namedItem, type Target } from "../src/cleanup-gather";
 import { classify, CleanupReason, CleanupVerdict, PrState } from "../src/cleanup-scan";
 import { ItemStatus } from "../src/pm/provider";
+import type { Claim } from "../src/state";
 import type { RunResult } from "../src/util";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -38,22 +39,26 @@ function fakeDeps(replies: Replies, over: Partial<GatherDeps> = {}) {
 const GIT = `git -C ${WT}`;
 
 /** A clean worktree on `branch`, `ahead` commits past main, all of them on a remote. */
-const cleanGit = (branch: string, ahead = 0): Replies => ({
+const cleanGit = (branch: string, ahead = 0) => ({
   [`${GIT} branch --show-current`]: ok(branch),
   [`${GIT} status --porcelain`]: ok(),
   [`${GIT} rev-list --count origin/main..HEAD`]: ok(String(ahead)),
   [`${GIT} rev-list --count HEAD --not --remotes`]: ok("0"),
   [`${GIT} rev-parse HEAD`]: ok("abc123"),
   [`${GIT} stash list`]: ok(),
-});
+}) satisfies Replies;
 
 const prJson = (number: number, state: string, headRefName: string, title = "") => ({ number, state, headRefName, url: `https://gh.test/pull/${number}`, title });
 
-const target = (ws: string, branch?: string, pr?: number): Target => ({
-  ws,
-  orphan: false,
-  repos: [{ repo: "app", wt: WT, claim: { ...(branch ? { branch } : {}), ...(pr ? { pr } : {}) } }],
-});
+const target = (ws: string, branch?: string, pr?: number): Target => {
+  const claim: Claim = {};
+
+  if (branch) claim.branch = branch;
+
+  if (pr) claim.pr = pr;
+
+  return { ws, orphan: false, repos: [{ repo: "app", wt: WT, claim }] };
+};
 
 describe("namedItem", () => {
   test("a jira workspace is named for its ticket", () => {

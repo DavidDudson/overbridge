@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { isJsonObject, isJsonString, type JsonValue } from "./json";
 import { packageRoot } from "./paths";
 import { run } from "./util";
 
@@ -11,6 +12,18 @@ type Marketplace = { name: string; plugins: { name: string; source: string }[] }
 /** A marketplace Claude already knows, as `claude plugin marketplace list --json` prints it. */
 export type KnownMarketplace = { name: string; source: string; path?: string; repo?: string; url?: string };
 
+/** The marketplace `value` describes, or undefined when it has no name or plugin list. */
+function decodeMarketplace(value: JsonValue | undefined): Marketplace | undefined {
+  if (!isJsonObject(value) || !isJsonString(value.name) || !Array.isArray(value.plugins)) return undefined;
+  const plugins: Marketplace["plugins"] = [];
+
+  for (const p of value.plugins) {
+    if (isJsonObject(p) && isJsonString(p.name) && isJsonString(p.source)) plugins.push({ name: p.name, source: p.source });
+  }
+
+  return { name: value.name, plugins };
+}
+
 /** The overbridge marketplace shipped in the installed package, or why it can't be read. */
 function readMarketplace(root: string): Marketplace | string {
   const file = join(root, MARKETPLACE_FILE);
@@ -20,9 +33,11 @@ function readMarketplace(root: string): Marketplace | string {
   }
 
   try {
-    return JSON.parse(readFileSync(file, "utf8")) as Marketplace;
+    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+
+    return decodeMarketplace(isJsonObject(parsed) ? parsed : undefined) ?? `${file} has no marketplace name and plugin list`;
   } catch (e) {
-    return `${file} is not valid JSON: ${(e as Error).message}`;
+    return `${file} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`;
   }
 }
 
@@ -34,7 +49,7 @@ function readMarketplace(root: string): Marketplace | string {
 export function pluginSettings(root = packageRoot()) {
   const marketplace = readMarketplace(root);
 
-  if (typeof marketplace === "string") {
+  if (isJsonString(marketplace)) {
     return {};
   }
 
@@ -53,7 +68,22 @@ export function knownMarketplaces(): KnownMarketplace[] {
   }
 
   try {
-    return JSON.parse(r.stdout) as KnownMarketplace[];
+    const parsed: unknown = JSON.parse(r.stdout);
+    const known: KnownMarketplace[] = [];
+
+    for (const m of Array.isArray(parsed) ? parsed : []) {
+      if (!isJsonObject(m) || !isJsonString(m.name) || !isJsonString(m.source)) continue;
+      const entry: KnownMarketplace = { name: m.name, source: m.source };
+
+      if (isJsonString(m.path)) entry.path = m.path;
+
+      if (isJsonString(m.repo)) entry.repo = m.repo;
+
+      if (isJsonString(m.url)) entry.url = m.url;
+      known.push(entry);
+    }
+
+    return known;
   } catch {
     return [];
   }
@@ -70,7 +100,7 @@ export type PluginProblems = { errors: string[]; warnings: string[] };
 export function pluginProblems(root = packageRoot(), known: () => KnownMarketplace[] = knownMarketplaces): PluginProblems {
   const marketplace = readMarketplace(root);
 
-  if (typeof marketplace === "string") {
+  if (isJsonString(marketplace)) {
     return { errors: [`${marketplace}. Reinstall overbridge from a build that ships .claude-plugin/, plugin/ and plugin-review/.`], warnings: [] };
   }
 
@@ -100,13 +130,12 @@ export function skillDirs(): string[] {
   const dirs = [join(config, "skills")];
 
   try {
-    const installed = JSON.parse(readFileSync(join(config, "plugins", "installed_plugins.json"), "utf8")) as {
-      plugins?: Record<string, { installPath?: string }[]>;
-    };
+    const installed: unknown = JSON.parse(readFileSync(join(config, "plugins", "installed_plugins.json"), "utf8"));
+    const plugins = isJsonObject(installed) && isJsonObject(installed.plugins) ? installed.plugins : {};
 
-    for (const entries of Object.values(installed.plugins ?? {})) {
-      for (const e of entries) {
-        if (e.installPath) dirs.push(join(e.installPath, "skills"));
+    for (const entries of Object.values(plugins)) {
+      for (const e of Array.isArray(entries) ? entries : []) {
+        if (isJsonObject(e) && isJsonString(e.installPath) && e.installPath) dirs.push(join(e.installPath, "skills"));
       }
     }
   } catch {
@@ -118,11 +147,9 @@ export function skillDirs(): string[] {
 
 /** One error per required skill that no skills folder holds, each with its fix. */
 export function requiredSkillProblems(required: string[] = REQUIRED_SKILLS, dirs: string[] = skillDirs()): string[] {
-  return required
-    .filter((name) => !dirs.some((d) => existsSync(join(d, name, "SKILL.md"))))
-    .map(
-      (name) =>
-        `the '${name}' skill is not installed, and the overbridge skills depend on it. ` +
-        `Install it (a skill folder with ${name}/SKILL.md under ${dirs[0]}).`,
-    );
+  return required.flatMap((name) =>
+    dirs.some((d) => existsSync(join(d, name, "SKILL.md")))
+      ? []
+      : [`the '${name}' skill is not installed, and the overbridge skills depend on it. Install it (a skill folder with ${name}/SKILL.md under ${dirs[0]}).`],
+  );
 }

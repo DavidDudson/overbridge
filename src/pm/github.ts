@@ -2,6 +2,12 @@ import type { ProjectManagement } from "../project-config";
 import { fail, run, type RunResult } from "../util";
 import { ItemStatus, namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
 
+interface AssignedIssue {
+  number: number;
+  title: string;
+  url: string;
+}
+
 export type Runner = (cmd: string[], opts?: { cwd?: string }) => RunResult;
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
@@ -76,7 +82,7 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
       ]);
 
       if (!r.ok) fail(`github: listing assigned issues failed: ${r.stderr || r.stdout}`);
-      const rows = JSON.parse(r.stdout || "[]") as { number: number; title: string; url: string }[];
+      const rows: AssignedIssue[] = JSON.parse(r.stdout || "[]");
 
       return rows.map((i): WorkItem => ({ id: String(i.number), title: i.title, url: i.url }));
     },

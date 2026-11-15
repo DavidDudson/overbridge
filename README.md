@@ -715,6 +715,7 @@ The width (default 60) comes from the global config:
 [sidebar]
 width = 60                # 12 to 200
 motion = "while-active"   # or "off"
+layout = "auto"           # auto, compact or wide
 ```
 
 With `motion = "while-active"` (the default) a card's 🔄 becomes a clock hand turning a quarter each second, only
@@ -722,6 +723,13 @@ while its agent is working. It is computed from the clock when the frame is draw
 sidebar's existing redraw rate (once a second on the focused tab, slower on hidden ones), and the sidebar still writes only
 frames that changed. `off` keeps the glyph still. The setting is read when the pane starts; a bad value shows in the footer
 and the glyph stays still.
+
+A narrow pane (under 36 columns) under `auto`, or `layout = "compact"`, draws compact cards: no stack lines and no
+status row (a card that needs attention, such as a failed cleanup, keeps it). `wide` always draws the full card.
+
+Space expands this tab's card: the whole title, its PR numbers, the CI state and the last three tool calls (read from
+the end of the history file, only while expanded). Space again collapses it. The key legend follows the selected card: it
+adds `⚠ blocked` (or `fault`, `unsaved`, `cleanup failed`) or `✓ mergeable` where they apply, and the new-workspace prompt shows its keys when there is room.
 
 `s` opens a one-line prompt at the foot of the sidebar. Type `<repo> <id>`, such as `overbridge 79` or
 `web-monorepo ENG-123`. If the tab's workspace holds one repo, the id alone is enough; otherwise the prompt asks for

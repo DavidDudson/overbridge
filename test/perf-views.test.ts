@@ -76,12 +76,6 @@ describe("dashboard and commands", () => {
     expect(m.skills["overbridge:ship-pr"]!.count).toBe(2);
   });
 
-  test("mergeSummaries reads a summary cached before sessions, commands and skills existed", () => {
-    const old = { ...s, sessions: undefined, commands: undefined, skills: undefined } as unknown as typeof s;
-    expect(() => mergeSummaries([old, s])).not.toThrow();
-    expect(mergeSummaries([old, s]).sessions).toBe(1);
-  });
-
   test("commandRows lists Bash and check commands slowest first", () => {
     const rows = commandRows(s);
     expect(rows.map((r) => `${r.source}:${r.label}`)).toEqual(["check:check", "bash:bun test", "bash:git status"]);

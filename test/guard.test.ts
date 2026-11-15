@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { check, type HookInput } from "../src/guard";
+import type { JsonObject } from "../src/json";
 
 const ctx = { root: "/w", ws: "ws1", home: "/home/u" };
 const bash = (command: string, cwd = "/w/ws1/app"): HookInput => ({ cwd, tool_name: "Bash", tool_input: { command } });
 
-const tool = (tool_name: string, tool_input: Record<string, unknown>): HookInput => ({
+const tool = (tool_name: string, tool_input: JsonObject): HookInput => ({
   cwd: "/w/ws1/app",
   tool_name,
   tool_input,

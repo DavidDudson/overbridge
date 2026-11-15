@@ -25,7 +25,7 @@ export function bar(part: number, whole: number): string {
   return "█".repeat(cells) + "░".repeat(BAR_WIDTH_CELLS - cells);
 }
 
-const byMs = <T extends Tally>(o: Record<string, T>) => Object.entries(o).sort(([a, x], [b, y]) => y.ms - x.ms || y.count - x.count || a.localeCompare(b));
+const byMs = <T extends Tally>(o: Partial<Record<string, T>>): [string, T][] => Object.entries(o).flatMap(([k, t]): [string, T][] => (t ? [[k, t]] : [])).sort(([a, x], [b, y]) => y.ms - x.ms || y.count - x.count || a.localeCompare(b));
 
 const mean = (t: Tally) => (t.count > 0 ? t.ms / t.count : 0);
 
@@ -63,7 +63,7 @@ export function dashboardLines(s: Summary, workspaces: number, commands: readonl
 
   for (const [name, t] of tools.slice(0, 10)) lines.push(tallyRow(name, 18, t, toolTotal));
 
-  const bash = byMs(s.bash as Record<string, Tally>);
+  const bash = byMs(s.bash);
 
   if (bash.length) {
     lines.push("");
@@ -83,7 +83,7 @@ export function dashboardLines(s: Summary, workspaces: number, commands: readonl
     for (const [name, g] of groups.slice(0, 6)) lines.push(`${tallyRow(name, 18, g, checks.ms)}${g.failed ? colorize(`  ${g.failed} failed`, "red") : ""}${g.queuedMs > 0 ? dim(`  queued ${duration(g.queuedMs)}`) : ""}`);
   }
 
-  const skills = byMs(s.skills ?? {});
+  const skills = byMs(s.skills);
 
   if (skills.length) {
     lines.push("");
