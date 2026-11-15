@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recordTurn, turnPath } from "../src/agent-state";
 import { COMPACT_SHOWN_MS, CONTEXT_STALE_MS, cachedRead, contextPath, gaugeText, readGauge, readReceipt, receiptText } from "../src/gauge";
+import { isNumber, type Json } from "../src/util";
 import { type Entry, entryHeight, entryLines, Section, withReceipt } from "../src/sidebar";
 
 let meta: string;
@@ -68,7 +69,7 @@ function readFileSyncOrNull(path: string): string | null {
   try {
     return readFileSync(path, "utf8");
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (e instanceof Error && "code" in e && e.code === "ENOENT") return null;
     throw e;
   }
 }
@@ -106,7 +107,7 @@ describe("cachedRead", () => {
     writeFileSync(file, "1");
     utimesSync(file, 100, 100);
     let parses = 0;
-    const parse = (raw: unknown) => (parses++, raw as number);
+    const parse = (raw: Json) => (parses++, isNumber(raw) ? raw : undefined);
     expect(cachedRead(file, parse)).toBe(1);
     expect(cachedRead(file, parse)).toBe(1);
     expect(parses).toBe(1);
@@ -119,9 +120,9 @@ describe("cachedRead", () => {
   test("a removed file reads as none", () => {
     const file = join(meta, "c.json");
     writeFileSync(file, "1");
-    expect(cachedRead(file, (r) => r as number)).toBe(1);
+    expect(cachedRead(file, (r) => (isNumber(r) ? r : undefined))).toBe(1);
     rmSync(file);
-    expect(cachedRead(file, (r) => r as number)).toBeUndefined();
+    expect(cachedRead(file, (r) => (isNumber(r) ? r : undefined))).toBeUndefined();
   });
 });
 

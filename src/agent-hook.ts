@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { type AgentState, agentStatePath, TOOL_NAME, CONTINUING_END_REASONS, clearSubagent, clearSubagents, markSubagent, readAgentState, recordTurn } from "./agent-state";
 import { backgroundShells } from "./bg-tasks";
+import { isJsonObject, numberField, parseJson } from "./json";
 import { claudeRecord, type HookPayload, type HistoryStore, historyStore } from "./history";
 import { envVar, ORCHESTRATION_ENV, root, selfCommand, silenceLegacyWarnings } from "./paths";
 import { notifyRefresh } from "./server-net";
@@ -14,7 +15,7 @@ import { notifyRefresh } from "./server-net";
  */
 
 /** Hook event → state. Events not listed leave the state alone. */
-export const EVENT_STATE: Record<string, AgentState> = {
+export const EVENT_STATE = {
   SessionStart: "idle",
   UserPromptSubmit: "busy",
   PostToolUse: "busy",
@@ -24,7 +25,9 @@ export const EVENT_STATE: Record<string, AgentState> = {
   PermissionRequest: "waiting",
   Stop: "done",
   SessionEnd: "end",
-};
+} satisfies Record<string, AgentState>;
+
+const EVENT_STATES: ReadonlyMap<string, AgentState> = new Map(Object.entries(EVENT_STATE));
 
 /** What a Notification hook payload says about why it fired. */
 export interface NotificationInfo {
@@ -64,7 +67,7 @@ export function nextState(
 
   if (event === "Notification") return current === "empty" || !isBlockingNotification(note) ? undefined : "waiting";
 
-  return EVENT_STATE[event];
+  return EVENT_STATES.get(event);
 }
 
 /** Notification types that block Claude until the user answers. Others (idle prompt, auth success) are news, not a wait. */
@@ -137,24 +140,43 @@ const ageMs = (path: string, now: number): number => {
   }
 };
 
+interface HookRecord {
+  state: AgentState;
+  at: number;
+  since: number;
+  tool?: string;
+  bg?: number[];
+  reason?: string;
+}
+
 /** Record `state` for `ws` unless it is the same state written moments ago. */
 export function recordState(metaDir: string, ws: string, state: AgentState, now = Date.now(), bg: number[] = [], endReason?: string, tool?: string) {
   const file = agentStatePath(metaDir, ws);
   let since = now;
 
   try {
-    const old = JSON.parse(readFileSync(file, "utf8")) as { state?: string; at?: number; since?: number };
+    const old = parseJson(readFileSync(file, "utf8"));
 
-    if (old.state === state) since = old.since ?? old.at ?? now;
+    if (isJsonObject(old) && old.state === state) {
+      const at = numberField(old, "at");
+      since = numberField(old, "since") ?? at ?? now;
 
-    if (old.state === state && bg.length === 0 && !(old as { bg?: unknown[] }).bg?.length && now - (old.at ?? 0) < REWRITE_MS) return;
+      if (bg.length === 0 && !(Array.isArray(old.bg) && old.bg.length) && now - (at ?? 0) < REWRITE_MS) return;
+    }
   } catch {
     // none yet, or unreadable: write it
   }
 
   mkdirSync(join(metaDir, "agent"), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ state, at: now, since, ...(tool ? { tool } : {}), ...(bg.length ? { bg } : {}), ...(endReason === undefined ? {} : { reason: endReason }) }));
+  const record: HookRecord = { state, at: now, since };
+
+  if (tool) record.tool = tool;
+
+  if (bg.length) record.bg = bg;
+
+  if (endReason !== undefined) record.reason = endReason;
+  writeFileSync(tmp, JSON.stringify(record));
   renameSync(tmp, file);
 }
 

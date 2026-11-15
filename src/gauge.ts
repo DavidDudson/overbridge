@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { metaDir } from "./paths";
 import { type TurnSummary, turnPath } from "./agent-state";
 import { duration } from "./history-report";
+import { isNumber, isRecord, type Json } from "./util";
 
 /** Per-card context gauge and last-turn receipt, both read through `cachedRead`: the formats are in the README. */
 
@@ -15,10 +16,17 @@ const GAUGE_CELLS = 5;
 
 export const contextPath = (meta: string, ws: string) => join(meta, "context", `${ws}.json`);
 
-const cache = new Map<string, { mtimeMs: number; value: unknown }>();
+/** One cached read: the file's mtime, the parser that produced `value`, and what it returned. */
+interface CachedRead {
+  mtimeMs: number;
+  parse: object;
+  value: unknown;
+}
+
+const cache = new Map<string, CachedRead>();
 
 /** `parse` of the file at `path`, re-read only when its mtime changed; undefined when it is missing or unreadable. */
-export function cachedRead<T>(path: string, parse: (raw: unknown) => T | undefined): T | undefined {
+export function cachedRead<T>(path: string, parse: (raw: Json) => T | undefined): T | undefined {
   let mtimeMs: number;
 
   try {
@@ -31,7 +39,11 @@ export function cachedRead<T>(path: string, parse: (raw: unknown) => T | undefin
 
   const hit = cache.get(path);
 
-  if (hit?.mtimeMs === mtimeMs) return hit.value as T | undefined;
+  if (hit?.mtimeMs === mtimeMs && hit.parse === parse) {
+    // SAFETY: the entry is only reused when `hit.parse === parse`, so `hit.value` is what this very `parse` returned
+    return hit.value as T | undefined;
+  }
+
   let value: T | undefined;
 
   try {
@@ -40,7 +52,7 @@ export function cachedRead<T>(path: string, parse: (raw: unknown) => T | undefin
     value = undefined;
   }
 
-  cache.set(path, { mtimeMs, value });
+  cache.set(path, { mtimeMs, parse, value });
 
   return value;
 }
@@ -52,22 +64,30 @@ export interface Gauge {
   compacted: boolean;
 }
 
-const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+const num = (v: Json | undefined): number | undefined => (isNumber(v) && Number.isFinite(v) ? v : undefined);
 
-const parseContext = (raw: unknown): { at: number; pct: number } | undefined => {
-  const r = raw as { at?: unknown; pct?: unknown } | null;
-  const at = num(r?.at);
-  const pct = num(r?.pct);
+const parseContext = (raw: Json): { at: number; pct: number } | undefined => {
+  if (!isRecord(raw)) return undefined;
+  const at = num(raw.at);
+  const pct = num(raw.pct);
 
   return at === undefined || pct === undefined ? undefined : { at, pct: Math.min(100, Math.max(0, Math.round(pct))) };
 };
 
 const TURN_KEYS = ["startedAt", "endedAt", "edits", "errors", "compactedAt"] as const;
 
-const parseTurn = (raw: unknown): TurnSummary => {
-  const r = (raw ?? {}) as Record<string, unknown>;
+const parseTurn = (raw: Json): TurnSummary => {
+  const turn: TurnSummary = {};
 
-  return Object.fromEntries(TURN_KEYS.flatMap((k) => (num(r[k]) === undefined ? [] : [[k, r[k]]])));
+  if (!isRecord(raw)) return turn;
+
+  for (const k of TURN_KEYS) {
+    const n = num(raw[k]);
+
+    if (n !== undefined) turn[k] = n;
+  }
+
+  return turn;
 };
 
 /** The turn summary of `ws`, if the hook has written one. */

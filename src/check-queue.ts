@@ -6,7 +6,7 @@ import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
 import type { ShellInvocation } from "./shell";
-import { exec, log } from "./util";
+import { exec, isNumber, isRecord, log } from "./util";
 
 /**
  * `overbridge check`: heavy commands from every workspace, started in queue order while the load leaves room.
@@ -44,6 +44,18 @@ export interface Ticket {
   runningSinceMs?: number;
 }
 
+/** What the watchdog of a running command has seen: why it stopped it, and the last CPU sample. */
+interface RunWatch {
+  stopped?: StopReason;
+  sample?: CpuSample;
+  sampledMs: number;
+}
+
+/** The group leader of the command this process is running, so a signal can reach it. */
+interface HeldRun {
+  runPid?: number;
+}
+
 const TURN_POLL_MS = 1_000;
 
 /** How long the 1-minute load average takes to show most of a new run. */
@@ -58,8 +70,7 @@ export const ticketName = (t: Pick<Ticket, "queuedAtMs" | "pid">) => `${String(t
 
 export const byQueueOrder = (a: Ticket, b: Ticket) => a.queuedAtMs - b.queuedAtMs || a.pid - b.pid;
 
-const isTicket = (v: unknown): v is Ticket =>
-  typeof v === "object" && v !== null && Number.isInteger((v as Ticket).pid) && Number.isFinite((v as Ticket).queuedAtMs);
+const isTicket = (v: unknown): v is Ticket => isRecord(v) && Number.isInteger(v.pid) && Number.isFinite(v.queuedAtMs);
 
 /** Every readable ticket, in queue order. A torn or foreign file is skipped. */
 export function readTickets(dir = queueDir()): Ticket[] {
@@ -84,8 +95,13 @@ export function readTickets(dir = queueDir()): Ticket[] {
     .toSorted(byQueueOrder);
 }
 
+export interface SplitQueue {
+  live: Ticket[];
+  dead: Ticket[];
+}
+
 /** Tickets whose owner is alive, in queue order, and the ones left by dead owners. */
-export function splitQueue(tickets: Ticket[], alive: (pid: number) => boolean): { live: Ticket[]; dead: Ticket[] } {
+export function splitQueue(tickets: Ticket[], alive: (pid: number) => boolean): SplitQueue {
   return { live: tickets.filter((t) => alive(t.pid)), dead: tickets.filter((t) => !alive(t.pid)) };
 }
 
@@ -150,8 +166,13 @@ export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machin
   return loadAllows(machine.load1 + unsettledLoad(ahead, nowMs), machine.cores, settings.maxLoadPercent) ? Gate.Start : Gate.Load;
 }
 
+export interface QueueView {
+  running: Ticket[];
+  waiting: Ticket[];
+}
+
 /** The running tickets and the ones waiting, each in queue order, for the sidebar. */
-export function queueView(tickets: Ticket[]): { running: Ticket[]; waiting: Ticket[] } {
+export function queueView(tickets: Ticket[]): QueueView {
   return { running: tickets.filter(isRunning), waiting: tickets.filter((t) => !isRunning(t)) };
 }
 
@@ -284,6 +305,8 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
   }
 }
 
+const signalExitOf = (signal: NodeJS.Signals | number) => (isNumber(signal) ? 128 + signal : signalExit(signal));
+
 const signalExit = (signal: NodeJS.Signals) => 128 + (constants.signals[signal] ?? 0);
 
 /** Run the command in its own process group and watch it until it exits, times out or stalls. */
@@ -302,7 +325,7 @@ async function runHeld(inv: ShellInvocation, me: Ticket, file: string, settings:
   const startedMs = Date.now();
   writeTicket(file, { ...me, runPid: child.pid, runningSinceMs: startedMs });
 
-  const watch: { stopped?: StopReason; sample?: CpuSample; sampledMs: number } = { sampledMs: startedMs };
+  const watch: RunWatch = { sampledMs: startedMs };
 
   const stop = (reason: StopReason, message: string) => {
     if (watch.stopped) {
@@ -342,7 +365,7 @@ async function runHeld(inv: ShellInvocation, me: Ticket, file: string, settings:
     return exitFor(watch.stopped);
   }
 
-  return child.signalCode ? signalExit(child.signalCode as NodeJS.Signals) : code;
+  return child.signalCode ? signalExitOf(child.signalCode) : code;
 }
 
 /**
@@ -360,7 +383,7 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
   const file = join(dir, ticketName(me));
   writeTicket(file, me);
 
-  const held: { runPid?: number } = {};
+  const held: HeldRun = {};
   const leave = () => rmSync(file, { force: true });
 
   const onSignal = (signal: NodeJS.Signals) => {

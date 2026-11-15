@@ -1,5 +1,6 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
-import { type HistoryRecord, historyFile } from "./history";
+import { historyFile } from "./history";
+import { isJsonObject, numberField, parseJson, stringField } from "./json";
 
 /** One recent tool call. */
 export interface ToolCall {
@@ -17,16 +18,23 @@ const label = (tool: string, cls: string | undefined): string => `${tool}${cls &
 export function parseToolCalls(text: string, n: number): ToolCall[] {
   const calls: ToolCall[] = [];
   const lines = text.split("\n");
+
   for (let i = lines.length - 1; i >= 0 && calls.length < n; i--) {
     try {
-      const r = JSON.parse(lines[i]!) as Partial<HistoryRecord>;
-      if (r.kind === "claude" && r.event === "PreToolUse" && r.tool && typeof r.at === "number") {
-        calls.push({ label: label(r.tool, r.cls), at: r.at });
+      const r = parseJson(lines[i]!);
+
+      if (!isJsonObject(r)) continue;
+      const tool = stringField(r, "tool");
+      const at = numberField(r, "at");
+
+      if (r.kind === "claude" && r.event === "PreToolUse" && tool && at !== undefined) {
+        calls.push({ label: label(tool, stringField(r, "cls")), at });
       }
     } catch {
       // a half-written or cut line
     }
   }
+
   return calls;
 }
 
@@ -38,26 +46,32 @@ const cache = new Map<string, { mtimeMs: number; size: number; ino: number; call
  */
 export function recentToolCalls(ws: string, n = 3, file = historyFile(ws)): ToolCall[] {
   let stat;
+
   try {
     stat = statSync(file);
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if (e instanceof Error && "code" in e && e.code === "ENOENT") return [];
     throw e;
   }
+
   const { mtimeMs, size, ino } = stat;
   const hit = cache.get(file);
+
   if (hit && hit.mtimeMs === mtimeMs && hit.size === size && hit.ino === ino) return hit.calls;
   const len = Math.min(size, TAIL_BYTES);
   const buf = Buffer.alloc(len);
   const fd = openSync(file, "r");
   let got = 0;
+
   try {
     for (let n = 1; n > 0 && got < len; got += n) n = readSync(fd, buf, got, len - got, size - len + got);
   } finally {
     closeSync(fd);
   }
+
   const text = buf.subarray(0, got).toString("utf8");
   const calls = parseToolCalls(size > len ? text.slice(text.indexOf("\n") + 1) : text, n);
   cache.set(file, { mtimeMs, size, ino, calls });
+
   return calls;
 }

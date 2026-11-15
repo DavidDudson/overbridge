@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadRootLayers } from "./project-config";
 import { metaDir, selfCommand } from "./paths";
-import { run, spawnCwd, type RunResult } from "./util";
+import { errorMessage, run, spawnCwd, type RunResult } from "./util";
 import { bold, boxBottom, boxRow, boxTop, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN } from "./term";
 
 /** The two PR lists in the orchestration tabs: PRs you opened, and PRs waiting for your review. */
@@ -74,7 +74,9 @@ interface SearchHit {
 
 /** Rows from `gh search prs --json` output. */
 export function rowsFromSearch(json: string): PrRow[] {
-  return (JSON.parse(json) as SearchHit[]).map((h) => ({
+  const hits: SearchHit[] = JSON.parse(json);
+
+  return hits.map((h) => ({
     repo: h.repository.nameWithOwner,
     number: h.number,
     title: h.title,
@@ -104,7 +106,7 @@ export function refreshPrList(kind: PrListKind, now = Date.now()): PrListCache {
   try {
     cache = { at: now, rows: readPrs(kind, orgs) };
   } catch (e) {
-    cache = { ...readPrList(kind), at: now, error: (e as Error).message };
+    cache = { ...readPrList(kind), at: now, error: errorMessage(e) };
   }
 
   writePrList(kind, cache);

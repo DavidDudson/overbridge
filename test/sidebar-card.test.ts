@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { JsonValue } from "../src/json";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,10 +17,12 @@ const stacked = entry("a", { label: "12 Add dark mode to the settings page", sta
 
 let tmp: string;
 const savedRoot = process.env.OVERBRIDGE_ROOT;
+
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), "overbridge-card-"));
   process.env.OVERBRIDGE_ROOT = tmp;
 });
+
 afterEach(() => {
   savedRoot === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = savedRoot);
   rmSync(tmp, { recursive: true, force: true });
@@ -101,7 +104,8 @@ describe("context legend", () => {
   });
 
   test.each([["fault", "fault"], ["error", "cleanup failed"], ["blocked", "blocked"], ["unsaved", "unsaved"]] as const)("a card with %s says %s, and keeps its status row when compact", (flag, word) => {
-    const e = entry("a", { [flag]: flag === "blocked" ? "merged-unsaved" : flag === "unsaved" ? true : "x" } as Partial<Entry>);
+    const over: Partial<Entry> = flag === "fault" ? { fault: "x" } : flag === "error" ? { error: "x" } : flag === "blocked" ? { blocked: "merged-unsaved" } : { unsaved: true };
+    const e = entry("a", over);
     expect(needsAttention(e)).toBe(true);
     expect(contextLegend(e, base, false)).toStartWith(`⚠ ${word}`);
     expect(entryHeight(e, 0, 30, { compact: true })).toBe(2);
@@ -133,8 +137,9 @@ describe("expanded card PR and CI rows", () => {
 });
 
 describe("prsOf", () => {
-  const pr = (over: object) => ({ label: "p", url: "u", pr: { number: 5, stack: [5], ...over } });
+  const pr = (over: { claimed?: boolean }) => ({ label: "p", url: "u", pr: { number: 5, stack: [5], ...over } });
   test("keeps claimed PRs with their status, skips unclaimed ones and links with no PR", () => {
+    // SAFETY: the fixture links carry only the fields prsOf reads.
     const links = [pr({ claimed: false }), { label: "item", url: "u" }, { ...pr({}), status: "mergeable" }, pr({ claimed: true })] as never;
     expect(prsOf({ links })).toEqual([{ number: 5, status: "mergeable" }, { number: 5, status: "unknown" }]);
   });
@@ -153,7 +158,7 @@ describe("viewFor", () => {
 });
 
 describe("recent tool calls", () => {
-  const line = (r: object) => JSON.stringify({ kind: "claude", ...r });
+  const line = (r: Record<string, JsonValue>) => JSON.stringify({ kind: "claude", ...r });
   const text = [line({ at: 1, event: "PreToolUse", tool: "Read" }), line({ at: 2, event: "PostToolUse", tool: "Read" }), line({ at: 3, event: "PreToolUse", tool: "Bash", cls: "test" }), "{cut", line({ at: 4, event: "PreToolUse", tool: "Edit" }), line({ at: 5, event: "Stop" })].join("\n");
 
   test("takes the newest PreToolUse records, newest first, skipping bad lines", () => {
@@ -196,9 +201,11 @@ describe("no row spills past the pane", () => {
     entry("c", { label: "supercalifragilisticexpialidocious-unbroken-word", state: "done", blocked: "merged-unsaved", prs: [{ number: 7, status: "mergeable" }] }),
     entry("d", { fault: "bad cache", label: "d" }),
   ];
+
   const limits: Limits = { at: 1, fiveHour: { pct: 91, resetsAt: 9e9 }, weekly: { pct: 40, resetsAt: 9e9 } };
   const queueText = ["▶ ws 12s npm run a-very-long-command-line-indeed", "⧗ 3 waiting: aaaa bbbb cccc"];
   const queueFor = (width: number) => queueText.map((q) => fit(q, width - 4));
+
   const footers = [
     undefined,
     EMPTY_PROMPT,
@@ -212,10 +219,14 @@ describe("no row spills past the pane", () => {
       test(`${compact ? "compact" : "wide"} at ${width} columns`, () => {
         for (const current of [0, 1, 2, 3]) {
           for (const expanded of [false, true]) {
-            const view: CardView = { compact, ...(expanded ? { expanded: { tab: list[current]!.tab, now: 10_000, toolCalls: [{ label: "Bash:typecheck", at: 1000 }, { label: "mcp__server__a_long_tool_name", at: 2000 }] } } : {}) };
+            const view: CardView = { compact };
+
+            if (expanded) view.expanded = { tab: list[current]!.tab, now: 10_000, toolCalls: [{ label: "Bash:typecheck", at: 1000 }, { label: "mcp__server__a_long_tool_name", at: 2000 }] };
+
             for (const footer of footers) {
               const rows = renderSidebar(list, current, 0, 30, width, limits, 5e8, "v1.2.3-a-long-version", queueFor(width), footer, "", view);
               expect(rows).toHaveLength(30);
+
               for (const r of rows) expect(textWidth(plain(r))).toBe(width);
             }
           }

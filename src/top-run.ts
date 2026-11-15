@@ -8,7 +8,7 @@ import { togglePane } from "./panes";
 import { mergePr, setReady } from "./pr-actions";
 import { ALT_COMMANDS, type ActDeps, activate, applyOptimistic, type PrChange, type Button, CLEANUP_ARM_MS, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
 import { ENTER_SCREEN, LEAVE_SCREEN } from "./term";
-import { log, spawnCwd } from "./util";
+import { errorMessage, log, spawnCwd } from "./util";
 import { subscribeEvents } from "./events-client";
 import { createPainter, isFocused, readView, shouldPoll } from "./zellij-view";
 
@@ -53,7 +53,7 @@ export async function topPanel(wsOpt?: string) {
       try {
         Bun.spawn({ cmd: ["sh", "-c", command], cwd: dir, env: { ...process.env, ...env }, stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
       } catch (e) {
-        note = (e as Error).message;
+        note = errorMessage(e);
       }
     },
     spawn: (cmd) => {
@@ -121,7 +121,10 @@ export async function topPanel(wsOpt?: string) {
   const painter = createPainter((text) => process.stdout.write(text));
 
   const draw = () => {
-    frame = layoutTop({ ...snap, ...(note ? { message: note } : {}) }, process.stdout.columns ?? 80, process.stdout.rows ?? 0);
+    const shown: TopSnapshot = { ...snap };
+
+    if (note) shown.message = note;
+    frame = layoutTop(shown, process.stdout.columns ?? 80, process.stdout.rows ?? 0);
     painter.paint(paintTop(frame, cursor));
   };
 

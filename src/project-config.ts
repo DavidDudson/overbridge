@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { repoOf, root, worktreePath } from "./paths";
 import { WORKLIST_SCOPES, type WorklistScope } from "./pm/board-github";
 import type { WorkStatus } from "./pm/worklist";
-import { fail, isRecord } from "./util";
+import { errorMessage, fail, isBoolean, isNumber, isRecord, isString, type Json, type JsonObject } from "./util";
 
 /** Per-repo rules live in `overbridge.yml` at the repo (worktree) root. */
 export const CONFIG_FILE = "overbridge.yml";
@@ -51,7 +51,7 @@ export const WORKSPACE_PLACEHOLDERS = ["id", "number", "repo"] as const;
 /** Problems with a name template: unknown placeholders, and a missing `{id}`/`{number}` when one is required. */
 export function templateProblems(template: string, allowed: readonly string[], needsId: boolean): string[] {
   const used = [...template.matchAll(/\{([^}]*)\}/g)].map((m) => m[1]!);
-  const problems = used.filter((p) => !allowed.includes(p)).map((p) => `unknown placeholder {${p}} (allowed: ${allowed.map((a) => `{${a}}`).join(", ")})`);
+  const problems = used.flatMap((p) => (allowed.includes(p) ? [] : [`unknown placeholder {${p}} (allowed: ${allowed.map((a) => `{${a}}`).join(", ")})`]));
 
   if (needsId && !used.some((p) => p === "id" || p === "number")) problems.push("needs {id} or {number}, so a branch names its item");
 
@@ -169,7 +169,7 @@ export interface ProjectConfig {
   /** Top panel buttons, from the root `config.yml` only. */
   buttons: ButtonSpec[];
   /** Top-level `x-<name>` keys, as written. Present only when there are any. */
-  extensions?: Record<string, unknown>;
+  extensions?: Record<string, Json>;
 }
 
 export const defaultConfig = (): ProjectConfig => ({
@@ -234,14 +234,14 @@ class Problems {
     this.list.push(path ? `${path}: ${message}` : message);
   }
   /** Report every key of `obj` not in `allowed`, suggesting the nearest valid key. */
-  unknownKeys(obj: Record<string, unknown>, allowed: readonly string[], path: string, extensions = false) {
+  unknownKeys(obj: JsonObject, allowed: readonly string[], path: string, extensions = false) {
     for (const key of Object.keys(obj)) {
       if (allowed.includes(key) || (extensions && isExtensionKey(key))) continue;
       const hint = suggest(key, allowed);
       this.add(path ? `${path}.${key}` : key, `unknown key${hint ? `, did you mean '${hint}'?` : ` (allowed: ${allowed.join(", ")})`}`);
     }
   }
-  string(obj: Record<string, unknown>, key: string, path: string, required: boolean): string | undefined {
+  string(obj: JsonObject, key: string, path: string, required: boolean): string | undefined {
     const at = path ? `${path}.${key}` : key;
     const v = obj[key];
 
@@ -252,9 +252,9 @@ class Problems {
     }
 
     // YAML parses `project: 123` as a number; accept it for ids and project numbers.
-    if (typeof v === "number") return String(v);
+    if (isNumber(v)) return String(v);
 
-    if (typeof v !== "string" || v === "") {
+    if (!isString(v) || v === "") {
       this.add(at, "expected a non-empty string");
 
       return;
@@ -263,7 +263,7 @@ class Problems {
     return v;
   }
   /** A list of non-empty strings, or undefined when the key is absent. */
-  stringList(obj: Record<string, unknown>, key: string, path: string): string[] | undefined {
+  stringList(obj: JsonObject, key: string, path: string): string[] | undefined {
     const at = path ? `${path}.${key}` : key;
     const v = obj[key];
 
@@ -277,39 +277,41 @@ class Problems {
 
     const out: string[] = [];
     v.forEach((item, i) => {
-      if (typeof item !== "string" || item === "") this.add(`${at}[${i}]`, "expected a non-empty string");
+      if (!isString(item) || item === "") this.add(`${at}[${i}]`, "expected a non-empty string");
       else out.push(item);
     });
 
     return out;
   }
   /** A whole number from 1 to `max`, or undefined when the key is absent. */
-  positiveInt(obj: Record<string, unknown>, key: string, path: string, max = Number.MAX_SAFE_INTEGER): number | undefined {
+  positiveInt(obj: JsonObject, key: string, path: string, max = Number.MAX_SAFE_INTEGER): number | undefined {
     const at = path ? `${path}.${key}` : key;
     const v = obj[key];
 
     if (v === undefined || v === null) return;
 
-    if (!Number.isInteger(v) || (v as number) < 1 || (v as number) > max) {
+    if (!isNumber(v) || !Number.isInteger(v) || v < 1 || v > max) {
       this.add(at, `expected a whole number from 1${max === Number.MAX_SAFE_INTEGER ? " up" : ` to ${max}`} (got ${JSON.stringify(v)})`);
 
       return;
     }
 
-    return v as number;
+    return v;
   }
   oneOf<T extends string>(value: string | undefined, choices: readonly T[], path: string): T | undefined {
     if (value === undefined) return;
 
-    if ((choices as readonly string[]).includes(value)) return value as T;
+    const choice = choices.find((c) => c === value);
+
+    if (choice !== undefined) return choice;
     this.add(path, `expected one of ${choices.join(", ")} (got "${value}")`);
   }
 }
 
 const APP_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const portOk =(n: unknown): n is number => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 65535;
+const portOk = (n: unknown): n is number => isNumber(n) && Number.isInteger(n) && n >= 1 && n <= 65535;
 
-function validateApp(entry: Record<string, unknown>, path: string, p: Problems): AppSpec | undefined {
+function validateApp(entry: JsonObject, path: string, p: Problems): AppSpec | undefined {
   p.unknownKeys(entry, APP_KEYS, path);
   const id = p.string(entry, "id", path, true);
 
@@ -356,7 +358,7 @@ function validateApp(entry: Record<string, unknown>, path: string, p: Problems):
   let open = false;
 
   if (entry.open !== undefined) {
-    if (typeof entry.open !== "boolean") p.add(`${path}.open`, "expected true or false");
+    if (!isBoolean(entry.open)) p.add(`${path}.open`, "expected true or false");
     else open = entry.open;
   }
 
@@ -370,18 +372,15 @@ function validateApp(entry: Record<string, unknown>, path: string, p: Problems):
 
   if (!id || !start) return;
 
-  return {
-    id,
-    label: label ?? id,
-    dir: dir ?? ".",
-    start,
-    ...(stop ? { stop } : {}),
-    ...(prepare ? { prepare } : {}),
-    ports,
-    ...(ready ? { ready } : {}),
-    open,
-    when,
-  };
+  const app: AppSpec = { id, label: label ?? id, dir: dir ?? ".", start, ports, open, when };
+
+  if (stop) app.stop = stop;
+
+  if (prepare) app.prepare = prepare;
+
+  if (ready) app.ready = ready;
+
+  return app;
 }
 
 const ROOT_ONLY = "only allowed in the root config.yml, so a checked-out branch can't run commands";
@@ -416,7 +415,7 @@ export function isPrunablePath(path: string): boolean {
  * one layer of a merged config, so a missing required key is not an error. With `root`, the root-only keys
  * (`hooks`, `buttons`) are allowed.
  */
-export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = false, root = false } = {}): ProjectConfig {
+export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { partial = false, root = false } = {}): ProjectConfig {
   if (raw === null || raw === undefined) return defaultConfig();
   const p = new Problems(partial);
   const config = defaultConfig();
@@ -472,20 +471,28 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       }
 
       if (name && project) {
-        config.projectManagement = {
-          name,
-          project,
-          ...(url ? { url } : {}),
-          ...(techDebt ? { techDebt } : {}),
-          ...(branch ? { branch } : {}),
-          ...(workspace ? { workspace } : {}),
-          ...(branchTypes ? { branchTypes } : {}),
-          ...(issueType ? { issueType } : {}),
-          ...(worklistJql !== undefined ? { worklistJql } : {}),
-          ...(worklistScope ? { worklistScope } : {}),
-          ...(worklistProject ? { worklistProject } : {}),
-          ...(worklistStatuses ? { worklistStatuses } : {}),
-        };
+        const management: ProjectManagement = { name, project };
+
+        if (url) management.url = url;
+
+        if (techDebt) management.techDebt = techDebt;
+
+        if (branch) management.branch = branch;
+
+        if (workspace) management.workspace = workspace;
+
+        if (branchTypes) management.branchTypes = branchTypes;
+
+        if (issueType) management.issueType = issueType;
+
+        if (worklistJql !== undefined) management.worklistJql = worklistJql;
+
+        if (worklistScope) management.worklistScope = worklistScope;
+
+        if (worklistProject) management.worklistProject = worklistProject;
+
+        if (worklistStatuses) management.worklistStatuses = worklistStatuses;
+        config.projectManagement = management;
       }
     }
   }
@@ -546,9 +553,9 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
         const value = hooks[name];
 
         if (value === undefined || value === null) continue;
-        const list = typeof value === "string" ? (value ? [value] : undefined) : p.stringList(hooks, name, "hooks");
+        const list = isString(value) ? (value ? [value] : undefined) : p.stringList(hooks, name, "hooks");
 
-        if (list === undefined && typeof value === "string") p.add(`hooks.${name}`, "expected a non-empty string");
+        if (list === undefined && isString(value)) p.add(`hooks.${name}`, "expected a non-empty string");
 
         if (list?.length) out[name] = list;
       }
@@ -586,8 +593,17 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
         if (!runCmd && !url && !status && !partial) p.add(at, "set run, url or status");
         const side = p.oneOf(p.string(entry, "side", at, false), ["left", "right"] as const, `${at}.side`) ?? "right";
 
-        if (id && label)
-          config.buttons.push({ id, label, side, ...(status ? { status } : {}), ...(runCmd ? { run: runCmd } : {}), ...(url ? { url } : {}) });
+
+        if (id && label) {
+          const button: ButtonSpec = { id, label, side };
+
+          if (status) button.status = status;
+
+          if (runCmd) button.run = runCmd;
+
+          if (url) button.url = url;
+          config.buttons.push(button);
+        }
       });
     }
   }
@@ -621,7 +637,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
       const shipPr = review["ship-pr"];
 
       if (shipPr === undefined || shipPr === null) config.review.shipPr = true;
-      else if (typeof shipPr !== "boolean") p.add("review.ship-pr", "expected true or false");
+      else if (!isBoolean(shipPr)) p.add("review.ship-pr", "expected true or false");
       else config.review.shipPr = shipPr;
     }
   }
@@ -652,7 +668,7 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
   const shell = raw.shell;
 
   if (shell !== undefined && shell !== null) {
-    if (typeof shell === "string") {
+    if (isString(shell)) {
       if (shell === "") p.add("shell", "expected a non-empty string or a mapping");
       else config.shell = { enter: shell, key: [] };
     } else if (!isRecord(shell)) p.add("shell", "expected a command prefix or a mapping with enter, env, key");
@@ -664,7 +680,12 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
 
       if (key.length && !env) p.add("shell.key", "needs shell.env: the key only invalidates a cached env");
 
-      if (enter) config.shell = { enter, ...(env ? { env } : {}), key };
+      if (enter) {
+        const spec: ShellSpec = { enter, key };
+
+        if (env) spec.env = env;
+        config.shell = spec;
+      }
     }
   }
 
@@ -693,11 +714,12 @@ export function validateConfig(raw: unknown, file = CONFIG_FILE, { partial = fal
 }
 
 /** Parse YAML text, naming `file` when it is not valid YAML. */
-export function parseYaml(text: string, file: string): unknown {
+export function parseYaml(text: string, file: string): Json {
   try {
-    return Bun.YAML.parse(text);
+    // SAFETY: a YAML document parses to plain scalars, arrays and mappings, which is what `Json` describes.
+    return Bun.YAML.parse(text) as Json;
   } catch (e) {
-    fail(`${file}: invalid YAML: ${(e as Error).message}`);
+    fail(`${file}: invalid YAML: ${errorMessage(e)}`);
   }
 }
 
@@ -731,8 +753,8 @@ export interface GuardConfig {
  */
 export interface RootLayers {
   file: string;
-  defaults?: Record<string, unknown>;
-  repos: Record<string, Record<string, unknown>>;
+  defaults?: JsonObject;
+  repos: Record<string, JsonObject>;
   /** Directories of skill extension files (`<dir>/<skill>/<phase>.md`), as written: absolute, `~/` or root-relative. */
   skillExtensions: string[];
   guard: GuardConfig;
@@ -798,7 +820,7 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
             try {
               layers.guard.deny.push({ pattern: new RegExp(source), reason });
             } catch (e) {
-              p.add(`${at}.pattern`, `not a valid regular expression: ${(e as Error).message}`);
+              p.add(`${at}.pattern`, `not a valid regular expression: ${errorMessage(e)}`);
             }
           });
       }
@@ -818,15 +840,20 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
  * Lay `over` on `base`: mappings merge key by key, anything else (lists included) replaces, and a
  * `null` in `over` removes the key.
  */
-export function overlay(base: unknown, over: unknown): unknown {
+export function overlay(base: Json | undefined, over: Json | undefined): Json | undefined {
   if (over === undefined || over === null) return base;
 
+  return merge(base, over);
+}
+
+/** `overlay` for an `over` that is set: a mapping merges onto a mapping, anything else replaces. */
+function merge(base: Json | undefined, over: Json): Json {
   if (!isRecord(base) || !isRecord(over)) return over;
-  const out: Record<string, unknown> = { ...base };
+  const out: JsonObject = { ...base };
 
   for (const [key, value] of Object.entries(over)) {
     if (value === null) delete out[key];
-    else out[key] = overlay(out[key], value);
+    else out[key] = merge(out[key], value);
   }
 
   return out;
@@ -836,7 +863,7 @@ export function overlay(base: unknown, over: unknown): unknown {
  * The config for `repo`: built-in defaults, then the root `defaults`, then the repo's own file (`repoRaw`,
  * parsed from `file`; undefined when there is none), then the root's `repos.<repo>`.
  */
-export function resolveConfig(repoRaw: unknown, repo: string | undefined, file: string, layers = loadRootLayers()): ProjectConfig {
+export function resolveConfig(repoRaw: Json | undefined, repo: string | undefined, file: string, layers = loadRootLayers()): ProjectConfig {
   if (repoRaw !== undefined && repoRaw !== null) validateConfig(repoRaw, file, { partial: true });
   const over = repo === undefined ? undefined : layers.repos[repo];
 
@@ -877,10 +904,11 @@ const camel = (key: string) => key.replace(/-([a-z])/g, (_, c: string) => c.toUp
  * config. Keys use the file's spelling. An `x-<name>` key reads an extension's settings as written.
  * Returns undefined when the key is unset.
  */
-export function getConfigValue(config: ProjectConfig, key: string): unknown {
+export function getConfigValue(config: ProjectConfig, key: string): Json | undefined {
   const [first = "", ...rest] = key.split(".");
   const extension = isExtensionKey(first);
-  let node: unknown = extension ? config.extensions?.[first] : config[camel(first) as keyof ProjectConfig];
+  // SAFETY: a resolved config holds only plain data (strings, numbers, booleans, arrays and objects of them), so any of its values is `Json`; an unknown key reads as undefined.
+  let node = (extension ? config.extensions?.[first] : config[camel(first) as keyof ProjectConfig]) as Json | undefined;
 
   for (const segment of rest) {
     if (!isRecord(node)) return;

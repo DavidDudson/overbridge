@@ -7,7 +7,7 @@ const err = (body: string): string => {
   try {
     app(body);
   } catch (e) {
-    return (e as Error).message;
+    return e instanceof Error ? e.message : String(e);
   }
 
   throw new Error("expected a validation error");

@@ -70,7 +70,11 @@ function codeRabbit(view: ReviewerView, pr: string): ReviewerStatus {
   if (limit && (!review?.submittedAt || (limit.createdAt ?? "") > review.submittedAt)) {
     const wait = /available in\s+([^*\n.]+?)\.?\s*\*\*/i.exec(limit.body ?? "")?.[1];
 
-    return { name: "CodeRabbit", state: "limited", ...(wait ? { detail: shortDuration(wait) } : {}), url: limit.url ?? pr };
+    const limited: ReviewerStatus = { name: "CodeRabbit", state: "limited", url: limit.url ?? pr };
+
+    if (wait) limited.detail = shortDuration(wait);
+
+    return limited;
   }
 
   const check = view.statusCheckRollup?.find((c) => CODERABBIT.test(c.name ?? c.context ?? ""));
@@ -150,7 +154,7 @@ export function countUnresolved(threads: ThreadNodes): NonNullable<ReviewerView[
 /** Unresolved review threads per reviewer, from `threadsCommand`'s output. */
 export function parseUnresolved(out: string | undefined): NonNullable<ReviewerView["unresolved"]> {
   try {
-    return countUnresolved((JSON.parse(out ?? "")?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? []) as ThreadNodes);
+    return countUnresolved((JSON.parse(out ?? "")?.data?.repository?.pullRequest?.reviewThreads?.nodes ?? []));
   } catch {
     // no output or not JSON: no counts
     return {};

@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isJsonObject, numberField, objectField, parseJson } from "./json";
 import { metaDir } from "./paths";
 import type { TopCache } from "./top";
 
@@ -45,7 +46,7 @@ const validLayer = (n: number, of: number): Layer | undefined => (Number.isInteg
 export function writePhase(ws: string, phase: Phase, layer?: Layer, now = Date.now()) {
   const file = phasePath(ws);
   mkdirSync(dirname(file), { recursive: true });
-  const record: PhaseRecord = { phase, ...(layer ? { layer } : {}), at: now };
+  const record: PhaseRecord = layer ? { phase, layer, at: now } : { phase, at: now };
   const tmp = `${file}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(record) + "\n");
   renameSync(tmp, file);
@@ -56,13 +57,19 @@ export const clearPhase = (ws: string) => rmSync(phasePath(ws), { force: true })
 /** The recorded phase of `ws`, or undefined when there is none or the file is unreadable. */
 export function readPhase(ws: string): PhaseRecord | undefined {
   try {
-    const raw = JSON.parse(readFileSync(phasePath(ws), "utf8")) as { phase?: unknown; layer?: { n?: unknown; of?: unknown }; at?: unknown };
+    const raw = parseJson(readFileSync(phasePath(ws), "utf8"));
+
+    if (!isJsonObject(raw)) return undefined;
     const phase = PHASES.find((p) => p === raw.phase);
 
     if (!phase) return undefined;
-    const layer = typeof raw.layer?.n === "number" && typeof raw.layer.of === "number" ? validLayer(raw.layer.n, raw.layer.of) : undefined;
+    const rawLayer = objectField(raw, "layer");
+    const n = rawLayer && numberField(rawLayer, "n");
+    const of = rawLayer && numberField(rawLayer, "of");
+    const layer = n !== undefined && of !== undefined ? validLayer(n, of) : undefined;
+    const at = numberField(raw, "at") ?? 0;
 
-    return { phase, ...(layer ? { layer } : {}), at: typeof raw.at === "number" ? raw.at : 0 };
+    return layer ? { phase, layer, at } : { phase, at };
   } catch {
     return undefined;
   }

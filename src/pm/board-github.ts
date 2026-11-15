@@ -50,7 +50,8 @@ type Reply = { data?: { repository?: { issues?: { nodes?: Node[]; pageInfo?: { h
 
 /** The cursor of the next page of a reply, or undefined on the last page. */
 export function nextCursor(reply: string): string | undefined {
-  const info = (JSON.parse(reply) as Reply).data?.repository?.issues?.pageInfo;
+  const parsed: Reply = JSON.parse(reply);
+  const info = parsed.data?.repository?.issues?.pageInfo;
 
   return info?.hasNextPage && info.endCursor ? info.endCursor : undefined;
 }
@@ -83,12 +84,13 @@ function statusOf(n: Node, labels: string[], columns: Record<string, WorkStatus>
  * only, so a closed blocker would otherwise read as unfinished.
  */
 export function rowsFromGraphql(reply: string, repo: string, columns: Record<string, WorkStatus> = {}, scope: WorklistScope = "assigned"): WorkRow[] {
-  const nodes = (JSON.parse(reply) as Reply).data?.repository?.issues?.nodes ?? [];
+  const parsed: Reply = JSON.parse(reply);
+  const nodes = parsed.data?.repository?.issues?.nodes ?? [];
 
   return nodes.filter((n) => inScope(n, scope)).map((n): WorkRow => {
     const labels = n.labels.nodes.map((l) => l.name);
 
-    return {
+    const row: WorkRow = {
       repo,
       id: String(n.number),
       title: n.title,
@@ -96,15 +98,18 @@ export function rowsFromGraphql(reply: string, repo: string, columns: Record<str
       status: statusOf(n, labels, columns),
       labels,
       blockedBy: n.blockedBy.nodes.filter((b) => b.state === "OPEN").map((b) => keyOf({ repo, id: String(b.number) })),
-      ...(n.parent ? { parent: keyOf({ repo, id: String(n.parent.number) }) } : {}),
       updatedAt: n.updatedAt,
     };
+
+    if (n.parent) row.parent = keyOf({ repo, id: String(n.parent.number) });
+
+    return row;
   });
 }
 
 /** Open issues assigned to the signed-in user in `owner/name`, as work rows labelled with `repo`. */
 export function githubRows(slug: string, repo: string, runner: Runner = run, columns: Record<string, WorkStatus> = {}, scope: WorklistScope = "assigned"): WorkRow[] {
-  const [owner, name] = slug.split("/") as [string, string];
+  const [owner = "", name = ""] = slug.split("/");
   const login: string[] = [];
 
   if (scope === "assigned") {
@@ -152,7 +157,12 @@ export function parseProject(spec: string, defaultOwner: string | undefined, sta
   const m = /^(?:([\w.-]+)\/)?(\d+)$/.exec(spec.trim());
   const owner = m?.[1] ?? defaultOwner;
 
-  return m && owner ? { owner, number: Number(m[2]), ...(statuses ? { statuses } : {}) } : undefined;
+  if (!m || !owner) return undefined;
+  const board: ProjectBoard = { owner, number: Number(m[2]) };
+
+  if (statuses) board.statuses = statuses;
+
+  return board;
 }
 
 interface ProjectItem {
@@ -166,7 +176,8 @@ interface ProjectItem {
 
 /** Rows for `repo` (GitHub `slug`) from `gh project item-list --format json`. Items of other repos, drafts and pull requests are left out. */
 export function rowsFromProject(json: string, slug: string, repo: string, statuses?: string[], columns: Record<string, WorkStatus> = {}): WorkRow[] {
-  const items = (JSON.parse(json) as { items?: ProjectItem[] }).items ?? [];
+  const parsed: { items?: ProjectItem[] } = JSON.parse(json);
+  const items = parsed.items ?? [];
   const want = statuses?.map((s) => s.trim().toLowerCase());
 
   return items.flatMap((i): WorkRow[] => {

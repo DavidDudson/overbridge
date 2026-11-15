@@ -89,10 +89,15 @@ describe("stale expiry", () => {
   });
 });
 
+interface HookExtra {
+  tool_name?: string;
+  source?: string;
+}
+
 describe("session end reasons", () => {
   const putEnd = (reason?: string) => {
     mkdirSync(join(meta, "agent"), { recursive: true });
-    writeFileSync(agentStatePath(meta, "w1"), JSON.stringify({ state: "end", at: Date.now(), ...(reason ? { reason } : {}) }));
+    writeFileSync(agentStatePath(meta, "w1"), JSON.stringify(reason ? { state: "end", at: Date.now(), reason } : { state: "end", at: Date.now() }));
   };
 
   test("only a deliberate exit counts as ended for good", () => {
@@ -174,13 +179,13 @@ describe("overbridge hook", () => {
   });
 
   test("the receipt survives a resume and is dropped by a clear, through the hook", () => {
-    const send = (hook_event_name: string, extra: object = {}) => hook(JSON.stringify({ hook_event_name, ...extra }), "w4");
+    const send = (hook_event_name: string, extra: HookExtra = {}) => hook(JSON.stringify({ hook_event_name, ...extra }), "w4");
     send("UserPromptSubmit");
     send("PostToolUseFailure", { tool_name: "Bash" });
     send("Stop");
     send("SessionStart", { source: "resume" });
     const kept = JSON.parse(readFileSync(turnPath(meta, "w4"), "utf8"));
-    expect([kept.errors, typeof kept.endedAt]).toEqual([1, "number"]);
+    expect([kept.errors, Number.isFinite(kept.endedAt)]).toEqual([1, true]);
     send("SessionStart", { source: "clear" });
     expect(existsSync(turnPath(meta, "w4"))).toBe(false);
   });

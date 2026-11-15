@@ -6,6 +6,7 @@ import { cacheStale } from "../src/agent-hook";
 import { createHandler, type HandlerDeps } from "../src/server";
 import { staleCandidates } from "../src/merge-sweep";
 import { serverRefresh, serverRefreshAll } from "../src/server-client";
+import type { ServerStatus } from "../src/server-cmd";
 import { withState } from "../src/state";
 import { BUILD_HEADER, call, claimStart, notifyRefresh, socketPath, START_LOCK_MS, startServer, takePidFile, VERSION_HEADER } from "../src/server-net";
 import { pidAlive } from "../src/proc";
@@ -143,7 +144,7 @@ describe("routes", () => {
     const h = createHandler(handlerDeps().deps);
     await post(h, "/refresh/top/w1");
     await post(h, "/refresh/top/w1");
-    const s = (await h.handle(new Request("http://x/status")).then((r) => r.json())) as Record<string, unknown>;
+    const s: ServerStatus = JSON.parse(await (await h.handle(new Request("http://x/status"))).text());
     expect(s).toMatchObject({ version: "v1", hits: 1, misses: 1, fetches: 1, inFlight: 0, draining: false });
   });
 

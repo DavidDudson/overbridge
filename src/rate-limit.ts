@@ -85,22 +85,34 @@ export class RateGate {
     this.trips++;
     this.untilMs = now + DEFAULT_PAUSE_MS;
     this.log(`GitHub rate limit hit: pausing gh until ${clock(this.untilMs)}`);
-    this.lookupReset().then(
-      (reset) => {
-        if (reset === undefined) return;
-        this.untilMs = Math.min(Math.max(reset, now + MIN_PAUSE_MS), now + MAX_PAUSE_MS);
-        this.log(`GitHub rate limit resets at ${clock(this.untilMs)}`);
-      },
-      (e: unknown) => this.log(`rate limit reset lookup failed: ${errorText(e)}`),
-    );
+    void this.learnReset(now);
 
     return true;
   }
 
-  stats(): RateStats {
-    const paused = this.message() !== undefined;
+  /** Move the pause to the real reset once `gh` says when it is; a failed lookup keeps the default pause. */
+  private async learnReset(now: number): Promise<void> {
+    try {
+      const reset = await this.lookupReset();
 
-    return { paused, trips: this.trips, ...(paused ? { untilMs: this.untilMs, message: this.message()! } : {}) };
+      if (reset === undefined) return;
+      this.untilMs = Math.min(Math.max(reset, now + MIN_PAUSE_MS), now + MAX_PAUSE_MS);
+      this.log(`GitHub rate limit resets at ${clock(this.untilMs)}`);
+    } catch (e) {
+      this.log(`rate limit reset lookup failed: ${errorText(e)}`);
+    }
+  }
+
+  stats(): RateStats {
+    const message = this.message();
+    const stats: RateStats = { paused: message !== undefined, trips: this.trips };
+
+    if (message !== undefined) {
+      stats.untilMs = this.untilMs;
+      stats.message = message;
+    }
+
+    return stats;
   }
 }
 

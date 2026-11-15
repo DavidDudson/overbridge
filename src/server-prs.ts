@@ -91,7 +91,7 @@ export async function prefetchFor(ws: string, batcher: PrBatcher, o: { force?: b
 
       try {
         const { prs, error } = await batcher.get(full, claimPrs(repo, c.branch, c.pr), o);
-        out[repo] = { prs, ...(error ? { error } : {}) };
+        out[repo] = error ? { prs, error } : { prs };
       } catch (e) {
         out[repo] = { error: errorText(e) };
       }

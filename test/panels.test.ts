@@ -79,14 +79,13 @@ describe("sidebar on screen", () => {
 describe("top panel on screen", () => {
   const spec = (id: string): AppSpec => ({ id, label: id, dir: ".", start: "x", ports: [], open: false, when: "always" });
 
-  const app = (id: string, status: AppStatus, port?: number): TopApp => ({
-    repo: "r",
-    spec: spec(id),
-    repoDir: "/w/r",
-    status,
-    available: true,
-    ...(port === undefined ? {} : { port }),
-  });
+  const app = (id: string, status: AppStatus, port?: number): TopApp => {
+    const view: TopApp = { repo: "r", spec: spec(id), repoDir: "/w/r", status, available: true };
+
+    if (port !== undefined) view.port = port;
+
+    return view;
+  };
 
   const snap: TopSnapshot = {
     ws: "w1",

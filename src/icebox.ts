@@ -12,7 +12,7 @@ import { defaultDeps, leaveTab, type RemovalDeps, stopApps } from "./remove";
 import { entries } from "./sidebar";
 import { scaffold } from "./scaffold";
 import { type DroppedRepo, getWorkspace, isIceboxed, isRemoving, readState, withState } from "./state";
-import { runHooks } from "./hooks";
+import { type HookContext, runHooks } from "./hooks";
 import { requireTab, TabFocus } from "./tab";
 import { errorMessage, fail, log, run } from "./util";
 
@@ -57,7 +57,7 @@ export function prunable(wt: string, path: string): { ok: true; abs: string } | 
   try {
     lstatSync(abs);
   } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
+    const code = e instanceof Error && "code" in e ? e.code : undefined;
 
     return { ok: false, why: code === "ENOENT" ? NOT_THERE : `cannot stat: ${code}` };
   }
@@ -234,7 +234,10 @@ function dropWorktrees(ws: string): void {
     withState((s) => {
       const current = getWorkspace(s, ws);
       const iceboxed = current.iceboxed ?? fail(`${ws} is no longer iceboxed`);
-      s.workspaces[ws] = { ...current, iceboxed: { ...iceboxed, dropped: [...(iceboxed.dropped ?? []), { repo, ...(branch ? { branch } : {}) }] } };
+      const record: DroppedRepo = { repo };
+
+      if (branch) record.branch = branch;
+      s.workspaces[ws] = { ...current, iceboxed: { ...iceboxed, dropped: [...(iceboxed.dropped ?? []), record] } };
     });
   }
 }
@@ -303,7 +306,12 @@ export function thaw(ws: string, deps: ThawDeps = defaultThawDeps()): void {
       const { branch, pr } = claims[repo] ?? {};
       runHooks("post-add", { ws, repo });
 
-      if (branch) runHooks("post-checkout", { ws, repo, branch, ...(pr ? { pr } : {}) });
+      if (branch) {
+        const vars: HookContext = { ws, repo, branch };
+
+        if (pr) vars.pr = pr;
+        runHooks("post-checkout", vars);
+      }
     }
   }
 
