@@ -8,7 +8,7 @@ import { filterOrgs, mergeRows, reviewCommand, rowsFromReviews } from "./review-
 import { spinner } from "./anim";
 import { prsView } from "./prs-view";
 import { readMyPrs } from "./prs-refresh";
-import { REVIEWS_SORT, reviewsView } from "./reviews-view";
+import { DEFAULT_REVIEWS_SORT, reviewsView } from "./reviews-view";
 import { sortPrRows } from "./pr-sort";
 import { nextSort, type SortMode } from "./sort-mode";
 import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN } from "./term";
@@ -156,7 +156,7 @@ export function renderPrList(kind: PrListKind, rows: readonly PrRow[], selected:
 export async function prListPane(kind: PrListKind) {
   const view = VIEWS[kind];
   let cache = readPrList(kind);
-  let sort: SortMode = REVIEWS_SORT;
+  let sort: SortMode = DEFAULT_REVIEWS_SORT;
   // only the reviews tab sorts; the PRs list keeps the order its source gave
   const rowsOf = () => view.order(kind === "reviews" ? sortPrRows(cache.rows, sort) : cache.rows);
   let selected = 0;
@@ -185,7 +185,12 @@ export async function prListPane(kind: PrListKind) {
     message = "refreshing…";
     draw();
     void refreshPrListInChild(kind).then((result) => {
+      // the cursor stays on the same PR when the refresh reorders the rows under it
+      const url = rowsOf()[selected]?.url;
       cache = readPrList(kind);
+      const moved = rowsOf().findIndex((r) => r.url === url);
+
+      if (moved >= 0) selected = moved;
       message = result.ok ? (cache.error ? `error: ${cache.error}` : "") : `error: ${result.error}`;
       busy = false;
       draw();

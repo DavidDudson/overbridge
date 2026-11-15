@@ -11,20 +11,21 @@ export const nextSort = (mode: SortMode): SortMode => SORT_MODES[(SORT_MODES.ind
 /** What the mode is called on screen. */
 export const SORT_LABEL: Record<SortMode, string> = { alpha: "a-z", status: "by status", age: "by age" };
 
-/** Something orderable: its name breaks every tie, `rank` is its status (low first) and `since` its start time in ms (old first; none last). */
+/** Something orderable: `rank` is its status (low first) and `since` its start time in ms (old first; none last). */
 export interface Sortable {
   name: string;
   rank: number;
   since: number | undefined;
 }
 
-/** The comparison for `mode`. Equal on the mode's key falls through to the name, then the original index never matters. */
+/** The comparison for `mode`. */
 export function compareFor(mode: SortMode): (a: Sortable, b: Sortable) => number {
   const byName = (a: Sortable, b: Sortable) => naturalSort(a.name, b.name);
+  const bySince = (a: Sortable, b: Sortable) => (a.since === b.since ? 0 : (a.since ?? Infinity) - (b.since ?? Infinity));
 
   if (mode === "status") return (a, b) => a.rank - b.rank || byName(a, b);
 
-  if (mode === "age") return (a, b) => (a.since ?? Infinity) - (b.since ?? Infinity) || byName(a, b);
+  if (mode === "age") return (a, b) => bySince(a, b) || byName(a, b);
 
   return byName;
 }

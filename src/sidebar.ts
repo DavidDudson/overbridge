@@ -37,10 +37,10 @@ import { overbridgeVersion } from "./version";
 
 /** The key that jumps to the performance tab, and the tab it reaches. */
 export const PERF_KEY = "p";
+export const PERF_TAB = "@perf";
 
 /** Cycles how the workspaces are ordered: a-z, by status, by age. */
 export const SORT_KEY = "o";
-export const PERF_TAB = "@perf";
 
 /** How long a held digit waits for a second one before it goes to its one-digit tab. */
 export const DIGIT_MS = 600;
