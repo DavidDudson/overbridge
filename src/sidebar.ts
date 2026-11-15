@@ -38,9 +38,6 @@ import { overbridgeVersion } from "./version";
 
 /** The key that jumps to the performance tab, and the tab it reaches. */
 export const PERF_KEY = "p";
-
-/** Cycles how the workspaces are ordered: a-z, by status, by age. */
-export const SORT_KEY = "o";
 export const PERF_TAB = "@perf";
 
 /** Cycles how the workspaces are ordered: a-z, by status, by age. */
