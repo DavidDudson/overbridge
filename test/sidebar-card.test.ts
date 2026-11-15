@@ -69,6 +69,12 @@ describe("expanded card", () => {
     expect(text).toContain("Edit 40s");
   });
 
+  test("never clips a long title", () => {
+    const long = entry("a", { label: Array.from({ length: 14 }, (_, i) => `word${String(i + 1).padStart(2, "0")}`).join(" ") });
+    const text = plain(entryLines(long, 0, false, 24, { expanded: { tab: "a", tools: [], now: 0 } }).join(" "));
+    expect(text).toContain("word14");
+  });
+
   test("its height matches its lines and only the named tab expands", () => {
     expect(entryHeight(stacked, 0, 30, view)).toBe(entryLines(stacked, 0, true, 30, view).length);
     expect(entryHeights([stacked, entry("b")], 34, view)[1]).toBe(2);

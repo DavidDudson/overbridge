@@ -381,8 +381,8 @@ function titleRows(e: Entry, index: number, inner: number, maxRows = MAX_TITLE_R
   return clipped.map((l, i) => (i === 0 ? lead : " ".repeat(textWidth(lead))) + l);
 }
 
-/** Longest the expanded card's title wraps to. */
-const EXPANDED_TITLE_ROWS = 6;
+/** The expanded card never clips its title. */
+const EXPANDED_TITLE_ROWS = Number.POSITIVE_INFINITY;
 
 /** Screen rows one entry takes: its wrapped title, a status line, its stack lines and receipt (a compact card drops the last two). */
 export const entryHeight = (e: Entry, index: number, inner: number, view: CardView = {}) => {
