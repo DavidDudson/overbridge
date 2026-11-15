@@ -35,8 +35,8 @@ describe("stateText", () => {
     expect(stateText(card({ state: "busy", since: now - 5_000, agents: 1 }), now).text).toBe("working 5s · 1 agent");
   });
   test("waiting shows the tool, and time only from a minute", () => {
-    expect(stateText(card({ state: "waiting", since: now - 120_000, tool: "Bash" }), now).text).toBe("needs your input 2m · Bash");
-    expect(stateText(card({ state: "waiting", since: now - 10_000 }), now).text).toBe("needs your input");
+    expect(stateText(card({ state: "waiting", since: now - 120_000, tool: "Bash" }), now).text).toBe("needs input 2m · Bash");
+    expect(stateText(card({ state: "waiting", since: now - 10_000 }), now).text).toBe("needs input");
   });
   test("finished with background tasks counts them", () => {
     expect(stateText(card({ state: "bg", since: now - 180_000, agents: 2 }), now).text).toBe("finished · 2 tasks running 3m");
