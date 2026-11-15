@@ -26,7 +26,7 @@ export const stripControl = (s: string): string => s.replace(/[\u0000-\u001f\u00
 export const colorize = (s: string, color: Color) => `${ESC}[${COLORS[color]}m${s}${ESC}[0m`;
 
 /** Emoji below U+1F000 that terminals draw two columns wide. Every other emoji the panes use is astral. */
-const WIDE_BMP = new Set([0x23f3, 0x2705, 0x2753, 0x274c, 0x26aa, 0x26ab]);
+const WIDE_BMP = new Set([0x231b, 0x23f3, 0x2705, 0x2753, 0x274c, 0x26aa, 0x26ab]);
 
 /** Columns one code point takes: 2 for emoji, 0 for variation selectors and joiners, else 1. */
 const cpWidth = (cp: number) => (cp === 0xfe0f || cp === 0x200d ? 0 : cp >= 0x1f000 || WIDE_BMP.has(cp) ? 2 : 1);

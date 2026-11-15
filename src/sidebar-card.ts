@@ -2,6 +2,8 @@ import type { SortMode } from "./sort-mode";
 import type { SidebarLayout } from "./config";
 import type { ToolCall } from "./history-tail";
 import type { Entry } from "./sidebar";
+import { HEALTH_LOOK, healthOf } from "./pr-look";
+import { prHealthInput } from "./card-look";
 import type { PrStatus } from "./top";
 import { dim, fit, textWidth } from "./term";
 
@@ -54,7 +56,12 @@ const ciRow = (prs: readonly { status: PrStatus }[]): string[] => {
 
 /** The PR and CI rows of an expanded card: one per PR, then the worst CI state, then the last tool calls. */
 export function detailRows(e: Entry, toolCalls: readonly ToolCall[] | undefined, now: number): string[] {
-  const prs = (e.prs ?? []).map((p) => `PR #${p.number} · ${p.status}`);
+  const prs = (e.prs ?? []).map((p) => {
+    const input = prHealthInput(p.status);
+
+    return `PR #${p.number} · ${p.status}${input ? ` ${HEALTH_LOOK[healthOf(input)].icon}` : ""}`;
+  });
+
   const calls = toolCalls === undefined ? ["tool calls unreadable"] : toolCalls.length ? ["last tools:", ...toolCalls.map((t) => `  ${t.label} ${ago(now - t.at)}`)] : ["no tool calls yet"];
 
   return [...(prs.length ? prs : ["no PR yet"]), ...ciRow(e.prs ?? []), ...calls];
