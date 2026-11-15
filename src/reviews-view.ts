@@ -117,14 +117,20 @@ export const teamNames = (via: string | undefined): string => (via ? via.split("
 
 const hasMotion = (r: PrRow) => r.mergeable === "CONFLICTING" || r.ci === "pending" || (r.bots ?? []).some((b) => b.state === "reviewing");
 
+/** A fitted piece of a row; no colour is the default text. */
+interface Part {
+  text: string;
+  color?: Color | undefined;
+}
+
 /** One table row: coloured cells, or plain text in inverse when selected. A draft is dim. */
 export function rowText(r: PrRow, cols: readonly Column[], inner: number, selected: boolean, now: number, animated: boolean): string {
   const cells = cellsFor(r, now, animated);
   const titleWidth = Math.max(1, inner - cols.reduce((n, c) => n + c.width + 1, 0));
-  const parts = [...cols.map((c) => ({ text: fit(cells[c.key].text, c.width), color: cells[c.key].color })), { text: fit(r.title, titleWidth), color: undefined as Color | undefined }];
+  const parts: Part[] = [...cols.map((c) => ({ text: fit(cells[c.key].text, c.width), color: cells[c.key].color })), { text: fit(r.title, titleWidth) }];
 
   if (selected) return inverse(parts.map((p) => p.text).join(" "));
-  const style = (p: { text: string; color: Color | undefined }) => (r.draft ? dim(p.color ? colorize(p.text, p.color) : p.text) : p.color ? colorize(p.text, p.color) : p.text);
+  const style = (p: Part) => (r.draft ? dim(p.color ? colorize(p.text, p.color) : p.text) : p.color ? colorize(p.text, p.color) : p.text);
 
   return parts.map(style).join(" ");
 }
@@ -136,8 +142,13 @@ const headerText = (cols: readonly Column[], inner: number) =>
  * How many PR rows each table gets out of `body` rows. Each table shows what it has when both fit; otherwise
  * the shorter one keeps its rows and the other gets the rest, so neither is squeezed out. An empty table keeps one row for its note.
  */
-export function allocate(direct: number, team: number, body: number): { direct: number; team: number } {
-  const need = { direct: Math.max(1, direct), team: Math.max(1, team) };
+export interface Share {
+  direct: number;
+  team: number;
+}
+
+export function allocate(direct: number, team: number, body: number): Share {
+  const need: Share = { direct: Math.max(1, direct), team: Math.max(1, team) };
 
   if (need.direct + need.team <= body) return need;
   const half = Math.floor(body / 2);
