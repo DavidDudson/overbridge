@@ -7,7 +7,7 @@ import { createHandler, type HandlerDeps } from "../src/server";
 import { staleCandidates } from "../src/merge-sweep";
 import { serverRefresh, serverRefreshAll } from "../src/server-client";
 import { withState } from "../src/state";
-import { call, CLIENT_START_HEADER, claimStart, notifyRefresh, socketPath, START_LOCK_MS, startServer, takePidFile, VERSION_HEADER } from "../src/server-net";
+import { BUILD_HEADER, call, claimStart, notifyRefresh, socketPath, START_LOCK_MS, startServer, takePidFile, VERSION_HEADER } from "../src/server-net";
 import { pidAlive } from "../src/proc";
 import type { TopCache } from "../src/top";
 
@@ -53,7 +53,7 @@ function stopServer() {
   }
 }
 
-const spawnServer = () => Bun.spawn({ cmd: [process.execPath, CLI, "serve"], env: process.env, stdout: "ignore", stderr: "ignore" });
+const spawnServer = () => Bun.spawn({ cmd: [process.execPath, CLI, "serve"], env: { ...process.env, OVERBRIDGE_BUILD_TIME: "1000" }, stdout: "ignore", stderr: "ignore" });
 
 async function until(ok: () => boolean | Promise<boolean>, ms = 5_000) {
   const end = Date.now() + ms;
@@ -138,19 +138,35 @@ describe("routes", () => {
     expect(s).toMatchObject({ version: "v1", hits: 1, misses: 1, fetches: 1, inFlight: 0, draining: false });
   });
 
-  test("a newer client of another version gets a 409 and the server is told to go", async () => {
-    const { deps, mismatches } = handlerDeps();
+  test("a client of a newer build gets a 409 and the server is told to go", async () => {
+    const { deps, mismatches } = handlerDeps({ buildTime: 1_000 });
     const h = createHandler(deps);
     expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v1" })).status).toBe(200);
-    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2", [CLIENT_START_HEADER]: String(Date.now() + 1_000) })).status).toBe(409);
+    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2", [BUILD_HEADER]: "1001" })).status).toBe(409);
     expect(mismatches()).toBe(1);
   });
 
-  test("an older client, or one that does not say when it started, gets a 409 and the server stays", async () => {
+  test("a client of an older or the same build, or one with no build time, gets a 409 and the server stays", async () => {
+    const { deps, mismatches } = handlerDeps({ buildTime: 1_000 });
+    const h = createHandler(deps);
+    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2", [BUILD_HEADER]: "999" })).status).toBe(409);
+    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2", [BUILD_HEADER]: "1000" })).status).toBe(409);
+    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2" })).status).toBe(409);
+    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2", [BUILD_HEADER]: "soon" })).status).toBe(409);
+    expect(mismatches()).toBe(0);
+  });
+
+  test("a server with no build time is never replaced, even by a client of a newer build", async () => {
     const { deps, mismatches } = handlerDeps();
     const h = createHandler(deps);
-    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2", [CLIENT_START_HEADER]: "1" })).status).toBe(409);
-    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2" })).status).toBe(409);
+    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2", [BUILD_HEADER]: "1001" })).status).toBe(409);
+    expect(mismatches()).toBe(0);
+  });
+
+  test("a client started after the server does not replace it unless its build is newer", async () => {
+    const { deps, mismatches } = handlerDeps({ buildTime: 1_000 });
+    const h = createHandler(deps);
+    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2", "x-overbridge-client-start": String(Date.now() + 1_000) })).status).toBe(409);
     expect(mismatches()).toBe(0);
   });
 
@@ -374,13 +390,15 @@ describe("real server", () => {
     expect(pidOf()).not.toBe(999999999);
   });
 
-  test("only a client started after the server, of another version, makes it exit; the next call finds none", async () => {
+  test("only a client of a newer build makes the server exit; the next call finds none", async () => {
     const s = spawnServer();
     await until(() => existsSync(socketPath()));
-    const older = await call("POST", "/refresh/top/w1", { timeoutMs: 5_000, version: "other", startedAtMs: 1 });
+    const older = await call("POST", "/refresh/top/w1", { timeoutMs: 5_000, version: "other", buildTime: 1 });
     expect(older?.status).toBe(409);
+    const unversioned = await call("POST", "/refresh/top/w1", { timeoutMs: 5_000, version: "other", buildTime: undefined, startedAtMs: Date.now() + 10_000 });
+    expect(unversioned?.status).toBe(409);
     expect(pidAlive(s.pid)).toBe(true);
-    const r = await call("POST", "/refresh/top/w1", { timeoutMs: 5_000, version: "other", startedAtMs: Date.now() + 10_000 });
+    const r = await call("POST", "/refresh/top/w1", { timeoutMs: 5_000, version: "other", buildTime: 1_001 });
     expect(r?.status).toBe(409);
     expect(await s.exited).toBe(0);
     expect(existsSync(socketPath())).toBe(false);

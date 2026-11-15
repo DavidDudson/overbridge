@@ -3,7 +3,7 @@ import { NAME_RE, metaDir, selfCommand } from "./paths";
 import { pidAlive } from "./proc";
 import { Cache, errorText } from "./server-cache";
 import { CONNECTED_FRAME, createEvents, HEARTBEAT_FRAME, HEARTBEAT_MS } from "./server-events";
-import { CLIENT_START_HEADER, pidFile, stoppingFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
+import { BUILD_HEADER, pidFile, stoppingFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
 import { defaultSweepDeps, staleCandidates, sweepMerged } from "./merge-sweep";
 import { ghResetLookup, RateGate } from "./rate-limit";
 import { startWatchdog } from "./server-watchdog";
@@ -16,7 +16,7 @@ import { createWorklistRefresher } from "./server-worklist";
 import { finishWorklist } from "./worklist-data";
 import { cachedClaimedPrs, prefetchFor } from "./server-prs";
 import { log } from "./util";
-import { overbridgeVersion } from "./version";
+import { overbridgeBuildTime, overbridgeVersion } from "./version";
 
 /**
  * `overbridge serve`: one process per workspaces root that owns the network refreshes and serves one cache over HTTP on
@@ -58,12 +58,17 @@ export interface HandlerDeps {
   /** The sweep timer's counters; present when the server runs the merged-PR sweep. `GET /sweep` answers 404 without it. */
   sweepStats?: () => unknown;
   sweepBusy?: () => boolean;
-  /** Called when a client of another version, started after this server, calls: finish what is running, then exit. */
+  /** This build's time (seconds since epoch), when it has one; a server without it is never replaced. */
+  buildTime?: number;
+  /** Called when a client of a newer build calls: finish what is running, then exit. */
   onVersionMismatch: () => void;
   /** Where a failed refresh is reported; the server's own stdio is ignored. */
   log?: (msg: string) => void;
   now?: () => number;
 }
+
+/** A client replaces the server only when both have a build time and the client's is strictly later. */
+const isNewerBuild = (client: number, server: number | undefined): boolean => server !== undefined && client > server;
 
 const json = (status: number, body: unknown) => Response.json(body, { status });
 
@@ -144,9 +149,9 @@ export function createHandler(deps: HandlerDeps) {
     const url = new URL(req.url);
     const theirs = req.headers.get(VERSION_HEADER);
     if (theirs && theirs !== deps.version) {
-      // only a client started after this server may replace it: an older pane that outlived an upgrade must not
-      // keep killing the new server
-      if (Number(req.headers.get(CLIENT_START_HEADER)) > startedAt) {
+      // only a client of a newer build may replace this server, so builds running side by side (an older pane that
+      // outlived an upgrade, a dev checkout) cannot keep killing each other's server; no build time on either side, no replace
+      if (isNewerBuild(Number(req.headers.get(BUILD_HEADER)), deps.buildTime)) {
         draining = true;
         deps.onVersionMismatch();
       }
@@ -379,6 +384,7 @@ export async function serve(): Promise<void> {
     cacheFileAt: (ws) => readTopCache(ws).at,
     log,
     version: overbridgeVersion(),
+    buildTime: overbridgeBuildTime(),
     onVersionMismatch: () => void shutdown(),
   });
   refreshForSweep = async (ws) => {
