@@ -55,3 +55,24 @@ describe("tab badge", () => {
     expect(badgeText(badgeOf(rows), 5)).toBe("💥 +2");
   });
 });
+
+import { animate } from "../src/sidebar-motion";
+import { entryLines, type Entry } from "../src/sidebar";
+import { Motion } from "../src/config";
+import { readBadge } from "../src/tab-badge-read";
+
+describe("sidebar badge", () => {
+  const card = (rows: { draft: boolean; mergeable?: string }[]): Entry => ({ tab: "@reviews", section: "orchestration", glyph: "  ", label: badgeLabel("reviews", badgeOf(rows)), badge: badgeOf(rows) });
+
+  test("card shows the count and icons, conflict pulses with motion", () => {
+    const e = card([{ draft: false, mergeable: "CONFLICTING" }, { draft: false }]);
+    const plain = (es: Entry[], now: number) => entryLines(animate(es, now, Motion.WhileActive)[0]!, 0, false, 30).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+    expect(plain([e], 0)).toContain("reviews 2");
+    expect(plain([e], 0)).toContain("💥");
+    expect(plain([e], 600)).toContain("🔥");
+    expect(animate([e], 600, Motion.Off)[0]).toBe(e);
+  });
+  test("a tab without a list has no badge", () => {
+    expect(readBadge("@root")).toBeUndefined();
+  });
+});

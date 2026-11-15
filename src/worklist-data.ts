@@ -24,7 +24,8 @@ export interface WorklistCache {
   notes: string[];
 }
 
-const cacheFile = () => join(metaDir(), "worklist.json");
+export const worklistPath = () => join(metaDir(), "worklist.json");
+const cacheFile = worklistPath;
 
 export function readWorklist(): WorklistCache {
   try {

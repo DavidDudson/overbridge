@@ -9,6 +9,8 @@ import { textWidth, type Color } from "./term";
 export interface TabBadge {
   count: number;
   icons: PrHealth[];
+  /** The clock the sidebar animates this badge at (`animate`); unset draws it still. */
+  at?: number;
 }
 
 export function badgeOf(rows: readonly HealthInput[]): TabBadge {
@@ -25,7 +27,7 @@ export const badgeColor = (b: TabBadge): Color => (b.icons[0] ? HEALTH_LOOK[b.ic
  * The icons as a status line fitted to `width` columns; what does not fit becomes `+N`. A conflict pulses between
  * two glyphs of the same width when `animated`, so the card never reflows.
  */
-export function badgeText(b: TabBadge, width: number, nowMs = 0, animated = false): string {
+export function badgeText(b: TabBadge, width: number, nowMs = b.at ?? 0, animated = b.at !== undefined): string {
   if (b.count === 0) return "nothing waiting";
   const glyphs = b.icons.map((h) => (h === "conflict" && animated ? alternate(HEALTH_LOOK[h].icon, HEALTH_LOOK[h].alt, nowMs) : HEALTH_LOOK[h].icon));
   let out = "";
