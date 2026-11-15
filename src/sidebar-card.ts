@@ -32,7 +32,7 @@ export interface CardPlan {
 }
 
 export const cardPlan = (e: Entry, view: CardView): CardPlan => ({
-  status: !view.compact || needsAttention(e),
+  status: !view.compact || needsAttention(e) || e.badge !== undefined,
   stacks: !view.compact,
 });
 

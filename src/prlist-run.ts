@@ -5,7 +5,9 @@ import { metaDir, selfCommand } from "./paths";
 import { errorMessage, run, spawnCwd, type RunResult } from "./util";
 import { age, CHROME, type PrRow } from "./pr-rows";
 import { filterOrgs, mergeRows, reviewCommand, rowsFromReviews } from "./review-batch";
+import { spinner } from "./anim";
 import { prsView } from "./prs-view";
+import { readMyPrs } from "./prs-refresh";
 import { REVIEWS_SORT, reviewsView } from "./reviews-view";
 import { sortPrRows } from "./pr-sort";
 import { nextSort, type SortMode } from "./sort-mode";
@@ -107,6 +109,9 @@ export function readReviews(orgs: readonly string[], runner: Runner = run): PrRo
 /** Read one list. Throws with `gh`'s message when the search fails. */
 export function readPrs(kind: PrListKind, orgs: readonly string[], runner: Runner = run): PrRow[] {
   if (kind === "reviews") return readReviews(orgs, runner);
+
+  if (kind === "prs") return readMyPrs(orgs, runner);
+
   const r = runner(searchCommand(kind, orgs));
 
   if (!r.ok) throw new Error(`gh search prs failed: ${(r.stderr || r.stdout).trim().split("\n")[0]}`);
@@ -170,7 +175,7 @@ export async function prListPane(kind: PrListKind) {
     if (selected < offset) offset = selected;
 
     if (selected >= offset + body) offset = selected - body + 1;
-    process.stdout.write(frame(view.render(rows, { selected, offset, height, width, message, now: Date.now(), sort }), height, width));
+    process.stdout.write(frame(view.render(rows, { selected, offset, height, width, message: busy ? `${spinner(Date.now())} ${message}` : message, now: Date.now(), sort }), height, width));
   };
 
   const refresh = () => {
@@ -201,15 +206,14 @@ export async function prListPane(kind: PrListKind) {
       if (input.kind !== "key") continue;
 
       if (input.key === "q" || input.key === "ctrl-c") quit();
-      else if (input.key === "j" || input.key === "down") selected = Math.min(rowsOf().length - 1, selected + 1);
+      else if (input.key === "j" || input.key === "down") selected = Math.max(0, Math.min(rowsOf().length - 1, selected + 1));
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
-      else if (input.key === "r") refresh();
       else if (input.key === "s" && kind === "reviews") {
         // the cursor stays on the same PR when the order changes under it
         const url = rowsOf()[selected]?.url;
         sort = nextSort(sort);
         selected = Math.max(0, rowsOf().findIndex((r) => r.url === url));
-      }
+      } else if (input.key === "r") refresh();
       else if (input.key === "o" && rowsOf()[selected]) {
         Bun.spawn({ cmd: ["gh", "pr", "view", "--web", rowsOf()[selected]!.url], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
       }
