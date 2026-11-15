@@ -3,25 +3,17 @@ import { join } from "node:path";
 import { loadRootLayers } from "./project-config";
 import { metaDir, selfCommand } from "./paths";
 import { run, spawnCwd, type RunResult } from "./util";
-import { bold, boxBottom, boxRow, boxTop, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN } from "./term";
+import { age, CHROME, type PrRow } from "./pr-rows";
+import { prsView } from "./prs-view";
+import { reviewsView } from "./reviews-view";
+import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN } from "./term";
+
+export { age, type PrRow };
 
 /** The two PR lists in the orchestration tabs: PRs you opened, and PRs waiting for your review. */
 export type PrListKind = "prs" | "reviews";
 
 export const PRLIST_REFRESH_MS = 60_000;
-
-/** Rows the frame uses besides the PR rows: top border, header, legend, bottom border. */
-const CHROME = 4;
-
-export interface PrRow {
-  repo: string;
-  number: number;
-  title: string;
-  url: string;
-  author: string;
-  draft: boolean;
-  updatedAt: string;
-}
 
 export interface PrListCache {
   at: number;
@@ -121,50 +113,19 @@ export async function refreshPrListInChild(kind: PrListKind): Promise<{ ok: bool
   return code === 0 ? { ok: true, error: "" } : { ok: false, error: first ?? `${kind} refresh exited with code ${code}` };
 }
 
-/** Age as `5m`, `3h`, `2d`; empty for an unreadable date. */
-export function age(iso: string, now = Date.now()): string {
-  const ms = now - Date.parse(iso);
-
-  if (!Number.isFinite(ms) || ms < 0) return "";
-  const m = Math.floor(ms / 60_000);
-
-  if (m < 60) return `${m}m`;
-
-  if (m < 60 * 24) return `${Math.floor(m / 60)}h`;
-
-  return `${Math.floor(m / 60 / 24)}d`;
-}
-
-const TITLES: Record<PrListKind, { title: string; empty: string }> = {
-  prs: { title: "My PRs", empty: "no open PRs of yours" },
-  reviews: { title: "Reviews", empty: "no reviews waiting on you" },
-};
+/** The view of each list: how its rows are ordered for the cursor and drawn. */
+const VIEWS = { prs: prsView, reviews: reviewsView } as const;
 
 /** The panel as screen rows. Pure, so it is snapshot-tested. */
 export function renderPrList(kind: PrListKind, rows: readonly PrRow[], selected: number, offset: number, height: number, width: number, message = "", now = Date.now()): string[] {
-  const inner = width - 4;
-  const body = Math.max(1, height - CHROME);
-  const who = kind === "reviews" ? "author" : "state";
-  const out: string[] = [boxTop(TITLES[kind].title, width), boxRow(dim(fit(`${"repo".padEnd(24)} ${"#".padEnd(5)} ${who.padEnd(12)} ${"age".padEnd(4)} title`, inner)))];
-  const visible = rows.slice(offset, offset + body);
-
-  for (const [i, r] of visible.entries()) {
-    const col = kind === "reviews" ? r.author : r.draft ? "draft" : "open";
-    const line = `${r.repo.slice(0, 24).padEnd(24)} ${String(r.number).padEnd(5)} ${col.slice(0, 12).padEnd(12)} ${age(r.updatedAt, now).padEnd(4)} ${r.title}`;
-    const text = fit(line, inner);
-    out.push(boxRow(offset + i === selected ? inverse(text) : r.draft ? dim(text) : text));
-  }
-
-  for (let i = visible.length; i < body; i++) out.push(boxRow(rows.length === 0 && i === 0 ? dim(fit(TITLES[kind].empty, inner)) : fit("", inner)));
-  out.push(boxRow(message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit("j/k move   o open in browser   r refresh   q quit", inner))));
-  out.push(boxBottom(width, `${rows.length} open`));
-
-  return out;
+  return VIEWS[kind].render(rows, { selected, offset, height, width, message, now });
 }
 
 /** `overbridge prs` / `overbridge reviews`: the pane of an orchestration tab. */
 export async function prListPane(kind: PrListKind) {
+  const view = VIEWS[kind];
   let cache = readPrList(kind);
+  const rowsOf = () => view.order(cache.rows);
   let selected = 0;
   let offset = 0;
   let message = cache.error ? `error: ${cache.error}` : "";
@@ -174,13 +135,14 @@ export async function prListPane(kind: PrListKind) {
   const draw = () => {
     const height = process.stdout.rows ?? 24;
     const width = process.stdout.columns ?? 80;
-    selected = Math.min(selected, Math.max(0, cache.rows.length - 1));
+    const rows = rowsOf();
+    selected = Math.min(selected, Math.max(0, rows.length - 1));
     const body = Math.max(1, height - CHROME);
 
     if (selected < offset) offset = selected;
 
     if (selected >= offset + body) offset = selected - body + 1;
-    process.stdout.write(frame(renderPrList(kind, cache.rows, selected, offset, height, width, message), height, width));
+    process.stdout.write(frame(view.render(rows, { selected, offset, height, width, message, now: Date.now() }), height, width));
   };
 
   const refresh = () => {
@@ -211,11 +173,11 @@ export async function prListPane(kind: PrListKind) {
       if (input.kind !== "key") continue;
 
       if (input.key === "q" || input.key === "ctrl-c") quit();
-      else if (input.key === "j" || input.key === "down") selected = Math.min(cache.rows.length - 1, selected + 1);
+      else if (input.key === "j" || input.key === "down") selected = Math.min(rowsOf().length - 1, selected + 1);
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
       else if (input.key === "r") refresh();
-      else if (input.key === "o" && cache.rows[selected]) {
-        Bun.spawn({ cmd: ["gh", "pr", "view", "--web", cache.rows[selected]!.url], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+      else if (input.key === "o" && rowsOf()[selected]) {
+        Bun.spawn({ cmd: ["gh", "pr", "view", "--web", rowsOf()[selected]!.url], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
       }
     }
 
@@ -231,6 +193,9 @@ export async function prListPane(kind: PrListKind) {
     if (latest.at > cache.at) cache = latest;
     draw();
   }, 5000);
+  setInterval(() => {
+    if (busy || view.animated(rowsOf())) draw();
+  }, 250);
   draw();
 
   if (cache.at === 0) refresh();
