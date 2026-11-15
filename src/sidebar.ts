@@ -1067,8 +1067,11 @@ export async function sidebar(wsOpt?: string) {
     lastGatherAtMs = Date.now();
 
     try {
-      last = gather(readers, inner, last);
-      last = { ...last, list: sortEntries(last.list, sortMode) };
+      // a half-typed two-digit number must keep meaning the same workspace, so the list holds still until it ends
+      if (!pending) {
+        last = gather(readers, inner, last);
+        last = { ...last, list: sortEntries(last.list, sortMode) };
+      }
     } catch (e) {
       last = { ...last, fault: `sidebar: ${errorMessage(e)}` };
     }

@@ -178,6 +178,15 @@ export async function prListPane(kind: PrListKind) {
     process.stdout.write(frame(view.render(rows, { selected, offset, height, width, message: busy ? `${spinner(Date.now())} ${message}` : message, now: Date.now(), sort }), height, width));
   };
 
+  /** Replace the rows; the cursor stays on the same PR when the new order moves it. */
+  const installCache = (next: typeof cache) => {
+    const url = rowsOf()[selected]?.url;
+    cache = next;
+    const moved = rowsOf().findIndex((r) => r.url === url);
+
+    if (moved >= 0) selected = moved;
+  };
+
   const refresh = () => {
     if (busy) return;
     busy = true;
@@ -185,12 +194,7 @@ export async function prListPane(kind: PrListKind) {
     message = "refreshing…";
     draw();
     void refreshPrListInChild(kind).then((result) => {
-      // the cursor stays on the same PR when the refresh reorders the rows under it
-      const url = rowsOf()[selected]?.url;
-      cache = readPrList(kind);
-      const moved = rowsOf().findIndex((r) => r.url === url);
-
-      if (moved >= 0) selected = moved;
+      installCache(readPrList(kind));
       message = result.ok ? (cache.error ? `error: ${cache.error}` : "") : `error: ${result.error}`;
       busy = false;
       draw();
@@ -233,7 +237,7 @@ export async function prListPane(kind: PrListKind) {
   setInterval(() => {
     const latest = readPrList(kind);
 
-    if (latest.at > cache.at) cache = latest;
+    if (latest.at > cache.at) installCache(latest);
     draw();
   }, 5000);
   setInterval(() => {
