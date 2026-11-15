@@ -132,7 +132,7 @@ describe("card rendering", () => {
 
   test("a busy card carries the gauge after its status", () => {
     const [, sub] = entryLines(card({ state: "busy", gauge: { pct: 62, compacted: false } }), 0, false, 40);
-    expect(plain(sub!).trim()).toBe("working ▕███░░▏62%");
+    expect(plain(sub!)).toMatch(/^ +working +▕███░░▏62%$/);
   });
 
   test("the gauge stays at the right edge beside a task suffix", () => {
