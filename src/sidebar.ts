@@ -338,15 +338,20 @@ export const entryHeight = (e: Entry, index: number, inner: number) => titleRows
 /** Row heights for the whole list in a pane `width` columns wide. */
 export const entryHeights = (list: Entry[], width: number) => list.map((e, i) => entryHeight(e, i, Math.max(1, width - 4)));
 
-/** ` ▕███░░▏62%` after the agent's own status text on a busy card; nothing when another status (fault, unsaved, …) has the line. */
-const gaugeSuffix = (e: Entry, status: { text: string } | undefined): string => (e.gauge && e.state === "busy" && status?.text === STATE_TEXT.busy.text ? ` ${gaugeText(e.gauge)}` : "");
+/** The gauge to show on `e`'s status line: only while the agent works and nothing else (fault, unsaved, …) has the line. */
+const gaugeFor = (e: Entry, status: { text: string } | undefined): string | undefined =>
+  e.gauge && e.state === "busy" && status?.text.startsWith(STATE_TEXT.busy.text) ? gaugeText(e.gauge) : undefined;
+
+/** The status row: the text fitted to `inner`, or, with a gauge, to what is left of it so the gauge stays at the right edge. */
+const statusRow = (text: string, gauge: string | undefined, inner: number): string =>
+  gauge && inner > textWidth(gauge) + 8 ? `${fit(text, inner - textWidth(gauge) - 1)} ${gauge}` : fit(text, inner);
 
 /** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line. */
 export function entryLines(e: Entry, index: number, selected: boolean, inner: number): string[] {
   const titles = titleRows(e, index, inner).map((l) => fit(l, inner));
   const status = statusFor(e);
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
-  const sub = fit(`${indent}${status?.text ?? ""}${gaugeSuffix(e, status)}`, inner);
+  const sub = statusRow(`${indent}${status?.text ?? ""}`, gaugeFor(e, status), inner);
   const stacks = (e.stacks ?? []).map((st) => fit(`${indent}${stackText(st)}`, inner));
   const receipt = e.receipt ? [fit(`${indent}${receiptText(e.receipt)}`, inner)] : [];
   if (selected) return [...titles, sub, ...stacks, ...receipt].map(inverse);

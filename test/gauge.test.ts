@@ -135,6 +135,12 @@ describe("card rendering", () => {
     expect(plain(sub!).trim()).toBe("working ▕███░░▏62%");
   });
 
+  test("the gauge stays at the right edge beside a task suffix", () => {
+    const [, sub] = entryLines(card({ state: "busy", task: "implement a rather long phase name", gauge: { pct: 62, compacted: false } }), 0, false, 40);
+    expect(plain(sub!)).toHaveLength(40);
+    expect(plain(sub!).endsWith("▕███░░▏62%")).toBe(true);
+  });
+
   test("another status keeps the line", () => {
     const [, sub] = entryLines(card({ state: "busy", gauge: { pct: 62, compacted: false }, unsaved: true }), 0, false, 40);
     expect(plain(sub!)).not.toContain("▕");
