@@ -19,7 +19,8 @@ afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })))
  */
 function fake(files: Record<string, string> = {}, captured = "FOO=bar\0PATH=/x\0", onPath = (_: string) => true) {
   const store = { ...files };
-  const state = { captures: 0, warnings: [] as string[] };
+  const warnings: string[] = [];
+  const state = { captures: 0, warnings };
   const cache = mkdtempSync(join(tmpdir(), "shell-cache-"));
   dirs.push(cache);
 

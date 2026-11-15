@@ -1,6 +1,6 @@
 import { root, selfCommand, worktreePath } from "./paths";
 import { type HookName, loadRepoConfig } from "./project-config";
-import { log } from "./util";
+import { errorMessage, log } from "./util";
 
 /** What a hook is told about the worktree it runs in. */
 export interface HookContext {
@@ -23,13 +23,13 @@ export function runHooks(name: HookName, ctx: HookContext): boolean {
   try {
     commands = loadRepoConfig(dir, ctx.repo).hooks?.[name] ?? [];
   } catch (e) {
-    log(`${name} hooks skipped for ${ctx.ws}/${ctx.repo}: ${(e as Error).message}`);
+    log(`${name} hooks skipped for ${ctx.ws}/${ctx.repo}: ${errorMessage(e)}`);
 
     return true;
   }
 
-  const env: Record<string, string> = {
-    ...(process.env as Record<string, string>),
+  const env = {
+    ...process.env,
     OVERBRIDGE_HOOK: name,
     OVERBRIDGE_ROOT: root(),
     OVERBRIDGE_SELF: selfCommand().join(" "),

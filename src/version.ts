@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { isJsonObject, isJsonString } from "./json";
 
 /** semantic-release never commits the real version back, so package.json in git holds this placeholder. */
 const PLACEHOLDER_PREFIX = "0.0.0-";
@@ -9,9 +10,9 @@ export const resolveVersion = (pkgVersion: string | undefined, envVersion: strin
 
 const readPackageVersion = (): string | undefined => {
   try {
-    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: unknown };
+    const pkg: unknown = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
-    return typeof pkg.version === "string" ? pkg.version : undefined;
+    return isJsonObject(pkg) && isJsonString(pkg.version) ? pkg.version : undefined;
   } catch {
     // The nix build ships only src/, without package.json.
     return undefined;

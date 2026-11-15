@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isJsonObject, type JsonValue, numberField, parseJson } from "./json";
 import { metaDir } from "./paths";
 import { type Color, colorize, dim, fit } from "./term";
 
@@ -29,19 +30,29 @@ export const LIMITS_STALE_MS = 6 * 3600_000;
 
 export const limitsFile = () => join(metaDir(), "limits.json");
 
-const limit = (raw: unknown): Limit | undefined => {
-  const l = raw as Partial<Limit> | undefined;
+const limit = (raw: JsonValue | undefined): Limit | undefined => {
+  if (!isJsonObject(raw)) return undefined;
+  const pct = numberField(raw, "pct");
+  const resetsAt = numberField(raw, "resetsAt");
 
-  return l && typeof l.pct === "number" && typeof l.resetsAt === "number" ? { pct: l.pct, resetsAt: l.resetsAt } : undefined;
+  return pct !== undefined && resetsAt !== undefined ? { pct, resetsAt } : undefined;
 };
 
 export function readLimits(path = limitsFile()): Limits | undefined {
   try {
-    const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    const fiveHour = limit(raw.fiveHour);
-    const weekly = limit(raw.weekly);
+    const raw = parseJson(readFileSync(path, "utf8"));
 
-    return { at: typeof raw.at === "number" ? raw.at : 0, ...(fiveHour ? { fiveHour } : {}), ...(weekly ? { weekly } : {}) };
+    if (!isJsonObject(raw)) return undefined;
+    const obj = raw;
+    const result: Limits = { at: numberField(obj, "at") ?? 0 };
+    const fiveHour = limit(obj.fiveHour);
+    const weekly = limit(obj.weekly);
+
+    if (fiveHour) result.fiveHour = fiveHour;
+
+    if (weekly) result.weekly = weekly;
+
+    return result;
   } catch {
     return undefined;
   }

@@ -16,7 +16,7 @@ mkdirSync(join(tmp, "workspaces"), { recursive: true });
 mkdirSync(join(tmp, "claude"), { recursive: true });
 
 const readConfig = () => JSON.parse(readFileSync(claudeConfigPath(), "utf8"));
-const writeConfig = (config: unknown) => writeFileSync(claudeConfigPath(), JSON.stringify(config));
+const writeConfig = (cause: unknown) => writeFileSync(claudeConfigPath(), JSON.stringify(cause));
 
 beforeEach(() => rmSync(claudeConfigPath(), { force: true }));
 

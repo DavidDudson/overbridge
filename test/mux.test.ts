@@ -263,6 +263,7 @@ describe("tmux layout script", () => {
 // The same operations against a real tmux server, on a private socket directory. Skipped where tmux is not installed.
 describe.skipIf(!Bun.which("tmux"))("tmuxMux against a real tmux", () => {
   let tmp: string;
+  const savedKeys = ["TMUX_TMPDIR", "TMUX", "TMUX_PANE"] as const;
   const saved = { TMUX_TMPDIR: process.env.TMUX_TMPDIR, TMUX: process.env.TMUX, TMUX_PANE: process.env.TMUX_PANE };
   const sleeper = ["sh", "-c", "sleep 60", "x"];
   const restore = (key: keyof typeof saved) => (saved[key] === undefined ? delete process.env[key] : (process.env[key] = saved[key]));
@@ -290,7 +291,7 @@ describe.skipIf(!Bun.which("tmux"))("tmuxMux against a real tmux", () => {
   });
   afterAll(() => {
     privateExec(["tmux", "kill-server"]);
-    (Object.keys(saved) as (keyof typeof saved)[]).forEach(restore);
+    savedKeys.forEach(restore);
     rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -298,7 +299,7 @@ describe.skipIf(!Bun.which("tmux"))("tmuxMux against a real tmux", () => {
     const script = join(tmp, "layout.tmux");
     const specs = layoutSpecs(["a", "b"], sleeper, { sidebarWidth: 30 });
     const names = specs.map((t) => t.name);
-    const [root, work, ...rest] = names as [string, string, ...string[]];
+    const [root = "", work = "", ...rest] = names;
     Bun.write(script, layoutScript("t", specs));
     const mux = tmuxMux(privateExec, { session: "t", env: {} });
     expect(privateExec(["tmux", "-f", "/dev/null", "start-server", ";", "source-file", script]).ok).toBe(true);

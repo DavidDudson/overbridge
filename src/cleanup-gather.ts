@@ -15,6 +15,7 @@ import type { Provider } from "./pm/provider";
 import { loadRepoConfig } from "./project-config";
 import { localStacks, stackOf } from "./stack";
 import { type Claim, isRemoving, readState, type State, TASK_BRANCH_PREFIX } from "./state";
+import { isJsonObject, type JsonValue, numberField, parseJson, stringField } from "./json";
 import { errorMessage, log, naturalSort, type RunResult, run } from "./util";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
@@ -89,18 +90,38 @@ const defaultDeps = (): GatherDeps => ({
 
 const PR_FIELDS = "number,state,headRefName,url,title";
 const PR_SEARCH_LIMIT = 30;
-const GH_STATES: Record<string, PrState> = { OPEN: PrState.Open, MERGED: PrState.Merged, CLOSED: PrState.Closed };
+
+const GH_STATES = new Map<string, PrState>([
+  ["OPEN", PrState.Open],
+  ["MERGED", PrState.Merged],
+  ["CLOSED", PrState.Closed],
+]);
 
 interface RawPr {
-  number?: number;
-  state?: string;
-  headRefName?: string;
-  url?: string;
-  title?: string;
+  number?: number | undefined;
+  state?: string | undefined;
+  headRefName?: string | undefined;
+  url?: string | undefined;
+  title?: string | undefined;
+}
+
+/** The `gh` fields of a parsed PR; a field of the wrong type reads as absent. */
+function rawPr(value: JsonValue | undefined): RawPr {
+  if (!isJsonObject(value)) {
+    return {};
+  }
+
+  return {
+    number: numberField(value, "number"),
+    state: stringField(value, "state"),
+    headRefName: stringField(value, "headRefName"),
+    url: stringField(value, "url"),
+    title: stringField(value, "title"),
+  };
 }
 
 function prFact(raw: RawPr, provider: Provider | undefined): PrFact | undefined {
-  const state = GH_STATES[raw.state ?? ""];
+  const state = GH_STATES.get(raw.state ?? "");
 
   if (raw.number === undefined || !state) {
     return undefined;
@@ -109,14 +130,19 @@ function prFact(raw: RawPr, provider: Provider | undefined): PrFact | undefined 
   const branch = raw.headRefName ?? "";
   const item = provider?.idFromBranch(branch) ?? provider?.idFromBranch(raw.title ?? "");
 
-  return { number: raw.number, state, branch, url: raw.url ?? "", ...(item ? { item } : {}) };
+  const fact: PrFact = { number: raw.number, state, branch, url: raw.url ?? "" };
+
+  if (item) fact.item = item;
+
+  return fact;
 }
 
-const parse = <T>(json: string, fallback: T): T => {
+/** Parsed `gh` output; text that is not JSON reads as absent. */
+const parse = (json: string): JsonValue | undefined => {
   try {
-    return JSON.parse(json) as T;
+    return parseJson(json);
   } catch {
-    return fallback;
+    return undefined;
   }
 };
 
@@ -131,7 +157,7 @@ const read = <T>(value: T, ...problems: string[]): Read<T> => ({ value, problems
 /** The PR `selector` (a number or a branch) names. A branch with no PR is not a problem; a PR number that can't be read is. */
 function readPr(selector: string, wt: string, deps: GatherDeps, provider: Provider | undefined): Read<PrFact | undefined> {
   const r = deps.exec(["gh", "pr", "view", selector, "--json", PR_FIELDS], wt);
-  const pr = r.ok ? prFact(parse<RawPr>(r.stdout, {}), provider) : undefined;
+  const pr = r.ok ? prFact(rawPr(parse(r.stdout)), provider) : undefined;
   const numbered = /^\d+$/.test(selector);
 
   return pr || !numbered ? read(pr) : read(pr, `PR #${selector} could not be read: ${r.stderr || "gh printed nothing usable"}`);
@@ -145,7 +171,8 @@ function readItemPrs(id: string, wt: string, deps: GatherDeps, provider: Provide
     return read([], `PRs for ${id} could not be listed: ${r.stderr || r.stdout}`);
   }
 
-  const prs = parse<RawPr[]>(r.stdout, []).flatMap((raw) => prFact(raw, provider) ?? []);
+  const listed = parse(r.stdout);
+  const prs = Array.isArray(listed) ? listed.flatMap((raw) => prFact(rawPr(raw), provider) ?? []) : [];
 
   return read(prs.filter((pr) => pr.item === id));
 }
@@ -154,7 +181,9 @@ function readItemPrs(id: string, wt: string, deps: GatherDeps, provider: Provide
 function inMergedPr(sha: string, wt: string, deps: GatherDeps): boolean {
   const r = deps.exec(["gh", "api", `repos/{owner}/{repo}/commits/${sha}/pulls`], wt);
 
-  return r.ok && parse<{ merged_at?: string | null }[]>(r.stdout, []).some((pr) => !!pr.merged_at);
+  const pulls = r.ok ? parse(r.stdout) : undefined;
+
+  return Array.isArray(pulls) && pulls.some((pr) => isJsonObject(pr) && !!pr.merged_at);
 }
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -180,7 +209,8 @@ function commitFacts(repo: string, wt: string, deps: GatherDeps): Read<Pick<Repo
   const status = gitIn(["status", "--porcelain"]);
   const aheadRun = gitIn(["rev-list", "--count", `${deps.defaultRef(repo)}..HEAD`]);
   const offRemote = gitIn(["rev-list", "--count", "HEAD", "--not", "--remotes"]);
-  const base = { ...(head ? { head } : {}), dirty: !status.ok || status.stdout !== "" };
+  const dirty = !status.ok || status.stdout !== "";
+  const base: Pick<RepoFacts, "head" | "dirty"> = head ? { head, dirty } : { dirty };
 
   if (!status.ok || !aheadRun.ok || !offRemote.ok || !/^\d+$/.test(aheadRun.stdout)) {
     return read({ ...base, ahead: 1, unpushed: true }, `${repo}: git could not read the worktree at ${wt}`);
@@ -200,14 +230,16 @@ function repoFacts(repo: string, wt: string, claim: Claim, itemId: string | unde
 
   const facts: RepoFacts = {
     repo,
-    ...(claim.branch ? { claim: claim.branch } : {}),
     ...commits.value,
     task: claim.branch?.startsWith(TASK_BRANCH_PREFIX) === true,
     stacked: deps.stacked(repo, claim.branch),
     stashes: stashesOn(commits.value.head ?? claim.branch, wt, deps),
-    ...(pr.value ? { pr: pr.value } : {}),
     itemPrs: searched.value.filter((found) => found.number !== pr.value?.number),
   };
+
+  if (claim.branch) facts.claim = claim.branch;
+
+  if (pr.value) facts.pr = pr.value;
 
   return read(facts, ...commits.problems, ...pr.problems, ...searched.problems);
 }
@@ -255,7 +287,7 @@ export function gatherFacts(target: Target, deps: GatherDeps): WorkspaceFacts {
 
     const status = provider.status(id);
 
-    return { id, ...(status ? { status } : {}) };
+    return status ? { id, status } : { id };
   };
 
   const item = fact(itemId);
@@ -263,17 +295,22 @@ export function gatherFacts(target: Target, deps: GatherDeps): WorkspaceFacts {
   const repos = target.repos.map((r) => repoFacts(r.repo, r.wt, r.claim, itemId ?? namedId, deps.provider(r.repo, r.wt), deps));
   const agent = orphan ? undefined : deps.agent(ws);
 
-  return {
+  const facts: WorkspaceFacts = {
     ws,
     orphan,
     repos: repos.map((r) => r.value),
-    ...(item ? { item } : {}),
-    ...(named ? { named } : {}),
-    ...(agent ? { agent } : {}),
     agentAtRest: AT_REST.has(agent),
     strayFiles: deps.strayFiles(ws, target.repos.map((r) => basename(r.wt))),
     problems: repos.flatMap((r) => r.problems),
   };
+
+  if (item) facts.item = item;
+
+  if (named) facts.named = named;
+
+  if (agent) facts.agent = agent;
+
+  return facts;
 }
 
 /** Every workspace in state that is not an orchestration tab or already being removed, then every orphan folder. */
@@ -289,7 +326,7 @@ export function targets(state: State): Target[] {
 }
 
 /** A workspace whose facts could not be read is kept, with the reason. */
-const unreadable = (target: Target, error: unknown): Finding => ({
+const unreadable = (target: Target, error: Error | string): Finding => ({
   ws: target.ws,
   orphan: target.orphan,
   repos: [],
@@ -308,7 +345,7 @@ export function scan(deps: GatherDeps = defaultDeps(), state: State = readState(
     try {
       return classify(gatherFacts(target, deps));
     } catch (e) {
-      return unreadable(target, e);
+      return unreadable(target, e instanceof Error ? e : String(e));
     }
   });
 }

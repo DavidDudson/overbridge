@@ -109,8 +109,13 @@ describe("createSweeper", () => {
 });
 
 describe("GET /sweep", () => {
-  const handler = (extra: object) =>
-    createHandler({ refreshTop: async () => ({}) as never, refreshPerf: async () => 0, workspaceExists: () => true, cacheFileAt: () => 0, version: "v", onVersionMismatch: () => undefined, ...extra });
+  type HandlerDeps = Parameters<typeof createHandler>[0];
+
+  // SAFETY: no test here reaches `refreshTop`, so its `never` result is never read.
+  const refreshTop = async () => ({}) as never;
+
+  const handler = (extra: Partial<HandlerDeps>) =>
+    createHandler({ refreshTop, refreshPerf: async () => 0, workspaceExists: () => true, cacheFileAt: () => 0, version: "v", onVersionMismatch: () => undefined, ...extra });
 
   test("answers that the server owns the sweep, with its counters", async () => {
     const h = handler({ sweepStats: () => ({ runs: 3 }), sweepBusy: () => true });

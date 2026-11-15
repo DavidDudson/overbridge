@@ -8,6 +8,7 @@ import { githubRows, parseProject, projectRows, slugFromUrl, type ProjectBoard, 
 import { jiraRows } from "./pm/board-jira";
 import { keyOf, type WorkRow, type WorkStatus } from "./pm/worklist";
 import type { ProjectManagement } from "./project-config";
+import { errorMessage } from "./util";
 
 /**
  * The work list's data: what a refresh reads and writes, with no pane code. The server and its workers import this, so
@@ -43,9 +44,41 @@ function writeWorklist(cache: WorklistCache) {
 }
 
 /** One board read: a GitHub repo, or a Jira project shared by every repo that names it. */
-export type BoardSource =
-  | { kind: "github"; repo: string; slug: string; columns?: Record<string, WorkStatus>; scope?: WorklistScope; project?: ProjectBoard }
-  | { kind: "jira"; project: string; repos: string[]; filter?: string; site?: string };
+export interface GithubSource {
+  kind: "github";
+  repo: string;
+  slug: string;
+  columns?: Record<string, WorkStatus>;
+  scope?: WorklistScope;
+  project?: ProjectBoard;
+}
+
+export interface JiraSource {
+  kind: "jira";
+  project: string;
+  repos: string[];
+  filter?: string;
+  site?: string;
+}
+
+export type BoardSource = GithubSource | JiraSource;
+
+/** The reads a refresh makes, and a note for each repo whose board could not be planned. */
+export interface WorklistPlan {
+  sources: BoardSource[];
+  notes: string[];
+}
+
+export interface GithubReadOptions {
+  columns?: Record<string, WorkStatus>;
+  scope?: WorklistScope;
+  project?: ProjectBoard;
+}
+
+export interface JiraReadOptions {
+  filter?: string;
+  site?: string;
+}
 
 export interface RepoBoard {
   repo: string;
@@ -59,26 +92,23 @@ export interface RepoBoard {
  * The reads a refresh makes. Repos on the same Jira project and filter share one read, so a ticket is listed once
  * however many repos it could land in.
  */
-export function boardSources(repos: readonly RepoBoard[]): { sources: BoardSource[]; notes: string[] } {
+export function boardSources(repos: readonly RepoBoard[]): WorklistPlan {
   const withPm = repos.filter((r): r is RepoBoard & { pm: ProjectManagement } => r.pm !== undefined);
 
-  const github = withPm
-    .filter((r) => r.pm.name === "github")
-    .map((r) => ({ r, slug: slugFromUrl(r.url) ?? (/^[\w.-]+\/[\w.-]+$/.test(r.pm.project) ? r.pm.project : undefined) }));
+  const github = withPm.flatMap((r) => (r.pm.name === "github" ? [{ r, slug: slugFromUrl(r.url) ?? (/^[\w.-]+\/[\w.-]+$/.test(r.pm.project) ? r.pm.project : undefined) }] : []));
 
   const jiraRepos = withPm.filter((r) => r.pm.name === "jira");
   const jiraGroups = Map.groupBy(jiraRepos, (r) => JSON.stringify([r.pm.project.toUpperCase(), r.pm.worklistJql ?? null, r.pm.url ?? null]));
 
   const jira = [...jiraGroups.values()].map((group): BoardSource => {
     const pm = group[0]!.pm;
+    const source: JiraSource = { kind: "jira", project: pm.project.toUpperCase(), repos: group.map((r) => r.repo) };
 
-    return {
-      kind: "jira",
-      project: pm.project.toUpperCase(),
-      repos: group.map((r) => r.repo),
-      ...(pm.worklistJql !== undefined ? { filter: pm.worklistJql } : {}),
-      ...(pm.url ? { site: pm.url } : {}),
-    };
+    if (pm.worklistJql !== undefined) source.filter = pm.worklistJql;
+
+    if (pm.url) source.site = pm.url;
+
+    return source;
   });
 
   return {
@@ -87,29 +117,28 @@ export function boardSources(repos: readonly RepoBoard[]): { sources: BoardSourc
         if (!slug) return [];
         const project = r.pm.worklistProject ? parseProject(r.pm.worklistProject, slug.split("/")[0], r.pm.worklistStatuses) : undefined;
 
-        return [
-          {
-            kind: "github",
-            repo: r.repo,
-            slug,
-            ...(r.columns && Object.keys(r.columns).length ? { columns: r.columns } : {}),
-            ...(r.pm.worklistScope ? { scope: r.pm.worklistScope } : {}),
-            ...(project ? { project } : {}),
-          },
-        ];
+        const source: GithubSource = { kind: "github", repo: r.repo, slug };
+
+        if (r.columns && Object.keys(r.columns).length) source.columns = r.columns;
+
+        if (r.pm.worklistScope) source.scope = r.pm.worklistScope;
+
+        if (project) source.project = project;
+
+        return [source];
       }),
       ...jira,
     ],
     notes: [
-      ...github.filter((g) => !g.slug).map(({ r }) => `${r.repo}: cannot tell the GitHub repo from ${r.url}`),
-      ...github.filter((g) => g.slug && g.r.pm.worklistProject && !parseProject(g.r.pm.worklistProject, g.slug.split("/")[0])).map(({ r }) => `${r.repo}: bad worklist-project ${r.pm.worklistProject}`),
+      ...github.flatMap(({ r, slug }) => (slug ? [] : [`${r.repo}: cannot tell the GitHub repo from ${r.url}`])),
+      ...github.flatMap(({ r, slug }) => (slug && r.pm.worklistProject && !parseProject(r.pm.worklistProject, slug.split("/")[0]) ? [`${r.repo}: bad worklist-project ${r.pm.worklistProject}`] : [])),
     ],
   };
 }
 
 export interface BoardReaders {
-  github: (slug: string, repo: string, opts?: { columns?: Record<string, WorkStatus>; scope?: WorklistScope; project?: ProjectBoard }) => WorkRow[];
-  jira: (project: string, repos: string[], opts: { filter?: string; site?: string }) => WorkRow[];
+  github: (slug: string, repo: string, opts?: GithubReadOptions) => WorkRow[];
+  jira: (project: string, repos: string[], opts: JiraReadOptions) => WorkRow[];
 }
 
 const defaultReaders: BoardReaders = {
@@ -125,14 +154,36 @@ export interface SourceRead {
   failedRepos: string[];
 }
 
+function githubReadOptions(s: GithubSource): GithubReadOptions {
+  const opts: GithubReadOptions = {};
+
+  if (s.columns) opts.columns = s.columns;
+
+  if (s.scope) opts.scope = s.scope;
+
+  if (s.project) opts.project = s.project;
+
+  return opts;
+}
+
+function jiraReadOptions(s: JiraSource): JiraReadOptions {
+  const opts: JiraReadOptions = {};
+
+  if (s.filter !== undefined) opts.filter = s.filter;
+
+  if (s.site) opts.site = s.site;
+
+  return opts;
+}
+
 /** Read one source. A source that fails adds a note and no rows. */
 export function readSource(s: BoardSource, readers: BoardReaders = defaultReaders): SourceRead {
   try {
-    const rows = s.kind === "github" ? readers.github(s.slug, s.repo, { ...(s.columns ? { columns: s.columns } : {}), ...(s.scope ? { scope: s.scope } : {}), ...(s.project ? { project: s.project } : {}) }) : readers.jira(s.project, s.repos, { ...(s.filter !== undefined ? { filter: s.filter } : {}), ...(s.site ? { site: s.site } : {}) });
+    const rows = s.kind === "github" ? readers.github(s.slug, s.repo, githubReadOptions(s)) : readers.jira(s.project, s.repos, jiraReadOptions(s));
 
     return { rows, notes: [], failedRepos: [] };
   } catch (e) {
-    return { rows: [], notes: [`${sourceName(s)}: ${(e as Error).message.split("\n")[0]}`], failedRepos: s.kind === "github" ? [s.repo] : s.repos };
+    return { rows: [], notes: [`${sourceName(s)}: ${errorMessage(e).split("\n")[0]}`], failedRepos: s.kind === "github" ? [s.repo] : s.repos };
   }
 }
 
@@ -153,11 +204,11 @@ export const mergeReads = (results: readonly SourceRead[]): SourceRead => ({
  * shares one read (`boardSources` has already grouped them).
  */
 export function sourceKey(s: BoardSource): string {
-  const shape = (v: unknown) => new Bun.CryptoHasher("sha1").update(JSON.stringify(v ?? null)).digest("hex").slice(0, 10);
+  const digest = <T>(parts: T) => new Bun.CryptoHasher("sha1").update(JSON.stringify(parts ?? null)).digest("hex").slice(0, 10);
 
   return s.kind === "github"
-    ? `board:gh:${s.slug}:${s.repo}:${shape([s.scope, s.project, s.columns])}`
-    : `board:jira:${s.project}:${shape([s.filter, s.site])}`;
+    ? `board:gh:${s.slug}:${s.repo}:${digest([s.scope, s.project, s.columns])}`
+    : `board:jira:${s.project}:${digest([s.filter, s.site])}`;
 }
 
 /**
@@ -183,21 +234,26 @@ export function filterOrgs(sources: readonly BoardSource[], orgs: readonly strin
 }
 
 /** The reads a refresh makes, and the notes for repos whose config cannot be read: one line per repo. */
-export function planWorklist(): { sources: BoardSource[]; notes: string[] } {
-  const configs = Object.values(loadRepos()).map((spec): RepoBoard | string => {
+export function planWorklist(): WorklistPlan {
+  const boards: RepoBoard[] = [];
+  const notes: string[] = [];
+
+  for (const spec of Object.values(loadRepos())) {
     try {
       const config = committedConfig(spec);
       const pm = config.projectManagement;
+      const board: RepoBoard = { repo: spec.name, url: spec.url, columns: config.boardColumns };
 
-      return { repo: spec.name, url: spec.url, ...(pm ? { pm } : {}), columns: config.boardColumns };
+      if (pm) board.pm = pm;
+      boards.push(board);
     } catch (e) {
-      return `${spec.name}: ${(e as Error).message.split("\n")[0]}`;
+      notes.push(`${spec.name}: ${errorMessage(e).split("\n")[0]}`);
     }
-  });
+  }
 
-  const planned = boardSources(configs.filter((c): c is RepoBoard => typeof c !== "string"));
+  const planned = boardSources(boards);
 
-  return { sources: filterOrgs(planned.sources, loadRootLayers().githubOrgs), notes: [...configs.filter((c): c is string => typeof c === "string"), ...planned.notes] };
+  return { sources: filterOrgs(planned.sources, loadRootLayers().githubOrgs), notes: [...notes, ...planned.notes] };
 }
 
 /** Write the cache from a plan's notes and what its reads returned, keeping the last good rows of a failed repo. */

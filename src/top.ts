@@ -6,14 +6,15 @@ import { getRepo } from "./config";
 import * as git from "./git";
 import { isOrchestrationTab } from "./orchestration";
 import { metaDir, wsDir, worktreePath } from "./paths";
+import { isJsonNumber, isJsonBoolean, isJsonObject, isJsonString, type JsonObject, type JsonValue } from "./json";
 import { providerFor, refreshTitle, TITLE_TTL_MS } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, isTaskClaim, readState } from "./state";
-import { boxBottom, boxRow, boxTop, type Color, COLORS, colorize, fit, inverse, textWidth } from "./term";
+import { boxBottom, boxRow, boxTop, type Color, colorize, fit, inverse, isColor, textWidth } from "./term";
 import { parseUnresolved, REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses, threadsCommand } from "./reviewers";
 import { stackOf, localStacks } from "./stack";
-import { describeValue, errorMessage, isRecord, run } from "./util";
+import { describeValue, errorMessage, run } from "./util";
 
 const safeStacks = (repo: string) => {
   try {
@@ -156,12 +157,16 @@ export function parseButtonStatus(out: string): ButtonState {
 
   if (trimmed.startsWith("{")) {
     try {
-      const v = JSON.parse(trimmed) as { text?: unknown; color?: unknown };
+      const v: unknown = JSON.parse(trimmed);
+      const state: ButtonState = {};
 
-      return {
-        ...(typeof v.text === "string" && v.text ? { text: v.text } : {}),
-        ...(typeof v.color === "string" && v.color in COLORS ? { color: v.color as Color } : {}),
-      };
+      if (isJsonObject(v)) {
+        if (isJsonString(v.text) && v.text) state.text = v.text;
+
+        if (isJsonString(v.color) && isColor(v.color)) state.color = v.color;
+      }
+
+      return state;
     } catch {
       // not JSON after all: fall through to plain text
     }
@@ -173,15 +178,15 @@ export function parseButtonStatus(out: string): ButtonState {
 }
 
 /** The env a configured button's commands run with. */
-export function buttonEnv(ws: string, repo: string, claim: { branch?: string; pr?: number }): Record<string, string> {
+export function buttonEnv(ws: string, repo: string, claim: { branch?: string; pr?: number }) {
   return { OVERBRIDGE_NAME: ws, OVERBRIDGE_REPO: repo, OVERBRIDGE_BRANCH: claim.branch ?? "", OVERBRIDGE_PR: claim.pr === undefined ? "" : String(claim.pr) };
 }
 
 /** Fill `{ws}`, `{repo}`, `{branch}` and `{pr}` in a button's URL, each URL-encoded. */
 export function buttonUrl(template: string, env: Record<string, string>): string {
-  const vars: Record<string, string> = { ws: env.OVERBRIDGE_NAME ?? "", repo: env.OVERBRIDGE_REPO ?? "", branch: env.OVERBRIDGE_BRANCH ?? "", pr: env.OVERBRIDGE_PR ?? "" };
+  const vars = { ws: env.OVERBRIDGE_NAME ?? "", repo: env.OVERBRIDGE_REPO ?? "", branch: env.OVERBRIDGE_BRANCH ?? "", pr: env.OVERBRIDGE_PR ?? "" };
 
-  return template.replace(/\{(ws|repo|branch|pr)\}/g, (_, k: string) => encodeURIComponent(vars[k]!));
+  return template.replace(/\{(ws|repo|branch|pr)\}/g, (_, k: keyof typeof vars) => encodeURIComponent(vars[k]));
 }
 
 export interface TopApp {
@@ -237,41 +242,47 @@ const EMPTY_CACHE: TopCache = { links: [], at: 0 };
  * Why a parsed cache file is not a `TopCache`, or undefined when every field the panes read has the right type:
  * the optional fields when present, and `links` and `at` always (the sweep's age check needs a real `at`).
  */
-export function topCacheFault(raw: unknown): string | undefined {
-  if (!isRecord(raw)) return `expected a mapping, got ${describeValue(raw)}`;
+export function topCacheFault(raw: JsonValue | undefined): string | undefined {
+  if (!isJsonObject(raw)) return `expected a mapping, got ${describeValue(raw)}`;
   const wrong = (field: string, ok: boolean) => (ok ? undefined : `${field} is ${describeValue(raw[field])}`);
   const optional = (field: string, ok: boolean) => (raw[field] === undefined ? undefined : wrong(field, ok));
 
   return (
-    optional("headline", typeof raw.headline === "string") ??
-    optional("title", typeof raw.title === "string") ??
-    optional("message", typeof raw.message === "string") ??
-    optional("prsOpen", typeof raw.prsOpen === "boolean") ??
-    optional("draftOnly", typeof raw.draftOnly === "boolean") ??
-    optional("prActiveAt", typeof raw.prActiveAt === "number" && Number.isFinite(raw.prActiveAt)) ??
-    optional("merged", isRecord(raw.merged)) ??
-    optional("branches", isRecord(raw.branches)) ??
-    optional("buttons", isRecord(raw.buttons)) ??
+    optional("headline", isJsonString(raw.headline)) ??
+    optional("title", isJsonString(raw.title)) ??
+    optional("message", isJsonString(raw.message)) ??
+    optional("prsOpen", isJsonBoolean(raw.prsOpen)) ??
+    optional("draftOnly", isJsonBoolean(raw.draftOnly)) ??
+    optional("prActiveAt", isJsonNumber(raw.prActiveAt)) ??
+    optional("merged", isJsonObject(raw.merged)) ??
+    optional("branches", isJsonObject(raw.branches)) ??
+    optional("buttons", isJsonObject(raw.buttons)) ??
     wrong("links", Array.isArray(raw.links)) ??
-    wrong("at", typeof raw.at === "number" && Number.isFinite(raw.at))
+    wrong("at", isJsonNumber(raw.at))
   );
 }
 
+/**
+ * Whether `raw` passes `topCacheFault`. That checks every scalar field `TopCache` declares, `links` and `at`, and that `merged`, `branches`
+ * and `buttons` are mappings; the entries inside those are written only by `refreshTop`.
+ */
+export const isTopCache = (raw: JsonValue | undefined): raw is JsonObject & TopCache => topCacheFault(raw) === undefined;
+
 /** The cache file, checked: a missing file is the empty cache; an unreadable or misshapen one is the empty cache plus why, for that workspace's card. */
-export function readTopCacheChecked(ws: string): { cache: TopCache; fault?: string } {
-  let raw: unknown;
+export function readTopCacheChecked(ws: string) {
+  let raw: JsonValue;
 
   try {
     raw = JSON.parse(readFileSync(cacheFile(ws), "utf8"));
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { cache: EMPTY_CACHE };
+    if (e instanceof Error && "code" in e && e.code === "ENOENT") return { cache: EMPTY_CACHE };
 
     return { cache: EMPTY_CACHE, fault: `top cache: ${errorMessage(e)}` };
   }
 
-  const fault = topCacheFault(raw);
+  if (!isTopCache(raw)) return { cache: EMPTY_CACHE, fault: `top cache: ${topCacheFault(raw)}` };
 
-  return fault ? { cache: EMPTY_CACHE, fault: `top cache: ${fault}` } : { cache: raw as TopCache };
+  return { cache: raw };
 }
 
 /** The cache file as a `TopCache`; the empty cache when it is missing, unreadable or misshapen. */
@@ -304,6 +315,7 @@ const prViewCommand = (n: number) => ["gh", "pr", "view", String(n), "--json", "
 
 function parsePrView(out: string | undefined): PrView | undefined {
   try {
+    // SAFETY: `gh pr view --json` prints the fields prViewCommand asks for, typed as PrView declares them; every field is optional, so one gh leaves out reads as undefined.
     return out ? (JSON.parse(out) as PrView) : undefined;
   } catch {
     return undefined;
@@ -365,7 +377,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     try {
       config = loadRepoConfig(dir, repo);
     } catch (e) {
-      problems.push(`${repo}: ${(e as Error).message}`);
+      problems.push(`${repo}: ${errorMessage(e)}`);
       continue;
     }
 
@@ -383,7 +395,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
           itemLink = { label: id, url: p.link(id) };
         }
       } catch (e) {
-        problems.push(`${repo}: ${(e as Error).message}`);
+        problems.push(`${repo}: ${errorMessage(e)}`);
       }
     }
 
@@ -408,42 +420,44 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 
     // while gh is paused the PR facts are the last ones read (below), so no PR is looked at
     if (claim.pr !== undefined && !deps.paused) {
+      const claimedPr = claim.pr;
+
       if (batched && "prs" in batched && batched.error) problems.push(`${repo}: ${batched.error}`);
-      const view = viewOf(claim.pr);
+      const view = viewOf(claimedPr);
 
       if (view?.url) {
         const layers = stackOf(safeStacks(repo), claim.branch)?.layers ?? [];
         const prs = layers.length > 1 ? layers.flatMap((l) => (l.pr === undefined ? [] : [l.pr])) : [];
-        const stack = prs.length > 1 && prs.includes(claim.pr as number) ? prs : [];
+        const stack = prs.length > 1 && prs.includes(claimedPr) ? prs : [];
 
-        const link = (n: number, v: PrView & { url: string }): TopLink => {
-          const threads = v.unresolved === undefined ? threadsCommand(v.url) : undefined;
+        const link = (n: number, v: PrView, url: string): TopLink => {
+          const threads = v.unresolved === undefined ? threadsCommand(url) : undefined;
 
           if (threads) v.unresolved = parseUnresolved(exec(threads, dir));
-          const layer = stack.length ? { n: stack.indexOf(n) + 1, of: stack.length } : undefined;
+          const info: PrInfo = { repo, number: n, title: v.title ?? "", draft: v.isDraft === true, dir, stack, reviewers: reviewerStatuses(v, url) };
 
-          return {
-            label: claims.length > 1 ? `${repo} #${n}` : `PR #${n}`,
-            url: v.url,
-            status: classifyPr(v),
-            pr: { repo, number: n, title: v.title ?? "", draft: v.isDraft === true, dir, stack, ...(layer ? { layer, claimed: n === claim.pr } : {}), reviewers: reviewerStatuses(v, v.url) },
-          };
+          if (stack.length) {
+            info.layer = { n: stack.indexOf(n) + 1, of: stack.length };
+            info.claimed = n === claimedPr;
+          }
+
+          return { label: claims.length > 1 ? `${repo} #${n}` : `PR #${n}`, url, status: classifyPr(v), pr: info };
         };
 
         // a stack lists every layer bottom to top; only the claimed one feeds the open/merged counts below
-        for (const n of stack.length ? stack : [claim.pr]) {
-          if (n === claim.pr) {
-            links.push(link(n, view as PrView & { url: string }));
+        for (const n of stack.length ? stack : [claimedPr]) {
+          if (n === claimedPr) {
+            links.push(link(n, view, view.url));
             continue;
           }
 
           const other = viewOf(n);
 
-          if (other?.url) links.push(link(n, other as PrView & { url: string }));
+          if (other?.url) links.push(link(n, other, other.url));
           else problems.push(`${repo}: no URL for PR #${n}`);
         }
       }
-      else problems.push(`${repo}: no URL for PR #${claim.pr}`);
+      else problems.push(`${repo}: no URL for PR #${claimedPr}`);
 
       if (view?.state === "OPEN") {
         openPrs++;
@@ -461,29 +475,46 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     }
   }
 
+  const headlineNow = headline ?? old.headline;
+  const titleNow = itemTitle ?? old.title;
+
   const cache: TopCache = {
-    // keep the previous values when this run found nothing, so the panel never goes blank on an outage
-    ...(headline ?? old.headline ? { headline: headline ?? old.headline } : {}),
-    ...(itemTitle ?? old.title ? { title: itemTitle ?? old.title } : {}),
     links: deps.paused ? (old.links.length ? old.links : itemLink ? [itemLink] : []) : itemLink || links.length ? [...(itemLink ? [itemLink] : []), ...links] : old.links,
-    ...(deps.paused
-      ? // the PR facts are the last ones read: gh was not asked
-        { prsOpen: old.prsOpen, ...(old.draftOnly ? { draftOnly: true as const } : {}), ...(old.prActiveAt !== undefined ? { prActiveAt: old.prActiveAt } : {}), ...(old.merged ? { merged: old.merged } : {}) }
-      : {
-          // released repos hold no branch, so only claimed branches need an open PR
-          // an open PR somewhere, and every other claim already merged: a merged branch is finished, not a reason to keep the workspace
-          prsOpen: claimed > 0 && openPrs > 0 && openPrs + mergedPrs === claimed,
-          ...(claimed > 0 && openPrs === claimed && draftPrs === claimed ? { draftOnly: true as const } : {}),
-          ...(prActiveAt !== undefined ? { prActiveAt } : {}),
-          // a claim with no PR, a closed PR or an unreadable one leaves this unset, so the workspace stays
-          ...(claimed > 0 && Object.keys(mergedHeads).length === claimed ? { merged: mergedHeads } : {}),
-        }),
     // while paused `merged` and `prsOpen` are the old ones, so they stay tied to the branches they were built for: a claim that moved meanwhile must still invalidate them (`claimedCache`)
     branches: deps.paused && old.branches ? old.branches : Object.fromEntries(claims.flatMap(([repo, c]) => (c.branch ? [[repo, c.branch] as const] : []))),
-    ...(Object.keys(buttonStates).length ? { buttons: buttonStates } : {}),
-    ...(deps.paused || problems.length ? { message: [...(deps.paused ? [deps.paused] : []), ...problems].join("; ") } : {}),
     at: Date.now(),
   };
+
+  // keep the previous values when this run found nothing, so the panel never goes blank on an outage
+  if (headlineNow) cache.headline = headlineNow;
+
+  if (titleNow) cache.title = titleNow;
+
+  if (deps.paused) {
+    // the PR facts are the last ones read: gh was not asked
+    if (old.prsOpen !== undefined) cache.prsOpen = old.prsOpen;
+
+    if (old.draftOnly) cache.draftOnly = true;
+
+    if (old.prActiveAt !== undefined) cache.prActiveAt = old.prActiveAt;
+
+    if (old.merged) cache.merged = old.merged;
+  } else {
+    // released repos hold no branch, so only claimed branches need an open PR
+    // an open PR somewhere, and every other claim already merged: a merged branch is finished, not a reason to keep the workspace
+    cache.prsOpen = claimed > 0 && openPrs > 0 && openPrs + mergedPrs === claimed;
+
+    if (claimed > 0 && openPrs === claimed && draftPrs === claimed) cache.draftOnly = true;
+
+    if (prActiveAt !== undefined) cache.prActiveAt = prActiveAt;
+
+    // a claim with no PR, a closed PR or an unreadable one leaves this unset, so the workspace stays
+    if (claimed > 0 && Object.keys(mergedHeads).length === claimed) cache.merged = mergedHeads;
+  }
+
+  if (Object.keys(buttonStates).length) cache.buttons = buttonStates;
+
+  if (deps.paused || problems.length) cache.message = [...(deps.paused ? [deps.paused] : []), ...problems].join("; ");
 
   writeTopCache(ws, cache);
 
@@ -575,7 +606,7 @@ export function gitClean(ws: string): boolean {
 export const CLEANUP_ARM_MS = 5_000;
 
 /** The first press arms Cleanup; a second within `CLEANUP_ARM_MS` confirms. Pure so the timing is testable. */
-export function pressCleanup(armedAt: number | undefined, now: number): { confirmed: boolean; armedAt: number | undefined } {
+export function pressCleanup(armedAt: number | undefined, now: number) {
   if (armedAt !== undefined && now - armedAt <= CLEANUP_ARM_MS) return { confirmed: true, armedAt: undefined };
 
   return { confirmed: false, armedAt: now };
@@ -603,40 +634,41 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
 
         // a button with a status command waits for it to print something
         if (spec.status && !state) continue;
-        custom.push({ repo, spec, dir: repoDir, env: buttonEnv(ws, repo, claimed[repo] ?? {}), ...(state ? { state } : {}) });
+        const button: CustomButton = { repo, spec, dir: repoDir, env: buttonEnv(ws, repo, claimed[repo] ?? {}) };
+
+        if (state) button.state = state;
+        custom.push(button);
       }
 
       for (const spec of config.apps) {
         const record = readRecord(ws, repo, spec.id);
-        apps.push({
-          repo,
-          spec,
-          repoDir,
-          status: await appStatus(ws, repo, spec),
-          ...(record?.port === undefined ? {} : { port: record.port }),
-          available: appAvailable(spec, repo, repoDir),
-        });
+        const app: TopApp = { repo, spec, repoDir, status: await appStatus(ws, repo, spec), available: appAvailable(spec, repo, repoDir) };
+
+        if (record?.port !== undefined) app.port = record.port;
+        apps.push(app);
       }
     } catch (e) {
-      problems.push(`${repo}: ${(e as Error).message}`);
+      problems.push(`${repo}: ${errorMessage(e)}`);
     }
   }
 
   const editor = ide ? undefined : env.OVERBRIDGE_IDE?.trim() || env.EDITOR?.trim() || undefined;
 
-  return {
-    ws,
-    dir: wsDir(ws),
-    ...(cache.headline ? { headline: cache.headline } : {}),
-    title: sidebarLabel(ws, cache),
-    links: cache.links,
-    ...(ide ? { ide } : {}),
-    ...(editor ? { editor } : {}),
-    apps,
-    ...(custom.length ? { custom } : {}),
-    ...(cleanable(ws) ? { cleanup: true } : {}),
-    ...(problems.length ? { message: problems.join("; ") } : {}),
-  };
+  const snapshot: TopSnapshot = { ws, dir: wsDir(ws), title: sidebarLabel(ws, cache), links: cache.links, apps };
+
+  if (cache.headline) snapshot.headline = cache.headline;
+
+  if (ide) snapshot.ide = ide;
+
+  if (editor) snapshot.editor = editor;
+
+  if (custom.length) snapshot.custom = custom;
+
+  if (cleanable(ws)) snapshot.cleanup = true;
+
+  if (problems.length) snapshot.message = problems.join("; ");
+
+  return snapshot;
 }
 
 export type PaneKind = "claude" | "terminal" | "diff";
@@ -684,9 +716,11 @@ export const PANE_BUTTONS: { pane: PaneKind; label: string }[] = [
 ];
 
 /** Where the editor commands live when the usual name is not on PATH (nixpkgs ships Zed as `zeditor`). */
-export const ALT_COMMANDS: Record<string, string> = { zed: "zeditor" };
+export const ALT_COMMANDS = Object.fromEntries([["zed", "zeditor"]]);
 
 export const appUrlOf = (app: TopApp): string | undefined => appUrl(app.spec, app.port);
+
+const isIde = (name: string): name is Ide => Object.hasOwn(IDE_COMMANDS, name);
 
 /** Split an editor env value like `code -w` (or an ide name like `zed`) into a command and a label. */
 function editorFromEnv(editor: string | undefined): { label: string; cmd: string[] } | undefined {
@@ -695,7 +729,7 @@ function editorFromEnv(editor: string | undefined): { label: string; cmd: string
   if (!cmd?.length) return undefined;
   const name = cmd[0]!;
 
-  if (cmd.length === 1 && name in IDE_COMMANDS) return { label: name, cmd: [IDE_COMMANDS[name as Ide]] };
+  if (cmd.length === 1 && isIde(name)) return { label: name, cmd: [IDE_COMMANDS[name]] };
 
   return { label: basename(name), cmd };
 }
@@ -759,14 +793,14 @@ export function buttons(snap: TopSnapshot): Button[] {
     const look = l.status ? PR_LOOK[l.status] : undefined;
     const pr = l.pr;
     const name = pr ? `${pr.repo} #${pr.number}${pr.layer ? ` ${pr.layer.n}/${pr.layer.of}` : ""}${pr.title ? ` ${pr.title}` : ""}` : l.label;
-    out.push({
-      label: look ? `${look.icon} ${name}` : `📋 ${name}`,
-      action: { kind: "link", url: l.url },
-      side: "left",
-      ...(pr ? { prRow } : {}),
-      ...(key ? { key } : {}),
-      ...(look ? { color: look.color } : {}),
-    });
+    const linkButton: Button = { label: look ? `${look.icon} ${name}` : `📋 ${name}`, action: { kind: "link", url: l.url }, side: "left" };
+
+    if (pr) linkButton.prRow = prRow;
+
+    if (key) linkButton.key = key;
+
+    if (look) linkButton.color = look.color;
+    out.push(linkButton);
 
     if (pr) {
       const row = prRow++;
@@ -787,14 +821,20 @@ export function buttons(snap: TopSnapshot): Button[] {
   for (const c of snap.custom ?? []) {
     const name = repos.size > 1 ? `${c.repo} ${c.spec.label}` : c.spec.label;
     const text = c.state?.text ? `${name}: ${c.state.text}` : name;
-    out.push({ label: text, action: { kind: "custom", button: c }, side: c.spec.side, ...(c.state?.color ? { color: c.state.color } : {}) });
+    const customButton: Button = { label: text, action: { kind: "custom", button: c }, side: c.spec.side };
+
+    if (c.state?.color) customButton.color = c.state.color;
+    out.push(customButton);
   }
 
   for (const app of snap.apps) {
     if (!app.available) continue;
     const port = app.status === AppStatus.Stopped || app.port === undefined ? "" : ` :${app.port}`;
     const color = APP_COLORS[app.status];
-    out.push({ label: `${MARKS[app.status]} ${app.spec.label}${port}`, action: { kind: "app", app }, side: "right", ...(color ? { color } : {}) });
+    const appButton: Button = { label: `${MARKS[app.status]} ${app.spec.label}${port}`, action: { kind: "app", app }, side: "right" };
+
+    if (color) appButton.color = color;
+    out.push(appButton);
   }
 
   const editor = snap.ide ? { label: snap.ide, cmd: [IDE_COMMANDS[snap.ide]] } : editorFromEnv(snap.editor);
@@ -1031,7 +1071,7 @@ export function activate(button: Button, deps: ActDeps): string | undefined {
         if (live) deps.stop(a.app);
         else deps.start(a.app);
       } catch (e) {
-        return (e as Error).message;
+        return errorMessage(e);
       }
 
       return undefined;

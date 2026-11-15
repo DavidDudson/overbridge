@@ -1,4 +1,6 @@
-import { historyStore, type HistoryStore, type RepoSummary, type Summary, summarize, summarizeRepos } from "./history";
+import { type CommandClass, historyStore, mergeSummaries, type HistoryStore, type RepoSummary, type Summary, summarize, summarizeRepos } from "./history";
+
+export { emptySummary, mergeSummaries } from "./history";
 
 /** `1h05m`, `4m12s`, `3.4s`, `120ms`: the shortest honest form of a duration. */
 export function duration(ms: number): string {
@@ -63,10 +65,38 @@ export const WINDOWS: readonly { label: string; ms: number | undefined }[] = [
   { label: "all", ms: undefined },
 ];
 
+/** One kind of command, from Claude's Bash tool or from `overbridge check`. */
+export interface CommandRow {
+  source: "bash" | "check";
+  /** `bun test` for Bash, the group (`check`) for a check run. */
+  label: string;
+  cls: CommandClass;
+  count: number;
+  ms: number;
+  maxMs: number;
+  failed: number;
+  /** Check queue wait; always 0 for Bash. */
+  queuedMs: number;
+  /** Whole command lines, check runs only. */
+  fulls: string[];
+}
+
+/** Every command in the summary, Bash and check alike, slowest total first. */
+export function commandRows(s: Summary): CommandRow[] {
+  const bash = Object.entries(s.commands).map(([label, c]): CommandRow => ({ source: "bash", label, cls: c.cls, count: c.count, ms: c.ms, maxMs: c.maxMs, failed: c.failed, queuedMs: 0, fulls: [] }));
+  const checks = Object.entries(s.groups).map(([label, g]): CommandRow => ({ source: "check", label, cls: g.cls, count: g.count, ms: g.ms, maxMs: g.maxMs ?? 0, failed: g.failed, queuedMs: g.queuedMs, fulls: g.fulls }));
+
+  return [...bash, ...checks].sort((a, b) => b.ms - a.ms || a.label.localeCompare(b.label));
+}
+
 /** Every view of the history for one window. */
 export interface WindowView {
   workspaces: WorkspaceSummary[];
   repos: RepoSummary[];
+  /** Every workspace's summary added up. */
+  dashboard: Summary;
+  /** Every command, Bash and check, slowest first. */
+  commands: CommandRow[];
 }
 
 /** All windows' views from one read of each workspace's history. Pure over `store`. */
@@ -78,7 +108,10 @@ export function computeViews(store: HistoryStore = historyStore(), now = Date.no
       const since = ms === undefined ? 0 : now - ms;
       const within = all.map(({ ws, records }) => ({ ws, records: records.filter((r) => r.at >= since) }));
 
-      return [label, { workspaces: within.map(({ ws, records }) => ({ ws, summary: summarize(records) })), repos: summarizeRepos(within.flatMap((w) => w.records)) }];
+      const workspaces = within.map(({ ws, records }) => ({ ws, summary: summarize(records) }));
+      const dashboard = mergeSummaries(workspaces.map((w) => w.summary));
+
+      return [label, { workspaces, repos: summarizeRepos(within.flatMap((w) => w.records)), dashboard, commands: commandRows(dashboard) }];
     }),
   );
 }
@@ -115,4 +148,9 @@ export function summaryLines({ ws, summary: s }: WorkspaceSummary): string[] {
   }
 
   return lines;
+}
+
+/** One plain-text line for a command row. */
+export function commandLine(c: CommandRow): string {
+  return `${c.label.padEnd(28)} ${c.source.padEnd(5)} ${c.cls.padEnd(9)} ${String(c.count).padStart(5)}× total ${duration(c.ms)} mean ${duration(c.count ? c.ms / c.count : 0)} worst ${duration(c.maxMs)}${c.failed ? ` ${c.failed} failed` : ""}${c.fulls[0] ? `  ${c.fulls[0]}` : ""}`;
 }

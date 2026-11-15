@@ -4,7 +4,7 @@ import type { CleanupCause, CleanupRecord } from "./cleanup-log";
 import { metaDir } from "./paths";
 import { pidAlive } from "./proc";
 import { type Cover, overlaps } from "./stack";
-import { describeValue, errorMessage, fail, isRecord } from "./util";
+import { describeValue, errorMessage, fail, isRecord, isString, type Json } from "./util";
 
 /** What a claim was moved from by a re-bind (`overbridge start` inside a task workspace, or `--here`). */
 export type ReboundFrom = { branch: string; pr?: number };
@@ -69,9 +69,15 @@ export function readState(): State {
   }
 }
 
+/** What `tryReadState` found: the state to use, and why the file could not be used when it fell back. */
+export interface StateRead {
+  state: State;
+  fault?: string;
+}
+
 /** `readState` for a pane that must keep running: `fallback` plus why when the file is unreadable; writers keep `readState` so `withState` never overwrites a file it cannot parse. */
-export function tryReadState(fallback: State = { version: 1, workspaces: {} }): { state: State; fault?: string } {
-  let state: unknown;
+export function tryReadState(fallback: State = { version: 1, workspaces: {} }): StateRead {
+  let state: State;
 
   try {
     state = readState();
@@ -83,11 +89,11 @@ export function tryReadState(fallback: State = { version: 1, workspaces: {} }): 
 
   if (!isRecord(state.workspaces)) return { state: fallback, fault: `${STATE_FILE}: workspaces is ${describeValue(state.workspaces)}, not a mapping` };
 
-  return { state: state as State };
+  return { state };
 }
 
 /** Why one workspace record in state cannot be trusted (a hand edit, a half-written file), or undefined when its shape is right. */
-export function workspaceFault(w: unknown): string | undefined {
+export function workspaceFault(w: Json | undefined): string | undefined {
   if (!isRecord(w)) return `state record is ${describeValue(w)}, not a mapping`;
 
   if (!isRecord(w.repos)) return `state record has ${w.repos === undefined ? "no repos" : `repos as ${describeValue(w.repos)}`}`;
@@ -95,10 +101,10 @@ export function workspaceFault(w: unknown): string | undefined {
   if (w.removing !== undefined) {
     if (!isRecord(w.removing)) return `state record has removing as ${describeValue(w.removing)}`;
 
-    if (typeof w.removing.since !== "string" || Number.isNaN(Date.parse(w.removing.since))) return "state record's removing has no valid since";
+    if (!isString(w.removing.since) || Number.isNaN(Date.parse(w.removing.since))) return "state record's removing has no valid since";
   }
 
-  if (w.removeError !== undefined && typeof w.removeError !== "string") return `state record has removeError as ${describeValue(w.removeError)}`;
+  if (w.removeError !== undefined && !isString(w.removeError)) return `state record has removeError as ${describeValue(w.removeError)}`;
 
   if (w.removalBlocked !== undefined && !Object.values<unknown>(RemovalBlock).includes(w.removalBlocked)) {
     return `state record has removalBlocked as ${JSON.stringify(w.removalBlocked)}`;
@@ -108,7 +114,7 @@ export function workspaceFault(w: unknown): string | undefined {
 }
 
 /** `workspaceFault` as a type guard, for callers that need no message. */
-export const isWorkspaceState = (w: unknown): w is WorkspaceState => workspaceFault(w) === undefined;
+export const isWorkspaceState = (w: unknown): w is WorkspaceState => isRecord(w) && workspaceFault(w) === undefined;
 
 function writeState(s: State) {
   const tmp = `${statePath()}.${process.pid}.tmp`;

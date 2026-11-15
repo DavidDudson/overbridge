@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
-import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, claimedCache, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type TopApp, type TopLink, type TopSnapshot } from "../src/top";
+import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, claimedCache, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type PrView, type TopApp, type TopLink, type TopSnapshot } from "../src/top";
 import { textWidth } from "../src/term";
 import { fakeProvider } from "./helpers/fake-provider";
 
-const prJson = (state = "OPEN", extra: Record<string, unknown> = {}) =>
+const prJson = (state = "OPEN", extra: Partial<PrView> = {}) =>
   JSON.stringify({ url: "https://host/o/r/pull/3", state, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", statusCheckRollup: [], ...extra });
 
 const noPane = () => undefined;
@@ -17,14 +17,13 @@ const editorButton = (s: TopSnapshot) => buttons(s).find((b) => b.action.kind ==
 
 const spec = (id: string): AppSpec => ({ id, label: id, dir: ".", start: "x", ports: [], open: false, when: "always" });
 
-const app = (id: string, status: AppStatus, port?: number, available = true): TopApp => ({
-  repo: "r",
-  spec: { ...spec(id), ready: { kind: "http", url: "http://localhost:{port}" } },
-  repoDir: "/w/r",
-  status,
-  available,
-  ...(port === undefined ? {} : { port }),
-});
+const app = (id: string, status: AppStatus, port?: number, available = true): TopApp => {
+  const a: TopApp = { repo: "r", spec: { ...spec(id), ready: { kind: "http", url: "http://localhost:{port}" } }, repoDir: "/w/r", status, available };
+
+  if (port !== undefined) a.port = port;
+
+  return a;
+};
 
 const snap = (over: Partial<TopSnapshot> = {}): TopSnapshot => ({ ws: "w1", dir: "/w/w1", links: [], apps: [], ...over });
 
@@ -371,7 +370,7 @@ describe("cleanable", () => {
   const items = [{ id: "12", title: "Add dark mode", url: "x" }];
 
   /** Cache the PR state as `gh` would report it. */
-  const cachePr = (state: string, extra: Record<string, unknown> = {}) =>
+  const cachePr = (state: string, extra: Partial<PrView> = {}) =>
     refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson(state, extra) });
 
   const headSha = () => sh(["git", "rev-parse", "HEAD"], wt);
@@ -441,7 +440,7 @@ describe("cleanable", () => {
   test("a cache from before branches were recorded is trusted", () => {
     const old = cachePr("MERGED", { headRefOid: headSha() });
     const { branches: _b, ...legacy } = old;
-    expect(claimedCache("w1", legacy as typeof old).merged).toBeDefined();
+    expect(claimedCache("w1", legacy).merged).toBeDefined();
   });
 
   test("a just-cleared agent makes it a candidate even without an open PR, but dirty trees still block", () => {

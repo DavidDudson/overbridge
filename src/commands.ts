@@ -11,7 +11,7 @@ import { isOrphan, strayFiles, worktreesIn } from "./orphan";
 import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
 import { clearSubagents } from "./agent-state";
 import { barePath, currentWorkspace, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, sessionName, worktreePath, wsDir } from "./paths";
-import { runHooks } from "./hooks";
+import { type HookContext, runHooks } from "./hooks";
 import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, workspaceSettingsPath } from "./scaffold";
 import { defaultMux, layoutPath, type Mux, MuxKind, tmuxConfPath } from "./mux";
 import { requireTab, TabFocus } from "./tab";
@@ -20,7 +20,7 @@ import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
 import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
 import { type Claim, claimOwner, type ReboundFrom, getWorkspace, isIceboxed, readState, withState } from "./state";
-import { exec, fail, log, must, naturalSort, run, shellQuote } from "./util";
+import { errorMessage, exec, fail, isRecord, log, must, naturalSort, run, shellQuote } from "./util";
 
 /** What a workspace really holds in `repo`: its claim, its worktree head, and the stacks of either. */
 export const holdings = (repo: string, stacks: Stack[]) => (ws: string, c: Claim) =>
@@ -145,7 +145,12 @@ export function removeWorkspace(ws: string, force: boolean) {
   }
 
   for (const [repo, claim] of Object.entries(w.repos)) {
-    const ok = runHooks("pre-remove", { ws, repo, ...(claim.branch ? { branch: claim.branch } : {}), ...(claim.pr ? { pr: claim.pr } : {}) });
+    const hookCtx: HookContext = { ws, repo };
+
+    if (claim.branch) hookCtx.branch = claim.branch;
+
+    if (claim.pr) hookCtx.pr = claim.pr;
+    const ok = runHooks("pre-remove", hookCtx);
 
     if (!ok && !force) fail(`a pre-remove hook for ${ws}/${repo} failed; nothing was removed (use --force to remove anyway)`);
   }
@@ -156,7 +161,7 @@ export function removeWorkspace(ws: string, force: boolean) {
     try {
       git.removeWorktree(getRepo(r), worktreePath(ws, r), force);
     } catch (e) {
-      const cause = `removing the ${r} worktree failed: ${(e as Error).message}`;
+      const cause = `removing the ${r} worktree failed: ${errorMessage(e)}`;
       fail(removed.length ? `${ws} is partly removed (the ${removed.join(", ")} worktrees are gone); ${cause}` : `${ws}: ${cause}; nothing was removed`);
     }
 
@@ -276,12 +281,18 @@ export function checkout(args: string[], wsOpt?: string, opts: { base?: string; 
     // A URL, because gh stack reads a bare number as a stack number first.
     if (remote) must(["gh", "stack", "checkout", prUrl!], { cwd: wt });
     else git.switchTo(wt, branch, base);
-    getWorkspace(s, ws).repos[repo] = { branch, pr: pr ?? git.prForBranch(wt, branch), ...(opts.reboundFrom ? { reboundFrom: opts.reboundFrom } : {}) };
+    const claimed: Claim = { branch, pr: pr ?? git.prForBranch(wt, branch) };
+
+    if (opts.reboundFrom) claimed.reboundFrom = opts.reboundFrom;
+    getWorkspace(s, ws).repos[repo] = claimed;
   });
   const stack = stackOf(localStacks(repo), branch);
   log(`${ws}/${repo} → ${branch}${pr ? ` (PR #${pr})` : ""}${stack ? `\nstack: ${chain(stack)}` : ""}`);
   const claim = getWorkspace(readState(), ws).repos[repo];
-  runHooks("post-checkout", { ws, repo, branch, ...(claim?.pr ? { pr: claim.pr } : {}) });
+  const hookCtx: HookContext = { ws, repo, branch };
+
+  if (claim?.pr) hookCtx.pr = claim.pr;
+  runHooks("post-checkout", hookCtx);
 }
 
 export function release(repo: string | undefined, wsOpt?: string) {
@@ -332,17 +343,29 @@ export function recordPr(repo: string | undefined, wsOpt?: string) {
   for (const f of found) runHooks("post-pr", { ws, ...f });
 }
 
+type StatusRow = {
+  ws: string;
+  repo: string;
+  branch: string;
+  pr: number | undefined;
+  head: string;
+  dirty: boolean;
+  iceboxed: boolean;
+  stack: Stack | undefined;
+  reboundFrom: ReboundFrom | undefined;
+};
+
 export function status(all: boolean, json: boolean) {
   const s = readState();
   const cur = currentWorkspace();
   const names = (all || !cur ? Object.keys(s.workspaces) : [cur]).sort(naturalSort);
 
-  const rows = names.flatMap((ws) => {
+  const rows = names.flatMap((ws): StatusRow[] => {
     const repos = Object.entries(getWorkspace(s, ws).repos);
     const iceboxed = isIceboxed(getWorkspace(s, ws));
 
     if (!repos.length)
-      return [{ ws, repo: "", branch: "", pr: undefined as number | undefined, head: "", dirty: false, iceboxed, stack: undefined as Stack | undefined, reboundFrom: undefined as ReboundFrom | undefined }];
+      return [{ ws, repo: "", branch: "", pr: undefined, head: "", dirty: false, iceboxed, stack: undefined, reboundFrom: undefined }];
 
     return repos.map(([repo, c]) => {
       const wt = worktreePath(ws, repo);
@@ -654,5 +677,5 @@ export function configGet(key: string, arg?: string) {
   const value = getConfigValue(loadConfigFile(file, repo), key);
 
   if (value === undefined) fail(`${key} is not set`);
-  console.log(typeof value === "string" ? value : JSON.stringify(value));
+  console.log(Array.isArray(value) || isRecord(value) ? JSON.stringify(value) : String(value));
 }

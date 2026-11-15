@@ -38,6 +38,22 @@ function freePorts(n: number): number[] {
   return ports;
 }
 
+function freePort(): number {
+  const [port] = freePorts(1);
+
+  if (port === undefined) throw new Error("no free port");
+
+  return port;
+}
+
+function freePortPair(): [number, number] {
+  const [a, b] = freePorts(2);
+
+  if (a === undefined || b === undefined) throw new Error("no free ports");
+
+  return [a, b];
+}
+
 function start(ws: string, s: AppSpec) {
   const record = startApp(ws, "app", s, dirOf(ws));
   started.push({ ws, spec: s });
@@ -72,7 +88,7 @@ afterEach(() => {
 
 describe("lifecycle", () => {
   test("start records pid and port, logs output, stop removes both", async () => {
-    const [port] = freePorts(1) as [number];
+    const port = freePort();
     const s = spec(`start: echo up on {port}; exec sleep 300\nports: [${port}]`);
     const record = start("ws1", s);
     expect(record.port).toBe(port);
@@ -98,7 +114,7 @@ describe("lifecycle", () => {
   });
 
   test("a stop command runs in the app dir with the port, then the group is cleaned up", () => {
-    const [port] = freePorts(1) as [number];
+    const port = freePort();
     const s = spec(`start: exec sleep 300\nstop: echo stopped-{port} > stopped.txt\nports: [${port}]`);
     const { pid } = start("ws1", s);
     stopApp("ws1", "app", s, dirOf("ws1"));
@@ -140,7 +156,7 @@ describe("lifecycle", () => {
 
 describe("ports", () => {
   test("each workspace gets the next port; exhaustion names the holders", () => {
-    const [a, b] = freePorts(2) as [number, number];
+    const [a, b] = freePortPair();
     const s = spec(`start: exec sleep 300\nports: [${a}, ${b}]`);
     expect(start("ws1", s).port).toBe(a);
     expect(start("ws2", s).port).toBe(b);
@@ -149,7 +165,7 @@ describe("ports", () => {
   });
 
   test("a port freed by stop is handed out again", () => {
-    const [a] = freePorts(1) as [number];
+    const a = freePort();
     const s = spec(`start: exec sleep 300\nports: [${a}]`);
     start("ws1", s);
     stopApp("ws1", "app", s, dirOf("ws1"));
@@ -157,7 +173,7 @@ describe("ports", () => {
   });
 
   test("a port in use by something else is skipped", () => {
-    const [a, b] = freePorts(2) as [number, number];
+    const [a, b] = freePortPair();
     const squatter = Bun.listen({ hostname: "127.0.0.1", port: a, socket: { data() {} } });
 
     try {
@@ -180,7 +196,7 @@ describe("ports", () => {
 
 describe("ready checks", () => {
   test("http: starting until something answers, then running", async () => {
-    const [port] = freePorts(1) as [number];
+    const port = freePort();
     const s = spec(`start: exec sleep 300\nready:\n  http: http://127.0.0.1:${port}/`);
     start("ws1", s);
     expect(await appStatus("ws1", "app", s)).toBe(AppStatus.Starting);
@@ -194,7 +210,7 @@ describe("ready checks", () => {
   });
 
   test("tcp on the allocated port", async () => {
-    const [port] = freePorts(1) as [number];
+    const port = freePort();
     const s = spec(`start: exec sleep 300\nports: [${port}]\nready:\n  tcp: "{port}"`);
     start("ws1", s);
     expect(await appStatus("ws1", "app", s)).toBe(AppStatus.Starting);

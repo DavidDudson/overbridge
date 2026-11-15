@@ -1,5 +1,6 @@
 import { Cache, errorText } from "./server-cache";
-import { countUnresolved } from "./reviewers";
+import { isJsonObject, type JsonObject, type JsonValue, numberField, objectField, parseJson, stringField } from "./json";
+import { countUnresolved, type ReviewerView } from "./reviewers";
 import type { PrView } from "./top";
 
 /**
@@ -28,42 +29,122 @@ export function buildBatchQuery(numbers: number[]): string {
   return `query($owner:String!,$name:String!){rateLimit{cost remaining resetAt} repository(owner:$owner,name:$name){${aliases}}} ${FRAGMENT}`;
 }
 
-type Nodes<T> = { nodes?: (T | null)[] } | null | undefined;
+/** The objects in a GraphQL connection's `nodes`; a null node (a deleted user's) is skipped. */
+function nodes(connection: JsonValue | undefined): JsonObject[] {
+  const list = isJsonObject(connection) ? connection.nodes : undefined;
 
-const nodes = <T>(c: Nodes<T>): T[] => (c?.nodes ?? []).filter((n): n is T => n != null);
+  return Array.isArray(list) ? list.filter(isJsonObject) : [];
+}
+
+type Check = NonNullable<ReviewerView["statusCheckRollup"]>[number];
+
+type ThreadNodes = Parameters<typeof countUnresolved>[0];
+
+const CHECK_KEYS = ["name", "context", "status", "conclusion", "state", "detailsUrl", "targetUrl"] as const;
+
+const check = (node: JsonObject): Check => {
+  const out: Check = {};
+
+  for (const key of CHECK_KEYS) {
+    const value = stringField(node, key);
+
+    if (value !== undefined) out[key] = value;
+  }
+
+  return out;
+};
+
+const login = (node: JsonObject): string | undefined => {
+  const author = objectField(node, "author");
+
+  return author ? stringField(author, "login") : undefined;
+};
+
+const optionalString = (node: JsonObject, key: string): string | undefined => stringField(node, key);
+
+const review = (node: JsonObject): NonNullable<PrView["latestReviews"]>[number] => ({
+  author: { login: login(node) },
+  state: optionalString(node, "state"),
+  submittedAt: optionalString(node, "submittedAt"),
+  url: optionalString(node, "url"),
+});
+
+const comment = (node: JsonObject): NonNullable<PrView["comments"]>[number] => ({
+  author: { login: login(node) },
+  body: optionalString(node, "body"),
+  createdAt: optionalString(node, "createdAt"),
+  url: optionalString(node, "url"),
+});
+
+const thread = (node: JsonObject): ThreadNodes[number] => ({
+  isResolved: node.isResolved === true,
+  comments: { nodes: nodes(node.comments).map((c) => ({ author: { login: login(c) } })) },
+});
+
+/** The node `pageInfo` of the connection `name` on `node`, when it says the page was cut short. */
+const cutShort = (connection: JsonValue | undefined, flag: "hasNextPage" | "hasPreviousPage"): boolean => {
+  const info = isJsonObject(connection) ? objectField(connection, "pageInfo") : undefined;
+
+  return info?.[flag] === true;
+};
+
+/** The first commit's check contexts of a reply node. */
+const rollup = (node: JsonObject): JsonValue | undefined => {
+  const commit = objectField(nodes(node.commits)[0] ?? {}, "commit");
+  const status = commit ? objectField(commit, "statusCheckRollup") : undefined;
+
+  return status?.contexts;
+};
 
 /** One reply node as `gh pr view --json ...` would have printed that PR. */
-export function mapPr(node: Record<string, any>): PrView {
-  const contexts = nodes<Record<string, any>>(node.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts).map(({ __typename: _t, ...c }) => c);
-  const requests = nodes<{ requestedReviewer?: { login?: string; name?: string } | null }>(node.reviewRequests).flatMap((r) => (r.requestedReviewer ? [r.requestedReviewer] : []));
+export function mapPr(node: JsonObject): PrView {
+  const contexts = nodes(rollup(node)).map(check);
+
+  const requested = nodes(node.reviewRequests).flatMap((r) => {
+    const reviewer = objectField(r, "requestedReviewer");
+
+    return reviewer ? [reviewer] : [];
+  });
+
+  const reviewRequests = requested.flatMap((r) => {
+    const out: NonNullable<PrView["reviewRequests"]>[number] = {};
+    const loginName = stringField(r, "login");
+    const name = stringField(r, "name");
+
+    if (loginName !== undefined) out.login = loginName;
+
+    if (name !== undefined) out.name = name;
+
+    return [out];
+  });
 
   return {
-    url: node.url,
-    title: node.title,
-    isDraft: node.isDraft,
-    updatedAt: node.updatedAt,
-    state: node.state,
-    headRefOid: node.headRefOid,
-    mergeable: node.mergeable,
-    mergeStateStatus: node.mergeStateStatus,
+    url: stringField(node, "url"),
+    title: stringField(node, "title"),
+    isDraft: node.isDraft === true || node.isDraft === false ? node.isDraft : undefined,
+    updatedAt: stringField(node, "updatedAt"),
+    state: stringField(node, "state"),
+    headRefOid: stringField(node, "headRefOid"),
+    mergeable: stringField(node, "mergeable"),
+    mergeStateStatus: stringField(node, "mergeStateStatus"),
     statusCheckRollup: contexts,
-    reviewRequests: requests.map(({ login, name }) => ({ ...(login !== undefined ? { login } : {}), ...(name !== undefined ? { name } : {}) })),
-    latestReviews: nodes(node.latestReviews),
-    comments: nodes(node.comments),
-    unresolved: countUnresolved(nodes(node.reviewThreads)),
-  } as PrView;
+    reviewRequests,
+    latestReviews: nodes(node.latestReviews).map(review),
+    comments: nodes(node.comments).map(comment),
+    unresolved: countUnresolved(nodes(node.reviewThreads).map(thread)),
+  };
 }
 
 /**
  * A connection the query cut short: past 100 review threads or check contexts or comments, or 20 reviews or review
  * requests, the counts and the reviewers' state would be short, so the PR is read the per-PR way.
  */
-const truncated = (node: Record<string, any>): boolean =>
-  node.reviewThreads?.pageInfo?.hasNextPage === true ||
-  node.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.pageInfo?.hasNextPage === true ||
-  node.comments?.pageInfo?.hasPreviousPage === true ||
-  node.latestReviews?.pageInfo?.hasNextPage === true ||
-  node.reviewRequests?.pageInfo?.hasNextPage === true;
+const truncated = (node: JsonObject): boolean =>
+  cutShort(node.reviewThreads, "hasNextPage") ||
+  cutShort(rollup(node), "hasNextPage") ||
+  cutShort(node.comments, "hasPreviousPage") ||
+  cutShort(node.latestReviews, "hasNextPage") ||
+  cutShort(node.reviewRequests, "hasNextPage");
 
 export interface BatchReply {
   /** Each requested PR; null when GitHub has no such PR or the user cannot see it, undefined when the reply cut its threads or checks short (read it directly). */
@@ -76,33 +157,42 @@ export interface BatchReply {
  * is read whatever the exit code; a reply with no data is a failure of the whole call.
  */
 export function parseBatch(out: string, numbers: number[]): BatchReply {
-  let body: any;
+  let body: JsonValue;
 
   try {
-    body = JSON.parse(out);
+    body = parseJson(out);
   } catch {
     throw new Error("GitHub reply was not JSON");
   }
 
-  const repo = body?.data?.repository;
+  const root = isJsonObject(body) ? body : {};
+  const data = objectField(root, "data");
+  const repo = data ? objectField(data, "repository") : undefined;
+  const errors = Array.isArray(root.errors) ? root.errors.filter(isJsonObject) : [];
 
-  if (!repo) throw new Error(body?.errors?.[0]?.message ?? "GitHub reply had no repository");
+  if (!repo) throw new Error((errors[0] && stringField(errors[0], "message")) || "GitHub reply had no repository");
   // an alias that is null because the PR is gone (NOT_FOUND) is a missing PR; any other error on it (a timeout, a
   // resource limit) fails the call, so a transient fault is not cached for the TTL as a deleted PR
-  const failed = (body.errors ?? []).find((e: any) => e?.type !== "NOT_FOUND" && /^p\d+$/.test(String(e?.path?.[1] ?? "")));
+  const failed = errors.find((e) => e.type !== "NOT_FOUND" && /^p\d+$/.test(String(errorAlias(e) ?? "")));
 
-  if (failed) throw new Error(failed.message ?? `GitHub error on ${failed.path?.[1]}`);
+  if (failed) throw new Error(stringField(failed, "message") ?? `GitHub error on ${errorAlias(failed)}`);
   const prs: Record<number, PrView | null | undefined> = {};
 
   for (const n of numbers) {
     const node = repo[`p${n}`];
-    prs[n] = !node ? null : truncated(node) ? undefined : mapPr(node);
+    prs[n] = !isJsonObject(node) ? null : truncated(node) ? undefined : mapPr(node);
   }
 
-  const cost = body?.data?.rateLimit?.cost;
+  const cost = data ? numberField(objectField(data, "rateLimit") ?? {}, "cost") : undefined;
+  const reply: BatchReply = { prs };
 
-  return { prs, ...(typeof cost === "number" ? { cost } : {}) };
+  if (cost !== undefined) reply.cost = cost;
+
+  return reply;
 }
+
+/** The alias a GraphQL error names: `path[1]`, under `repository`. */
+const errorAlias = (e: JsonObject): JsonValue | undefined => (Array.isArray(e.path) ? e.path[1] : undefined);
 
 /** Runs `gh` with these args; resolves its stdout whatever the exit code, rejects when it cannot run. */
 export type GhRun = (args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>;
@@ -173,7 +263,7 @@ export class PrBatcher {
     this.paused = o.paused ?? (() => undefined);
     this.perQuery = o.perQuery ?? PRS_PER_QUERY;
     this.sleep = o.sleep ?? ((ms) => Bun.sleep(ms));
-    this.cache = new Cache({ maxInFlight: 2, ...(o.now ? { now: o.now } : {}), ...(o.onError ? { onError: o.onError } : {}) });
+    this.cache = new Cache({ maxInFlight: 2, now: o.now, onError: o.onError });
   }
 
   stats(): PrBatchStats & { cache: ReturnType<Cache<unknown>["stats"]> } {
@@ -217,7 +307,7 @@ export class PrBatcher {
       }
     }
 
-    return { prs: got.value, ...(got.error ? { error: got.error } : {}) };
+    return got.error ? { prs: got.value, error: got.error } : { prs: got.value };
   }
 
   private async fetch(repo: string): Promise<Record<number, PrView | null | undefined>> {

@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isJsonObject, isJsonString, type JsonValue, parseJson } from "./json";
 import { defaultMux } from "./mux";
 import { metaDir } from "./paths";
 
@@ -23,11 +24,17 @@ export const visit = (history: History, leaving: string): History => ({
   forward: [],
 });
 
+/** Where a move led: the history after it, and the tab to go to when there was one. */
+export interface Travelled {
+  history: History;
+  target?: string;
+}
+
 /**
  * ← or → from `here`: the nearest tab in that direction that is still `open` and not `here`, and the history after
  * moving to it. Closed tabs passed over are dropped. No target when none is left, with the history unchanged.
  */
-export function travel(history: History, way: Travel, here: string, open: ReadonlySet<string>): { history: History; target?: string } {
+export function travel(history: History, way: Travel, here: string, open: ReadonlySet<string>): Travelled {
   const from = way === Travel.Back ? history.back : history.forward;
   const to = way === Travel.Back ? history.forward : history.back;
   const index = from.findLastIndex((tab) => tab !== here && open.has(tab));
@@ -50,15 +57,17 @@ export const sessionName = () => defaultMux().sessionName();
 
 const historyFile = (session: string) => join(metaDir(), "sidebar-history", `${encodeURIComponent(session)}.json`);
 
-const isTabList = (value: unknown): value is string[] => Array.isArray(value) && value.every((v) => typeof v === "string");
+const tabList = (value: JsonValue | undefined): string[] | undefined => (Array.isArray(value) && value.every(isJsonString) ? value.filter(isJsonString) : undefined);
 
 /** The session's history; empty when there is none or the file is not a valid one. */
 export function readHistory(session = sessionName()): History {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(historyFile(session), "utf8"));
-    const { back, forward } = (parsed ?? {}) as Partial<Record<keyof History, unknown>>;
+    const parsed = parseJson(readFileSync(historyFile(session), "utf8"));
+    const lists = isJsonObject(parsed) ? parsed : {};
+    const back = tabList(lists.back);
+    const forward = tabList(lists.forward);
 
-    return isTabList(back) && isTabList(forward) ? { back, forward } : EMPTY_HISTORY;
+    return back && forward ? { back, forward } : EMPTY_HISTORY;
   } catch {
     return EMPTY_HISTORY;
   }

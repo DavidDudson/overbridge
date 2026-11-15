@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isJsonObject, isJsonString, numberField, parseJson, type JsonObject, type JsonValue } from "./json";
 import { metaDir } from "./paths";
 
 /**
@@ -50,6 +51,36 @@ export function commandLabel(command: string): string {
   }
 
   return label.join(" ");
+}
+
+/** Programs whose second word is a subcommand, not an argument: `git status`, `cargo build`. */
+const SUBCOMMAND_PROGRAMS = new Set(["git", "gh", "cargo", "nix", "docker", "kubectl", "systemctl", "go", "rustup", "brew", "terraform", "helm", "overbridge", "zellij", "tmux"]);
+
+const SUBCOMMAND = /^[a-z][a-z0-9:_-]*$/;
+
+/**
+ * What a Claude Bash call is, for display and kept in history: the program (its basename) and, for a task runner,
+ * package manager or a program in `SUBCOMMAND_PROGRAMS`, the task or subcommand. Every other word is an argument and is
+ * dropped, since a secret passed as a bare argument cannot be told from any other word. Only the command that runs is
+ * labelled: a leading `cd <dir> &&` is skipped and a pipeline or chain stops at its first command. Empty when unreadable.
+ */
+export function bashLabel(command: string): string {
+  const segments = command.split(/&&|\|\||;|\||\n/).map((x) => x.trim()).filter(Boolean);
+  const running = segments.find((x) => !/^cd(\s|$)/.test(x)) ?? segments[0] ?? "";
+  const words = running.split(/\s+/).filter((w) => !/^\w+=/.test(w));
+  const program = (words[0] ?? "").split("/").pop() ?? "";
+
+  if (!/^[\w.+-]+$/.test(program)) return "";
+
+  if (TASK_RUNNERS.has(program) || PACKAGE_MANAGERS.has(program)) {
+    const task = commandGroup(running);
+
+    return SUBCOMMAND.test(task) && task !== program ? `${program} ${task}` : program;
+  }
+
+  const sub = words[1];
+
+  return SUBCOMMAND_PROGRAMS.has(program) && sub && SUBCOMMAND.test(sub) ? `${program} ${sub}` : program;
 }
 
 /** Words that name a secret: the value after one is never kept. */
@@ -139,6 +170,8 @@ export interface ClaudeRecord {
   id?: string;
   /** What a Bash call is, never its text. */
   cls?: CommandClass;
+  /** What the call ran, for display: `bashLabel` of a Bash command (a program and at most a subcommand), the name of a Skill. */
+  label?: string;
 }
 
 export interface CheckRecord {
@@ -175,16 +208,22 @@ export const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 const safeName = (ws: string) => ws.replace(/[^\w@.-]/g, "_");
 
+/** A parsed line is ours when it has a numeric `at` and a known kind; the other fields come from `append`, which serialises a HistoryRecord. */
+const isHistoryRecord = (raw: JsonValue): raw is JsonObject & HistoryRecord =>
+  isJsonObject(raw) && numberField(raw, "at") !== undefined && (raw.kind === "claude" || raw.kind === "check");
+
 /** One JSON line per record in `<dir>/<ws>.jsonl`. A line is one `appendFileSync`, so concurrent writers do not interleave. */
 export function fileStore(dir: string, maxBytes = MAX_FILE_BYTES): HistoryStore {
-  const file = (ws: string) => join(dir, `${safeName(ws)}.jsonl`);
+  const file = (ws: string) => historyFile(ws, dir);
 
   const parse = (text: string): HistoryRecord[] =>
     text.split("\n").flatMap((line) => {
       if (!line) return [];
 
       try {
-        return [JSON.parse(line) as HistoryRecord];
+        const raw = parseJson(line);
+
+        return isHistoryRecord(raw) ? [raw] : [];
       } catch {
         return [];
       }
@@ -223,6 +262,9 @@ export function fileStore(dir: string, maxBytes = MAX_FILE_BYTES): HistoryStore 
 
 export const historyDir = () => join(metaDir(), "history");
 
+/** The file `fileStore` keeps `ws`'s records in. */
+export const historyFile = (ws: string, dir = historyDir()) => join(dir, `${safeName(ws)}.jsonl`);
+
 /** The store in use. The server, when it lands, is returned here. */
 export const historyStore = (): HistoryStore => fileStore(historyDir());
 
@@ -231,7 +273,7 @@ export interface HookPayload {
   hook_event_name?: string;
   tool_name?: string;
   tool_use_id?: string;
-  tool_input?: { command?: unknown };
+  tool_input?: JsonObject;
 }
 
 /** The record for a Claude hook payload, or undefined for an event that is not recorded. */
@@ -240,16 +282,40 @@ export function claudeRecord(input: HookPayload, at = Date.now()): ClaudeRecord 
 
   if (!event) return undefined;
   const tool = event === "PreToolUse" || event === "PostToolUse" || event === "PostToolUseFailure" ? input.tool_name : undefined;
-  const command = tool === "Bash" && typeof input.tool_input?.command === "string" ? input.tool_input.command : undefined;
+  const text = input.tool_input?.command;
+  const command = tool === "Bash" && isJsonString(text) ? text : undefined;
+  const skillName = input.tool_input?.skill;
+  const skill = tool === "Skill" && isJsonString(skillName) ? skillName.slice(0, 80) : undefined;
+  const label = command === undefined ? skill : bashLabel(command) || undefined;
+  const record: ClaudeRecord = { kind: "claude", at, event };
 
-  return {
-    kind: "claude",
-    at,
-    event,
-    ...(tool ? { tool } : {}),
-    ...(tool && input.tool_use_id ? { id: input.tool_use_id } : {}),
-    ...(command === undefined ? {} : { cls: classifyCommand(command) }),
-  };
+  if (tool) record.tool = tool;
+
+  if (tool && input.tool_use_id) record.id = input.tool_use_id;
+
+  if (command !== undefined) record.cls = classifyCommand(command);
+
+  if (label) record.label = label;
+
+  return record;
+}
+
+/** A tool call that has started and not yet finished. */
+interface OpenCall {
+  at: number;
+  tool: string;
+  cls?: CommandClass;
+  label?: string;
+}
+
+function openCall(r: ClaudeRecord): OpenCall {
+  const call: OpenCall = { at: r.at, tool: r.tool ?? "?" };
+
+  if (r.cls) call.cls = r.cls;
+
+  if (r.label) call.label = r.label;
+
+  return call;
 }
 
 export interface Tally {
@@ -262,6 +328,8 @@ export interface GroupTally extends Tally {
   failed: number;
   queuedMs: number;
   cls: CommandClass;
+  /** The slowest single run. */
+  maxMs: number;
   /** The distinct full command lines, newest first, at most three. */
   fulls: string[];
 }
@@ -277,6 +345,7 @@ export function addCheck(groups: Record<string, GroupTally>, r: CheckRecord): vo
     failed: (prev?.failed ?? 0) + (r.exit === 0 ? 0 : 1),
     queuedMs: (prev?.queuedMs ?? 0) + r.queuedMs,
     cls: r.cls,
+    maxMs: Math.max(prev?.maxMs ?? 0, r.runMs),
     fulls: [full, ...(prev?.fulls ?? []).filter((f) => f !== full)].slice(0, 3),
   };
 }
@@ -310,7 +379,17 @@ export function summarizeRepos(records: readonly HistoryRecord[]): RepoSummary[]
   return [...repos.values()];
 }
 
+/** Claude Bash calls of one command label: what it was (`cls`), how often, how long. */
+export interface CommandTally extends Tally {
+  cls: CommandClass;
+  failed: number;
+  /** The slowest single call. */
+  maxMs: number;
+}
+
 export interface Summary {
+  /** `SessionStart` events: a resume, clear or compaction starts one too. */
+  sessions: number;
   turns: number;
   /** Prompt to stop, summed. */
   turnMs: number;
@@ -327,10 +406,58 @@ export interface Summary {
   tools: Record<string, Tally>;
   /** Bash tool time by command class. */
   bash: Partial<Record<CommandClass, Tally>>;
+  /** Bash tool time by command label (`bun test`), never the arguments. Calls recorded before labels existed are `(<class>)`. */
+  commands: Record<string, CommandTally>;
+  /** Skill invocations by skill name. */
+  skills: Record<string, Tally>;
   /** `overbridge check` runs by class: count, and run time. */
   checks: Partial<Record<CommandClass, Tally & { failed: number; queuedMs: number }>>;
   /** `overbridge check` runs by group (`check`, `lint`): what the user can optimise. */
   groups: Record<string, GroupTally>;
+}
+
+/** A summary with nothing in it. */
+export const emptySummary = (): Summary => ({ sessions: 0, turns: 0, turnMs: 0, modelMs: 0, toolMs: 0, permissionMs: 0, userMs: 0, awayMs: 0, tools: {}, bash: {}, commands: {}, skills: {}, checks: {}, groups: {} });
+
+const addTally = <T extends Tally>(into: Partial<Record<string, T>>, key: string, t: T, join: (a: T, b: T) => T) => {
+  const prev = into[key];
+  into[key] = prev ? join(prev, t) : { ...t };
+};
+
+const plus = (a: Tally, b: Tally) => ({ count: a.count + b.count, ms: a.ms + b.ms });
+
+/** Sum summaries into one: the dashboard over every workspace. Tool time adds across workspaces, which run side by side. */
+export function mergeSummaries(list: readonly Summary[]): Summary {
+  const out = emptySummary();
+
+  for (const s of list) {
+    out.sessions += s.sessions;
+    out.turns += s.turns;
+    out.turnMs += s.turnMs;
+    out.modelMs += s.modelMs;
+    out.toolMs += s.toolMs;
+    out.permissionMs += s.permissionMs;
+    out.userMs += s.userMs;
+    out.awayMs += s.awayMs;
+
+    for (const [k, t] of Object.entries(s.tools)) addTally(out.tools, k, t, plus);
+
+    for (const [k, t] of Object.entries(s.skills)) addTally(out.skills, k, t, plus);
+
+    for (const [k, t] of Object.entries(s.bash)) addTally(out.bash, k, t, plus);
+
+    for (const [k, t] of Object.entries(s.commands)) addTally(out.commands, k, t, (a, b): CommandTally => ({ ...plus(a, b), cls: a.cls, failed: a.failed + b.failed, maxMs: Math.max(a.maxMs, b.maxMs) }));
+
+    for (const [k, t] of Object.entries(s.checks)) {
+      if (t) addTally(out.checks, k, t, (a, b) => ({ ...plus(a, b), failed: a.failed + b.failed, queuedMs: a.queuedMs + b.queuedMs }));
+    }
+
+    for (const [k, g] of Object.entries(s.groups)) {
+      addTally(out.groups, k, g, (a, b): GroupTally => ({ ...plus(a, b), failed: a.failed + b.failed, queuedMs: a.queuedMs + b.queuedMs, cls: a.cls, maxMs: Math.max(a.maxMs ?? 0, b.maxMs ?? 0), fulls: [...new Set([...a.fulls, ...b.fulls])].slice(0, 3) }));
+    }
+  }
+
+  return out;
 }
 
 /** A gap between turns longer than this counts as away, not waiting. */
@@ -354,11 +481,11 @@ function unionMs(spans: [number, number][]): number {
 
 /** Fold a workspace's records into time totals. Records need not be sorted. */
 export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_AFTER_MS): Summary {
-  const s: Summary = { turns: 0, turnMs: 0, modelMs: 0, toolMs: 0, permissionMs: 0, userMs: 0, awayMs: 0, tools: {}, bash: {}, checks: {}, groups: {} };
+  const s = emptySummary();
   let turnStart: number | undefined;
   let lastStop: number | undefined;
   let notifiedAt: number | undefined;
-  const open = new Map<string, { at: number; tool: string; cls?: CommandClass }>();
+  const open = new Map<string, OpenCall>();
   // parallel tool calls overlap, so tool time is the union of the intervals, not their sum
   const spans: [number, number][] = [];
 
@@ -373,6 +500,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
     switch (r.event) {
       case "SessionStart":
       case "SessionEnd":
+        if (r.event === "SessionStart") s.sessions++;
         turnStart = lastStop = notifiedAt = undefined;
         open.clear();
         break;
@@ -389,7 +517,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
         open.clear();
         break;
       case "PreToolUse":
-        if (turnStart !== undefined && r.id) open.set(r.id, { at: r.at, tool: r.tool ?? "?", ...(r.cls ? { cls: r.cls } : {}) });
+        if (turnStart !== undefined && r.id) open.set(r.id, openCall(r));
         break;
       case "Notification":
         // an idle notification after the turn ended waits on nobody
@@ -409,7 +537,14 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
         spans.push([started.at, started.at + ms]);
         s.tools[started.tool] = bump(s.tools[started.tool], ms);
 
-        if (started.cls) s.bash[started.cls] = bump(s.bash[started.cls], ms);
+        if (started.cls) {
+          s.bash[started.cls] = bump(s.bash[started.cls], ms);
+          const key = started.label ?? `(${started.cls})`;
+          const prev = s.commands[key];
+          s.commands[key] = { ...bump(prev, ms), cls: started.cls, failed: (prev?.failed ?? 0) + (r.event === "PostToolUseFailure" ? 1 : 0), maxMs: Math.max(prev?.maxMs ?? 0, ms) };
+        }
+
+        if (started.tool === "Skill" && started.label) s.skills[started.label] = bump(s.skills[started.label], ms);
         break;
       }
 

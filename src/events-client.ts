@@ -1,4 +1,5 @@
 import { request } from "node:http";
+import { isJsonObject, parseJson, stringField } from "./json";
 import { clientHeaders, serverDisabled, socketPath } from "./server-net";
 
 /**
@@ -16,8 +17,13 @@ export interface SseFrame {
   data: string;
 }
 
+export interface SseParse {
+  frames: SseFrame[];
+  rest: string;
+}
+
 /** Split `buffer` into complete SSE frames (blank-line terminated) and the unfinished rest. Comment lines are skipped. */
-export function parseSse(buffer: string): { frames: SseFrame[]; rest: string } {
+export function parseSse(buffer: string): SseParse {
   const parts = buffer.replace(/\r\n/g, "\n").split("\n\n");
   const rest = parts.pop() ?? "";
 
@@ -112,9 +118,10 @@ export function subscribeEvents(o: SubscribeOptions): Subscription {
               if (f.event !== "changed") continue;
 
               try {
-                const key = (JSON.parse(f.data) as { key?: unknown }).key;
+                const payload = parseJson(f.data);
+                const key = isJsonObject(payload) ? stringField(payload, "key") : undefined;
 
-                if (typeof key === "string") o.onChange(key);
+                if (key !== undefined) o.onChange(key);
               } catch {
                 // a malformed frame is skipped; the poll covers it
               }

@@ -40,11 +40,11 @@ function worktree(ws: string, repo: string, yaml?: string): string {
   return dir;
 }
 
-const thrown = (fn: () => unknown): string => {
+const thrown = (fn: () => void): string => {
   try {
     fn();
   } catch (e) {
-    return (e as Error).message;
+    return e instanceof Error ? e.message : String(e);
   }
 
   throw new Error("expected a throw");
@@ -314,10 +314,16 @@ describe("guard block", () => {
   });
 });
 
+interface GuardCall {
+  cwd: string;
+  tool_name: string;
+  tool_input: { command: string };
+}
+
 describe("guard hook", () => {
   const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 
-  const guard = (input: object) => {
+  const guard = (input: GuardCall) => {
     const p = Bun.spawnSync({
       cmd: [process.execPath, CLI, "guard"],
       stdin: new TextEncoder().encode(JSON.stringify(input)),
@@ -329,7 +335,7 @@ describe("guard hook", () => {
     return { code: p.exitCode, err: p.stderr.toString() };
   };
 
-  const call = (command: string) => ({ cwd: worktree("ws1", "app"), tool_name: "Bash", tool_input: { command } });
+  const call = (command: string): GuardCall => ({ cwd: worktree("ws1", "app"), tool_name: "Bash", tool_input: { command } });
 
   test("applies the root config's deny rules", () => {
     writeRoot("guard:\n  deny:\n    - pattern: '\\bnpm publish\\b'\n      reason: no publishing from a workspace\n");

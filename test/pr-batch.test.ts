@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { JsonObject, JsonValue } from "../src/json";
 import { buildBatchQuery, type GhRun, mapPr, parseBatch, PrBatcher } from "../src/pr-batch";
 import { ownerRepo } from "../src/repo-slug";
 import { withState } from "../src/state";
@@ -56,7 +57,7 @@ const node = {
   commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [{ __typename: "CheckRun", ...CHECK }, { __typename: "StatusContext", ...STATUS }] } } } }] },
 };
 
-const reply = (prs: Record<number, unknown>, cost = 1) => JSON.stringify({ data: { rateLimit: { cost }, repository: Object.fromEntries(Object.entries(prs).map(([n, v]) => [`p${n}`, v])) } });
+const reply = (prs: Record<number, JsonValue>, cost = 1) => JSON.stringify({ data: { rateLimit: { cost }, repository: Object.fromEntries(Object.entries(prs).map(([n, v]) => [`p${n}`, v])) } });
 
 describe("PR batch mapping", () => {
   test("query aliases every PR and names the cost", () => {
@@ -89,7 +90,7 @@ describe("PR batch mapping", () => {
   });
 
   test("a PR whose comments, reviews or review requests the query cut short is read directly", () => {
-    const cut = (extra: Record<string, unknown>) => parseBatch(JSON.stringify({ data: { repository: { p3: { ...node, ...extra } } } }), [3]).prs[3];
+    const cut = (extra: JsonObject) => parseBatch(JSON.stringify({ data: { repository: { p3: { ...node, ...extra } } } }), [3]).prs[3];
     expect(cut({ comments: { ...node.comments, pageInfo: { hasPreviousPage: true } } })).toBeUndefined();
     expect(cut({ latestReviews: { ...node.latestReviews, pageInfo: { hasNextPage: true } } })).toBeUndefined();
     expect(cut({ reviewRequests: { ...node.reviewRequests, pageInfo: { hasNextPage: true } } })).toBeUndefined();
@@ -260,7 +261,7 @@ describe("prefetchFor and claimedPrs", () => {
     const layer = (branch: string, n: number) => ({ branch, pullRequest: { number: n } });
     writeFileSync(join(tmp, ".bare", "gh.git", "gh-stack"), JSON.stringify({ stacks: [{ trunk: { branch: "main" }, branches: [layer("a", 7), layer("b", 8), layer("c", 9)] }] }));
     withState((s) => {
-      s.workspaces.w4 = { created: "now", iceboxed: true, repos: { gh: { branch: "z", pr: 99 } } } as never;
+      s.workspaces.w4 = { created: "now", iceboxed: { since: "now" }, repos: { gh: { branch: "z", pr: 99 } } };
       s.workspaces.w1 = { created: "now", repos: { gh: { branch: "b", pr: 8 }, lab: { branch: "x", pr: 1 } } };
       s.workspaces.w2 = { created: "now", repos: { gh: { branch: "feat", pr: 3 } } };
       s.workspaces.w3 = { created: "now", repos: { gh: { branch: "feat3", pr: 3 } } };
@@ -291,11 +292,25 @@ describe("prefetchFor and claimedPrs", () => {
 
   test("prefetchFor leaves a non-GitHub repo out, passes force, and turns a failure into that repo's error", async () => {
     const seen: { repo: string; numbers: number[]; force?: boolean }[] = [];
-    const batcher = { get: async (repo: string, numbers: number[], o: { force?: boolean }) => (seen.push({ repo, numbers, force: o.force }), { prs: { 8: null } as Record<number, null> }) };
-    const ok = await prefetchFor("w1", batcher as unknown as PrBatcher, { force: true });
+
+    class Recording extends PrBatcher {
+      override async get(repo: string, numbers: number[], o: { force?: boolean } = {}) {
+        seen.push({ repo, numbers, force: o.force });
+
+        return { prs: { 8: null } };
+      }
+    }
+
+    class Failing extends PrBatcher {
+      override async get(): Promise<never> {
+        throw new Error("down");
+      }
+    }
+
+    const ok = await prefetchFor("w1", new Recording(), { force: true });
     expect(Object.keys(ok)).toEqual(["gh"]);
     expect(seen).toEqual([{ repo: "o/r", numbers: [8, 7, 9], force: true }]);
-    const bad = await prefetchFor("w1", { get: async () => { throw new Error("down"); } } as unknown as PrBatcher);
+    const bad = await prefetchFor("w1", new Failing());
     expect(bad).toEqual({ gh: { error: "down" } });
   });
 });

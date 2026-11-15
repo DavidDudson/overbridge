@@ -37,16 +37,24 @@ export interface Ranked extends WorkRow {
 /** A Jira key such as `ENG-12` is unique on its own; a bare number needs its repo. */
 export const keyOf = (r: Pick<WorkRow, "repo" | "id">): string => (/^[A-Z][A-Z0-9_]*-\d+$/.test(r.id) ? r.id : `${r.repo}#${r.id}`);
 
+const PRIORITY_NAMES: ReadonlyMap<string, number> = new Map([
+  ["critical", 0],
+  ["high", 1],
+  ["medium", 2],
+  ["low", 3],
+]);
+
 /** `p0`..`p3` or `priority: high|medium|low`. Lower is more urgent; no label sorts last. */
 export function priorityOf(labels: string[]): number {
   let best = 9;
 
   for (const raw of labels) {
     const l = raw.toLowerCase();
-    const p = /^p([0-3])$/.exec(l)?.[1] ?? /^priority[:/ -]*(critical|high|medium|low)$/.exec(l)?.[1];
+    const digit = /^p([0-3])$/.exec(l)?.[1];
+    const named = /^priority[:/ -]*(critical|high|medium|low)$/.exec(l)?.[1];
+    const n = digit === undefined ? (named === undefined ? undefined : PRIORITY_NAMES.get(named)) : Number(digit);
 
-    if (p === undefined) continue;
-    const n = /^\d$/.test(p) ? Number(p) : { critical: 0, high: 1, medium: 2, low: 3 }[p as "critical"];
+    if (n === undefined) continue;
 
     if (n < best) best = n;
   }

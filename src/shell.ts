@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { shellCacheDir } from "./paths";
 import type { ShellSpec } from "./project-config";
-import { fail, log } from "./util";
+import { fail, isRecord, isString, log } from "./util";
 
 /** A command ready to spawn: where, with what env. */
 export interface ShellInvocation {
@@ -17,15 +17,23 @@ export type Env = Record<string, string>;
 
 /** Parse NUL-separated `KEY=VALUE` pairs, as `env -0` prints them. Entries without `=` are dropped. */
 export function parseEnv0(text: string): Env {
-  const env: Env = {};
+  return Object.fromEntries(
+    text.split("\0").flatMap((entry) => {
+      const eq = entry.indexOf("=");
 
-  for (const entry of text.split("\0")) {
-    const eq = entry.indexOf("=");
+      return eq > 0 ? [[entry.slice(0, eq), entry.slice(eq + 1)] satisfies [string, string]] : [];
+    }),
+  );
+}
 
-    if (eq > 0) env[entry.slice(0, eq)] = entry.slice(eq + 1);
-  }
+/** The env a cache file holds: a mapping of strings, or undefined when the file is anything else. */
+function parseCachedEnv(text: string): Env | undefined {
+  const parsed = JSON.parse(text);
 
-  return env;
+  if (!isRecord(parsed)) return undefined;
+  const entries = Object.entries(parsed).flatMap(([key, value]) => (isString(value) ? [[key, value] satisfies [string, string]] : []));
+
+  return entries.length === Object.keys(parsed).length ? Object.fromEntries(entries) : undefined;
 }
 
 /** Set by whichever shell ran the capture, not by the dev env. */
@@ -90,7 +98,9 @@ export function resolveEnv(repo: string, dir: string, spec: ShellSpec, deps: She
 
   if (hit !== undefined) {
     try {
-      return JSON.parse(hit) as Env;
+      const cached = parseCachedEnv(hit);
+
+      if (cached) return cached;
     } catch {
       // a torn or hand-edited file: capture again
     }

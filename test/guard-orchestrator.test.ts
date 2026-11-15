@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { orchestrationPlansDir } from "../src/paths";
 import { guardReason, type HookInput } from "../src/guard";
+import type { JsonObject } from "../src/json";
 import { checkOrchestrator, splitCommand, START_HINT } from "../src/guard-orchestrator";
 
 const bash = (command: string): HookInput => ({ cwd: "/w", tool_name: "Bash", tool_input: { command } });
-const tool = (tool_name: string, tool_input: Record<string, unknown> = {}): HookInput => ({ cwd: "/w", tool_name, tool_input });
+const tool = (tool_name: string, tool_input: JsonObject = {}): HookInput => ({ cwd: "/w", tool_name, tool_input });
 
 describe("orchestrator: file and other tools", () => {
   test.each(["Write", "Edit", "MultiEdit", "NotebookEdit"])("blocks %s and says to start a workspace", (name) => {

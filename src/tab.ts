@@ -1,5 +1,5 @@
 import { sidebarWidth } from "./config";
-import { agentDirOf, workspaceTabSpec } from "./layout";
+import { agentDirOf, type TabOptions, workspaceTabSpec } from "./layout";
 import { defaultMux, type Mux, type MuxResult, TabFocus } from "./mux";
 import { selfCommand } from "./paths";
 import { fail, log, shellQuote } from "./util";
@@ -27,7 +27,12 @@ export function openTab(ws: string, prompt?: string, focus: TabFocus = TabFocus.
     return { ok: true };
   }
 
-  const spec = workspaceTabSpec(ws, selfCommand(), { sidebarWidth: sidebarWidth(), focus: true, agentCwd: agentDirOf(ws), ...(prompt ? { prompt } : {}), ...(resume ? { resume } : {}) });
+  const opts: TabOptions = { sidebarWidth: sidebarWidth(), focus: true, agentCwd: agentDirOf(ws) };
+
+  if (prompt) opts.prompt = prompt;
+
+  if (resume) opts.resume = resume;
+  const spec = workspaceTabSpec(ws, selfCommand(), opts);
   let r = mux.openTab(spec, focus);
 
   for (const delay of tabRetry.delaysMs) {

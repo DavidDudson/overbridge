@@ -13,6 +13,9 @@ export const COLORS = { red: "31", green: "32", yellow: "33", blue: "34", purple
 
 export type Color = keyof typeof COLORS;
 
+/** Whether `name` is one of the colours. */
+export const isColor = (name: string): name is Color => Object.hasOwn(COLORS, name);
+
 export const colorize = (s: string, color: Color) => `${ESC}[${COLORS[color]}m${s}${ESC}[0m`;
 
 /** Emoji below U+1F000 that terminals draw two columns wide. Every other emoji the panes use is astral. */
@@ -61,20 +64,20 @@ export type Input =
   /** Left-button press at a 0-based cell. */
   | { kind: "click"; col: number; row: number };
 
-const NAMED: Record<string, string> = {
-  [`${ESC}[A`]: "up",
-  [`${ESC}[B`]: "down",
-  [`${ESC}[C`]: "right",
-  [`${ESC}[D`]: "left",
-  [`${ESC}[Z`]: "shift-tab",
-  [`${ESC}OA`]: "up",
-  [`${ESC}OB`]: "down",
-  "\r": "enter",
-  "\n": "enter",
-  "\t": "tab",
-  "\x03": "ctrl-c",
-  [ESC]: "escape",
-};
+const NAMED = new Map<string, string>([
+  [`${ESC}[A`, "up"],
+  [`${ESC}[B`, "down"],
+  [`${ESC}[C`, "right"],
+  [`${ESC}[D`, "left"],
+  [`${ESC}[Z`, "shift-tab"],
+  [`${ESC}OA`, "up"],
+  [`${ESC}OB`, "down"],
+  ["\r", "enter"],
+  ["\n", "enter"],
+  ["\t", "tab"],
+  ["\x03", "ctrl-c"],
+  [ESC, "escape"],
+]);
 
 const MOUSE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/;
 const CSI = /^\x1b\[[0-9;?]*[ -/]*[@-~]/;
@@ -99,10 +102,10 @@ export function decodeInput(data: string): Input[] {
       continue;
     }
 
-    const named = Object.keys(NAMED).find((seq) => seq.length > 1 && rest.startsWith(seq));
+    const named = [...NAMED.keys()].find((seq) => seq.length > 1 && rest.startsWith(seq));
 
     if (named) {
-      out.push({ kind: "key", key: NAMED[named]! });
+      out.push({ kind: "key", key: NAMED.get(named)! });
       rest = rest.slice(named.length);
       continue;
     }
@@ -113,7 +116,7 @@ export function decodeInput(data: string): Input[] {
     }
 
     const ch = String.fromCodePoint(rest.codePointAt(0)!);
-    out.push({ kind: "key", key: NAMED[ch] ?? ch });
+    out.push({ kind: "key", key: NAMED.get(ch) ?? ch });
     rest = rest.slice(ch.length);
   }
 

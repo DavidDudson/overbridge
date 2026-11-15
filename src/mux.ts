@@ -98,6 +98,9 @@ export interface ZellijOptions {
   metaDir?: () => string;
 }
 
+/** One pane of `zellij action list-panes --json`. */
+type ZellijPaneJson = { id: number; is_plugin?: boolean; title?: string; tab_name?: string; exited?: boolean };
+
 /** The zellij backend: `zellij action ...`, text output parsed with regexes. */
 export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): Mux {
   const env = opts.env ?? process.env;
@@ -178,9 +181,9 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
       const r = act("list-panes", "--json");
 
       try {
-        const panes = (r.ok ? JSON.parse(r.stdout) : []) as { id: number; is_plugin?: boolean; title?: string; tab_name?: string; exited?: boolean }[];
+        const panes: ZellijPaneJson[] = r.ok ? JSON.parse(r.stdout) : [];
 
-        return panes.filter((p) => !p.is_plugin).map((p) => ({ id: String(p.id), title: p.title ?? "", tab: p.tab_name ?? "", exited: p.exited === true }));
+        return panes.flatMap((p) => (p.is_plugin ? [] : [{ id: String(p.id), title: p.title ?? "", tab: p.tab_name ?? "", exited: p.exited === true }]));
       } catch {
         return [];
       }
@@ -340,5 +343,9 @@ export const layoutPath = (kind: MuxKind) => join(metaDir(), kind === MuxKind.Tm
 export function defaultMux(env: Record<string, string | undefined> = process.env, exec: MuxExec = safeExec): Mux {
   if (muxKind(env) === MuxKind.Tmux) return tmuxMux(exec, { env, conf: tmuxConfPath });
 
-  return zellijMux(exec, { env, ...(env.ZELLIJ ? {} : { session: configuredSession() }) });
+  const opts: ZellijOptions = { env };
+
+  if (!env.ZELLIJ) opts.session = configuredSession();
+
+  return zellijMux(exec, opts);
 }
