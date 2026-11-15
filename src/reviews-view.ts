@@ -2,6 +2,7 @@ import { alternate, spinner } from "./anim";
 import { age, type PrRow, type ViewState } from "./pr-rows";
 import { ciLook, conflictLook } from "./pr-look";
 import type { PrView } from "./prs-view";
+import { SORT_LABEL, type SortMode } from "./sort-mode";
 import { REVIEWER_LOOK, type ReviewerStatus } from "./reviewers";
 import { bold, boxBottom, boxRow, boxTop, type Color, colorize, dim, fit, inverse } from "./term";
 
@@ -10,6 +11,9 @@ const TABLE_CHROME = 3;
 
 /** The one footer row under both tables. */
 const FOOTER_ROWS = 1;
+
+/** How the reviews are ordered until the user cycles it: what needs doing first. */
+export const DEFAULT_REVIEWS_SORT: SortMode = "status";
 
 export type Group = "direct" | "team";
 
@@ -20,7 +24,7 @@ const GROUPS: Record<Group, { title: string; empty: string; unit: string }> = {
 
 const groupOf = (r: PrRow): Group => r.group ?? "direct";
 
-/** The rows split into the two tables, each in its original (newest first) order. */
+/** The rows split into the two tables, each keeping the order of `rows`. */
 export const split = (rows: readonly PrRow[]): Record<Group, PrRow[]> => ({ direct: rows.filter((r) => groupOf(r) === "direct"), team: rows.filter((r) => groupOf(r) === "team") });
 
 /** Cursor order: the direct table, then the team table. */
@@ -161,11 +165,11 @@ export function allocate(direct: number, team: number, body: number): Share {
 export const windowStart = (count: number, selected: number | undefined, rows: number): number =>
   selected === undefined || count <= rows ? 0 : Math.min(count - rows, Math.max(0, selected - Math.floor(rows / 2)));
 
-const footer = (message: string, inner: number) =>
-  message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit("j/k move   o open in browser   r refresh   q quit", inner));
+const footer = (message: string, inner: number, sort: SortMode) =>
+  message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit(`j/k move   o open in browser   s sort: ${SORT_LABEL[sort]}   r refresh   q quit`, inner));
 
 /** The Reviews tab as screen rows: two tables, same columns, direct requests above team requests. Pure, so it is snapshot-tested. */
-function render(rows: readonly PrRow[], { selected, height, width, message, now }: ViewState): string[] {
+function render(rows: readonly PrRow[], { selected, height, width, message, now, sort = DEFAULT_REVIEWS_SORT }: ViewState): string[] {
   const inner = width - 4;
   const cols = columnsFor(inner);
   const groups = split(rows);
@@ -193,7 +197,7 @@ function render(rows: readonly PrRow[], { selected, height, width, message, now 
   }
 
   while (out.length < height - FOOTER_ROWS) out.push(fit("", width));
-  out.push(footer(message, width));
+  out.push(footer(message, width, sort));
 
   return out;
 }

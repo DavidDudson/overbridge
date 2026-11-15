@@ -685,6 +685,11 @@ workspace holds the branch does it run `overbridge start ... --prompt '/pickup #
 messages every workspace whose work is still outstanding to continue, `/revisit` asks the Claude of every workspace whose branch is ahead of main whether its commits are still relevant, and `/cleanup` finds the workspaces
 that can go (see [Claude Code plugin](#claude-code-plugin)). The Workspaces frame is below it. Keys,
 clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
+`o` cycles how the workspaces are ordered: a-z (the default), by status (faults, then agents that want you, then busy,
+then the rest) or by age (longest in its state first). The mode shows in the Workspaces title, every mode ends in the
+workspace name so the order never shifts between redraws, and the Orchestration tabs stay first. Digits typed in the
+sidebar follow the order shown; the multiplexer's `⌥1`-`⌥9` keys follow tab position, so they match only in a-z order
+when tabs were opened in name order. In `@reviews`, `s` cycles the same three orders (by status by default: conflicts first).
 Orchestration tab names start with `@`, which a workspace name can't, so an orchestration tab's state
 and sidebar files never share a name with a workspace's.
 
