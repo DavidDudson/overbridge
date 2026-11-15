@@ -182,7 +182,7 @@ const isHistoryRecord = (raw: JsonValue): raw is JsonObject & HistoryRecord =>
 
 /** One JSON line per record in `<dir>/<ws>.jsonl`. A line is one `appendFileSync`, so concurrent writers do not interleave. */
 export function fileStore(dir: string, maxBytes = MAX_FILE_BYTES): HistoryStore {
-  const file = (ws: string) => join(dir, `${safeName(ws)}.jsonl`);
+  const file = (ws: string) => historyFile(ws, dir);
 
   const parse = (text: string): HistoryRecord[] =>
     text.split("\n").flatMap((line) => {
@@ -229,6 +229,9 @@ export function fileStore(dir: string, maxBytes = MAX_FILE_BYTES): HistoryStore 
 }
 
 export const historyDir = () => join(metaDir(), "history");
+
+/** The file `fileStore` keeps `ws`'s records in. */
+export const historyFile = (ws: string, dir = historyDir()) => join(dir, `${safeName(ws)}.jsonl`);
 
 /** The store in use. The server, when it lands, is returned here. */
 export const historyStore = (): HistoryStore => fileStore(historyDir());

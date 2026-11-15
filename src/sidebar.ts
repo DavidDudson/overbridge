@@ -4,6 +4,9 @@ import { join } from "node:path";
 import { readPhase, taskStatus } from "./task-status";
 import { ATTENTION, type AgentState, glyphFor, readAgentDetail, UNKNOWN_GLYPH } from "./agent-state";
 import { iceboxHint } from "./icebox-suggest";
+import { type SidebarLayout, sidebarLayout } from "./config";
+import { type CardView, cardPlan, contextLegend, detailRows, isExpanded, promptWithHint, viewFor } from "./sidebar-card";
+import { recentToolCalls } from "./history-tail";
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
@@ -22,7 +25,7 @@ import { subscribeEvents } from "./events-client";
 import { serverOwnsSweep } from "./server-client";
 import { claimSweep, createSweepTrigger, startSweep } from "./sweep-trigger";
 import { boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
-import { readTopCache, readTopCacheChecked, sidebarLabel, type TopCache } from "./top";
+import { readTopCache, readTopCacheChecked, sidebarLabel, type PrStatus, type TopCache } from "./top";
 import { defaultMux, type Mux } from "./mux";
 import { currentTab, tabOrder } from "./tab";
 import { createPainter, readView, shouldPoll } from "./zellij-view";
@@ -77,6 +80,8 @@ export interface Entry {
   unsaved?: boolean;
   /** Stacked PRs of this workspace, bottom first, with the claimed one's number; one compact line each. */
   stacks?: { prs: number[]; current: number }[];
+  /** Its claimed PRs with their state, for the expanded card and the footer legend. */
+  prs?: { number: number; status: PrStatus }[];
   /** This entry could not be read: a bad cache or state record, or a reader that threw. Replaces the status line. */
   fault?: string;
   /** Where the work is in its lifecycle (`draft PR`, `implement (stack 2/3)`, ...): the second half of the status line. */
@@ -136,6 +141,10 @@ function guardedEntry(tab: string, section: Section, build: () => Entry, label =
 const stacksOf = (cache: Pick<TopCache, "links">): NonNullable<Entry["stacks"]> =>
   cache.links.flatMap((l) => (l.pr && l.pr.stack.length > 1 && l.pr.claimed !== false ? [{ prs: l.pr.stack, current: l.pr.number }] : []));
 
+/** The claimed PRs in `cache` with their state. */
+export const prsOf = (cache: Pick<TopCache, "links">): NonNullable<Entry["prs"]> =>
+  cache.links.flatMap((l) => (l.pr && l.pr.claimed !== false ? [{ number: l.pr.number, status: l.status ?? "unknown" }] : []));
+
 /** `stack 12·[13]·14`: the claimed layer in brackets, layers in order bottom to top. */
 const stackText = (s: { prs: number[]; current: number }) => `stack ${s.prs.map((n) => (n === s.current ? `[${n}]` : String(n))).join("·")}`;
 
@@ -154,6 +163,7 @@ function workspaceEntry(ws: string, w: WorkspaceState): Entry {
   const { cache, fault } = readTopCacheChecked(ws);
   const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
   const stacks = stacksOf(cache);
+  const prs = prsOf(cache);
   const idleHint = fault ? undefined : iceboxHint(ws, cache);
   const task = fault ? undefined : taskStatus(cache, readPhase(ws));
   const gauge = entry.state === "busy" ? readGauge(ws) : undefined;
@@ -167,6 +177,8 @@ function workspaceEntry(ws: string, w: WorkspaceState): Entry {
   if (task) card.task = task;
 
   if (stacks.length) card.stacks = stacks;
+
+  if (prs.length) card.prs = prs;
 
   if (fault) card.fault = fault;
 
@@ -392,20 +404,42 @@ export function wrapText(text: string, width: number): string[] {
 }
 
 /** The unstyled title rows of an entry: the digit hint and glyph lead the first, the rest are indented under the text. */
-function titleRows(e: Entry, index: number, inner: number): string[] {
+function titleRows(e: Entry, index: number, inner: number, maxRows = MAX_TITLE_ROWS): string[] {
   const digit = index < 9 ? `⌥${index + 1}` : String(index + 1).padStart(2);
   const lead = `${digit} ${e.glyph} `;
   const lines = wrapText(e.label, Math.max(1, inner - textWidth(lead)));
-  const clipped = lines.length > MAX_TITLE_ROWS ? [...lines.slice(0, MAX_TITLE_ROWS - 1), `${lines.slice(MAX_TITLE_ROWS - 1).join(" ")}`] : lines;
+  const clipped = lines.length > maxRows ? [...lines.slice(0, maxRows - 1), `${lines.slice(maxRows - 1).join(" ")}`] : lines;
 
   return clipped.map((l, i) => (i === 0 ? lead : " ".repeat(textWidth(lead))) + l);
 }
 
-/** Screen rows one entry takes: its wrapped title and a status line. */
-export const entryHeight = (e: Entry, index: number, inner: number) => titleRows(e, index, inner).length + 1 + (e.stacks?.length ?? 0) + (e.receipt ? 1 : 0);
+/** The expanded card never clips its title. */
+const EXPANDED_TITLE_ROWS = Number.POSITIVE_INFINITY;
+
+/** Screen rows one entry takes: its wrapped title, a status line, its stack lines and receipt (a compact card drops the last two). */
+export const entryHeight = (e: Entry, index: number, inner: number, view: CardView = {}) => {
+  if (isExpanded(e, view)) return expandedLines(e, index, false, inner, view).length;
+  const plan = cardPlan(e, view);
+
+  return titleRows(e, index, inner).length + (plan.status ? 1 : 0) + (plan.stacks ? (e.stacks?.length ?? 0) + (e.receipt ? 1 : 0) : 0);
+};
 
 /** Row heights for the whole list in a pane `width` columns wide. */
-export const entryHeights = (list: Entry[], width: number) => list.map((e, i) => entryHeight(e, i, Math.max(1, width - 4)));
+export const entryHeights = (list: Entry[], width: number, view: CardView = {}) => list.map((e, i) => entryHeight(e, i, Math.max(1, width - 4), view));
+
+/** The expanded card: the whole title, the state, the PR and CI rows and the last tool calls. */
+function expandedLines(e: Entry, index: number, selected: boolean, inner: number, view: CardView): string[] {
+  const { toolCalls = [], now = 0 } = view.expanded ?? {};
+  const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
+  const status = statusFor(e);
+  const titles = titleRows(e, index, inner, EXPANDED_TITLE_ROWS).map((r) => fit(r, inner));
+  const statusRow = status ? [fit(`${indent}${status.text}`, inner)] : [];
+  const details = detailRows(e, toolCalls, now).map((r) => fit(`${indent}${r}`, inner));
+
+  if (selected) return [...titles, ...statusRow, ...details].map(inverse);
+
+  return [...titles, ...statusRow.map((r) => colorize(r, status!.color)), ...details];
+}
 
 /** Narrowest text a status row keeps when a gauge shares it. */
 const MIN_STATUS_COLS = 8;
@@ -418,17 +452,20 @@ const gaugeFor = (e: Entry): string | undefined =>
 const statusRow = (text: string, gauge: string | undefined, inner: number): string =>
   gauge && inner > textWidth(gauge) + MIN_STATUS_COLS ? `${fit(text, inner - textWidth(gauge) - 1)} ${gauge}` : fit(text, inner);
 
-/** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line. */
-export function entryLines(e: Entry, index: number, selected: boolean, inner: number): string[] {
+/** The rows of one entry, each `inner` columns wide: the current one inverse, others with a coloured status line; `view` can make it compact or the expanded card. */
+export function entryLines(e: Entry, index: number, selected: boolean, inner: number, view: CardView = {}): string[] {
+  if (isExpanded(e, view)) return expandedLines(e, index, selected, inner, view);
+  const plan = cardPlan(e, view);
   const titles = titleRows(e, index, inner).map((l) => fit(l, inner));
   const status = statusFor(e);
   const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
   const sub = statusRow(`${indent}${status?.text ?? ""}`, gaugeFor(e), inner);
-  const stacks = (e.stacks ?? []).map((st) => fit(`${indent}${stackText(st)}`, inner));
-  const receipt = e.receipt ? [fit(`${indent}${receiptText(e.receipt)}`, inner)] : [];
+  const stacks = (plan.stacks ? (e.stacks ?? []) : []).map((st) => fit(`${indent}${stackText(st)}`, inner));
+  const receipt = plan.stacks && e.receipt ? [fit(`${indent}${receiptText(e.receipt)}`, inner)] : [];
+  const subRow = plan.status ? [status ? colorize(sub, status.color) : sub] : [];
 
-  if (selected) return [...titles, sub, ...stacks, ...receipt].map(inverse);
-  const lines = [...titles, status ? colorize(sub, status.color) : sub, ...stacks.map(dim), ...receipt.map(dim)];
+  if (selected) return [...titles, ...(plan.status ? [sub] : []), ...stacks, ...receipt].map(inverse);
+  const lines = [...titles, ...subRow, ...stacks.map(dim), ...receipt.map(dim)];
 
   return e.stale ? lines.map(dim) : lines;
 }
@@ -559,12 +596,14 @@ export function gather(readers: SidebarReaders, inner: number, last: Model): Mod
  * The whole sidebar as `height` rows of `width` columns. A rounded frame titled "Orchestration" holds a card per
  * orchestration tab; below it a frame titled "Workspaces" holds a card per workspace (title wraps), scrolled by
  * `offset` (an index into the workspaces), then a divider, the `queue` rows (recent cleanups, then the check queue), the usage limits and the key legend,
- * with `version` set into the bottom border. `current` indexes the whole list.
+ * with `version` set into the bottom border. `current` indexes the whole list. `view` picks compact cards and the one
+ * expanded card; the legend follows the selected entry.
  */
-export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = "", queue: string[] = [], footer: Footer = LEGEND_FOOTER, pending = ""): string[] {
+export function renderSidebar(list: Entry[], current: number, offset: number, height: number, width: number, limits: Limits | undefined, now = Date.now(), version = "", queue: string[] = [], footer: Footer = LEGEND_FOOTER, pending = "", view: CardView = {}): string[] {
   const inner = Math.max(0, width - 4);
+  const selected = list[current];
   const pinned = pinnedCount(list);
-  const cards = (from: number, to: number) => list.slice(from, to).flatMap((e, i) => entryLines(e, from + i, from + i === current, inner));
+  const cards = (from: number, to: number) => list.slice(from, to).flatMap((e, i) => entryLines(e, from + i, from + i === current, inner, view));
   const pinnedFrame = pinned ? [boxTop("Orchestration", width), ...cards(0, pinned).map(boxRow), boxBottom(width)] : [];
   const bodyRows = Math.max(0, height - pinnedFrame.length - CHROME_TOP - CHROME_BOTTOM - queue.length);
   const visible = cards(pinned + offset, list.length).slice(0, bodyRows);
@@ -577,7 +616,7 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
     boxDivider(width),
     ...queue.map(boxRow),
     ...limitRows(limits, inner, now).map(boxRow),
-    boxRow(footerRow(footer, inner, legend(list.length, pending))),
+    boxRow(footerRow(footer, inner, pending ? legend(list.length, pending) : contextLegend(selected, legend(list.length), selected !== undefined && isExpanded(selected, view)))),
     boxBottom(width, version, "grey"),
   ];
 }
@@ -632,7 +671,12 @@ export function footerRow(footer: Footer, inner: number, legendText = legend(0))
     case FooterKind.Legend:
       return dim(fit(legendText, inner));
     case FooterKind.Prompt:
-      return fitTail(`${promptLabel(footer.prompt)}${footer.prompt.text}█`, inner);
+    {
+      const typed = `${promptLabel(footer.prompt)}${footer.prompt.text}█`;
+
+      return promptWithHint(typed, inner) ?? fitTail(typed, inner);
+    }
+
     case FooterKind.Busy:
       return dim(fit(`starting ${footer.id}…`, inner));
     case FooterKind.Error:
@@ -907,6 +951,15 @@ export async function sidebar(wsOpt?: string) {
   // Read once at start, so a pane left running across an upgrade shows the version it runs.
   const version = overbridgeVersion();
   const userLayout = existsSync(userLayoutPath());
+  // a bad `[sidebar] layout` must not close the pane before it can say so: fall back and show the message in the footer
+  let layoutSetting: SidebarLayout = "auto";
+  let startFault: string | undefined;
+
+  try {
+    layoutSetting = sidebarLayout();
+  } catch (e) {
+    startFault = errorMessage(e);
+  }
 
   const readers: SidebarReaders = {
     tabOrder: () => readView().order,
@@ -925,6 +978,9 @@ export async function sidebar(wsOpt?: string) {
   let footer: Footer = LEGEND_FOOTER;
   let statusRowCount = 0;
   let pending = "";
+  /** Space shows this pane's own card in full. Nothing extra is read until it is on. */
+  let expanded = false;
+  let view: CardView = {};
   let digitTimer: ReturnType<typeof setTimeout> | undefined;
 
   const hold = (digit: string) => {
@@ -990,14 +1046,15 @@ export async function sidebar(wsOpt?: string) {
       const { status } = last;
       const list = animate(last.list, Date.now(), motion);
       const current = Math.max(0, list.findIndex((e) => e.tab === self));
-      const heights = entryHeights(list, width);
+      view = viewFor(layoutSetting, width, expanded ? self : undefined, recentToolCalls);
+      const heights = entryHeights(list, width, view);
       const pinned = pinnedCount(list);
       const workspaceHeights = heights.slice(pinned);
       statusRowCount = status.length;
       const rows = bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount);
       const scrolled = current >= pinned ? scrollFor(current - pinned, offset, workspaceHeights, rows) : offset;
       offset = clampScroll(scrolled, workspaceHeights, rows);
-      painter.paint(frame(renderSidebar(list, current, offset, height, width, last.limits, Date.now(), version, status, footerToDraw(footer, inputFault, last.fault), pending), height, width));
+      painter.paint(frame(renderSidebar(list, current, offset, height, width, last.limits, Date.now(), version, status, footerToDraw(footer, inputFault, last.fault ?? startFault), pending, view), height, width));
     } catch (e) {
       painter.paint(frame([colorize(fit(`sidebar: ${errorMessage(e)}`, width), FAULT_COLOR)], height, width));
     }
@@ -1104,11 +1161,19 @@ export async function sidebar(wsOpt?: string) {
             return;
           }
 
+          if (input.kind === "key" && input.key === " ") {
+            hold("");
+
+            if (footer.kind === FooterKind.Legend) expanded = !expanded;
+
+            return;
+          }
+
           // the list on screen, so a click lands on the card the user saw
           const list = last.list;
           const current = list.findIndex((e) => e.tab === self);
           const { height, width } = size();
-          const heights = entryHeights(list, width);
+          const heights = entryHeights(list, width, view);
           const pinned = pinnedCount(list);
           const step = stepFor(input, current, offset, heights, bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount), pinned, pending);
           hold(step.pending);

@@ -15,6 +15,7 @@ const HEADER = `# overbridge repo registry. Add with \`overbridge repo add <name
 # [sidebar]
 # width = 60                # columns of the tab sidebar, 12 to 200
 # motion = "while-active"   # "while-active" animates the busy glyph, "off" keeps it still
+# layout = "auto"           # auto (compact when narrow), compact or wide
 `;
 
 export function initReposFile() {
@@ -71,7 +72,7 @@ export const Motion = { Off: "off", WhileActive: "while-active" } as const;
 
 export type Motion = (typeof Motion)[keyof typeof Motion];
 
-type SidebarSection = { width?: Json; motion?: Json };
+type SidebarSection = { width?: Json; motion?: Json; layout?: Json };
 
 /** The `[sidebar]` table of repos.toml; empty when the file or table is missing. */
 function readSidebarSection(): SidebarSection {
@@ -90,4 +91,18 @@ export function sidebarMotion(): Motion {
   const modes = Object.values(Motion);
 
   return modes.find((m) => m === motion) ?? fail(`repos.toml: sidebar.motion must be one of ${modes.map((m) => `"${m}"`).join(", ")}`);
+}
+
+export const SIDEBAR_LAYOUTS = ["auto", "compact", "wide"] as const;
+
+export type SidebarLayout = (typeof SIDEBAR_LAYOUTS)[number];
+
+/** `[sidebar] layout` in repos.toml: `auto` (the default) picks compact for a narrow pane, the others force one. */
+export function sidebarLayout(): SidebarLayout {
+  const layout = readSidebarSection().layout;
+
+  if (layout === undefined) return "auto";
+  const known = SIDEBAR_LAYOUTS.find((l) => l === layout);
+
+  return known ?? fail(`repos.toml: sidebar.layout must be one of ${SIDEBAR_LAYOUTS.join(", ")}`);
 }
