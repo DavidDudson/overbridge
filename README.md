@@ -95,8 +95,10 @@ removed this way.
 draft PR. It refuses while any repo has uncommitted or unpushed work. Otherwise it stops the workspace's apps and
 queued checks, writes a handoff to `<ws>/.overbridge/handoffs/` (reason `icebox`), closes its tab and marks it
 iceboxed. Claims and worktrees stay, so nothing else can take its branch or PR. The sidebar lists it as a dim
-`❄ <name> iceboxed` row, `status` marks it `iceboxed`, and `up`/`layout` leave it out. `overbridge thaw <name>`
-reopens the tab, the agent continuing its conversation and reading the handoff. If every PR of an iceboxed
+`❄ <name> iceboxed` row, `status` marks it `iceboxed`, and `up`/`layout` leave it out. `f` in a workspace's sidebar
+iceboxes that workspace; a refusal (unsaved work) shows in the sidebar footer. The `@frozen` orchestration tab
+(`overbridge frozen`) lists every iceboxed workspace with its age and claims; `t` there thaws the selected one.
+`overbridge thaw <name>` reopens the tab, the agent continuing its conversation and reading the handoff. If every PR of an iceboxed
 workspace merges, the merged-PR check removes it like any other. With `icebox.idle-days` set, the sidebar suggests
 iceboxing a workspace whose claimed PRs are all drafts and untouched that long: its card reads
 `draft PRs idle <n>d · icebox?` unless the agent is waiting on you. It only suggests; run `overbridge icebox <name>` to act.
@@ -665,6 +667,7 @@ Every tab's sidebar shares one history per zellij session (`<meta>/sidebar-histo
 tabs closed since are skipped, and a failed switch leaves it as it was. Switches made outside the sidebar
 (zellij keys, the tab bar, `overbridge next`, `overbridge go`) are not recorded.
 `p` jumps to the `@perf` tab (also `overbridge go perf`, or its number), where the legend lists it.
+`f` iceboxes the sidebar's own workspace (see Icebox); `@frozen` thaws it.
 The new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. Long titles wrap under their text (up to three rows).
 
