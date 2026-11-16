@@ -357,3 +357,20 @@ describe("github-orgs", () => {
     expect(loadRootLayers().githubOrgs).toEqual(["DavidDudson", "megaport"]);
   });
 });
+
+describe("mcp-servers in the root config", () => {
+  test("reach the repo's resolved config, and default to none", () => {
+    writeRoot("repos:\n  app:\n    mcp-servers: [playwright]\n");
+    expect(loadRepoConfig(worktree("ws1", "app")).mcpServers).toEqual(["playwright"]);
+    expect(loadRepoConfig(worktree("ws1", "other")).mcpServers).toEqual([]);
+  });
+
+  test("must be a list of names", () => {
+    writeRoot("defaults:\n  mcp-servers: playwright\n");
+    expect(thrown(() => loadRootLayers())).toContain("mcp-servers: expected a list of strings");
+  });
+
+  test("a repo's own overbridge.yml can't declare them", () => {
+    expect(thrown(() => loadRepoConfig(worktree("ws1", "app", "version: 1\nmcp-servers: [evil]\n")))).toContain("mcp-servers: only allowed in the root config.yml");
+  });
+});

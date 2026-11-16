@@ -512,6 +512,20 @@ keys are taken.
 
 Like hooks, buttons are only read from the root `config.yml`, because `status` runs without anyone pressing anything.
 
+### Project MCP servers
+
+In every new workspace, Claude asks before it starts a server from the repo's `.mcp.json`. `mcp-servers` in the root `config.yml` lists the servers to approve ahead of time, under `defaults` or `repos.<name>`.
+
+```yaml
+repos:
+  web-app:
+    mcp-servers: [playwright, nx]
+```
+
+overbridge writes the list into the workspace's Claude settings as `enabledMcpjsonServers`. Claude reads that key through `--settings` even in a folder it doesn't trust (see [project server approvals](https://code.claude.com/docs/en/mcp.md#project-server-approvals-and-workspace-trust)). The agent starts in the workspace's first repo, so only that repo's list and `.mcp.json` count. Claude still asks about any server not on the list, and overbridge has no setting that approves them all.
+
+Like hooks, the list is read only from the root `config.yml`. A server in `.mcp.json` runs a command from the repo, so a branch can't approve its own servers. An approved name still runs whatever command the checked-out branch gives it.
+
 ### Guard additions
 
 A top-level `guard` block in the root `config.yml` adjusts the workspace guard for every workspace. A repo's
