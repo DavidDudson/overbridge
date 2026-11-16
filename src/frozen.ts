@@ -14,7 +14,7 @@ export interface FrozenRow {
   dropped: boolean;
 }
 
-/** The iceboxed workspaces of `state`, oldest first; a malformed record is skipped. */
+/** The iceboxed workspaces of `state`, oldest first; a record that cannot be read shows as `unreadable record`. */
 export function frozenRows(state: State): FrozenRow[] {
   return Object.entries(state.workspaces)
     .flatMap(([ws, w]): FrozenRow[] => {
@@ -23,12 +23,12 @@ export function frozenRows(state: State): FrozenRow[] {
           return [];
         }
 
-        // a record a hand edit broke is skipped, so one bad entry never hides the rest
         const claims = Object.entries(w.repos ?? {}).map(([repo, c]) => `${repo}:${c.branch ?? "?"}${c.pr ? ` #${c.pr}` : ""}`);
 
-        return [{ ws, since: w.iceboxed.since, claims, dropped: (w.iceboxed.dropped?.length ?? 0) > 0 }];
+        // a hand-edited `since` may not be a string, and the sort below must never throw
+        return [{ ws, since: String(w.iceboxed.since ?? ""), claims, dropped: (w.iceboxed.dropped?.length ?? 0) > 0 }];
       } catch {
-        return [];
+        return [{ ws, since: "", claims: ["unreadable record"], dropped: false }];
       }
     })
     .toSorted((a, b) => a.since.localeCompare(b.since) || naturalSort(a.ws, b.ws));
@@ -39,6 +39,9 @@ const LEGEND = "j/k move   t thaw   q quit";
 
 /** Rows the frame takes beyond the list: top border, header, footer, bottom border. */
 export const FROZEN_CHROME = 4;
+
+const WS_COLUMNS = 28;
+const AGE_COLUMNS = 4;
 
 export interface FrozenView {
   selected: number;
@@ -53,11 +56,11 @@ export interface FrozenView {
 export function renderFrozen(rows: readonly FrozenRow[], { selected, offset, height, width, message, now }: FrozenView): string[] {
   const inner = width - 4;
   const body = Math.max(1, height - FROZEN_CHROME);
-  const head = `${cell("workspace", 28)} ${cell("age", 4)} claims`;
+  const head = `${cell("workspace", WS_COLUMNS)} ${cell("age", AGE_COLUMNS)} claims`;
   const visible = rows.slice(offset, offset + body);
 
   const lines = visible.map((r, i) => {
-    const text = fit(`${cell(r.ws.slice(0, 28), 28)} ${cell(age(r.since, now), 4)} ${r.claims.join("  ")}${r.dropped ? "  · dropped" : ""}`, inner);
+    const text = fit(`${cell(r.ws.slice(0, WS_COLUMNS), WS_COLUMNS)} ${cell(age(r.since, now), AGE_COLUMNS)} ${r.claims.join("  ")}${r.dropped ? "  · dropped" : ""}`, inner);
 
     return boxRow(offset + i === selected ? inverse(text) : text);
   });

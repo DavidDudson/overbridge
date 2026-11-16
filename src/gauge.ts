@@ -25,10 +25,7 @@ interface CachedRead {
 
 const cache = new Map<string, CachedRead>();
 
-/**
- * `parse` of the file at `path`, re-read only when its mtime (ns), inode or size changed; undefined when it is missing or
- * unreadable. Two writes in the same millisecond share `mtimeMs`, and an atomic rename gives a new inode.
- */
+/** `parse` of the file at `path`, re-read when its mtime (ns), inode or size changed; undefined when missing or unreadable. */
 export function cachedRead<T>(path: string, parse: (raw: Json) => T | undefined): T | undefined {
   let stamp: string;
 

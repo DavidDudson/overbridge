@@ -3,10 +3,10 @@
  * holding any layer owns every layer, so `gh stack up/down/add/rebase` never
  * reach into another workspace's worktree.
  */
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { barePath } from "./paths";
-import { run } from "./util";
+import { errorMessage, log, run } from "./util";
 
 export type StackLayer = { branch: string; pr?: number };
 
@@ -22,8 +22,8 @@ export function issueOf(branch: string): number | undefined {
 }
 
 /**
- * Where gh-stack keeps its catalogs: each worktree's own git dir (`worktrees/<name>/gh-stack`, gh-stack 0.0.8 and
- * later), then the shared bare repo (older gh-stack). Every one is read, so every workspace sees every stack.
+ * gh-stack's catalogs: each live worktree's own git dir (`worktrees/<name>/gh-stack`), then the shared bare repo older
+ * gh-stack used. A worktree whose folder is gone (not yet pruned) is left out, so its stack claims nothing.
  */
 export function catalogPaths(bare: string): string[] {
   let worktrees: string[];
@@ -34,7 +34,19 @@ export function catalogPaths(bare: string): string[] {
     worktrees = [];
   }
 
-  return [...worktrees.map((w) => join(bare, "worktrees", w, "gh-stack")), join(bare, "gh-stack")];
+  // only a folder known to be gone drops a worktree; an unreadable `gitdir` keeps it, so a claim never fails open
+  const live = worktrees.filter((w) => {
+    const admin = join(bare, "worktrees", w);
+
+    try {
+      // git's worktree.useRelativePaths writes `gitdir` relative to the admin dir
+      return existsSync(resolve(admin, readFileSync(join(admin, "gitdir"), "utf8").trim()));
+    } catch {
+      return true;
+    }
+  });
+
+  return [...live.map((w) => join(bare, "worktrees", w, "gh-stack")), join(bare, "gh-stack")];
 }
 
 function readCatalog(path: string): Stack[] {
@@ -54,13 +66,38 @@ function readCatalog(path: string): Stack[] {
   }));
 }
 
-/** Stacks tracked locally by gh-stack across every catalog of `repo`; a stack listed in two catalogs appears once, from the first in `catalogPaths` order. */
-export function localStacks(repo: string): Stack[] {
-  const all = catalogPaths(barePath(repo)).flatMap(readCatalog);
-  const key = (s: Stack) => s.layers.map((l) => l.branch).join("\0");
+/** Bad catalogs already logged, so a poll does not repeat the line. */
+const loggedBad = new Set<string>();
 
-  return all.filter((s, i) => all.findIndex((t) => key(t) === key(s)) === i);
+/** A worktree's catalog that cannot be read is skipped and logged once, so one workspace's bad file never breaks the others. */
+function readWorktreeCatalog(path: string): Stack[] {
+  try {
+    return readCatalog(path);
+  } catch (e) {
+    const line = `skipped gh-stack catalog ${path}: ${errorMessage(e)}`;
+
+    if (!loggedBad.has(line)) {
+      loggedBad.add(line);
+      log(line);
+    }
+
+    return [];
+  }
 }
+
+/** Stacks in every gh-stack catalog of bare repo `bare`; a stack listed in two catalogs appears once, from the first in `catalogPaths` order. */
+export function stacksIn(bare: string): Stack[] {
+  const shared = join(bare, "gh-stack");
+  const all = catalogPaths(bare).flatMap((p) => (p === shared ? readCatalog(p) : readWorktreeCatalog(p)));
+  const key = (s: Stack) => s.layers.map((l) => l.branch).join("\0");
+  // reversed, so the first index of each key is the one the Map keeps
+  const firstAt = new Map(all.map((s, i) => [key(s), i] as const).toReversed());
+
+  return all.filter((s, i) => firstAt.get(key(s)) === i);
+}
+
+/** Stacks tracked locally by gh-stack for `repo`. */
+export const localStacks = (repo: string): Stack[] => stacksIn(barePath(repo));
 
 /** Stack with `branch` as one of its layers (the trunk is not a layer). */
 export const stackOf = (stacks: Stack[], branch?: string) =>

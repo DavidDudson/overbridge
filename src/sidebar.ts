@@ -712,6 +712,11 @@ export const FooterKind = { Legend: "legend", Prompt: "prompt", Busy: "busy", Er
 
 export type FooterKind = (typeof FooterKind)[keyof typeof FooterKind];
 
+/** What a busy footer says is running. */
+export const BusyVerb = { Starting: "starting", Freezing: "freezing" } as const;
+
+export type BusyVerb = (typeof BusyVerb)[keyof typeof BusyVerb];
+
 /**
  * The new-workspace prompt. `text` is what the user has typed. `id` is set once an id alone was
  * submitted and the prompt is asking which repo it belongs to.
@@ -724,7 +729,7 @@ export interface Prompt {
 export type Footer =
   | { kind: typeof FooterKind.Legend }
   | { kind: typeof FooterKind.Prompt; prompt: Prompt }
-  | { kind: typeof FooterKind.Busy; id: string; verb?: string }
+  | { kind: typeof FooterKind.Busy; id: string; verb?: BusyVerb }
   | { kind: typeof FooterKind.Error; message: string };
 
 export const LEGEND_FOOTER: Footer = { kind: FooterKind.Legend };
@@ -764,7 +769,7 @@ export function footerRow(footer: Footer, inner: number, legendText = legend(0))
     }
 
     case FooterKind.Busy:
-      return dim(fit(`${footer.verb ?? "starting"} ${footer.id}…`, inner));
+      return dim(fit(`${footer.verb ?? BusyVerb.Starting} ${footer.id}…`, inner));
     case FooterKind.Error:
       return colorize(fit(footer.message, inner), "red");
   }
@@ -842,8 +847,6 @@ export function parseStart(p: Prompt, holds: readonly string[]): StartPlan {
   return { kind: StartPlanKind.Invalid, message: `type <repo> <id> or <id>, such as ${holds[0] ?? "my-repo"} 123` };
 }
 
-export type { Finished, Spawner };
-
 /** The last non-empty stderr line without the CLI's `overbridge: ` prefix, else a line naming the command. */
 export function startError(repo: string, id: string, result: Finished): string {
   return childError(`overbridge start ${repo} ${id}`, result);
@@ -860,10 +863,7 @@ export async function runStart(repo: string, id: string, spawn: Spawner = spawnA
   return result.code === 0 ? LEGEND_FOOTER : { kind: FooterKind.Error, message: startError(repo, id, result) };
 }
 
-/**
- * Run `overbridge icebox <ws>` as a child process. On success it closes the tab this sidebar runs in, so only a
- * refusal (unsaved work, say) comes back: resolves to the legend on success, the error otherwise.
- */
+/** Runs `overbridge icebox <ws>` as a child; resolves to the legend, or the error when icebox refuses. */
 export async function runFreeze(ws: string, spawn: Spawner = spawnAsync): Promise<Footer> {
   const result = await spawn([...selfCommand(), "icebox", ws]).catch((cause: unknown): Finished => ({ code: -1, stderr: `could not run overbridge icebox: ${errorMessage(cause)}` }));
 
@@ -1258,7 +1258,7 @@ export async function sidebar(wsOpt?: string) {
               return show({ kind: FooterKind.Error, message: `${self} is an orchestration tab; only a workspace can be frozen` });
             }
 
-            show({ kind: FooterKind.Busy, id: self, verb: "freezing" });
+            show({ kind: FooterKind.Busy, id: self, verb: BusyVerb.Freezing });
 
             return void runFreeze(self).then(show);
           }

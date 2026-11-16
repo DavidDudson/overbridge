@@ -210,7 +210,7 @@ describe("workflow", () => {
 
     for (const n of ["sa", "sb"]) expect(ws(["new", n, "-r", "app"]).code).toBe(0);
     const sa = join(root, "sa", "app");
-    // older gh-stack keeps its catalog in git's common dir, the shared bare repo; newer ones use each worktree's git dir
+    // older gh-stack kept its catalog in git's common dir, the shared bare repo
     expect(sh(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], sa)).toBe(bare);
     expect(ws(["checkout", "app", "s1"], sa).code).toBe(0);
     const layer = (branch: string, pr?: number) => ({ branch, ...(pr && { pullRequest: { number: pr } }) });
@@ -233,6 +233,21 @@ describe("workflow", () => {
     expect(ws(["checkout", "app", "s1"], join(root, "sb")).code).toBe(1);
     expect(ws(["release", "app"], sa).code).toBe(0);
     expect(ws(["checkout", "app", "s1"], join(root, "sb")).code).toBe(0);
+  });
+
+  test("a gh-stack catalog kept in a worktree's own git dir still claims the stack", () => {
+    const bare = join(root, ".bare", "app.git");
+
+    for (const n of ["wa", "wb"]) expect(ws(["new", n, "-r", "app"]).code).toBe(0);
+    const wa = join(root, "wa", "app");
+    expect(ws(["checkout", "app", "w1"], wa).code).toBe(0);
+    rmSync(join(bare, "gh-stack"), { force: true });
+    const gitDir = sh(["git", "rev-parse", "--path-format=absolute", "--git-dir"], wa);
+    writeFileSync(join(gitDir, "gh-stack"), JSON.stringify({ schemaVersion: 1, stacks: [{ trunk: { branch: "main" }, branches: [{ branch: "w1" }, { branch: "w2" }] }] }));
+
+    const steal = ws(["checkout", "app", "w2"], join(root, "wb"));
+    expect(steal.code).toBe(1);
+    expect(steal.err).toContain("claimed by workspace wa");
   });
 
   test("two branch names for one issue clash", () => {

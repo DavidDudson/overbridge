@@ -8,8 +8,9 @@ import { Motion, sidebarMotion, sidebarWidth } from "../src/config";
 import { animate, BUSY_FRAMES, busyFrame, FRAME_MS } from "../src/sidebar-motion";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { bodyRowsFor, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Finished, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
+import { BusyVerb, bodyRowsFor, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
 import { readHistory, Travel, writeHistory } from "../src/sidebar-history";
+import type { Finished } from "../src/child";
 import { type Input, textWidth } from "../src/term";
 
 const entry = (tab: string, glyph = "○", label = tab, section: Section = Section.Workspaces): Entry => ({ tab, section, glyph, label });
@@ -469,7 +470,7 @@ describe("runFreeze", () => {
 
   test("the legend names the key and the busy footer says what runs", () => {
     expect(legend(3)).toContain("f freeze");
-    expect(footerRow({ kind: FooterKind.Busy, id: "w1", verb: "freezing" }, 20).replace(/[[0-9;]*m/g, "").trimEnd()).toBe("freezing w1…");
+    expect(footerRow({ kind: FooterKind.Busy, id: "w1", verb: BusyVerb.Freezing }, 20).replace(/[[0-9;]*m/g, "").trimEnd()).toBe("freezing w1…");
   });
 });
 

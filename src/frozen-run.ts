@@ -4,11 +4,9 @@ import { tryReadState, watchState } from "./state";
 import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN } from "./term";
 import { childError, type Finished, type Spawner, spawnAsync } from "./child";
 import { errorMessage } from "./util";
+import { createPainter } from "./zellij-view";
 
-/**
- * Run `overbridge thaw <ws>` as a child, so the pane keeps drawing while worktrees come back. The child inherits the
- * session's environment, so it opens the workspace's tab. Resolves to the pane's next message: empty on success.
- */
+/** Runs `overbridge thaw <ws>` as a child so the pane keeps drawing; resolves to the pane's next message, empty on success. */
 export async function runThaw(ws: string, spawn: Spawner = spawnAsync): Promise<string> {
   const result = await spawn([...selfCommand(), "thaw", ws]).catch((cause: unknown): Finished => ({ code: -1, stderr: `could not run overbridge thaw: ${errorMessage(cause)}` }));
 
@@ -23,11 +21,15 @@ export async function frozenPane() {
     return { rows: frozenRows(state), fault };
   };
 
-  let rows = read().rows;
+  const first = read();
+  let rows = first.rows;
   let selected = 0;
   let offset = 0;
-  let message = "";
+  // `notice` is the last thaw's outcome; `fault` is why the last state read failed, cleared by the next good one
+  let notice = "";
+  let fault = first.fault ?? "";
   let busy = false;
+  const painter = createPainter((text) => process.stdout.write(text));
 
   const draw = () => {
     const height = process.stdout.rows ?? 24;
@@ -43,22 +45,23 @@ export async function frozenPane() {
       offset = selected - body + 1;
     }
 
-    process.stdout.write(frame(renderFrozen(rows, { selected, offset, height, width, message, now: Date.now() }), height, width));
+    const message = !busy && fault ? `error: ${fault}` : notice;
+    painter.paint(frame(renderFrozen(rows, { selected, offset, height, width, message, now: Date.now() }), height, width));
   };
 
-  /** Re-read state; the cursor stays on the same workspace when the list moves under it. */
+  /** Re-read state, keeping the last good rows when the read fails; the cursor stays on the same workspace. */
   const reload = () => {
-    const ws = rows[selected]?.ws;
     const next = read();
-    rows = next.rows;
-    const moved = rows.findIndex((r) => r.ws === ws);
+    fault = next.fault ?? "";
 
-    if (moved >= 0) {
-      selected = moved;
-    }
+    if (!next.fault) {
+      const ws = rows[selected]?.ws;
+      rows = next.rows;
+      const moved = rows.findIndex((r) => r.ws === ws);
 
-    if (!busy && next.fault) {
-      message = `error: ${next.fault}`;
+      if (moved >= 0) {
+        selected = moved;
+      }
     }
 
     draw();
@@ -72,10 +75,10 @@ export async function frozenPane() {
     }
 
     busy = true;
-    message = `thawing ${chosen.ws}…`;
+    notice = `thawing ${chosen.ws}…`;
     void runThaw(chosen.ws).then((next) => {
       busy = false;
-      message = next;
+      notice = next;
       reload();
     });
   };
@@ -87,12 +90,17 @@ export async function frozenPane() {
   };
 
   process.stdout.write(ENTER_SCREEN);
+  painter.invalidate();
   process.stdin.setRawMode?.(true);
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (data: string) => {
     for (const input of decodeInput(data)) {
       if (input.kind !== "key") {
         continue;
+      }
+
+      if (!busy) {
+        notice = "";
       }
 
       if (input.key === "q" || input.key === "ctrl-c") {
@@ -110,7 +118,10 @@ export async function frozenPane() {
 
     draw();
   });
-  process.stdout.on("resize", draw);
+  process.stdout.on("resize", () => {
+    painter.invalidate();
+    draw();
+  });
   watchState(reload);
   // ages move and a missed watch event is caught here
   setInterval(reload, 30_000);

@@ -22,6 +22,16 @@ describe("frozenRows", () => {
     ]);
   });
 
+  test("a hand-edited since that is not a string still lists, after the rest", () => {
+    const broken: State = JSON.parse(JSON.stringify({ ...state, workspaces: { ...state.workspaces, bad: { created: "", repos: {}, iceboxed: { since: 5 } } } }));
+    expect(frozenRows(broken).map((r) => r.ws)).toEqual(["older", "newer", "bad"]);
+  });
+
+  test("a record that cannot be read shows as unreadable instead of vanishing", () => {
+    const broken: State = JSON.parse(JSON.stringify({ ...state, workspaces: { bad: { created: "", repos: { app: null }, iceboxed: { since: "2026-11-01T00:00:00Z" } } } }));
+    expect(frozenRows(broken)).toEqual([{ ws: "bad", since: "", claims: ["unreadable record"], dropped: false }]);
+  });
+
   test("an empty state lists nothing", () => {
     expect(frozenRows({ version: 1, workspaces: {} })).toEqual([]);
   });

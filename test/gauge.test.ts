@@ -115,6 +115,10 @@ describe("cachedRead", () => {
     utimesSync(file, 200, 200);
     expect(cachedRead(file, parse)).toBe(2);
     expect(parses).toBe(2);
+    // a rewrite that keeps the mtime still reads the new value
+    writeFileSync(file, "33");
+    utimesSync(file, 200, 200);
+    expect(cachedRead(file, parse)).toBe(33);
   });
 
   test("a removed file reads as none", () => {
