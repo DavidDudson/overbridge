@@ -10,6 +10,8 @@ export * from "./worklist-data";
 
 import { spawnCwd } from "./util";
 import { spinner } from "./anim";
+import { silencedTitle } from "./pr-rows";
+import { silencedSet, spawnMentionRefresh, toggleMessage } from "./silence-refresh";
 import { statusGlyph, workAnimated } from "./worklist-look";
 import { bold, boxBottom, boxRow, boxTop, cell, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN, stripControl } from "./term";
 
@@ -67,7 +69,7 @@ export function pickRepo(key: string, repos: readonly string[]): string | undefi
  * The panel as screen rows: a table of ranked items with the selected row inverted, then the selected
  * row's reasons and a legend. Pure, so it is snapshot-tested.
  */
-export function renderWorklist(list: Ranked[], selected: number, offset: number, height: number, width: number, message = "", notes: string[] = [], filter = "", now = Date.now()): string[] {
+export function renderWorklist(list: Ranked[], selected: number, offset: number, height: number, width: number, message = "", notes: string[] = [], filter = "", now = Date.now(), silenced: ReadonlySet<string> = new Set()): string[] {
   const inner = width - 4;
   const body = Math.max(1, height - CHROME);
   const rows: string[] = [boxTop("Work", width), boxRow(dim(fit(`${"".padEnd(2)} ${"#".padEnd(3)} ${"ready".padEnd(5)} ${"stream".padEnd(6)} ${"item".padEnd(14)} title`, inner)))];
@@ -76,16 +78,16 @@ export function renderWorklist(list: Ranked[], selected: number, offset: number,
   for (const [i, r] of visible.entries()) {
     const glyph = statusGlyph(r, now);
     const icon = cell(glyph.icon, 2);
-    const line = `${icon} ${String(r.rank).padEnd(3)} ${(r.ready ? "yes" : r.status === "in-progress" ? "wip" : "no").padEnd(5)} ${`s${r.stream}`.padEnd(6)} ${r.key.slice(0, 14).padEnd(14)} ${stripControl(r.title)}`;
+    const line = `${icon} ${String(r.rank).padEnd(3)} ${(r.ready ? "yes" : r.status === "in-progress" ? "wip" : "no").padEnd(5)} ${`s${r.stream}`.padEnd(6)} ${r.key.slice(0, 14).padEnd(14)} ${silencedTitle(stripControl(r.title), silenced.has(r.url))}`;
     const text = fit(line, inner);
-    rows.push(boxRow(offset + i === selected ? inverse(text) : colorize(text, glyph.color)));
+    rows.push(boxRow(offset + i === selected ? inverse(text) : silenced.has(r.url) ? dim(text) : colorize(text, glyph.color)));
   }
 
   for (let i = visible.length; i < body; i++) rows.push(boxRow(list.length === 0 && i === 0 ? dim(fit(filter ? `nothing matches /${filter}` : "nothing assigned to you", inner)) : fit("", inner)));
   const chosen = list[selected];
   rows.push(boxRow(fit(chosen ? `why: ${chosen.reasons.join(", ")}` : "", inner)));
   const shown = message || (notes[0] ? `error: ${notes[0]}${notes.length > 1 ? ` (+${notes.length - 1} more)` : ""}; showing the last good list` : "");
-  const status = shown.startsWith("error: ") ? colorize(fit(shown, inner), "red") : shown ? bold(fit(shown, inner)) : dim(fit("j/k move   enter detail   / filter   s start   r refresh   q quit", inner));
+  const status = shown.startsWith("error: ") ? colorize(fit(shown, inner), "red") : shown ? bold(fit(shown, inner)) : dim(fit("j/k move   enter detail   / filter   s start   x silence   r refresh   q quit", inner));
   rows.push(boxRow(status));
   rows.push(boxBottom(width, filter ? `${list.length} match /${filter}` : `${list.length} open`));
 
@@ -129,7 +131,7 @@ export async function worklistPane() {
     if (selected >= offset + body) offset = selected - body + 1;
     const width = process.stdout.columns ?? 80;
     const shown = typing ? `/${filter}▏` : "";
-    const rows = detail ? renderDetail(detail, everything(), height, width) : renderWorklist(list, selected, offset, height, width, typing ? shown : busy ? `${spinner(Date.now())} ${message}` : message, cache.notes, filter);
+    const rows = detail ? renderDetail(detail, everything(), height, width) : renderWorklist(list, selected, offset, height, width, typing ? shown : busy ? `${spinner(Date.now())} ${message}` : message, cache.notes, filter, Date.now(), silencedSet(list));
     process.stdout.write(frame(rows, height, width));
   };
 
@@ -147,6 +149,7 @@ export async function worklistPane() {
       message = result.ok ? "" : `error: ${result.error}`;
       busy = false;
       draw();
+      spawnMentionRefresh();
     });
   };
 
@@ -221,6 +224,7 @@ export async function worklistPane() {
       else if (input.key === "j" || input.key === "down") selected = Math.max(0, Math.min(list.length - 1, selected + 1));
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
       else if (input.key === "r") refresh(true);
+      else if (input.key === "x" && list[selected]) message = toggleMessage(list[selected]!, list[selected]!.key);
       else if (input.key === "/") typing = true;
       else if (input.key === "escape" && filter) filter = "";
       else if ((input.key === "enter" || input.key === "l" || input.key === "right") && list[selected]) detail = list[selected];

@@ -286,6 +286,12 @@ async function main(argv: string[]): Promise<number> {
       break;
     }
 
+    case "silence": {
+      const { silenceCommand } = await import("./silence-cmd");
+      silenceCommand(rest);
+      break;
+    }
+
     case "top": {
       const { values, positionals } = opts(rest, ws);
 

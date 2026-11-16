@@ -1,7 +1,8 @@
 import { cachedRead } from "./gauge";
 import { rank, type WorkRow, type WorkStatus } from "./pm/worklist";
 import type { CiState, HealthInput } from "./pr-look";
-import { prListPath, type PrListKind } from "./prlist-run";
+import { prListPath, type PrListKind } from "./prlist-data";
+import { isSilenced, mentionsPath, parseMentions, parseStore, silencePath, type Silenceable } from "./silence";
 import { badgeOf, type TabBadge } from "./tab-badge";
 import { isRecord, isString, type Json } from "./util";
 import { worklistPath } from "./worklist-data";
@@ -28,13 +29,50 @@ function healthInputs(row: Json): HealthInput[] {
   return [input];
 }
 
-/** A PR list cache file as its badge; undefined when it holds no `rows`. */
-export function prBadgeFromCache(raw: Json): TabBadge | undefined {
-  return isRecord(raw) && Array.isArray(raw.rows) ? badgeOf(raw.rows.flatMap(healthInputs)) : undefined;
+/** Whether a cached row is silenced now; nothing is silenced by default. */
+export type SilencedTest = (row: Silenceable) => boolean;
+
+const noneSilenced: SilencedTest = () => false;
+
+/** A cached row as silence reads it, or undefined when it has no URL. */
+function silenceable(row: Json): Silenceable | undefined {
+  if (!isRecord(row) || !isString(row.url)) return undefined;
+  const out: Silenceable = { url: row.url };
+
+  if (row.group === "direct" || row.group === "team") out.group = row.group;
+
+  if (isString(row.seenAt)) out.seenAt = row.seenAt;
+
+  return out;
+}
+
+const loud = (silenced: SilencedTest) => (row: Json): boolean => {
+  const item = silenceable(row);
+
+  return item === undefined || !silenced(item);
+};
+
+/** A PR list cache file as its badge, leaving out silenced rows; undefined when it holds no `rows`. */
+export function prBadgeFromCache(raw: Json, silenced: SilencedTest = noneSilenced): TabBadge | undefined {
+  return isRecord(raw) && Array.isArray(raw.rows) ? badgeOf(raw.rows.filter(loud(silenced)).flatMap(healthInputs)) : undefined;
+}
+
+const asJson = (raw: Json): Json => raw;
+
+/** `isSilenced` over the store and mentions as they are on disk now (each re-read only when its file changed). */
+function silencedNow(): SilencedTest {
+  const store = cachedRead(silencePath(), parseStore) ?? new Map();
+  const mentions = cachedRead(mentionsPath(), parseMentions)?.mentions ?? new Map<string, string>();
+
+  return (row) => isSilenced(row, store, mentions);
 }
 
 /** The badge of a PR list tab (`prs` or `reviews`). */
-export const prListBadge = (kind: PrListKind): TabBadge | undefined => cachedRead(prListPath(kind), prBadgeFromCache);
+export function prListBadge(kind: PrListKind): TabBadge | undefined {
+  const raw = cachedRead(prListPath(kind), asJson);
+
+  return raw === undefined ? undefined : prBadgeFromCache(raw, silencedNow());
+}
 
 const WORK_STATUSES = ["todo", "in-progress", "blocked", "done"] as const satisfies readonly WorkStatus[];
 
@@ -50,9 +88,13 @@ const isWorkRow = (v: Json): v is Json & WorkRow =>
   Array.isArray(v.blockedBy) &&
   Array.isArray(v.labels);
 
-/** The work list cache as its badge: open items only, since a done item needs nothing. */
-export function workBadgeFromCache(raw: Json): TabBadge | undefined {
-  return isRecord(raw) && Array.isArray(raw.rows) ? badgeOf(rank(raw.rows.filter(isWorkRow)).filter((r) => r.status !== "done").map(workInput)) : undefined;
+/** The work list cache as its badge: open items that are not silenced, since a done item needs nothing. */
+export function workBadgeFromCache(raw: Json, silenced: SilencedTest = noneSilenced): TabBadge | undefined {
+  return isRecord(raw) && Array.isArray(raw.rows) ? badgeOf(rank(raw.rows.filter(isWorkRow)).flatMap((r) => (r.status === "done" || silenced(r) ? [] : [workInput(r)]))) : undefined;
 }
 
-export const workBadge = (): TabBadge | undefined => cachedRead(worklistPath(), workBadgeFromCache);
+export function workBadge(): TabBadge | undefined {
+  const raw = cachedRead(worklistPath(), asJson);
+
+  return raw === undefined ? undefined : workBadgeFromCache(raw, silencedNow());
+}

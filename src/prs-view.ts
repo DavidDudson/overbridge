@@ -1,6 +1,6 @@
 import { alternate } from "./anim";
 import { ciLook, conflictLook, HEALTH_LOOK, healthOf } from "./pr-look";
-import { age, CHROME, type PrRow, type ViewState } from "./pr-rows";
+import { age, CHROME, type PrRow, silencedTitle, type ViewState } from "./pr-rows";
 import { REVIEWER_LOOK, type ReviewerStatus } from "./reviewers";
 import { bold, boxBottom, boxRow, boxTop, cell, colorize, dim, fit, inverse } from "./term";
 
@@ -13,7 +13,7 @@ export interface PrView {
 }
 
 const EMPTY = "no open PRs of yours";
-const LEGEND = "j/k move   o open in browser   r refresh   q quit";
+const LEGEND = "j/k move   o open in browser   x silence   r refresh   q quit";
 
 const isConflict = (r: PrRow) => r.mergeable === "CONFLICTING";
 
@@ -44,7 +44,7 @@ function mergeIcon(r: PrRow, now: number): string {
 }
 
 /** The My PRs panel as screen rows. Pure, so it is snapshot-tested. */
-function render(rows: readonly PrRow[], { selected, offset, height, width, message, now }: ViewState): string[] {
+function render(rows: readonly PrRow[], { selected, offset, height, width, message, now, silenced = new Set() }: ViewState): string[] {
   const inner = width - 4;
   const body = Math.max(1, height - CHROME);
   const head = `${cell("repo", 22)} ${cell("#", 5)} ${cell("mrg", 3)} ${cell("ci", 2)} ${cell("rev", 3)} ${cell("cop", 3)} ${cell("rab", 3)} ${cell("age", 4)} title`;
@@ -61,13 +61,13 @@ function render(rows: readonly PrRow[], { selected, offset, height, width, messa
       cell(botIcon(r.bots, "Copilot"), 3),
       cell(botIcon(r.bots, "CodeRabbit"), 3),
       cell(age(r.updatedAt, now), 4),
-      r.title,
+      silencedTitle(r.title, silenced.has(r.url)),
     ].join(" ");
 
     const text = fit(line, inner);
     const color = HEALTH_LOOK[healthOf(r)].color;
 
-    out.push(boxRow(offset + i === selected ? inverse(text) : r.draft ? dim(text) : color === "red" ? colorize(text, "red") : text));
+    out.push(boxRow(offset + i === selected ? inverse(text) : r.draft || silenced.has(r.url) ? dim(text) : color === "red" ? colorize(text, "red") : text));
   }
 
   for (let i = visible.length; i < body; i++) out.push(boxRow(rows.length === 0 && i === 0 ? dim(fit(EMPTY, inner)) : fit("", inner)));

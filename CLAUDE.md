@@ -80,6 +80,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   The sidebar starts the sweep; `claimSweep` (`src/sweep-trigger.ts`) lets one sidebar run it per `MERGE_SWEEP_MS`.
   Every removal is visible: `beginRemoval` stores its `CleanupCause` in `removing`, `finishRemoval` appends the outcome to
   `State.cleanups` (`src/cleanup-log.ts`), and the sidebar shows a countdown to the next sweep, the removals in flight and those finished since the last sweep (`cleanupRows`).
+- Silenced items: `src/silence.ts` is the pure rule (`isSilenced` decides from the user's toggle, a team review's `seenAt`, and the newest mention) plus the `silenced.json`/`mentions.json` I/O.
+  Only a pane's `x` writes `silenced.json` (`toggleSilence` in `src/silence-refresh.ts`); only `overbridge silence refresh` writes `mentions.json` (`src/mention-scan.ts`).
+  `src/prlist-data.ts` holds the PR list caches so the scan reads them without loading the panes. The badges (`src/my-badges.ts`) leave silenced rows out.
 - `src/icebox.ts` is `overbridge icebox`/`thaw`: a paused workspace keeps its claims and worktrees, has `iceboxed` in state and no
   tab. `icebox` refuses on `unsavedRepos`, stops apps (`stopApps`) and checks (`stopChecksFor`), writes a handoff (`src/handoff.ts`)
   and closes the tab last (`leaveTab`); `thaw` reopens it with `--continue` and `/read-handoff`. `entries()` leaves iceboxed
