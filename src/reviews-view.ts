@@ -1,5 +1,6 @@
 import { alternate, spinner } from "./anim";
 import { age, type PrRow, type ViewState } from "./pr-rows";
+import { silencedTitle } from "./silence";
 import { ciLook, conflictLook } from "./pr-look";
 import type { PrView } from "./prs-view";
 import { SORT_LABEL, type SortMode } from "./sort-mode";
@@ -127,14 +128,14 @@ interface Part {
   color?: Color | undefined;
 }
 
-/** One table row: coloured cells, or plain text in inverse when selected. A draft is dim. */
-export function rowText(r: PrRow, cols: readonly Column[], inner: number, selected: boolean, now: number, animated: boolean): string {
+/** One table row: coloured cells, or plain text in inverse when selected. A draft or a silenced row is dim. */
+export function rowText(r: PrRow, cols: readonly Column[], inner: number, selected: boolean, now: number, animated: boolean, silenced = false): string {
   const cells = cellsFor(r, now, animated);
   const titleWidth = Math.max(1, inner - cols.reduce((n, c) => n + c.width + 1, 0));
-  const parts: Part[] = [...cols.map((c) => ({ text: fit(cells[c.key].text, c.width), color: cells[c.key].color })), { text: fit(r.title, titleWidth) }];
+  const parts: Part[] = [...cols.map((c) => ({ text: fit(cells[c.key].text, c.width), color: cells[c.key].color })), { text: fit(silencedTitle(r.title, silenced), titleWidth) }];
 
   if (selected) return inverse(parts.map((p) => p.text).join(" "));
-  const style = (p: Part) => (r.draft ? dim(p.color ? colorize(p.text, p.color) : p.text) : p.color ? colorize(p.text, p.color) : p.text);
+  const style = (p: Part) => (r.draft || silenced ? dim(p.color ? colorize(p.text, p.color) : p.text) : p.color ? colorize(p.text, p.color) : p.text);
 
   return parts.map(style).join(" ");
 }
@@ -166,10 +167,10 @@ export const windowStart = (count: number, selected: number | undefined, rows: n
   selected === undefined || count <= rows ? 0 : Math.min(count - rows, Math.max(0, selected - Math.floor(rows / 2)));
 
 const footer = (message: string, inner: number, sort: SortMode) =>
-  message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit(`j/k move   o open in browser   s sort: ${SORT_LABEL[sort]}   r refresh   q quit`, inner));
+  message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit(`j/k move   o open in browser   s sort: ${SORT_LABEL[sort]}   x silence   r refresh   q quit`, inner));
 
 /** The Reviews tab as screen rows: two tables, same columns, direct requests above team requests. Pure, so it is snapshot-tested. */
-function render(rows: readonly PrRow[], { selected, height, width, message, now, sort = DEFAULT_REVIEWS_SORT }: ViewState): string[] {
+function render(rows: readonly PrRow[], { selected, height, width, message, now, sort = DEFAULT_REVIEWS_SORT, silenced = new Set() }: ViewState): string[] {
   const inner = width - 4;
   const cols = columnsFor(inner);
   const groups = split(rows);
@@ -190,7 +191,7 @@ function render(rows: readonly PrRow[], { selected, height, width, message, now,
 
     for (let i = 0; i < rowsHere; i++) {
       const r = list[start + i];
-      out.push(boxRow(r ? rowText(r, cols, inner, mine === start + i, now, true) : list.length === 0 && i === 0 ? dim(fit(GROUPS[g].empty, inner)) : fit("", inner)));
+      out.push(boxRow(r ? rowText(r, cols, inner, mine === start + i, now, true, silenced.has(r.url)) : list.length === 0 && i === 0 ? dim(fit(GROUPS[g].empty, inner)) : fit("", inner)));
     }
 
     out.push(boxBottom(width, list.length > rowsHere ? `${start + 1}-${Math.min(list.length, start + rowsHere)} of ${list.length}` : GROUPS[g].unit, g === "direct" ? "cyan" : "yellow"));

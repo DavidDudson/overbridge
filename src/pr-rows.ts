@@ -24,6 +24,8 @@ export interface PrRow {
   group?: "direct" | "team";
   /** Reviews tab: the team (`org/slug`) the request named, for a team row. */
   via?: string;
+  /** ISO time the row first appeared in its list: when a team review's silence starts. */
+  seenAt?: string;
 }
 
 /** Age as `5m`, `3h`, `2d`; empty for an unreadable date. */
@@ -50,4 +52,6 @@ export interface ViewState {
   now: number;
   /** How the rows are ordered, for a view to name in its legend. */
   sort?: SortMode;
+  /** URLs of the rows silenced now, drawn dim with a bell. */
+  silenced?: ReadonlySet<string>;
 }

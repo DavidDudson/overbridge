@@ -1,11 +1,12 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { loadRootLayers } from "./project-config";
-import { metaDir, selfCommand } from "./paths";
+import { selfCommand } from "./paths";
+import { type PrListCache, type PrListKind, readPrList, writePrList } from "./prlist-data";
 import { errorMessage, run, spawnCwd, type RunResult } from "./util";
 import { age, CHROME, type PrRow } from "./pr-rows";
 import { filterOrgs, mergeRows, reviewCommand, rowsFromReviews } from "./review-batch";
 import { spinner } from "./anim";
+import { carrySeenAt } from "./silence";
+import { mentionScanError, silencedSet, spawnMentionRefresh, toggleMessage } from "./silence-refresh";
 import { prsView } from "./prs-view";
 import { readMyPrs } from "./prs-refresh";
 import { DEFAULT_REVIEWS_SORT, reviewsView } from "./reviews-view";
@@ -15,34 +16,9 @@ import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN } from "./term";
 
 export { age, type PrRow };
 
-/** The two PR lists in the orchestration tabs: PRs you opened, and PRs waiting for your review. */
-export type PrListKind = "prs" | "reviews";
+export * from "./prlist-data";
 
 export const PRLIST_REFRESH_MS = 60_000;
-
-export interface PrListCache {
-  at: number;
-  rows: PrRow[];
-  /** Why the last read failed, if it did. */
-  error?: string;
-}
-
-export const prListPath = (kind: PrListKind) => join(metaDir(), `prlist-${kind}.json`);
-
-export function readPrList(kind: PrListKind): PrListCache {
-  try {
-    return JSON.parse(readFileSync(prListPath(kind), "utf8"));
-  } catch {
-    return { at: 0, rows: [] };
-  }
-}
-
-function writePrList(kind: PrListKind, cache: PrListCache) {
-  mkdirSync(metaDir(), { recursive: true });
-  const tmp = `${prListPath(kind)}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(cache, null, 2) + "\n");
-  renameSync(tmp, prListPath(kind));
-}
 
 export const SEARCH_FIELDS = "number,title,url,repository,author,isDraft,updatedAt";
 
@@ -120,12 +96,12 @@ export function readPrs(kind: PrListKind, orgs: readonly string[], runner: Runne
 }
 
 /** `overbridge prs refresh` / `reviews refresh`: read the list into its cache. A failed read keeps the old rows. */
-export function refreshPrList(kind: PrListKind, now = Date.now()): PrListCache {
+export function refreshPrList(kind: PrListKind, now = Date.now(), runner: Runner = run): PrListCache {
   const orgs = loadRootLayers().githubOrgs;
   let cache: PrListCache;
 
   try {
-    cache = { at: now, rows: readPrs(kind, orgs) };
+    cache = { at: now, rows: carrySeenAt(readPrs(kind, orgs, runner), readPrList(kind).rows, new Date(now).toISOString()) };
   } catch (e) {
     cache = { ...readPrList(kind), at: now, error: errorMessage(e) };
   }
@@ -175,7 +151,7 @@ export async function prListPane(kind: PrListKind) {
     if (selected < offset) offset = selected;
 
     if (selected >= offset + body) offset = selected - body + 1;
-    process.stdout.write(frame(view.render(rows, { selected, offset, height, width, message: busy ? `${spinner(Date.now())} ${message}` : message, now: Date.now(), sort }), height, width));
+    process.stdout.write(frame(view.render(rows, { selected, offset, height, width, message: busy ? `${spinner(Date.now())} ${message}` : message, now: Date.now(), sort, silenced: silencedSet(rows) }), height, width));
   };
 
   /** Replace the rows; the cursor stays on the same PR when the new order moves it. */
@@ -195,8 +171,9 @@ export async function prListPane(kind: PrListKind) {
     draw();
     void refreshPrListInChild(kind).then((result) => {
       installCache(readPrList(kind));
-      message = result.ok ? (cache.error ? `error: ${cache.error}` : "") : `error: ${result.error}`;
+      message = result.ok ? (cache.error ? `error: ${cache.error}` : mentionScanError()) : `error: ${result.error}`;
       busy = false;
+      message ||= spawnMentionRefresh();
       draw();
     });
   };
@@ -213,6 +190,7 @@ export async function prListPane(kind: PrListKind) {
   process.stdin.on("data", (data: string) => {
     for (const input of decodeInput(data)) {
       if (input.kind !== "key") continue;
+      const chosen = rowsOf()[selected];
 
       if (input.key === "q" || input.key === "ctrl-c") quit();
       else if (input.key === "j" || input.key === "down") selected = Math.max(0, Math.min(rowsOf().length - 1, selected + 1));
@@ -222,6 +200,8 @@ export async function prListPane(kind: PrListKind) {
         const url = rowsOf()[selected]?.url;
         sort = nextSort(sort);
         selected = Math.max(0, rowsOf().findIndex((r) => r.url === url));
+      } else if (input.key === "x" && chosen) {
+        message = toggleMessage(chosen, `${chosen.repo}#${chosen.number}`);
       } else if (input.key === "r") refresh();
       else if (input.key === "o" && rowsOf()[selected]) {
         Bun.spawn({ cmd: ["gh", "pr", "view", "--web", rowsOf()[selected]!.url], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });

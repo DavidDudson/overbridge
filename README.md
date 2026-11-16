@@ -716,6 +716,14 @@ Its sidebar card shows the count and one icon per PR, worst first: 💥 conflict
 🟡 waiting, ⚪ draft, 🟢 ready. The sidebar's `motion = "off"` stops the pulse. The list comes from one GraphQL search per
 owner in `github-orgs`, so a refresh costs one `gh` call per owner plus one for your login.
 
+`x` in `@prs`, `@reviews`, or `@work` silences the selected item, and `x` again brings it back. A silenced item stays in
+its list, dim and marked 🔕, but its sidebar card leaves it out of the count and icons. A review asked only of a team of
+yours starts silenced. A comment that mentions you (`@<your login>`) after the silence started lifts it: after each list
+refresh, `overbridge silence refresh` reads the comments, review bodies, and review comments of every silenced GitHub
+item in one `gh api graphql` call per 20 items, at most every 30 seconds. Silences live in `<meta>/silenced.json`, keyed
+by URL. The next toggle drops every entry whose item has left all three lists. overbridge does not read mentions on Jira items.
+`overbridge silence` lists what is silenced now, and `overbridge silence toggle <url>` flips one item from a shell.
+
 Under the list, up to three rows show workspaces being removed or removed in the last hour (see **Seeing what was
 removed** above). Below them, while the [check queue](#check-queue) is busy, a `▶` row for each running command shows its
 workspace and how long it has run, and a `⧗` row lists the workspaces waiting.
