@@ -384,7 +384,10 @@ describe("check queue", () => {
     const second = spawnCheck(step("b"));
     expect(await first.exited).toBe(0);
     expect(await second.exited).toBe(0);
-    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "start b", "end a", "end b"]);
+    // both start before either ends; two equal sleeps started close together can end in either order
+    const lines = readFileSync(log, "utf8").trim().split("\n");
+    expect(lines.slice(0, 2)).toEqual(["start a", "start b"]);
+    expect(lines.slice(2).toSorted()).toEqual(["end a", "end b"]);
     expect(tickets()).toEqual([]);
   }, CHECK_TEST_MS);
 
