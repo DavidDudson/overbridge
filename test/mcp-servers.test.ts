@@ -79,9 +79,13 @@ describe("mcp-servers", () => {
     expect(settingsOf("ws1").copy.enabledMcpjsonServers).toBeUndefined();
   });
 
-  test("a repo's own overbridge.yml can't approve servers", () => {
-    writeFileSync(rootConfigPath(), "");
-    writeFileSync(join(tmp, "workspaces", "ws1", "app", "overbridge.yml"), "version: 1\nmcp-servers: [evil]\n");
-    expect(settingsOf("ws1").copy.enabledMcpjsonServers).toBeUndefined();
+  test("a repo's own overbridge.yml can't change the list, even when it doesn't load", () => {
+    writeFileSync(rootConfigPath(), "repos:\n  app:\n    mcp-servers: [playwright]\n");
+    const repoFile = join(tmp, "workspaces", "ws1", "app", "overbridge.yml");
+    writeFileSync(repoFile, "version: 1\nmcp-servers: ~\n");
+    expect(settingsOf("ws1").copy.enabledMcpjsonServers).toEqual(["playwright"]);
+    writeFileSync(repoFile, "version: 1\nmcp-servers: [evil]\nnot-a-key: 1\n");
+    expect(settingsOf("ws1").copy.enabledMcpjsonServers).toEqual(["playwright"]);
+    rmSync(repoFile);
   });
 });

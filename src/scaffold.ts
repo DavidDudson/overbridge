@@ -1,10 +1,11 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { agentDirOf } from "./layout";
 import { ghReposCache, metaDir, ORCHESTRATION_ENV, orchestrationPlansDir, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { pluginSettings } from "./plugins";
-import { loadRepoConfig } from "./project-config";
+import { loadRepoConfig, rootMcpServers } from "./project-config";
 import { getWorkspace, readState } from "./state";
-import { shellQuote } from "./util";
+import { errorMessage, log, shellQuote } from "./util";
 
 /** Where plan-mode plans are written, relative to the workspace folder. */
 export const PLANS_DIR = "plans";
@@ -35,18 +36,19 @@ export const AUTO_MODE_ALLOW = [
 export function scaffold(ws: string) {
   const dir = wsDir(ws);
   mkdirSync(join(dir, ".claude"), { recursive: true });
-  writeFileSync(join(dir, ".claude", "settings.json"), JSON.stringify(workspaceSettings(ws, PLANS_DIR), null, 2) + "\n");
+  const mcp = mcpServerSettings(ws);
+  writeFileSync(join(dir, ".claude", "settings.json"), JSON.stringify(workspaceSettings(ws, PLANS_DIR, mcp), null, 2) + "\n");
   // a Claude started in a repo folder does not read the workspace's .claude, so it loads this copy with `--settings`;
   // plans stay in the workspace folder, not that repo's worktree
   mkdirSync(dirname(workspaceSettingsPath(ws)), { recursive: true });
-  writeFileSync(workspaceSettingsPath(ws), JSON.stringify(workspaceSettings(ws, join(dir, PLANS_DIR)), null, 2) + "\n");
+  writeFileSync(workspaceSettingsPath(ws), JSON.stringify(workspaceSettings(ws, join(dir, PLANS_DIR), mcp), null, 2) + "\n");
   writeFileSync(join(dir, "CLAUDE.md"), claudeMd(ws, dir, devShellSection(ws)));
 }
 
 /** The copy of workspace `ws`'s settings kept in the meta dir, for a Claude whose cwd is a repo folder. */
 export const workspaceSettingsPath = (ws: string) => join(metaDir(), "workspaces", `${ws}.settings.json`);
 
-const workspaceSettings = (ws: string, plansDirectory: string) => ({
+const workspaceSettings = (ws: string, plansDirectory: string, mcp: McpServerSettings) => ({
   env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
   ...pluginSettings(),
   // plan-mode plans live in the workspace folder, not ~/.claude/plans
@@ -54,32 +56,33 @@ const workspaceSettings = (ws: string, plansDirectory: string) => ({
   permissions: { allow: ALLOWED_COMMANDS },
   autoMode: { allow: ["$defaults", ...AUTO_MODE_ALLOW] },
   hooks: agentStateHooks(),
-  ...mcpServerSettings(ws),
+  ...mcp,
 });
 
-/** The part of a workspace's Claude settings that approves project MCP servers. */
-export interface McpServerSettings {
+interface McpServerSettings {
   enabledMcpjsonServers?: string[];
 }
 
 /**
- * Approves the agent repo's `.mcp.json` servers named in its root-config `mcp-servers`, so Claude starts them
- * without asking. Claude honours `enabledMcpjsonServers` from `--settings` even in a folder it does not trust.
- * The agent starts in the first repo's worktree, so only that repo's `.mcp.json` is loaded.
- * A repo whose config does not load approves nothing: the generated files must never block a launch.
+ * Claude honours `enabledMcpjsonServers` from `--settings` even in a folder it does not trust. Only the repo the
+ * agent starts in counts, since that is the only `.mcp.json` Claude loads.
  */
-export function mcpServerSettings(ws: string): McpServerSettings {
-  const [first] = Object.keys(getWorkspace(readState(), ws).repos);
+function mcpServerSettings(ws: string): McpServerSettings {
+  const agentDir = agentDirOf(ws);
+  const repo = Object.keys(getWorkspace(readState(), ws).repos).find((r) => worktreePath(ws, r) === agentDir);
 
-  if (!first) {
+  if (!repo) {
     return {};
   }
 
   try {
-    const servers = loadRepoConfig(worktreePath(ws, first), first).mcpServers;
+    const servers = rootMcpServers(repo);
 
     return servers.length ? { enabledMcpjsonServers: servers } : {};
-  } catch {
+  } catch (e) {
+    // the generated files must never block a launch
+    log(`warning: ${errorMessage(e)}\nClaude will ask before starting ${repo}'s .mcp.json servers`);
+
     return {};
   }
 }

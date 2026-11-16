@@ -849,6 +849,13 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
   return layers;
 }
 
+/** `repo`'s `mcp-servers` from the root layers alone, so nothing in a repo's own file can change the list. */
+export function rootMcpServers(repo: string, layers = loadRootLayers()): string[] {
+  const merged = overlay(layers.defaults, layers.repos[repo]) ?? {};
+
+  return validateConfig(merged, layers.file, { partial: true, root: true }).mcpServers;
+}
+
 /**
  * Lay `over` on `base`: mappings merge key by key, anything else (lists included) replaces, and a
  * `null` in `over` removes the key.
