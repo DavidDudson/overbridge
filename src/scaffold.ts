@@ -54,7 +54,35 @@ const workspaceSettings = (ws: string, plansDirectory: string) => ({
   permissions: { allow: ALLOWED_COMMANDS },
   autoMode: { allow: ["$defaults", ...AUTO_MODE_ALLOW] },
   hooks: agentStateHooks(),
+  ...mcpServerSettings(ws),
 });
+
+/** The part of a workspace's Claude settings that approves project MCP servers. */
+export interface McpServerSettings {
+  enabledMcpjsonServers?: string[];
+}
+
+/**
+ * Approves the agent repo's `.mcp.json` servers named in its root-config `mcp-servers`, so Claude starts them
+ * without asking. Claude honours `enabledMcpjsonServers` from `--settings` even in a folder it does not trust.
+ * The agent starts in the first repo's worktree, so only that repo's `.mcp.json` is loaded.
+ * A repo whose config does not load approves nothing: the generated files must never block a launch.
+ */
+export function mcpServerSettings(ws: string): McpServerSettings {
+  const [first] = Object.keys(getWorkspace(readState(), ws).repos);
+
+  if (!first) {
+    return {};
+  }
+
+  try {
+    const servers = loadRepoConfig(worktreePath(ws, first), first).mcpServers;
+
+    return servers.length ? { enabledMcpjsonServers: servers } : {};
+  } catch {
+    return {};
+  }
+}
 
 const hook = (sub: string) => ({ type: "command", command: [...selfCommand(), sub].map(shellQuote).join(" ") });
 

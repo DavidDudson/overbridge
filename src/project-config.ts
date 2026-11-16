@@ -168,6 +168,8 @@ export interface ProjectConfig {
   hooks?: Hooks;
   /** Top panel buttons, from the root `config.yml` only. */
   buttons: ButtonSpec[];
+  /** Names of the repo's `.mcp.json` servers Claude starts without asking, from the root `config.yml` only. */
+  mcpServers: string[];
   /** Top-level `x-<name>` keys, as written. Present only when there are any. */
   extensions?: Record<string, Json>;
 }
@@ -181,9 +183,10 @@ export const defaultConfig = (): ProjectConfig => ({
   checkQueue: defaultCheckQueue(),
   icebox: { prune: [] },
   buttons: [],
+  mcpServers: [],
 });
 
-const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons"];
+const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons", "mcp-servers"];
 const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
 const ICEBOX_KEYS = ["prune", "idle-days"];
@@ -413,7 +416,7 @@ export function isPrunablePath(path: string): boolean {
 /**
  * Validate parsed YAML. Throws one error naming `file` and every offending key. With `partial`, `raw` is
  * one layer of a merged config, so a missing required key is not an error. With `root`, the root-only keys
- * (`hooks`, `buttons`) are allowed.
+ * (`hooks`, `buttons`, `mcp-servers`) are allowed.
  */
 export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { partial = false, root = false } = {}): ProjectConfig {
   if (raw === null || raw === undefined) return defaultConfig();
@@ -561,6 +564,16 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
       }
 
       if (Object.keys(out).length) config.hooks = out;
+    }
+  }
+
+  const mcpServers = raw["mcp-servers"];
+
+  if (mcpServers !== undefined && mcpServers !== null) {
+    if (!root) {
+      p.add("mcp-servers", ROOT_ONLY);
+    } else {
+      config.mcpServers = p.stringList(raw, "mcp-servers", "") ?? [];
     }
   }
 
