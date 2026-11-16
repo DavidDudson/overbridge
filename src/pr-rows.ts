@@ -55,6 +55,3 @@ export interface ViewState {
   /** URLs of the rows silenced now, drawn dim with a bell. */
   silenced?: ReadonlySet<string>;
 }
-
-/** The title as drawn: a silenced row leads with a struck bell. */
-export const silencedTitle = (title: string, silenced: boolean): string => (silenced ? `🔕 ${title}` : title);

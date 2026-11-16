@@ -1,6 +1,7 @@
 import { alternate } from "./anim";
 import { ciLook, conflictLook, HEALTH_LOOK, healthOf } from "./pr-look";
-import { age, CHROME, type PrRow, silencedTitle, type ViewState } from "./pr-rows";
+import { age, CHROME, type PrRow, type ViewState } from "./pr-rows";
+import { silencedTitle } from "./silence";
 import { REVIEWER_LOOK, type ReviewerStatus } from "./reviewers";
 import { bold, boxBottom, boxRow, boxTop, cell, colorize, dim, fit, inverse } from "./term";
 

@@ -1,12 +1,14 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isJsonObject, isJsonString, type JsonObject, type JsonValue, numberField, objectField, parseJson, stringField } from "./json";
+import { cachedRead } from "./gauge";
+import { isGithubItem } from "./mention-scan";
 import { metaDir } from "./paths";
 
 /**
- * Silenced list items (#224): a silenced issue or PR stays in its tab, drawn dim, and leaves the sidebar badges.
- * `silenced.json` holds what the user chose, keyed by item URL; only a pane's toggle writes it, so no background
- * writer races the user. `mentions.json` holds the newest comment that mentions the user on each watched item, and
+ * Silenced list items: a silenced issue or PR stays in its tab, drawn dim, and leaves the sidebar badges.
+ * `silenced.json` holds what the user chose, keyed by item URL; only a toggle (a pane's `x` or `overbridge silence
+ * toggle`) writes it, so no background writer races the user. `mentions.json` holds the newest comment that mentions the user on each watched item, and
  * only `overbridge silence refresh` writes it. A mention newer than the silence lifts it without a write.
  */
 
@@ -40,6 +42,9 @@ export interface Silenceable {
 export const silencePath = () => join(metaDir(), "silenced.json");
 
 export const mentionsPath = () => join(metaDir(), "mentions.json");
+
+/** When a pane last started a mention scan (ms, as text): kept apart from `mentions.json` so a claim never overwrites a scan's result. */
+export const mentionClaimPath = () => join(metaDir(), "mentions.claim");
 
 const SILENCE_STATES = ["silenced", "unsilenced"] as const satisfies readonly SilenceState[];
 
@@ -88,6 +93,32 @@ const readJson = (path: string): JsonValue => {
 
 export const readStore = (): SilenceStore => parseStore(readJson(silencePath()));
 
+/** The store for a toggle to write back: a missing file is empty, but an unreadable one throws, so a write never replaces silences it could not read. */
+export function readStoreForWrite(): SilenceStore {
+  let text: string;
+
+  try {
+    text = readFileSync(silencePath(), "utf8");
+  } catch (e) {
+    if (isRecordWithCode(e) && e.code === "ENOENT") return new Map();
+    throw e;
+  }
+
+  let raw: JsonValue;
+
+  try {
+    raw = parseJson(text);
+  } catch {
+    throw new Error(`${silencePath()} is not valid JSON; fix or delete it to silence items again`);
+  }
+
+  if (!isJsonObject(raw) || !isJsonObject(raw.items)) throw new Error(`${silencePath()} has no "items" mapping; fix or delete it to silence items again`);
+
+  return parseStore(raw);
+}
+
+const isRecordWithCode = (e: unknown): e is { code?: unknown } => isJsonObject(e) || e instanceof Error;
+
 export const readMentions = (): MentionCache => parseMentions(readJson(mentionsPath()));
 
 function writeJson(path: string, body: JsonObject) {
@@ -114,13 +145,18 @@ export function writeMentions(cache: MentionCache) {
   writeJson(mentionsPath(), body);
 }
 
-/** When the item's silence started: the user's toggle, or for a team review its first sighting. Undefined when not silenced. */
-export function silencedSince(item: Silenceable, store: SilenceStore): string | undefined {
+/**
+ * When the item's silence started (ms): the user's toggle, or for a team review its first sighting; `-Infinity` for a
+ * team row with no `seenAt`, so any mention lifts it. Undefined when not silenced.
+ */
+export function silencedSince(item: Silenceable, store: SilenceStore): number | undefined {
   const entry = store.get(item.url);
 
-  if (entry) return entry.state === "silenced" ? entry.at : undefined;
+  if (entry) return entry.state === "silenced" ? Date.parse(entry.at) : undefined;
 
-  return item.group === "team" ? (item.seenAt ?? "") : undefined;
+  if (item.group !== "team") return undefined;
+
+  return item.seenAt === undefined ? -Infinity : Date.parse(item.seenAt);
 }
 
 /** Whether the item is silenced now: silenced, with no mention of the user since. */
@@ -131,19 +167,18 @@ export function isSilenced(item: Silenceable, store: SilenceStore, mentions: Rea
   const mentioned = mentions.get(item.url);
 
   if (mentioned === undefined) return true;
-  // a team row cached before rows carried `seenAt` has no start, so any mention lifts it
-  const sinceMs = since === "" ? -Infinity : Date.parse(since);
 
   // NaN on either side compares false, so an unreadable time keeps the silence
-  return !(Date.parse(mentioned) > sinceMs);
+  return !(Date.parse(mentioned) > since);
 }
 
 /**
  * The store after the user toggles `item`: silenced becomes unsilenced and the other way round. Entries for URLs no
  * tab lists any more are dropped, so the file only holds what is on screen somewhere.
  */
-export function toggled(store: SilenceStore, item: Silenceable, mentions: ReadonlyMap<string, string>, now: string, listed: ReadonlySet<string>): SilenceStore {
-  const next: SilenceStore = new Map([...store].filter(([url]) => listed.has(url)));
+export function toggled(store: SilenceStore, item: Silenceable, mentions: ReadonlyMap<string, string>, now: string, listed: ReadonlySet<string> | undefined): SilenceStore {
+  // with no list to compare against, keep every entry rather than drop what an unread list holds
+  const next: SilenceStore = new Map(listed ? [...store].filter(([url]) => listed.has(url)) : store);
   next.set(item.url, { state: isSilenced(item, store, mentions) ? "unsilenced" : "silenced", at: now });
 
   return next;
@@ -155,13 +190,21 @@ export function watchedUrls(rows: readonly Silenceable[], store: SilenceStore): 
 
   for (const [url, e] of store) if (e.state === "silenced") urls.add(url);
 
-  for (const r of rows) if (r.group === "team") urls.add(r.url);
+  for (const r of rows) if (r.group === "team" && store.get(r.url)?.state !== "unsilenced") urls.add(r.url);
 
   return [...urls].filter(isGithubItem).sort();
 }
 
-/** An issue or PR page on github.com, the only kind the mention scan can read. */
-export const isGithubItem = (url: string): boolean => /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(issues|pull)\/\d+$/.test(url);
+/** Whether a row is silenced now, by the store and mentions on disk (each re-read only when its file changed). */
+export function silencedNow(): (item: Silenceable) => boolean {
+  const store = cachedRead(silencePath(), parseStore) ?? new Map();
+  const mentions = cachedRead(mentionsPath(), parseMentions)?.mentions ?? new Map<string, string>();
+
+  return (item) => isSilenced(item, store, mentions);
+}
+
+/** The title as drawn: a silenced row leads with a struck bell. */
+export const silencedTitle = (title: string, silenced: boolean): string => (silenced ? `🔕 ${title}` : title);
 
 /** `rows` with each one's first sighting: kept from `previous` for a URL already listed, else `now`. */
 export function carrySeenAt<T extends { url: string; seenAt?: string }>(rows: readonly T[], previous: readonly T[], now: string): T[] {

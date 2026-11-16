@@ -1,6 +1,6 @@
 import { isSilenced, readMentions, readStore } from "./silence";
 import { listedRows, refreshMentions, toggleSilence } from "./silence-refresh";
-import { log, OverbridgeError } from "./util";
+import { errorMessage, log, OverbridgeError } from "./util";
 
 const USAGE = "usage: overbridge silence [ls|refresh|toggle <url>]";
 
@@ -26,6 +26,14 @@ export function silenceCommand(args: readonly string[]) {
     log(`silence: ${cache.mentions.size} mentioned item(s)${cache.error ? `; ${cache.error}` : ""}`);
   } else if (sub === "toggle" && url !== undefined) {
     const row = listedRows().find((r) => r.url === url) ?? { url };
-    log(`${toggleSilence(row)} ${url}`);
+    let state: string;
+
+    try {
+      state = toggleSilence(row);
+    } catch (e) {
+      throw new OverbridgeError(`could not save the silence for ${url}: ${errorMessage(e)}`);
+    }
+
+    log(`${state} ${url}`);
   } else throw new OverbridgeError(USAGE);
 }

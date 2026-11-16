@@ -10,8 +10,8 @@ export * from "./worklist-data";
 
 import { spawnCwd } from "./util";
 import { spinner } from "./anim";
-import { silencedTitle } from "./pr-rows";
-import { silencedSet, spawnMentionRefresh, toggleMessage } from "./silence-refresh";
+import { silencedTitle } from "./silence";
+import { mentionScanError, silencedSet, spawnMentionRefresh, toggleMessage } from "./silence-refresh";
 import { statusGlyph, workAnimated } from "./worklist-look";
 import { bold, boxBottom, boxRow, boxTop, cell, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN, stripControl } from "./term";
 
@@ -146,10 +146,10 @@ export async function worklistPane() {
     draw();
     void refreshWorklistAny({ force }).then((result) => {
       cache = readWorklist();
-      message = result.ok ? "" : `error: ${result.error}`;
+      message = result.ok ? mentionScanError() : `error: ${result.error}`;
       busy = false;
+      message ||= spawnMentionRefresh();
       draw();
-      spawnMentionRefresh();
     });
   };
 
@@ -174,6 +174,7 @@ export async function worklistPane() {
     for (const input of decodeInput(data)) {
       if (input.kind !== "key") continue;
       const list = ranked();
+      const chosen = list[selected];
 
       if (typing) {
         if (input.key === "enter") typing = false;
@@ -224,7 +225,7 @@ export async function worklistPane() {
       else if (input.key === "j" || input.key === "down") selected = Math.max(0, Math.min(list.length - 1, selected + 1));
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
       else if (input.key === "r") refresh(true);
-      else if (input.key === "x" && list[selected]) message = toggleMessage(list[selected]!, list[selected]!.key);
+      else if (input.key === "x" && chosen) message = toggleMessage(chosen, chosen.key);
       else if (input.key === "/") typing = true;
       else if (input.key === "escape" && filter) filter = "";
       else if ((input.key === "enter" || input.key === "l" || input.key === "right") && list[selected]) detail = list[selected];

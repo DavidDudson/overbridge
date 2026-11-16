@@ -2,7 +2,7 @@ import { cachedRead } from "./gauge";
 import { rank, type WorkRow, type WorkStatus } from "./pm/worklist";
 import type { CiState, HealthInput } from "./pr-look";
 import { prListPath, type PrListKind } from "./prlist-data";
-import { isSilenced, mentionsPath, parseMentions, parseStore, silencePath, type Silenceable } from "./silence";
+import { type Silenceable, silencedNow } from "./silence";
 import { badgeOf, type TabBadge } from "./tab-badge";
 import { isRecord, isString, type Json } from "./util";
 import { worklistPath } from "./worklist-data";
@@ -35,7 +35,7 @@ export type SilencedTest = (row: Silenceable) => boolean;
 const noneSilenced: SilencedTest = () => false;
 
 /** A cached row as silence reads it, or undefined when it has no URL. */
-function silenceable(row: Json): Silenceable | undefined {
+function toSilenceable(row: Json): Silenceable | undefined {
   if (!isRecord(row) || !isString(row.url)) return undefined;
   const out: Silenceable = { url: row.url };
 
@@ -47,7 +47,7 @@ function silenceable(row: Json): Silenceable | undefined {
 }
 
 const loud = (silenced: SilencedTest) => (row: Json): boolean => {
-  const item = silenceable(row);
+  const item = toSilenceable(row);
 
   return item === undefined || !silenced(item);
 };
@@ -58,14 +58,6 @@ export function prBadgeFromCache(raw: Json, silenced: SilencedTest = noneSilence
 }
 
 const asJson = (raw: Json): Json => raw;
-
-/** `isSilenced` over the store and mentions as they are on disk now (each re-read only when its file changed). */
-function silencedNow(): SilencedTest {
-  const store = cachedRead(silencePath(), parseStore) ?? new Map();
-  const mentions = cachedRead(mentionsPath(), parseMentions)?.mentions ?? new Map<string, string>();
-
-  return (row) => isSilenced(row, store, mentions);
-}
 
 /** The badge of a PR list tab (`prs` or `reviews`). */
 export function prListBadge(kind: PrListKind): TabBadge | undefined {

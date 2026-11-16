@@ -8,7 +8,11 @@ import type { RunResult } from "./util";
 
 export const URLS_PER_QUERY = 20;
 
-const TEXT = "author{login} body createdAt";
+/** An issue or PR page on github.com, the only kind the scan can read. */
+export const isGithubItem = (url: string): boolean => /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(issues|pull)\/\d+$/.test(url);
+
+// `publishedAt` is when a review or comment became visible; a pending review was created earlier and has none yet
+const TEXT = "author{login} body createdAt publishedAt";
 
 const ITEM = `...on Issue{comments(last:50){nodes{${TEXT}}}} ...on PullRequest{comments(last:50){nodes{${TEXT}}} reviews(last:30){nodes{${TEXT} comments(last:30){nodes{${TEXT}}}}}}`;
 
@@ -26,7 +30,7 @@ export const mentionCommand = (urls: readonly string[]): string[] => ["gh", "api
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Whether `body` mentions `@login`: not inside an email, a path or a longer handle. */
-export function mentions(body: string, login: string): boolean {
+export function mentionsUser(body: string, login: string): boolean {
   return new RegExp(`(^|[^\\w/.@-])@${escapeRegExp(login)}(?![\\w-])`, "i").test(body);
 }
 
@@ -45,7 +49,7 @@ const nodes = (connection: JsonValue | undefined): JsonObject[] => {
 const textOf = (n: JsonObject): Text => ({
   author: stringField(objectField(n, "author") ?? {}, "login") ?? "",
   body: stringField(n, "body") ?? "",
-  createdAt: stringField(n, "createdAt") ?? "",
+  createdAt: stringField(n, "publishedAt") ?? stringField(n, "createdAt") ?? "",
 });
 
 /** Every comment-like text on one resource node: issue comments, review bodies, and review comments. */
@@ -57,7 +61,7 @@ function textsOf(item: JsonObject): Text[] {
 
 /** The newest time someone other than `me` mentioned `me` in `texts`, or undefined. */
 export function newestMention(texts: readonly Text[], me: string): string | undefined {
-  const times = texts.flatMap((t) => (t.author.toLowerCase() !== me.toLowerCase() && t.createdAt && mentions(t.body, me) ? [t.createdAt] : []));
+  const times = texts.flatMap((t) => (t.author.toLowerCase() !== me.toLowerCase() && t.createdAt && mentionsUser(t.body, me) ? [t.createdAt] : []));
 
   return times.toSorted((a, b) => Date.parse(b) - Date.parse(a))[0];
 }

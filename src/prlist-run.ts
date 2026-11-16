@@ -6,7 +6,7 @@ import { age, CHROME, type PrRow } from "./pr-rows";
 import { filterOrgs, mergeRows, reviewCommand, rowsFromReviews } from "./review-batch";
 import { spinner } from "./anim";
 import { carrySeenAt } from "./silence";
-import { silencedSet, spawnMentionRefresh, toggleMessage } from "./silence-refresh";
+import { mentionScanError, silencedSet, spawnMentionRefresh, toggleMessage } from "./silence-refresh";
 import { prsView } from "./prs-view";
 import { readMyPrs } from "./prs-refresh";
 import { DEFAULT_REVIEWS_SORT, reviewsView } from "./reviews-view";
@@ -96,12 +96,12 @@ export function readPrs(kind: PrListKind, orgs: readonly string[], runner: Runne
 }
 
 /** `overbridge prs refresh` / `reviews refresh`: read the list into its cache. A failed read keeps the old rows. */
-export function refreshPrList(kind: PrListKind, now = Date.now()): PrListCache {
+export function refreshPrList(kind: PrListKind, now = Date.now(), runner: Runner = run): PrListCache {
   const orgs = loadRootLayers().githubOrgs;
   let cache: PrListCache;
 
   try {
-    cache = { at: now, rows: carrySeenAt(readPrs(kind, orgs), readPrList(kind).rows, new Date(now).toISOString()) };
+    cache = { at: now, rows: carrySeenAt(readPrs(kind, orgs, runner), readPrList(kind).rows, new Date(now).toISOString()) };
   } catch (e) {
     cache = { ...readPrList(kind), at: now, error: errorMessage(e) };
   }
@@ -171,10 +171,10 @@ export async function prListPane(kind: PrListKind) {
     draw();
     void refreshPrListInChild(kind).then((result) => {
       installCache(readPrList(kind));
-      message = result.ok ? (cache.error ? `error: ${cache.error}` : "") : `error: ${result.error}`;
+      message = result.ok ? (cache.error ? `error: ${cache.error}` : mentionScanError()) : `error: ${result.error}`;
       busy = false;
+      message ||= spawnMentionRefresh();
       draw();
-      spawnMentionRefresh();
     });
   };
 
@@ -190,6 +190,7 @@ export async function prListPane(kind: PrListKind) {
   process.stdin.on("data", (data: string) => {
     for (const input of decodeInput(data)) {
       if (input.kind !== "key") continue;
+      const chosen = rowsOf()[selected];
 
       if (input.key === "q" || input.key === "ctrl-c") quit();
       else if (input.key === "j" || input.key === "down") selected = Math.max(0, Math.min(rowsOf().length - 1, selected + 1));
@@ -199,9 +200,8 @@ export async function prListPane(kind: PrListKind) {
         const url = rowsOf()[selected]?.url;
         sort = nextSort(sort);
         selected = Math.max(0, rowsOf().findIndex((r) => r.url === url));
-      } else if (input.key === "x" && rowsOf()[selected]) {
-        const row = rowsOf()[selected]!;
-        message = toggleMessage(row, `${row.repo}#${row.number}`);
+      } else if (input.key === "x" && chosen) {
+        message = toggleMessage(chosen, `${chosen.repo}#${chosen.number}`);
       } else if (input.key === "r") refresh();
       else if (input.key === "o" && rowsOf()[selected]) {
         Bun.spawn({ cmd: ["gh", "pr", "view", "--web", rowsOf()[selected]!.url], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });

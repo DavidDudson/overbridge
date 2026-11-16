@@ -1,5 +1,6 @@
 import { alternate, spinner } from "./anim";
-import { age, type PrRow, silencedTitle, type ViewState } from "./pr-rows";
+import { age, type PrRow, type ViewState } from "./pr-rows";
+import { silencedTitle } from "./silence";
 import { ciLook, conflictLook } from "./pr-look";
 import type { PrView } from "./prs-view";
 import { SORT_LABEL, type SortMode } from "./sort-mode";

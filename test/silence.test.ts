@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { carrySeenAt, isSilenced, parseMentions, parseStore, readMentions, readStore, type SilenceStore, silencedSince, toggled, watchedUrls } from "../src/silence";
-import { mentionCommand, mentionQuery, mentions, newestMention, parseMentionReply, scanMentions, URLS_PER_QUERY } from "../src/mention-scan";
-import { listedRows, refreshMentions, toggleMessage, toggleSilence } from "../src/silence-refresh";
-import { prBadgeFromCache, workBadgeFromCache } from "../src/my-badges";
-import { renderPrList } from "../src/prlist-run";
+import { isGithubItem, mentionCommand, mentionQuery, mentionsUser, newestMention, parseMentionReply, scanMentions, URLS_PER_QUERY } from "../src/mention-scan";
+import { keepNewest, listedRows, listedUrls, MENTION_REFRESH_MS, mentionScanError, refreshMentions, spawnMentionRefresh, toggleMessage, toggleSilence } from "../src/silence-refresh";
+import { prBadgeFromCache, prListBadge, workBadgeFromCache } from "../src/my-badges";
+import { readPrList, refreshPrList, renderPrList } from "../src/prlist-run";
 import { renderWorklist } from "../src/worklist-run";
 import { rank, type WorkRow } from "../src/pm/worklist";
 import { prsView } from "../src/prs-view";
@@ -48,7 +48,7 @@ describe("isSilenced", () => {
 
   test("a team review starts silenced from its first sighting", () => {
     const team = { url: URL_A, group: "team" as const, seenAt: T1 };
-    expect(silencedSince(team, new Map())).toBe(T1);
+    expect(silencedSince(team, new Map())).toBe(Date.parse(T1));
     expect(isSilenced(team, new Map(), new Map())).toBe(true);
     expect(isSilenced(team, new Map(), new Map([[URL_A, T0]]))).toBe(true);
     expect(isSilenced(team, new Map(), new Map([[URL_A, T2]]))).toBe(false);
@@ -60,6 +60,10 @@ describe("isSilenced", () => {
 
   test("the user's unsilence beats the team default", () => {
     expect(isSilenced({ url: URL_A, group: "team", seenAt: T0 }, store([[URL_A, "unsilenced", T1]]), new Map())).toBe(false);
+  });
+
+  test("a mention at exactly the silence time keeps it", () => {
+    expect(isSilenced({ url: URL_A }, store([[URL_A, "silenced", T1]]), new Map([[URL_A, T1]]))).toBe(true);
   });
 
   test("an unreadable mention time keeps the silence", () => {
@@ -74,6 +78,10 @@ describe("toggled", () => {
     expect([...after.keys()].sort()).toEqual([URL_A, URL_B].sort());
     expect(after.get(URL_A)).toEqual({ state: "silenced", at: T1 });
     expect(toggled(after, { url: URL_A }, new Map(), T2, new Set([URL_A])).get(URL_A)).toEqual({ state: "unsilenced", at: T2 });
+  });
+
+  test("keeps every entry when the lists are not all read yet", () => {
+    expect(toggled(store([[URL_B, "silenced", T0]]), { url: URL_A }, new Map(), T1, undefined).get(URL_B)).toEqual({ state: "silenced", at: T0 });
   });
 
   test("toggling a team review unsilences it", () => {
@@ -105,6 +113,7 @@ describe("watchedUrls and carrySeenAt", () => {
   test("watches silenced entries and team reviews on GitHub only", () => {
     const s = store([[URL_B, "silenced", T0], ["https://jira.example/browse/ENG-1", "silenced", T0], ["https://github.com/o/r/pull/5", "unsilenced", T0]]);
     expect(watchedUrls([{ url: URL_A, group: "team" }, { url: "https://github.com/o/r/pull/6", group: "direct" }], s)).toEqual([URL_B, URL_A]);
+    expect(watchedUrls([{ url: "https://github.com/o/r/pull/5", group: "team" }], s)).toEqual([URL_B]);
   });
 
   test("keeps the first sighting of a row already listed", () => {
@@ -115,11 +124,11 @@ describe("watchedUrls and carrySeenAt", () => {
 
 describe("mention scan", () => {
   test("matches a handle, not an email, a path or a longer handle", () => {
-    expect(mentions("cc @DavidDudson please", "daviddudson")).toBe(true);
-    expect(mentions("@DavidDudson: look", "DavidDudson")).toBe(true);
-    expect(mentions("mail a@DavidDudson.com", "DavidDudson")).toBe(false);
-    expect(mentions("see @DavidDudson-bot", "DavidDudson")).toBe(false);
-    expect(mentions("org/@DavidDudson", "DavidDudson")).toBe(false);
+    expect(mentionsUser("cc @DavidDudson please", "daviddudson")).toBe(true);
+    expect(mentionsUser("@DavidDudson: look", "DavidDudson")).toBe(true);
+    expect(mentionsUser("mail a@DavidDudson.com", "DavidDudson")).toBe(false);
+    expect(mentionsUser("see @DavidDudson-bot", "DavidDudson")).toBe(false);
+    expect(mentionsUser("org/@DavidDudson", "DavidDudson")).toBe(false);
   });
 
   test("passes URLs as variables, never in the query text", () => {
@@ -158,6 +167,24 @@ describe("mention scan", () => {
     expect(() => parseMentionReply("<html>", [URL_A], "me")).toThrow("not JSON");
   });
 
+  test("a published review is dated by when it was published, not when its draft started", () => {
+    const reply = { data: { m0: { comments: { nodes: [] }, reviews: { nodes: [{ author: { login: "bob" }, body: "@me look", createdAt: T0, publishedAt: T2, comments: { nodes: [] } }] } } } };
+
+    expect(parseMentionReply(JSON.stringify(reply), [URL_A], "me").get(URL_A)).toBe(T2);
+  });
+
+  test("keeps a mention that scrolled out of the scan window, and drops URLs no longer watched", () => {
+    expect(keepNewest(new Map([[URL_A, T1], ["https://github.com/o/r/pull/9", T1]]), new Map([[URL_B, T2]]), [URL_A, URL_B])).toEqual(new Map([[URL_A, T1], [URL_B, T2]]));
+    expect(keepNewest(new Map([[URL_A, T2]]), new Map([[URL_A, T1]]), [URL_A]).get(URL_A)).toBe(T2);
+  });
+
+  test("a page where one item errored still reads the others", () => {
+    const partial = JSON.stringify({ data: { m0: { comments: { nodes: [{ author: { login: "x" }, body: "@me", createdAt: T1 }] } }, m1: null }, errors: [{ message: "Could not resolve to a node" }] });
+    expect(scanMentions([URL_A, URL_B], "me", () => ({ ok: false, code: 1, stdout: partial, stderr: "Could not resolve to a node" })).get(URL_A)).toBe(T1);
+    expect(isGithubItem(URL_A)).toBe(true);
+    expect(isGithubItem("https://jira.example/browse/ENG-1")).toBe(false);
+  });
+
   test("pages the URLs and reports gh's error", () => {
     const urls = Array.from({ length: URLS_PER_QUERY + 1 }, (_, i) => `https://github.com/o/r/issues/${i}`);
     const calls: string[][] = [];
@@ -180,6 +207,11 @@ describe("badges leave out silenced rows", () => {
     const silenced = (r: { url: string }) => r.url === URL_A;
     expect(prBadgeFromCache(cacheOf([pr(), pr({ url: URL_B, number: 2 })]), silenced)?.count).toBe(1);
     expect(prBadgeFromCache(cacheOf([pr()]))?.count).toBe(1);
+  });
+
+  test("a team review leaves the badge by the real rule", () => {
+    const rows = cacheOf([pr({ group: "team", seenAt: T0 }), pr({ url: URL_B, number: 2, group: "direct", seenAt: T0 })]);
+    expect(prBadgeFromCache(rows, (r) => isSilenced(r, new Map(), new Map()))?.count).toBe(1);
   });
 
   test("work badge", () => {
@@ -236,10 +268,63 @@ describe("on disk", () => {
     expect(isSilenced({ url: URL_A, group: "team", seenAt: T0 }, readStore(), readMentions().mentions)).toBe(true);
   });
 
+  test("the reviews badge leaves out the team review on disk", () => {
+    expect(prListBadge("reviews")?.count).toBe(0);
+  });
+
+  test("a toggle keeps another list's silences while that list has never been read", () => {
+    writeFileSync(join(tmp, ".overbridge", "silenced.json"), JSON.stringify({ items: { "https://github.com/o/r/pull/9": { state: "silenced", at: T0 } } }));
+    expect(listedUrls()).toBeUndefined();
+    toggleSilence({ url: URL_B }, new Date(T1));
+    expect(readStore().has("https://github.com/o/r/pull/9")).toBe(true);
+  });
+
+  test.each(["{ half", "[]", '{"item":{}}'])("a toggle refuses to overwrite a store it cannot read: %s", (body) => {
+    writeFileSync(join(tmp, ".overbridge", "silenced.json"), body);
+    expect(toggleMessage({ url: URL_B }, "o/r#2")).toStartWith("error: could not save the silence for o/r#2:");
+    expect(readFileSync(join(tmp, ".overbridge", "silenced.json"), "utf8")).toBe(body);
+  });
+
+  test("a refresh keeps each row's first sighting", () => {
+    const node = { number: 1, title: "Fix", url: URL_A, isDraft: false, updatedAt: T2, repository: { nameWithOwner: "o/r" }, reviewRequests: { nodes: [] } };
+
+    const runner = (cmd: string[]): RunResult => (cmd.includes("user") ? ok("me\n") : ok(JSON.stringify({ data: { search: { nodes: [node] } } })));
+
+    refreshPrList("reviews", Date.parse(T2), runner);
+    expect(readPrList("reviews").rows.map((r) => r.seenAt)).toEqual([T0]);
+  });
+
+  test("panes that refresh together start one scan; a stale or unreadable claim starts another", () => {
+    const spawned: string[][] = [];
+    const spawn = (cmd: string[]) => void spawned.push(cmd);
+    const t = Date.parse(T2);
+
+    expect(spawnMentionRefresh(t, spawn)).toBe("");
+    spawnMentionRefresh(t + 1000, spawn);
+    expect(spawned).toHaveLength(1);
+    spawnMentionRefresh(t + MENTION_REFRESH_MS, spawn);
+    expect(spawned).toHaveLength(2);
+    writeFileSync(join(tmp, ".overbridge", "mentions.claim"), "junk");
+    spawnMentionRefresh(t + MENTION_REFRESH_MS + 1, spawn);
+    expect(spawned).toHaveLength(3);
+    expect(spawned[0]!.slice(-2)).toEqual(["silence", "refresh"]);
+  });
+
+  test("once every list is read, a toggle drops silences no tab lists and keeps the toggled item", () => {
+    writeFileSync(join(tmp, ".overbridge", "prlist-prs.json"), JSON.stringify({ at: 1, rows: [] }));
+    writeFileSync(join(tmp, ".overbridge", "silenced.json"), JSON.stringify({ items: { "https://github.com/o/r/pull/9": { state: "silenced", at: T0 } } }));
+    expect(listedUrls()).toEqual(new Set([URL_A, URL_B]));
+    toggleSilence({ url: "https://github.com/o/r/issues/77" }, new Date(T1));
+    expect([...readStore().keys()]).toEqual(["https://github.com/o/r/issues/77"]);
+  });
+
   test("a failed scan keeps the last mentions and records why", () => {
     writeFileSync(join(tmp, ".overbridge", "mentions.json"), JSON.stringify({ at: 1, mentions: { [URL_A]: T1 } }));
     const cache = refreshMentions(5, () => ({ ok: false, code: 1, stdout: "", stderr: "offline" }));
     expect(cache).toEqual({ at: 5, mentions: new Map([[URL_A, T1]]), error: "gh api user failed: offline" });
+    expect(mentionScanError()).toBe("error: mention scan failed: gh api user failed: offline");
+    refreshMentions(6, (cmd) => ok(cmd.includes("user") ? "me\n" : JSON.stringify({ data: {} })));
+    expect(mentionScanError()).toBe("");
   });
 });
 
