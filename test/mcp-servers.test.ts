@@ -35,6 +35,8 @@ beforeAll(() => {
   sh(["git", "clone", "-q", "--bare", src, join(tmp, "remote.git")], tmp);
   repoAdd("app", join(tmp, "remote.git"));
   repoAdd("lib", join(tmp, "remote.git"));
+  createWorkspace("ws1", ["app", "lib"]);
+  createWorkspace("ws2", []);
 });
 
 afterAll(() => {
@@ -60,7 +62,6 @@ const settingsOf = (ws: string) => {
 describe("mcp-servers", () => {
   test("approves the agent repo's listed .mcp.json servers in the workspace settings", () => {
     writeFileSync(rootConfigPath(), "repos:\n  app:\n    mcp-servers: [playwright, nx]\n  lib:\n    mcp-servers: [other]\n");
-    createWorkspace("ws1", ["app", "lib"]);
     const { copy, local } = settingsOf("ws1");
     expect(copy.enabledMcpjsonServers).toEqual(["playwright", "nx"]);
     expect(local.enabledMcpjsonServers).toEqual(["playwright", "nx"]);
@@ -70,7 +71,6 @@ describe("mcp-servers", () => {
   test("approves nothing when the repo lists no servers or the workspace has no repo", () => {
     writeFileSync(rootConfigPath(), "repos:\n  lib:\n    mcp-servers: [other]\n");
     expect(settingsOf("ws1").copy.enabledMcpjsonServers).toBeUndefined();
-    createWorkspace("ws2", []);
     expect(settingsOf("ws2").copy.enabledMcpjsonServers).toBeUndefined();
   });
 
