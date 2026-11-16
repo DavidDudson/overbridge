@@ -270,10 +270,10 @@ export function checkout(args: string[], wsOpt?: string, opts: { base?: string; 
     git.validateBranch(branch);
   }
 
-  const stacks = localStacks(repo);
-  const want = cover(stacks, [branch, ...(remote?.layers.map((l) => l.branch) ?? [])], [pr]);
-
   withState((s) => {
+    // read under the lock, so a stack another checkout records inside its lock is seen here
+    const stacks = localStacks(repo);
+    const want = cover(stacks, [branch, ...(remote?.layers.map((l) => l.branch) ?? [])], [pr]);
     const owner = claimOwner(s, repo, want, holdings(repo, stacks), ws);
 
     if (owner) fail(`${repo} ${pr ? `PR #${pr} (${branch})` : branch} (or its stack or issue) is claimed by workspace ${owner}`);

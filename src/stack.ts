@@ -30,7 +30,12 @@ export function catalogPaths(bare: string): string[] {
 
   try {
     worktrees = readdirSync(join(bare, "worktrees")).toSorted();
-  } catch {
+  } catch (e) {
+    // only a missing folder means no worktrees; any other failure throws, so a claim never fails open
+    if (!(e instanceof Error && "code" in e && e.code === "ENOENT")) {
+      throw e;
+    }
+
     worktrees = [];
   }
 

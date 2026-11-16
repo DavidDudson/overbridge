@@ -44,6 +44,13 @@ describe("catalogPaths", () => {
   test("a bare repo with no worktrees has only the shared catalog", () => {
     expect(catalogPaths("/no/such/bare")).toEqual(["/no/such/bare/gh-stack"]);
   });
+
+  test("a worktrees folder that cannot be listed throws instead of hiding every worktree catalog", () => {
+    const bare = mkdtempSync(join(tmpdir(), "overbridge-stack-"));
+    writeFileSync(join(bare, "worktrees"), "not a folder");
+    expect(() => catalogPaths(bare)).toThrow();
+    rmSync(bare, { recursive: true, force: true });
+  });
 });
 
 describe("stacksIn", () => {
