@@ -46,6 +46,7 @@ overbridge cleanup [--json] [--no-fetch]          # report which workspaces and 
 overbridge icebox <name> [--prune] [--drop-worktree]  # pause: stop apps and checks, write a handoff, close the tab; claims stay; refuses with unsaved work
                                                   # --prune deletes the repo's icebox.prune paths (untracked only); --drop-worktree removes worktrees, keeps branches
 overbridge thaw <name>                            # reopen an iceboxed workspace; its agent resumes and reads the handoff; recreates dropped worktrees
+overbridge frozen                                 # the @frozen tab's pane: lists iceboxed workspaces, t thaws one (f in a sidebar iceboxes its workspace)
 overbridge status --all
 
 overbridge spinup                                 # rebuild the zellij session over existing workspaces

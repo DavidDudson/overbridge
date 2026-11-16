@@ -8,8 +8,9 @@ import { Motion, sidebarMotion, sidebarWidth } from "../src/config";
 import { animate, BUSY_FRAMES, busyFrame, FRAME_MS } from "../src/sidebar-motion";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { bodyRowsFor, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Finished, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
+import { BusyVerb, bodyRowsFor, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
 import { readHistory, Travel, writeHistory } from "../src/sidebar-history";
+import type { Finished } from "../src/child";
 import { type Input, textWidth } from "../src/term";
 
 const entry = (tab: string, glyph = "○", label = tab, section: Section = Section.Workspaces): Entry => ({ tab, section, glyph, label });
@@ -444,6 +445,32 @@ describe("new workspace prompt", () => {
     expect(parseStart({ text: "a b c" }, []).kind).toBe(StartPlanKind.Invalid);
     expect(parseStart({ text: "", id: "79" }, []).kind).toBe(StartPlanKind.Invalid);
     expect(parseStart({ text: "a b", id: "79" }, []).kind).toBe(StartPlanKind.Invalid);
+  });
+});
+
+describe("runFreeze", () => {
+  test("runs overbridge icebox on the workspace and returns to the legend on success", async () => {
+    const calls: string[][] = [];
+    expect(await runFreeze("w1", async (cmd) => (calls.push(cmd), { code: 0, stderr: "" }))).toEqual({ kind: FooterKind.Legend });
+    expect(calls[0]!.slice(-2)).toEqual(["icebox", "w1"]);
+  });
+
+  test("a refusal shows icebox's reason without the CLI prefix", async () => {
+    const stderr = "overbridge: w1 has uncommitted changes or unpushed commits in app; commit and push first\n";
+    expect(await runFreeze("w1", async () => ({ code: 1, stderr }))).toEqual({ kind: FooterKind.Error, message: "w1 has uncommitted changes or unpushed commits in app; commit and push first" });
+  });
+
+  test("a spawn that throws becomes an error footer", async () => {
+    const footer = await runFreeze("w1", async () => {
+      throw new Error("ENOENT");
+    });
+
+    expect(footer).toEqual({ kind: FooterKind.Error, message: "could not run overbridge icebox: ENOENT" });
+  });
+
+  test("the legend names the key and the busy footer says what runs", () => {
+    expect(legend(3)).toContain("f freeze");
+    expect(footerRow({ kind: FooterKind.Busy, id: "w1", verb: BusyVerb.Freezing }, 20).replace(/[[0-9;]*m/g, "").trimEnd()).toBe("freezing w1…");
   });
 });
 

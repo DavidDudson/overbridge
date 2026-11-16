@@ -18,7 +18,7 @@ import { requireTab, TabFocus } from "./tab";
 import { runCheck } from "./check-queue";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
-import { chain, cover, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
+import { chain, cover, displayStacks, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
 import { type Claim, claimOwner, type ReboundFrom, getWorkspace, isIceboxed, readState, withState } from "./state";
 import { errorMessage, exec, fail, isRecord, log, must, naturalSort, run, shellQuote } from "./util";
 
@@ -270,10 +270,10 @@ export function checkout(args: string[], wsOpt?: string, opts: { base?: string; 
     git.validateBranch(branch);
   }
 
-  const stacks = localStacks(repo);
-  const want = cover(stacks, [branch, ...(remote?.layers.map((l) => l.branch) ?? [])], [pr]);
-
   withState((s) => {
+    // read under the lock, so a stack another checkout records inside its lock is seen here
+    const stacks = localStacks(repo);
+    const want = cover(stacks, [branch, ...(remote?.layers.map((l) => l.branch) ?? [])], [pr]);
     const owner = claimOwner(s, repo, want, holdings(repo, stacks), ws);
 
     if (owner) fail(`${repo} ${pr ? `PR #${pr} (${branch})` : branch} (or its stack or issue) is claimed by workspace ${owner}`);
@@ -286,7 +286,7 @@ export function checkout(args: string[], wsOpt?: string, opts: { base?: string; 
     if (opts.reboundFrom) claimed.reboundFrom = opts.reboundFrom;
     getWorkspace(s, ws).repos[repo] = claimed;
   });
-  const stack = stackOf(localStacks(repo), branch);
+  const stack = stackOf(displayStacks(repo), branch);
   log(`${ws}/${repo} → ${branch}${pr ? ` (PR #${pr})` : ""}${stack ? `\nstack: ${chain(stack)}` : ""}`);
   const claim = getWorkspace(readState(), ws).repos[repo];
   const hookCtx: HookContext = { ws, repo, branch };
@@ -370,7 +370,7 @@ export function status(all: boolean, json: boolean) {
     return repos.map(([repo, c]) => {
       const wt = worktreePath(ws, repo);
       const head = git.head(wt);
-      const stacks = localStacks(repo);
+      const stacks = displayStacks(repo);
       const stack = stackOf(stacks, head) ?? stackOf(stacks, c.branch);
 
       return { ws, repo, branch: c.branch ?? "", pr: c.pr, head, dirty: git.isDirty(wt), iceboxed, stack, reboundFrom: c.reboundFrom };

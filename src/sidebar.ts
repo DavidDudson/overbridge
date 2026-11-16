@@ -27,18 +27,22 @@ import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-h
 import { isIceboxed, isRemoving, isWorkspaceState, RemovalBlock, readState, type Removing, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
 import { subscribeEvents } from "./events-client";
 import { serverOwnsSweep } from "./server-client";
+import { childError, type Finished, type Spawner, spawnAsync } from "./child";
 import { claimSweep, createSweepTrigger, startSweep } from "./sweep-trigger";
 import { bold, boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { readTopCache, readTopCacheChecked, sidebarLabel, type PrStatus, type TopCache } from "./top";
 import { defaultMux, type Mux } from "./mux";
 import { currentTab, tabOrder } from "./tab";
 import { createPainter, readView, shouldPoll } from "./zellij-view";
-import { errorMessage, naturalSort, run, spawnCwd } from "./util";
+import { errorMessage, naturalSort } from "./util";
 import { overbridgeVersion } from "./version";
 
 /** The key that jumps to the performance tab, and the tab it reaches. */
 export const PERF_KEY = "p";
 export const PERF_TAB = "@perf";
+
+/** Ices this sidebar's workspace (`overbridge icebox`); the @frozen tab thaws it. */
+export const FREEZE_KEY = "f";
 
 /** Cycles how the workspaces are ordered: a-z, by status, by age. */
 export const SORT_KEY = "o";
@@ -54,7 +58,7 @@ export function legend(count: number, pending = ""): string {
 
   const digits = count > 1 ? `1-${count} go  ` : count === 1 ? "1 go  " : "";
 
-  return `${digits}←→ back  ⌥w next  s new ws  p perf  o sort`;
+  return `${digits}←→ back  ⌥w next  s new ws  f freeze  p perf  o sort`;
 }
 
 /**
@@ -708,6 +712,11 @@ export const FooterKind = { Legend: "legend", Prompt: "prompt", Busy: "busy", Er
 
 export type FooterKind = (typeof FooterKind)[keyof typeof FooterKind];
 
+/** What a busy footer says is running. */
+export const BusyVerb = { Starting: "starting", Freezing: "freezing" } as const;
+
+export type BusyVerb = (typeof BusyVerb)[keyof typeof BusyVerb];
+
 /**
  * The new-workspace prompt. `text` is what the user has typed. `id` is set once an id alone was
  * submitted and the prompt is asking which repo it belongs to.
@@ -720,7 +729,7 @@ export interface Prompt {
 export type Footer =
   | { kind: typeof FooterKind.Legend }
   | { kind: typeof FooterKind.Prompt; prompt: Prompt }
-  | { kind: typeof FooterKind.Busy; id: string }
+  | { kind: typeof FooterKind.Busy; id: string; verb?: BusyVerb }
   | { kind: typeof FooterKind.Error; message: string };
 
 export const LEGEND_FOOTER: Footer = { kind: FooterKind.Legend };
@@ -760,7 +769,7 @@ export function footerRow(footer: Footer, inner: number, legendText = legend(0))
     }
 
     case FooterKind.Busy:
-      return dim(fit(`starting ${footer.id}…`, inner));
+      return dim(fit(`${footer.verb ?? BusyVerb.Starting} ${footer.id}…`, inner));
     case FooterKind.Error:
       return colorize(fit(footer.message, inner), "red");
   }
@@ -838,26 +847,9 @@ export function parseStart(p: Prompt, holds: readonly string[]): StartPlan {
   return { kind: StartPlanKind.Invalid, message: `type <repo> <id> or <id>, such as ${holds[0] ?? "my-repo"} 123` };
 }
 
-/** Exit code and stderr of a finished command. */
-export interface Finished {
-  code: number;
-  stderr: string;
-}
-
-export type Spawner = (cmd: string[]) => Promise<Finished>;
-
-const spawnAsync: Spawner = async (cmd) => {
-  const p = Bun.spawn({ cmd, cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "pipe" });
-  const [code, stderr] = await Promise.all([p.exited, new Response(p.stderr).text()]);
-
-  return { code, stderr };
-};
-
 /** The last non-empty stderr line without the CLI's `overbridge: ` prefix, else a line naming the command. */
 export function startError(repo: string, id: string, result: Finished): string {
-  const last = result.stderr.split("\n").map((l) => l.trim()).filter(Boolean).at(-1);
-
-  return last?.replace(/^overbridge: /, "") ?? `overbridge start ${repo} ${id} failed with exit code ${result.code}`;
+  return childError(`overbridge start ${repo} ${id}`, result);
 }
 
 /**
@@ -869,6 +861,13 @@ export async function runStart(repo: string, id: string, spawn: Spawner = spawnA
   const result = await spawn([...selfCommand(), "start", repo, id]).catch((cause: unknown): Finished => ({ code: -1, stderr: `could not run overbridge start: ${errorMessage(cause)}` }));
 
   return result.code === 0 ? LEGEND_FOOTER : { kind: FooterKind.Error, message: startError(repo, id, result) };
+}
+
+/** Runs `overbridge icebox <ws>` as a child; resolves to the legend, or the error when icebox refuses. */
+export async function runFreeze(ws: string, spawn: Spawner = spawnAsync): Promise<Footer> {
+  const result = await spawn([...selfCommand(), "icebox", ws]).catch((cause: unknown): Finished => ({ code: -1, stderr: `could not run overbridge icebox: ${errorMessage(cause)}` }));
+
+  return result.code === 0 ? LEGEND_FOOTER : { kind: FooterKind.Error, message: childError(`overbridge icebox ${ws}`, result) };
 }
 
 /**
@@ -1246,6 +1245,22 @@ export async function sidebar(wsOpt?: string) {
             if (perf && perf.tab !== self) visitTab(self, perf.tab);
 
             return;
+          }
+
+          if (input.kind === "key" && input.key === FREEZE_KEY) {
+            hold("");
+
+            if (footer.kind === FooterKind.Busy) {
+              return;
+            }
+
+            if (orchestrationTab(self)) {
+              return show({ kind: FooterKind.Error, message: `${self} is an orchestration tab; only a workspace can be frozen` });
+            }
+
+            show({ kind: FooterKind.Busy, id: self, verb: BusyVerb.Freezing });
+
+            return void runFreeze(self).then(show);
           }
 
           if (input.kind === "key" && input.key === SORT_KEY) {

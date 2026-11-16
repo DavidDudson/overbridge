@@ -159,10 +159,10 @@ describe("workflow", () => {
     expect(r.out).toContain("nothing assigned to you");
   });
 
-  test("layout opens the orchestration tabs (root, work list, PRs, reviews, performance), then one tab per workspace, each with sidebar and top panel", () => {
+  test("layout opens the orchestration tabs (root, work list, PRs, reviews, performance, frozen), then one tab per workspace, each with sidebar and top panel", () => {
     for (const n of ["ws3", "ws4", "ws5"]) ws(["new", n]);
     const kdl = ws(["layout"]).out;
-    expect(kdl.match(/\btab name=/g)?.length).toBe(10);
+    expect(kdl.match(/\btab name=/g)?.length).toBe(11);
     expect(kdl.indexOf('tab name="@root"')).toBeLessThan(kdl.indexOf('tab name="ws'));
     expect(kdl).toContain('"claude" "@root"');
     expect(kdl).toMatch(/args .*"worklist"/);
@@ -210,7 +210,7 @@ describe("workflow", () => {
 
     for (const n of ["sa", "sb"]) expect(ws(["new", n, "-r", "app"]).code).toBe(0);
     const sa = join(root, "sa", "app");
-    // gh-stack keeps its catalog in git's common dir: the shared bare repo.
+    // older gh-stack kept its catalog in git's common dir, the shared bare repo
     expect(sh(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], sa)).toBe(bare);
     expect(ws(["checkout", "app", "s1"], sa).code).toBe(0);
     const layer = (branch: string, pr?: number) => ({ branch, ...(pr && { pullRequest: { number: pr } }) });
@@ -233,6 +233,21 @@ describe("workflow", () => {
     expect(ws(["checkout", "app", "s1"], join(root, "sb")).code).toBe(1);
     expect(ws(["release", "app"], sa).code).toBe(0);
     expect(ws(["checkout", "app", "s1"], join(root, "sb")).code).toBe(0);
+  });
+
+  test("a gh-stack catalog kept in a worktree's own git dir still claims the stack", () => {
+    const bare = join(root, ".bare", "app.git");
+
+    for (const n of ["wa", "wb"]) expect(ws(["new", n, "-r", "app"]).code).toBe(0);
+    const wa = join(root, "wa", "app");
+    expect(ws(["checkout", "app", "w1"], wa).code).toBe(0);
+    rmSync(join(bare, "gh-stack"), { force: true });
+    const gitDir = sh(["git", "rev-parse", "--path-format=absolute", "--git-dir"], wa);
+    writeFileSync(join(gitDir, "gh-stack"), JSON.stringify({ schemaVersion: 1, stacks: [{ trunk: { branch: "main" }, branches: [{ branch: "w1" }, { branch: "w2" }] }] }));
+
+    const steal = ws(["checkout", "app", "w2"], join(root, "wb"));
+    expect(steal.code).toBe(1);
+    expect(steal.err).toContain("claimed by workspace wa");
   });
 
   test("two branch names for one issue clash", () => {
@@ -384,7 +399,10 @@ describe("check queue", () => {
     const second = spawnCheck(step("b"));
     expect(await first.exited).toBe(0);
     expect(await second.exited).toBe(0);
-    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "start b", "end a", "end b"]);
+    // both start before either ends; two equal sleeps started close together can end in either order
+    const lines = readFileSync(log, "utf8").trim().split("\n");
+    expect(lines.slice(0, 2)).toEqual(["start a", "start b"]);
+    expect(lines.slice(2).toSorted()).toEqual(["end a", "end b"]);
     expect(tickets()).toEqual([]);
   }, CHECK_TEST_MS);
 

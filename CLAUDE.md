@@ -89,6 +89,8 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   and closes the tab last (`leaveTab`); `thaw` reopens it with `--continue` and `/read-handoff`. `entries()` leaves iceboxed
   workspaces out (they have no tab, so no digit; the sidebar lists them under `icedRows`), and `workspaceNames()` skips them for
   `up`/`layout`. Any new code that lists workspaces for tabs must skip `isIceboxed`.
+  `f` in a sidebar runs `icebox` on its own workspace in a child (`runFreeze`); the `@frozen` tab (`src/frozen.ts` pure rows and
+  render, `src/frozen-run.ts` pane) lists iceboxed workspaces from state and `t` runs `thaw` in a child (`runThaw`).
 - `overbridge cleanup` reports what the sweep leaves behind and removes nothing: `src/cleanup-scan.ts` is the pure `classify`
   (facts → `CleanupVerdict` + `CleanupReason`; blockers turn a removal into a review, a failed read into `keep`),
   `src/cleanup-gather.ts` reads the facts through injectable `GatherDeps` (git, `gh`, `Provider.status`), and `src/orphan.ts`
@@ -115,7 +117,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   The agent starts in `agentDir` (`src/layout.ts`: the first repo's worktree, so `overbridge.yml`, `item`, `config` and `ext`
   resolve; the workspace root with no repo or only root transcripts) and loads `<meta>/workspaces/<ws>.settings.json`
   through `--settings`, since Claude reads `.claude/settings.json` only from its own folder.
-- `src/stack.ts` reads gh-stack's catalog (`<bare>/gh-stack`); claims cover whole stacks via `cover()`.
+- `src/stack.ts` reads gh-stack's catalogs (`<bare>/worktrees/*/gh-stack`, then the older shared `<bare>/gh-stack`); claims cover whole stacks via `cover()`.
 - Installed from nix-home's `ws` flake input (to be renamed `overbridge`), which is pinned. After a PR merges to `main`, bump it in
   nix-home (`nix flake update ws`, own commit + PR) or the installed `ws` stays on the old rev.
 - `src/plugins.ts` enables both plugins from the installed package (`packageRoot()`) as a directory marketplace,
