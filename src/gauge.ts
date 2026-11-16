@@ -16,21 +16,25 @@ const GAUGE_CELLS = 5;
 
 export const contextPath = (meta: string, ws: string) => join(meta, "context", `${ws}.json`);
 
-/** One cached read: the file's mtime, the parser that produced `value`, and what it returned. */
+/** One cached read: the file's identity, the parser that produced `value`, and what it returned. */
 interface CachedRead {
-  mtimeMs: number;
+  stamp: string;
   parse: object;
   value: unknown;
 }
 
 const cache = new Map<string, CachedRead>();
 
-/** `parse` of the file at `path`, re-read only when its mtime changed; undefined when it is missing or unreadable. */
+/**
+ * `parse` of the file at `path`, re-read only when its mtime (ns), inode or size changed; undefined when it is missing or
+ * unreadable. Two writes in the same millisecond share `mtimeMs`, and an atomic rename gives a new inode.
+ */
 export function cachedRead<T>(path: string, parse: (raw: Json) => T | undefined): T | undefined {
-  let mtimeMs: number;
+  let stamp: string;
 
   try {
-    mtimeMs = statSync(path).mtimeMs;
+    const st = statSync(path, { bigint: true });
+    stamp = `${st.mtimeNs}:${st.ino}:${st.size}`;
   } catch {
     cache.delete(path);
 
@@ -39,7 +43,7 @@ export function cachedRead<T>(path: string, parse: (raw: Json) => T | undefined)
 
   const hit = cache.get(path);
 
-  if (hit?.mtimeMs === mtimeMs && hit.parse === parse) {
+  if (hit?.stamp === stamp && hit.parse === parse) {
     // SAFETY: the entry is only reused when `hit.parse === parse`, so `hit.value` is what this very `parse` returned
     return hit.value as T | undefined;
   }
@@ -52,7 +56,7 @@ export function cachedRead<T>(path: string, parse: (raw: Json) => T | undefined)
     value = undefined;
   }
 
-  cache.set(path, { mtimeMs, parse, value });
+  cache.set(path, { stamp, parse, value });
 
   return value;
 }
