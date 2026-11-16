@@ -3,7 +3,7 @@
  * holding any layer owns every layer, so `gh stack up/down/add/rebase` never
  * reach into another workspace's worktree.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { barePath } from "./paths";
 import { run } from "./util";
@@ -22,14 +22,26 @@ export function issueOf(branch: string): number | undefined {
 }
 
 /**
- * Stacks tracked locally by gh-stack. The catalog lives in git's common dir,
- * i.e. the shared bare repo, so every workspace sees every stack.
+ * Where gh-stack keeps its catalogs: each worktree's own git dir (`worktrees/<name>/gh-stack`, gh-stack 0.0.8 and
+ * later), then the shared bare repo (older gh-stack). Every one is read, so every workspace sees every stack.
  */
-export function localStacks(repo: string): Stack[] {
+export function catalogPaths(bare: string): string[] {
+  let worktrees: string[];
+
+  try {
+    worktrees = readdirSync(join(bare, "worktrees")).toSorted();
+  } catch {
+    worktrees = [];
+  }
+
+  return [...worktrees.map((w) => join(bare, "worktrees", w, "gh-stack")), join(bare, "gh-stack")];
+}
+
+function readCatalog(path: string): Stack[] {
   let file: any;
 
   try {
-    file = JSON.parse(readFileSync(join(barePath(repo), "gh-stack"), "utf8"));
+    file = JSON.parse(readFileSync(path, "utf8"));
   } catch (e: any) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -40,6 +52,14 @@ export function localStacks(repo: string): Stack[] {
     trunk: s.trunk?.branch ?? "",
     layers: (s.branches ?? []).map((b: any) => ({ branch: b.branch, pr: b.pullRequest?.number })),
   }));
+}
+
+/** Stacks tracked locally by gh-stack across every catalog of `repo`; a stack listed in two catalogs appears once, from the first in `catalogPaths` order. */
+export function localStacks(repo: string): Stack[] {
+  const all = catalogPaths(barePath(repo)).flatMap(readCatalog);
+  const key = (s: Stack) => s.layers.map((l) => l.branch).join("\0");
+
+  return all.filter((s, i) => all.findIndex((t) => key(t) === key(s)) === i);
 }
 
 /** Stack with `branch` as one of its layers (the trunk is not a layer). */

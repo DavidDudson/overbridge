@@ -159,10 +159,10 @@ describe("workflow", () => {
     expect(r.out).toContain("nothing assigned to you");
   });
 
-  test("layout opens the orchestration tabs (root, work list, PRs, reviews, performance), then one tab per workspace, each with sidebar and top panel", () => {
+  test("layout opens the orchestration tabs (root, work list, PRs, reviews, performance, frozen), then one tab per workspace, each with sidebar and top panel", () => {
     for (const n of ["ws3", "ws4", "ws5"]) ws(["new", n]);
     const kdl = ws(["layout"]).out;
-    expect(kdl.match(/\btab name=/g)?.length).toBe(10);
+    expect(kdl.match(/\btab name=/g)?.length).toBe(11);
     expect(kdl.indexOf('tab name="@root"')).toBeLessThan(kdl.indexOf('tab name="ws'));
     expect(kdl).toContain('"claude" "@root"');
     expect(kdl).toMatch(/args .*"worklist"/);
@@ -210,7 +210,7 @@ describe("workflow", () => {
 
     for (const n of ["sa", "sb"]) expect(ws(["new", n, "-r", "app"]).code).toBe(0);
     const sa = join(root, "sa", "app");
-    // gh-stack keeps its catalog in git's common dir: the shared bare repo.
+    // older gh-stack keeps its catalog in git's common dir, the shared bare repo; newer ones use each worktree's git dir
     expect(sh(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], sa)).toBe(bare);
     expect(ws(["checkout", "app", "s1"], sa).code).toBe(0);
     const layer = (branch: string, pr?: number) => ({ branch, ...(pr && { pullRequest: { number: pr } }) });
