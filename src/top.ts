@@ -13,12 +13,12 @@ import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectMa
 import { getWorkspace, isTaskClaim, readState } from "./state";
 import { boxBottom, boxRow, boxTop, type Color, colorize, fit, inverse, isColor, textWidth } from "./term";
 import { parseUnresolved, REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses, threadsCommand } from "./reviewers";
-import { stackOf, localStacks } from "./stack";
+import { displayStacks, stackOf } from "./stack";
 import { describeValue, errorMessage, run } from "./util";
 
 const safeStacks = (repo: string) => {
   try {
-    return localStacks(repo);
+    return displayStacks(repo);
   } catch {
     return [];
   }

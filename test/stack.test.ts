@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { catalogPaths, issueOf, stacksIn } from "../src/stack";
+import { catalogPaths, cover, issueOf, readWorktreeCatalog, stacksIn } from "../src/stack";
 
 describe("issueOf", () => {
   test.each([
@@ -84,12 +84,24 @@ describe("stacksIn", () => {
     });
   });
 
-  test("an unreadable worktree catalog is skipped; an unreadable shared one throws", () => {
+  test("an unreadable worktree catalog throws for claim checks and is skipped for display; a bad shared one always throws", () => {
     withBare({ "worktrees/a/gh-stack": "{nope", "worktrees/b/gh-stack": catalog({ branches: ["s1"] }) }, (bare) => {
-      expect(stacksIn(bare).map((s) => s.layers[0]!.branch)).toEqual(["s1"]);
+      expect(() => stacksIn(bare)).toThrow();
+      expect(stacksIn(bare, readWorktreeCatalog).map((s) => s.layers[0]!.branch)).toEqual(["s1"]);
     });
     withBare({ "gh-stack": "{nope" }, (bare) => {
       expect(() => stacksIn(bare)).toThrow();
+      expect(() => stacksIn(bare, readWorktreeCatalog)).toThrow();
     });
+  });
+});
+
+describe("cover", () => {
+  const stack = (...branches: string[]) => ({ trunk: "main", layers: branches.map((branch) => ({ branch })) });
+
+  test("a branch in two stacks covers the layers of both", () => {
+    const stacks = [stack("p", "x"), stack("q", "y"), stack("p", "q")];
+    expect([...cover(stacks, ["p"]).branches].toSorted()).toEqual(["p", "q", "x"]);
+    expect([...cover(stacks, ["q"]).branches].toSorted()).toEqual(["p", "q", "y"]);
   });
 });

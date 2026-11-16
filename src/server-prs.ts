@@ -1,7 +1,7 @@
 import { getRepo } from "./config";
 import { ownerRepo } from "./repo-slug";
 import type { PrBatcher } from "./pr-batch";
-import { localStacks, stackOf } from "./stack";
+import { displayStacks, type Stack, stackOf } from "./stack";
 import { getWorkspace, isIceboxed, readState } from "./state";
 import type { PrefetchedPrs } from "./top";
 import { errorText } from "./server-cache";
@@ -9,14 +9,14 @@ import { errorText } from "./server-cache";
 
 const safeStacks = (repo: string) => {
   try {
-    return localStacks(repo);
+    return displayStacks(repo);
   } catch {
     return [];
   }
 };
 
 /** Every PR a workspace's claim names, with the other layers of its stack: what `refreshTop` reads for `claim`. */
-function claimPrs(repo: string, branch: string | undefined, pr: number, stacks: ReturnType<typeof localStacks> = safeStacks(repo)): number[] {
+function claimPrs(repo: string, branch: string | undefined, pr: number, stacks: Stack[] = safeStacks(repo)): number[] {
   const layers = stackOf(stacks, branch)?.layers ?? [];
   const prs = layers.flatMap((l) => (l.pr === undefined ? [] : [l.pr]));
 
@@ -35,7 +35,7 @@ function repoOf(repo: string): string | undefined {
 function claimedByRepo(): Map<string, Set<number>> {
   const out = new Map<string, Set<number>>();
   const state = readState();
-  const catalogs = new Map<string, ReturnType<typeof localStacks>>();
+  const catalogs = new Map<string, Stack[]>();
   const stacks = (repo: string) => catalogs.get(repo) ?? catalogs.set(repo, safeStacks(repo)).get(repo)!;
 
   for (const ws of Object.keys(state.workspaces)) {
