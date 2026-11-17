@@ -861,10 +861,10 @@ still read `top/<ws>.json`, so the server is a faster writer, not a dependency f
   (a second `serve` finds a live pid and exits; a dead pid and a leftover socket are replaced).
 - Every call carries the client's version and, on a nix build, its build time. A client of another version gets a 409 and
   falls back for that call. When the client has a later build time (both sides have one) or else a later release version, the server also finishes
-  what runs and exits, so the next call starts the new version. A rev or a dev build is never newer, so a pane that
-  outlived an upgrade never replaces a newer server.
+  what runs and exits, so the next call starts the new version. Without a build time on both sides, a rev or a dev
+  version is never newer, so a pane that outlived an upgrade never replaces a newer server.
 - An upgrade that deletes the server's own files (pnpm removes the old package folder) makes the server exit on its next
-  request, with a 503, or within 5 s on its sweep timer.
+  request, with a 503, or starts draining within 5 s on its sweep timer. Running work can delay the exit.
 - Down, refused or on another version, every caller falls back to what it did before: the panel spawns `top refresh`, the
   hook spawns it under its 30 s lock, the sweep refreshes in-process. A refresh that failed on the server (a 502, with
   the cache's error backoff) is not retried by the caller; the panel shows the error.

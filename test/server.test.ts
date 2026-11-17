@@ -209,6 +209,16 @@ describe("routes", () => {
     expect(mismatches()).toBe(1);
   });
 
+  test("drain shows on /status, so a shutdown that waits on running work is visible", async () => {
+    const { deps } = handlerDeps({});
+    const h = createHandler(deps);
+    const before: unknown = await (await h.handle(new Request("http://x/status"))).json();
+    expect(before).toMatchObject({ draining: false });
+    h.drain();
+    const after: unknown = await (await h.handle(new Request("http://x/status"))).json();
+    expect(after).toMatchObject({ draining: true });
+  });
+
   test("a server whose code is still there serves as usual", async () => {
     const { deps, mismatches } = handlerDeps({ workerFileGone: () => false });
     expect((await post(createHandler(deps), "/refresh/top/w1")).status).toBe(200);

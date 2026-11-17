@@ -318,6 +318,10 @@ export function createHandler(deps: HandlerDeps) {
     streamCount: () => streams.size,
     /** Publish a change from outside the routes (the sweep, tests). */
     publish: (key: string) => events.publish(key),
+    /** Mark the server as draining, so `GET /status` shows it while running work finishes. */
+    drain: () => {
+      draining = true;
+    },
     /** End every event stream, so a client reconnects to whichever server runs next. */
     closeStreams: () => [...streams].forEach((close) => close()),
     busy: () => cache.busy || perf.busy || (deps.prBusy?.() ?? false) || (deps.worklistBusy?.() ?? false) || (deps.sweepBusy?.() ?? false),
@@ -584,6 +588,7 @@ export async function serve(): Promise<void> {
   async function shutdown() {
     if (exiting) return;
     exiting = true;
+    handler.drain();
 
     // finish what runs, then go: the next client call starts the new version
     while (handler.busy()) await Bun.sleep(100);
