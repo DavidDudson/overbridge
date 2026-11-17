@@ -12,6 +12,7 @@ import {
   parseConfig,
   resolveConfig,
   rootConfigPath,
+  rootMcpServers,
 } from "../src/project-config";
 
 let tmp: string;
@@ -66,9 +67,9 @@ describe("overlay", () => {
 
 describe("loadRootLayers", () => {
   test("a missing or empty file has no layers", () => {
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] });
     writeRoot("");
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] });
   });
 
   test("reads defaults and per-repo layers", () => {
@@ -76,6 +77,7 @@ describe("loadRootLayers", () => {
     expect(loadRootLayers()).toEqual({
       file: rootConfigPath(),
       defaults: { ide: "zed" },
+      owners: {},
       repos: { app: { commands: { test: "bun test" } } },
       skillExtensions: [],
       guard: { readPaths: [], deny: [] },
@@ -107,6 +109,80 @@ describe("loadRootLayers", () => {
     expect(thrown(() => loadRootLayers())).toContain("config.yml (defaults):\n  comands: unknown key, did you mean 'commands'?");
     writeRoot("repos:\n  app:\n    ide: emacs\n");
     expect(thrown(() => loadRootLayers())).toContain("config.yml (repos.app):\n  ide: expected one of");
+  });
+});
+
+describe("owners layer", () => {
+  const registry = (lines: string[]) => writeFileSync(join(tmp, "repos.toml"), lines.join("\n"));
+
+  beforeEach(() => {
+    registry([
+      "[repos.app]",
+      'url = "git@github.com:Megaport/app.git"',
+      "[repos.mine]",
+      'url = "https://github.com/someone/mine"',
+      "[repos.lab]",
+      'url = "git@gitlab.com:megaport/lab.git"',
+    ]);
+  });
+
+  test("applies only to repos whose GitHub owner matches, ignoring case", () => {
+    writeRoot("owners:\n  megaport:\n    ide: zed\n");
+    expect(loadRepoConfig(worktree("ws1", "app")).ide).toBe("zed");
+    expect(loadRepoConfig(worktree("ws1", "mine")).ide).toBeUndefined();
+    expect(loadRepoConfig(worktree("ws1", "lab")).ide).toBeUndefined();
+    expect(loadRepoConfig(worktree("ws1", "unregistered")).ide).toBeUndefined();
+  });
+
+  test("defaults < owners.<owner> < repo file < repos.<name>", () => {
+    writeRoot(
+      [
+        "defaults:",
+        "  ide: zed",
+        "  commands: { test: default-test, lint: default-lint, format: default-format }",
+        "owners:",
+        "  MegaPort:",
+        "    ide: webstorm",
+        "    commands: { test: owner-test, lint: owner-lint, format: owner-format }",
+        "repos:",
+        "  app:",
+        "    commands: { lint: root-lint }",
+      ].join("\n"),
+    );
+    const config = loadRepoConfig(worktree("ws1", "app", "commands:\n  test: repo-test\n  lint: repo-lint\n"));
+    expect(config.ide).toBe("webstorm");
+    expect(config.commands).toEqual({ test: "repo-test", lint: "root-lint", format: "owner-format" });
+  });
+
+  test("adds buttons for the owner's repos, and mcp-servers through rootMcpServers", () => {
+    writeRoot("owners:\n  megaport:\n    buttons:\n      - { id: release-note, label: Release Note, run: 'mega release-note \"$OVERBRIDGE_ITEM\"' }\n    mcp-servers: [jira]\n");
+    expect(loadRepoConfig(worktree("ws1", "app")).buttons.map((b) => b.id)).toEqual(["release-note"]);
+    expect(loadRepoConfig(worktree("ws1", "mine")).buttons).toEqual([]);
+    expect(rootMcpServers("app")).toEqual(["jira"]);
+    expect(rootMcpServers("mine")).toEqual([]);
+  });
+
+  test("an explicit owner wins over the registry", () => {
+    writeRoot("owners:\n  someone:\n    ide: zed\n");
+    expect(resolveConfig(undefined, "app", "f.yml", loadRootLayers(), "Someone").ide).toBe("zed");
+  });
+
+  test("names the owner layer in a merged problem", () => {
+    writeRoot("owners:\n  megaport:\n    buttons:\n      - { id: a, label: A }\n");
+    expect(thrown(() => loadRepoConfig(worktree("ws1", "app")))).toContain("config.yml (owners.megaport)");
+  });
+
+  test("checks each owner layer, and the shape of owners", () => {
+    writeRoot("owners:\n  megaport:\n    comands: {}\n");
+    expect(thrown(() => loadRootLayers())).toContain("config.yml (owners.megaport):\n  comands: unknown key, did you mean 'commands'?");
+    writeRoot("owners: [megaport]\n");
+    expect(thrown(() => loadRootLayers())).toContain("owners: expected a mapping of GitHub owner to settings");
+    writeRoot("owners:\n  megaport: 3\n  empty: ~\n");
+    expect(thrown(() => loadRootLayers())).toContain("owners.megaport: expected a mapping in overbridge.yml's format");
+  });
+
+  test("a repo's own overbridge.yml can't declare owners", () => {
+    expect(thrown(() => parseConfig("owners: {}\n", "f.yml"))).toContain("owners: unknown key");
   });
 });
 
