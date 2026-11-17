@@ -12,10 +12,10 @@ Take the target from the argument: file paths, skill names, or a plugin director
 ## 1. Measure
 
 ```sh
-wc -c -w <files>
+wc -c -w -l <files>
 ```
 
-Keep the numbers for the report. Then copy each target into a new temporary directory (`mktemp -d`) before you edit it. Step 5 compares against these copies, so changes the user made earlier are not mistaken for yours, and an untracked file can still be checked.
+Keep the numbers for the report. Note any `SKILL.md` over about 300 lines (150 to 200 is a good size). In step 2, look in it first for a mode most runs skip. Leave out copies of another project's skills that a reinstall or sync overwrites, such as a skill whose frontmatter names the repo it came from; ask when unsure. Then copy each target into a new temporary directory (`mktemp -d`) before you edit it. Step 5 compares against these copies, so changes the user made earlier are not mistaken for yours, and an untracked file can still be checked.
 
 ## 2. Find what repeats across files
 
@@ -24,6 +24,11 @@ Do this before touching prose, because it saves the most.
 - **A block repeated across sibling files** (the same scope paragraph in every persona, the same spawn parameters in every step). State it once, in a preamble or in one reference file that each sibling names. Put it in the orchestrator's spawn prompt only when no sibling can run without that orchestrator, because a sibling run on its own would lose the rule without an error. Find candidates with `rg -c '<a distinctive phrase>' <dir>`.
 - **A mode most runs skip** (a stacked-PR path, a split path, or a long template). Move it to a file beside `SKILL.md` and leave one line that says when to read it.
 - **A table that copies facts another file owns.** Keep the owner's copy and point at it, unless the reader needs the facts before it can open that file.
+- **A fenced block over about 20 lines that runs the same way every time** (a script, a long query). Move it to a script with a command-line interface beside `SKILL.md`, or into the repo's own CLI if it has one, and leave the one-line command.
+- **Code blocks that differ in one value.** Keep one block with a placeholder and list the values.
+- **Facts spread through prose** (per-environment values, per-repo settings). Collect them into one table.
+
+Before you move a shared block, find every skill or lint that reads its wording (`rg '<a distinctive phrase>'`), and update them in the same change.
 
 Show the user these moves and wait for a yes before making them. They change which files exist, and other skills or tools may read the old ones. The prose moves in step 3 need no approval.
 
@@ -45,8 +50,9 @@ Shorten the frontmatter `description` too. It loads in every session, so it cost
 ## 4. What stays
 
 - Numbers, thresholds, commands, flags, paths, model names, and fallbacks, exactly as written.
-- Fenced code blocks. Don't edit them.
+- Fenced code blocks. Don't edit them, except in an approved step 2 move.
 - Stable ids that other files cite: rule numbers, step numbers, phase names, and heading text used as a link target. If you must renumber, fix every citation (`rg '<skill name>' <plugin dirs>`).
+- A clause only one copy had. When you delete a copy because a shared file now holds the rule, move that file's extra clause to the line that remains.
 - An example that is the only statement of a rule, or that shows a case the rule text cannot.
 - A reason, when the agent needs it to judge a case the rule does not name. Keep it to one clause.
 - Whole sentences. Keep articles and verbs. Don't replace words with arrows, symbols, or abbreviations. Compressed text makes the agent guess at the missing words.
@@ -60,7 +66,8 @@ If the text contradicts itself, names something that does not exist, or asks for
 1. Run `diff <copy> <file>` for each file against its step 1 copy. For every deleted line, name where its instruction now lives, or why it held none. Restore any line you cannot account for.
 2. Resolve every file path, skill name, step number, and heading link in the changed files, and every citation of them from other files.
 3. Run the repo's own checks for skills and plugins if it has any.
-4. For a skill with output you can compare (a review panel, a report, or a verdict), offer to run it on the same input before and after. Don't run it unasked. It can cost more than the distill saved.
+4. List any `SKILL.md` still over about 300 lines in the report as a candidate for a later step 2 split.
+5. For a skill with output you can compare (a review panel, a report, or a verdict), offer to run it on the same input before and after. Don't run it unasked. It can cost more than the distill saved.
 
 ## 6. Report
 
