@@ -4,11 +4,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentStateFile, GLYPHS, glyphFor, readAgentState, UNKNOWN_GLYPH } from "../src/agent-state";
+import { CleanupCause } from "../src/cleanup-log";
+import { RemovalMode } from "../src/state";
 import { Motion, sidebarMotion, sidebarWidth } from "../src/config";
 import { animate, BUSY_FRAMES, busyFrame, FRAME_MS } from "../src/sidebar-motion";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { BusyVerb, bodyRowsFor, KILL_KEY, killArmAfter, killArmWhileFocused, killStep, KillStepKind, pressKill, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
+import { BusyVerb, bodyRowsFor, KILL_KEY, KILL_REMOVAL, killArmAfter, killArmWhileFocused, killStep, KillStepKind, pressKill, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
 import { readHistory, Travel, writeHistory } from "../src/sidebar-history";
 import type { Finished } from "../src/child";
 import { type Input, textWidth } from "../src/term";
@@ -491,6 +493,10 @@ describe("killStep", () => {
     const begun: string[] = [];
     expect(pressKill("w1", 1_000, 2_000, (ws) => (begun.push(ws), undefined))).toEqual({});
     expect(begun).toEqual(["w1"]);
+  });
+
+  test("a confirmed kill forces the removal and credits it to the kill", () => {
+    expect(KILL_REMOVAL).toEqual({ cause: CleanupCause.Kill, mode: RemovalMode.Force });
   });
 
   test("a refused removal shows its reason", () => {

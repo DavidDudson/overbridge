@@ -64,7 +64,7 @@ export const Landing = { Always: "always", IfFocused: "if-focused" } as const;
 export type Landing = (typeof Landing)[keyof typeof Landing];
 
 /**
- * Remove `ws` without making the user wait: refuse at once when git holds unsaved work, otherwise mark it
+ * Remove `ws` without making the user wait: refuse at once when git holds unsaved work (unless `mode` is `RemovalMode.Force`), otherwise mark it
  * removing (every sidebar hides it), start the worker that does the slow part, switch to the landing tab
  * and close `ws`'s tab. `previous` is the tab the user came from, when known; `cause` is what the cleanup log
  * credits, the Cleanup button unless set; `mode` is `RemovalMode.Safe` unless set. Returns a refusal message,
@@ -145,7 +145,8 @@ function waitTabGone(ws: string) {
 
 /**
  * The worker's half: re-check from the network that `ws` is still cleanable, stop its apps and run a
- * non-force remove. `RemovalMode.Force` skips the re-check, also stops the workspace's checks, and forces the remove. On any failure the workspace comes back with the error on its sidebar card and its tab reopened.
+ * non-force remove; a `RemovalMode.Force` removal skips the re-check. On any failure the workspace comes back with
+ * the error on its sidebar card and its tab reopened.
  * Either way the outcome goes in the cleanup log the sidebar lists.
  */
 export async function finishRemoval(ws: string): Promise<void> {

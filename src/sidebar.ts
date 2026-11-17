@@ -899,7 +899,12 @@ export const killArmWhileFocused = (armedAtMs: number | undefined, self: string,
 /** Starts the forced removal of `ws`; returns a refusal message, or undefined once it is under way. */
 export type KillBegin = (ws: string) => string | undefined;
 
-const beginKill: KillBegin = (ws) => beginRemoval(ws, { cause: CleanupCause.Kill, mode: RemovalMode.Force });
+/** The removal a confirmed kill starts: credited to the kill, discarding unsaved work. */
+export const KILL_REMOVAL = { cause: CleanupCause.Kill, mode: RemovalMode.Force } as const;
+
+const beginKill: KillBegin = (ws) => beginRemoval(ws, KILL_REMOVAL);
+
+const errorFooter = (message: string): Footer => ({ kind: FooterKind.Error, message });
 
 /** What one press of `KILL_KEY` leaves: the arm to keep, and the footer to show (none once the removal is under way). */
 export interface KillPress {
@@ -907,20 +912,19 @@ export interface KillPress {
   footer?: Footer;
 }
 
-/** One press of `KILL_KEY` in `ws`'s sidebar. */
 export function pressKill(ws: string, armedAtMs: number | undefined, nowMs: number, begin: KillBegin = beginKill): KillPress {
   const step = killStep(ws, armedAtMs, nowMs);
 
   switch (step.kind) {
     case KillStepKind.Refuse:
-      return { footer: { kind: FooterKind.Error, message: step.message } };
+      return { footer: errorFooter(step.message) };
     case KillStepKind.Arm:
-      return { armedAtMs: step.armedAtMs, footer: { kind: FooterKind.Error, message: step.message } };
+      return { armedAtMs: step.armedAtMs, footer: errorFooter(step.message) };
     case KillStepKind.Kill:
     {
       const refusal = begin(ws);
 
-      return refusal === undefined ? {} : { footer: { kind: FooterKind.Error, message: refusal } };
+      return refusal === undefined ? {} : { footer: errorFooter(refusal) };
     }
   }
 }

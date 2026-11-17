@@ -55,7 +55,6 @@ export const isCleanupRecord = (r: unknown): r is CleanupRecord => isJsonObject(
 /** The usable records of `State.cleanups` as read from disk; every consumer of that field goes through here. */
 export const cleanupRecords = (log: JsonValue | undefined): CleanupRecord[] => (Array.isArray(log) ? log : []).filter(isCleanupRecord);
 
-/** How one finished removal's row looks. */
 interface RowStyle {
   glyph: string;
   word: string;

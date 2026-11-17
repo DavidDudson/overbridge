@@ -17,7 +17,7 @@ export const TASK_BRANCH_PREFIX = "task/";
 /** A claim on a `task/` branch that has no PR yet: work with no item that can continue into one. */
 export const isTaskClaim = (c: Claim): boolean => c.branch?.startsWith(TASK_BRANCH_PREFIX) === true && c.pr === undefined;
 
-/** How a removal treats unsaved work: `Safe` refuses it, `Force` discards it and ignores a failing pre-remove hook. */
+/** How a removal treats unsaved work: `Safe` refuses it; `Force` discards it, stops the workspace's checks and ignores a failing pre-remove hook. */
 export const RemovalMode = { Safe: "safe", Force: "force" } as const;
 
 export type RemovalMode = (typeof RemovalMode)[keyof typeof RemovalMode];
