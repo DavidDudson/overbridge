@@ -278,7 +278,9 @@ describe("routes", () => {
 
 describe("sweepTick", () => {
   const tickDeps = (o: { exiting?: boolean; gone?: boolean }) => {
-    const calls = { shutdown: 0, tick: 0, logged: [] as string[] };
+    const logged: string[] = [];
+    const calls = { shutdown: 0, tick: 0, logged };
+
     const deps: SweepTickDeps = {
       exiting: () => o.exiting ?? false,
       workerFileGone: () => o.gone ?? false,
