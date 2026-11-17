@@ -425,7 +425,7 @@ defaults:             # under every repo's overbridge.yml
     name: jira
     project: ENG
     url: https://example.atlassian.net
-owners:               # under the repo's overbridge.yml, for every repo a GitHub owner holds
+owners:               # under the repo's overbridge.yml, for every repo an owner holds
   my-org:
     commands:
       lint: pnpm lint
@@ -450,8 +450,8 @@ Mappings merge key by key. Lists, such as `apps` and `review.personas`, replace 
 only has to be set once the layers are merged. `overbridge start` reads the repo's file from its default branch, so
 the root `config.yml` is how to set up a repo that has no `overbridge.yml`.
 
-`owners.<owner>` matches the GitHub owner in the repo's URL in `repos.toml`, ignoring case. A repo that is not on
-GitHub gets no owner layer.
+`owners.<owner>` matches the owner in the repo's URL in `repos.toml` (`megaport` in
+`git@github.com:megaport/app.git`), ignoring case. A repo registered from a local path gets no owner layer.
 
 `owners.<owner>` and `repos.<name>` apply inside a workspace, where overbridge knows which repo a directory belongs
 to. Outside a workspace, only `defaults` applies.
@@ -527,6 +527,7 @@ owners:
     buttons:
       - id: release-note
         label: 📝 Release Note
+        status: '[ -n "$OVERBRIDGE_ITEM" ] && echo "$OVERBRIDGE_ITEM"'   # hidden on a branch with no item
         run: mega release-note "$OVERBRIDGE_ITEM"
 ```
 

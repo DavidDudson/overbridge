@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoOf, root, worktreePath } from "./paths";
 import { loadRepos } from "./config";
-import { slugFromUrl, WORKLIST_SCOPES, type WorklistScope } from "./pm/board-github";
+import { WORKLIST_SCOPES, type WorklistScope } from "./pm/board-github";
 import type { WorkStatus } from "./pm/worklist";
 import { errorMessage, fail, isBoolean, isNumber, isRecord, isString, type Json, type JsonObject } from "./util";
 
@@ -768,7 +768,7 @@ export interface GuardConfig {
 export interface RootLayers {
   file: string;
   defaults?: JsonObject;
-  /** By GitHub owner, lowercased: applies to every repo whose registered remote that owner holds. */
+  /** By owner, lowercased: applies to every repo whose URL in `repos.toml` names that owner. */
   owners: Record<string, JsonObject>;
   repos: Record<string, JsonObject>;
   /** Directories of skill extension files (`<dir>/<skill>/<phase>.md`), as written: absolute, `~/` or root-relative. */
@@ -801,12 +801,20 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
     else p.add("defaults", "expected a mapping in overbridge.yml's format");
   }
 
+  // owners match case-insensitively, so keys are stored lowercased; messages name the key as written
+  const ownerNames: Record<string, string> = {};
+
   if (raw.owners !== undefined && raw.owners !== null) {
     if (!isRecord(raw.owners)) p.add("owners", "expected a mapping of GitHub owner to settings");
     else
       for (const [owner, layer] of Object.entries(raw.owners)) {
-        if (isRecord(layer)) layers.owners[owner.toLowerCase()] = layer;
-        else if (layer !== null) p.add(`owners.${owner}`, "expected a mapping in overbridge.yml's format");
+        const ownerKey = owner.toLowerCase();
+
+        if (ownerNames[ownerKey] !== undefined) p.add(`owners.${owner}`, `same owner as owners.${ownerNames[ownerKey]} (owners match ignoring case)`);
+        else if (isRecord(layer)) {
+          layers.owners[ownerKey] = layer;
+          ownerNames[ownerKey] = owner;
+        } else if (layer !== null) p.add(`owners.${owner}`, "expected a mapping in overbridge.yml's format");
       }
   }
 
@@ -856,42 +864,34 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
 
   if (layers.defaults) validateConfig(layers.defaults, `${file} (defaults)`, { partial: true, root: true });
 
-  for (const [owner, layer] of Object.entries(layers.owners)) validateConfig(layer, `${file} (owners.${owner})`, { partial: true, root: true });
+  for (const [ownerKey, layer] of Object.entries(layers.owners)) validateConfig(layer, `${file} (owners.${ownerNames[ownerKey]})`, { partial: true, root: true });
 
   for (const [name, layer] of Object.entries(layers.repos)) validateConfig(layer, `${file} (repos.${name})`, { partial: true, root: true });
 
   return layers;
 }
 
-/** The GitHub owner of a registered repo's remote, lowercased; undefined when it is not registered or not on GitHub. */
-export function repoOwner(repo: string | undefined): string | undefined {
-  if (repo === undefined) return undefined;
-
-  try {
-    const url = loadRepos()[repo]?.url;
-
-    return url === undefined ? undefined : slugFromUrl(url)?.split("/")[0]?.toLowerCase();
-  } catch {
-    return undefined;
-  }
+/** The owner in a remote URL (`host:owner/name` or `scheme://host/owner/name`), lowercased; undefined for a local path. */
+export function ownerFromUrl(url: string): string | undefined {
+  return /^(?:[\w+.-]+:\/\/[^/]+\/|[^/:@]+@[^/:]+:|[^/:]+:(?!\/))([\w.-]+)\/[\w.-]+?(?:\.git)?\/?$/.exec(url)?.[1]?.toLowerCase();
 }
 
-/** `repo`'s owner, read from `repos.toml` only when the root config has an `owners` layer to match. */
-function ownerOf(layers: RootLayers, repo: string | undefined): string | undefined {
-  return Object.keys(layers.owners).length ? repoOwner(repo) : undefined;
-}
+/**
+ * The `owners.<owner>` layer for `repo`, with its key. The owner comes from the repo's URL in `repos.toml`, which is
+ * read only when the root config has an `owners` layer.
+ */
+function ownerLayerOf(layers: RootLayers, repo: string | undefined): { owner: string; layer: JsonObject } | undefined {
+  if (repo === undefined || !Object.keys(layers.owners).length) return undefined;
+  const url = loadRepos()[repo]?.url;
+  const ownerKey = url === undefined ? undefined : ownerFromUrl(url);
+  const layer = ownerKey === undefined ? undefined : layers.owners[ownerKey];
 
-/** The `owners.<owner>` layer for `repo`, with its key; `owner` overrides the owner read from `repos.toml`. */
-function ownerLayerOf(layers: RootLayers, repo: string | undefined, owner: string | undefined): { owner: string; layer: JsonObject } | undefined {
-  const known = owner?.toLowerCase() ?? ownerOf(layers, repo);
-  const layer = known === undefined ? undefined : layers.owners[known];
-
-  return known === undefined || layer === undefined ? undefined : { owner: known, layer };
+  return ownerKey === undefined || layer === undefined ? undefined : { owner: ownerKey, layer };
 }
 
 /** `repo`'s `mcp-servers` from the root layers alone, so nothing in a repo's own file can change the list. */
-export function rootMcpServers(repo: string, layers = loadRootLayers(), owner?: string): string[] {
-  const merged = overlay(overlay(layers.defaults, ownerLayerOf(layers, repo, owner)?.layer), layers.repos[repo]) ?? {};
+export function rootMcpServers(repo: string, layers = loadRootLayers()): string[] {
+  const merged = overlay(overlay(layers.defaults, ownerLayerOf(layers, repo)?.layer), layers.repos[repo]) ?? {};
 
   return validateConfig(merged, layers.file, { partial: true, root: true }).mcpServers;
 }
@@ -923,26 +923,20 @@ function merge(base: Json | undefined, over: Json): Json {
  * The config for `repo`: built-in defaults, then the root `defaults`, then the root's `owners.<owner>`, then the
  * repo's own file (`repoRaw`, parsed from `file`; undefined when there is none), then the root's `repos.<repo>`.
  */
-export function resolveConfig(
-  repoRaw: Json | undefined,
-  repo: string | undefined,
-  file: string,
-  layers = loadRootLayers(),
-  owner?: string,
-): ProjectConfig {
+export function resolveConfig(repoRaw: Json | undefined, repo: string | undefined, file: string, layers = loadRootLayers()): ProjectConfig {
   if (repoRaw !== undefined && repoRaw !== null) validateConfig(repoRaw, file, { partial: true });
-  const under = ownerLayerOf(layers, repo, owner);
+  const ownerLayer = ownerLayerOf(layers, repo);
   const over = repo === undefined ? undefined : layers.repos[repo];
 
   const sources = [
     layers.defaults && `${layers.file} (defaults)`,
-    under && `${layers.file} (owners.${under.owner})`,
+    ownerLayer && `${layers.file} (owners.${ownerLayer.owner})`,
     repoRaw !== undefined && repoRaw !== null && file,
     over && `${layers.file} (repos.${repo})`,
   ].filter(Boolean);
 
   // the repo file was checked for root-only keys above, so any left come from the root config
-  return validateConfig(overlay(overlay(overlay(layers.defaults, under?.layer), repoRaw), over), sources.join(" + ") || file, { root: true });
+  return validateConfig(overlay(overlay(overlay(layers.defaults, ownerLayer?.layer), repoRaw), over), sources.join(" + ") || file, { root: true });
 }
 
 /** Load a config file for `repo` with the root layers applied. A missing file means the root layers alone. */

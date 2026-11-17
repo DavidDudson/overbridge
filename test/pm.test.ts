@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { itemIdOf } from "../src/pm";
 import { cachedTitle, refreshTitle } from "../src/pm/cache";
 import { createTechDebtItem, slug } from "../src/pm/provider";
 import { clearProviders, providerFor, registerProvider } from "../src/pm/registry";
@@ -19,6 +20,27 @@ beforeEach(() => {
 afterEach(() => {
   savedRoot === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = savedRoot);
   rmSync(tmp, { recursive: true, force: true });
+});
+
+describe("itemIdOf", () => {
+  const pm = { name: "github", project: "o/r" } as const;
+  const make = () => fakeProvider();
+
+  test.each([
+    ["no project-management", undefined, "feat/12-x", ""],
+    ["no branch", pm, undefined, ""],
+    ["a branch naming no item", pm, "topic", ""],
+    ["a branch naming an item", pm, "feat/12-x", "12"],
+  ] as const)("%s", (_, config, branch, expected) => {
+    expect(itemIdOf(config, tmp, branch, make)).toBe(expected);
+  });
+
+  test("a provider that cannot be built gives no item", () => {
+    const broken = () => {
+      throw new Error("no provider");
+    };
+    expect(itemIdOf(pm, tmp, "feat/12-x", broken)).toBe("");
+  });
 });
 
 describe("registry", () => {

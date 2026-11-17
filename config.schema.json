@@ -12,7 +12,7 @@
       "properties": { "hooks": { "$ref": "#/$defs/hooks" }, "buttons": { "$ref": "#/$defs/buttons" }, "mcp-servers": { "$ref": "#/$defs/mcp-servers" } }
     },
     "owners": {
-      "description": "Per GitHub owner (user or org, any case), matched against the remote URL of each repo in repos.toml: applied over defaults and under the repo's overbridge.yml.",
+      "description": "Per owner (GitHub user or org, any case), matched against the owner in each repo's URL in repos.toml: applied over defaults and under the repo's overbridge.yml.",
       "type": "object",
       "additionalProperties": {
         "type": ["object", "null"],

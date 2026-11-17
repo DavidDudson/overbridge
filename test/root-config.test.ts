@@ -11,6 +11,7 @@ import {
   overlay,
   parseConfig,
   resolveConfig,
+  ownerFromUrl,
   rootConfigPath,
   rootMcpServers,
 } from "../src/project-config";
@@ -122,11 +123,11 @@ describe("owners layer", () => {
       "[repos.mine]",
       'url = "https://github.com/someone/mine"',
       "[repos.lab]",
-      'url = "git@gitlab.com:megaport/lab.git"',
+      'url = "/srv/git/lab.git"',
     ]);
   });
 
-  test("applies only to repos whose GitHub owner matches, ignoring case", () => {
+  test("applies only to repos whose owner matches, ignoring case", () => {
     writeRoot("owners:\n  megaport:\n    ide: zed\n");
     expect(loadRepoConfig(worktree("ws1", "app")).ide).toBe("zed");
     expect(loadRepoConfig(worktree("ws1", "mine")).ide).toBeUndefined();
@@ -162,9 +163,14 @@ describe("owners layer", () => {
     expect(rootMcpServers("mine")).toEqual([]);
   });
 
-  test("an explicit owner wins over the registry", () => {
-    writeRoot("owners:\n  someone:\n    ide: zed\n");
-    expect(resolveConfig(undefined, "app", "f.yml", loadRootLayers(), "Someone").ide).toBe("zed");
+  test("reads the owner from ssh, ssh-alias, https and enterprise URLs, and none from a local path", () => {
+    expect(ownerFromUrl("git@github.com:Megaport/app.git")).toBe("megaport");
+    expect(ownerFromUrl("git@github-work:megaport/app.git")).toBe("megaport");
+    expect(ownerFromUrl("github-work:megaport/app")).toBe("megaport");
+    expect(ownerFromUrl("https://github.com/megaport/app")).toBe("megaport");
+    expect(ownerFromUrl("ssh://git@github.example.com/megaport/app.git")).toBe("megaport");
+    expect(ownerFromUrl("/tmp/remote.git")).toBeUndefined();
+    expect(ownerFromUrl("../remote.git")).toBeUndefined();
   });
 
   test("names the owner layer in a merged problem", () => {
@@ -177,8 +183,17 @@ describe("owners layer", () => {
     expect(thrown(() => loadRootLayers())).toContain("config.yml (owners.megaport):\n  comands: unknown key, did you mean 'commands'?");
     writeRoot("owners: [megaport]\n");
     expect(thrown(() => loadRootLayers())).toContain("owners: expected a mapping of GitHub owner to settings");
-    writeRoot("owners:\n  megaport: 3\n  empty: ~\n");
+    writeRoot("owners:\n  megaport: 3\n");
     expect(thrown(() => loadRootLayers())).toContain("owners.megaport: expected a mapping in overbridge.yml's format");
+    writeRoot("owners:\n  Megaport:\n    ide: zed\n  megaport:\n    ide: zed\n");
+    expect(thrown(() => loadRootLayers())).toContain("owners.megaport: same owner as owners.Megaport");
+    writeRoot("owners:\n  MegaPort:\n    comands: {}\n");
+    expect(thrown(() => loadRootLayers())).toContain("config.yml (owners.MegaPort):");
+  });
+
+  test("an empty owner layer is accepted and adds nothing", () => {
+    writeRoot("owners:\n  empty: ~\n");
+    expect(loadRootLayers().owners).toEqual({});
   });
 
   test("a repo's own overbridge.yml can't declare owners", () => {
