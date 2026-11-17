@@ -1262,6 +1262,7 @@ export async function sidebar(wsOpt?: string) {
         if (input.kind !== "key" || input.key !== KILL_KEY) {
           killArmedAtMs = undefined;
         }
+
         guarded("key", () => {
           if (input.kind === "key" && input.key === "n") {
             hold("");
