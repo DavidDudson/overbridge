@@ -24,7 +24,7 @@ import { next } from "./next";
 import { ORCHESTRATION_TABS, orchestrationTab } from "./orchestration";
 import { ensureOrchestrationTabs } from "./orchestration-keep";
 import { moveWithHistory, readHistory, Travel, travel, visit } from "./sidebar-history";
-import { isIceboxed, isRemoving, isWorkspaceState, RemovalBlock, readState, type Removing, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
+import { isIceboxed, isRemoving, isWorkspaceState, RemovalBlock, RemovalMode, readState, type Removing, type State, tryReadState, watchState, type WorkspaceState, workspaceFault } from "./state";
 import { subscribeEvents } from "./events-client";
 import { serverOwnsSweep } from "./server-client";
 import { childError, type Finished, type Spawner, spawnAsync } from "./child";
@@ -886,7 +886,37 @@ export function killStep(ws: string, armedAtMs: number | undefined, nowMs: numbe
     return { kind: KillStepKind.Kill };
   }
 
-  return { kind: KillStepKind.Arm, armedAtMs: nowMs, message: `press ${KILL_KEY} again within ${CLEANUP_ARM_MS / 1000}s to kill ${ws}; unsaved work is lost` };
+  return { kind: KillStepKind.Arm, armedAtMs: nowMs, message: `unsaved work is lost: press ${KILL_KEY} again within ${CLEANUP_ARM_MS / 1000}s to kill ${ws}` };
+}
+
+/** The kill arm left after `input`: only `KILL_KEY` keeps it, so any other key, a click or a prompt drops it. */
+export const killArmAfter = (armedAtMs: number | undefined, input: Input): number | undefined => (input.kind === "key" && input.key === KILL_KEY ? armedAtMs : undefined);
+
+/** The kill arm left while `focused` is on screen: leaving `self`'s tab drops it, so coming back never confirms an old arm. */
+export const killArmWhileFocused = (armedAtMs: number | undefined, self: string, focused: string | undefined): number | undefined =>
+  focused === undefined || focused === self ? armedAtMs : undefined;
+
+/** Starts the forced removal of `ws`; returns a refusal message, or undefined once it is under way. */
+export type KillBegin = (ws: string) => string | undefined;
+
+const beginKill: KillBegin = (ws) => beginRemoval(ws, { cause: CleanupCause.Kill, mode: RemovalMode.Force });
+
+/** One press of `KILL_KEY` in `ws`'s sidebar: the arm to keep, and the footer to show (none once the removal is under way). */
+export function pressKill(ws: string, armedAtMs: number | undefined, nowMs: number, begin: KillBegin = beginKill): { armedAtMs?: number; footer?: Footer } {
+  const step = killStep(ws, armedAtMs, nowMs);
+
+  switch (step.kind) {
+    case KillStepKind.Refuse:
+      return { footer: { kind: FooterKind.Error, message: step.message } };
+    case KillStepKind.Arm:
+      return { armedAtMs: step.armedAtMs, footer: { kind: FooterKind.Error, message: step.message } };
+    case KillStepKind.Kill:
+    {
+      const refusal = begin(ws);
+
+      return refusal === undefined ? {} : { footer: { kind: FooterKind.Error, message: refusal } };
+    }
+  }
 }
 
 /** Runs `overbridge icebox <ws>` as a child; resolves to the legend, or the error when icebox refuses. */
@@ -1245,6 +1275,7 @@ export async function sidebar(wsOpt?: string) {
       inputFault = undefined;
 
       for (const input of decodeInput(buf.toString())) {
+        killArmedAtMs = killArmAfter(killArmedAtMs, input);
         let taken = false;
         guarded("key", () => {
           taken = footerTakes(input);
@@ -1257,11 +1288,6 @@ export async function sidebar(wsOpt?: string) {
 
         // an open prompt takes q and ctrl-c as text and cancel, so quit only once the footer has passed on the key
         if (input.kind === "key" && (input.key === "q" || input.key === "ctrl-c")) return quit();
-
-        // a kill is confirmed only by two presses in a row, so any other input disarms it
-        if (input.kind !== "key" || input.key !== KILL_KEY) {
-          killArmedAtMs = undefined;
-        }
 
         guarded("key", () => {
           if (input.kind === "key" && input.key === "n") {
@@ -1303,16 +1329,10 @@ export async function sidebar(wsOpt?: string) {
               return;
             }
 
-            const step = killStep(self, killArmedAtMs, Date.now());
-            killArmedAtMs = step.kind === KillStepKind.Arm ? step.armedAtMs : undefined;
+            const press = pressKill(self, killArmedAtMs, Date.now());
+            killArmedAtMs = press.armedAtMs;
 
-            if (step.kind !== KillStepKind.Kill) {
-              return show({ kind: FooterKind.Error, message: step.message });
-            }
-
-            const refusal = beginRemoval(self, { cause: CleanupCause.Kill });
-
-            return refusal === undefined ? undefined : show({ kind: FooterKind.Error, message: refusal });
+            return press.footer === undefined ? undefined : show(press.footer);
           }
 
           if (input.kind === "key" && input.key === SORT_KEY) {
@@ -1367,7 +1387,10 @@ export async function sidebar(wsOpt?: string) {
     });
 
     const tick = () => {
-      if (shouldPoll(self, readView(), lastGatherAtMs, Date.now())) {
+      const view = readView();
+      killArmedAtMs = killArmWhileFocused(killArmedAtMs, self, view.focused);
+
+      if (shouldPoll(self, view, lastGatherAtMs, Date.now())) {
         draw();
       }
     };

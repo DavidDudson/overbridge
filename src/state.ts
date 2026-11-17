@@ -17,8 +17,13 @@ export const TASK_BRANCH_PREFIX = "task/";
 /** A claim on a `task/` branch that has no PR yet: work with no item that can continue into one. */
 export const isTaskClaim = (c: Claim): boolean => c.branch?.startsWith(TASK_BRANCH_PREFIX) === true && c.pr === undefined;
 
-/** A background removal in flight: when it started, what started it and, once spawned, the worker's pid. */
-export type Removing = { since: string; cause?: CleanupCause; pid?: number };
+/** How a removal treats unsaved work: `Safe` refuses it, `Force` discards it and ignores a failing pre-remove hook. */
+export const RemovalMode = { Safe: "safe", Force: "force" } as const;
+
+export type RemovalMode = (typeof RemovalMode)[keyof typeof RemovalMode];
+
+/** A background removal in flight: when it started, what started it, how it treats unsaved work and, once spawned, the worker's pid. */
+export type Removing = { since: string; cause?: CleanupCause; mode?: RemovalMode; pid?: number };
 
 /** Why a workspace that would be removed by itself is kept; shown on its sidebar card. */
 export const RemovalBlock = { MergedUnsaved: "merged-unsaved" } as const;

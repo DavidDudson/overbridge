@@ -8,7 +8,7 @@ import { Motion, sidebarMotion, sidebarWidth } from "../src/config";
 import { animate, BUSY_FRAMES, busyFrame, FRAME_MS } from "../src/sidebar-motion";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { BusyVerb, bodyRowsFor, KILL_KEY, killStep, KillStepKind, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
+import { BusyVerb, bodyRowsFor, KILL_KEY, killArmAfter, killArmWhileFocused, killStep, KillStepKind, pressKill, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
 import { readHistory, Travel, writeHistory } from "../src/sidebar-history";
 import type { Finished } from "../src/child";
 import { type Input, textWidth } from "../src/term";
@@ -450,7 +450,7 @@ describe("new workspace prompt", () => {
 
 describe("killStep", () => {
   test("the first press arms the kill and says how to confirm it", () => {
-    expect(killStep("w1", undefined, 1_000)).toEqual({ kind: KillStepKind.Arm, armedAtMs: 1_000, message: `press ${KILL_KEY} again within 5s to kill w1; unsaved work is lost` });
+    expect(killStep("w1", undefined, 1_000)).toEqual({ kind: KillStepKind.Arm, armedAtMs: 1_000, message: `unsaved work is lost: press ${KILL_KEY} again within 5s to kill w1` });
   });
 
   test("a second press within 5s kills", () => {
@@ -461,8 +461,40 @@ describe("killStep", () => {
     expect(killStep("w1", 1_000, 6_001)).toMatchObject({ kind: KillStepKind.Arm, armedAtMs: 6_001 });
   });
 
-  test("an orchestration tab is refused, armed or not", () => {
-    expect(killStep("@root", 1_000, 1_500)).toEqual({ kind: KillStepKind.Refuse, message: "@root is an orchestration tab; only a workspace can be killed" });
+  test.each([undefined, 1_000])("an orchestration tab is refused, armed at %p", (armedAtMs) => {
+    expect(killStep("@root", armedAtMs, 1_500)).toEqual({ kind: KillStepKind.Refuse, message: "@root is an orchestration tab; only a workspace can be killed" });
+  });
+
+  test("only the kill key keeps the arm; any other key or a click drops it", () => {
+    expect(killArmAfter(1_000, { kind: "key", key: KILL_KEY })).toBe(1_000);
+    expect(killArmAfter(1_000, { kind: "key", key: "o" })).toBeUndefined();
+    expect(killArmAfter(1_000, { kind: "key", key: "s" })).toBeUndefined();
+    expect(killArmAfter(1_000, { kind: "click", col: 1, row: 3 })).toBeUndefined();
+  });
+
+  test("leaving the tab drops the arm; an unknown focus keeps it", () => {
+    expect(killArmWhileFocused(1_000, "w1", "w1")).toBe(1_000);
+    expect(killArmWhileFocused(1_000, "w1", "w2")).toBeUndefined();
+    expect(killArmWhileFocused(1_000, "w1", undefined)).toBe(1_000);
+  });
+
+  test("X, another key, X arms again instead of killing", () => {
+    const begun: string[] = [];
+    const begin = (ws: string) => (begun.push(ws), undefined);
+    const first = pressKill("w1", undefined, 1_000, begin);
+    const second = pressKill("w1", killArmAfter(first.armedAtMs, { kind: "key", key: "o" }), 2_000, begin);
+    expect(second.armedAtMs).toBe(2_000);
+    expect(begun).toEqual([]);
+  });
+
+  test("a confirmed press starts the removal and clears the footer and the arm", () => {
+    const begun: string[] = [];
+    expect(pressKill("w1", 1_000, 2_000, (ws) => (begun.push(ws), undefined))).toEqual({});
+    expect(begun).toEqual(["w1"]);
+  });
+
+  test("a refused removal shows its reason", () => {
+    expect(pressKill("w1", 1_000, 2_000, () => "w1 is already being removed")).toEqual({ footer: { kind: FooterKind.Error, message: "w1 is already being removed" } });
   });
 
   test("the legend names the key", () => {

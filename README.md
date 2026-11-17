@@ -683,7 +683,8 @@ tabs closed since are skipped, and a failed switch leaves it as it was. Switches
 `p` jumps to the `@perf` tab (also `overbridge go perf`, or its number), where the legend lists it.
 `f` iceboxes the sidebar's own workspace (see Icebox); `@frozen` thaws it.
 `X` pressed twice within 5 s kills the sidebar's own workspace: it is removed like Cleanup, but whatever its state,
-so uncommitted changes and unpushed commits are lost. An orchestration tab refuses it.
+so uncommitted changes and unpushed commits are lost, its running checks are stopped, and a failing
+`pre-remove` hook does not stop it. Any other key, or leaving the tab, disarms it. An orchestration tab refuses it.
 The new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. Long titles wrap under their text (up to three rows).
 

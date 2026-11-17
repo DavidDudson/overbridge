@@ -9,7 +9,7 @@ import { zellijMux } from "../src/mux";
 import { beginRemoval, finishRemoval, FINISH_FLAG, Landing, type RemovalDeps } from "../src/remove";
 import { cleanable, gitClean, taskWithoutCommits } from "../src/top";
 import { entries, entryLines } from "../src/sidebar";
-import { isRemoving, readState, REMOVING_GRACE_MS, watchState, withState, type WorkspaceState } from "../src/state";
+import { isRemoving, readState, RemovalMode, REMOVING_GRACE_MS, watchState, withState, type WorkspaceState } from "../src/state";
 import type { RunResult } from "../src/util";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
@@ -396,7 +396,8 @@ describe("the background worker", () => {
     sh(["git", "commit", "-q", "--allow-empty", "-m", "unpushed"], wt);
     writeFileSync(join(wt, "dirty.txt"), "x");
     expect(beginRemoval("k1", { deps: noZellij() })).toContain("uncommitted changes or unpushed commits");
-    expect(beginRemoval("k1", { deps: noZellij(), cause: CleanupCause.Kill })).toBeUndefined();
+    expect(beginRemoval("k1", { deps: noZellij(), cause: CleanupCause.Kill })).toContain("uncommitted changes or unpushed commits");
+    expect(beginRemoval("k1", { deps: noZellij(), cause: CleanupCause.Kill, mode: RemovalMode.Force })).toBeUndefined();
     expect(await until(() => !readState().workspaces.k1)).toBe(true);
     expect(existsSync(join(root, "k1"))).toBe(false);
     expect(readState().cleanups?.filter((c) => c.ws === "k1").map((c) => [c.outcome, c.cause])).toEqual([[CleanupOutcome.Removed, CleanupCause.Kill]]);

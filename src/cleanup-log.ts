@@ -55,8 +55,13 @@ export const isCleanupRecord = (r: unknown): r is CleanupRecord => isJsonObject(
 /** The usable records of `State.cleanups` as read from disk; every consumer of that field goes through here. */
 export const cleanupRecords = (log: JsonValue | undefined): CleanupRecord[] => (Array.isArray(log) ? log : []).filter(isCleanupRecord);
 
-const rowStyle = (r: CleanupRecord): { glyph: string; word: string; color: Color } =>
-  r.outcome === CleanupOutcome.Failed ? { glyph: "✗", word: "failed", color: "red" } : { glyph: "🧹", word: "removed", color: "grey" };
+function rowStyle(r: CleanupRecord): { glyph: string; word: string; color: Color } {
+  if (r.outcome === CleanupOutcome.Failed) {
+    return { glyph: "✗", word: "failed", color: "red" };
+  }
+
+  return r.cause === CleanupCause.Kill ? { glyph: "💀", word: "killed", color: "yellow" } : { glyph: "🧹", word: "removed", color: "grey" };
+}
 
 /**
  * The cleanup rows under the sidebar's divider, each `inner` columns wide: a countdown to the next check, then the removals in flight, then

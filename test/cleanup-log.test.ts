@@ -44,6 +44,11 @@ describe("cleanupRows", () => {
     expect(plain(rows)).toEqual(["🧹 next check 30s", "🧹 removing #9 tidy", "✗ failed #7 fix the thing", "🧹 removed #12 fix the thing"]);
   });
 
+  test("a kill says so, apart from a routine removal", () => {
+    const rows = cleanupRows([], [record("k", 10_000, CleanupOutcome.Removed, CleanupCause.Kill), record("f", 5_000, CleanupOutcome.Failed, CleanupCause.Kill)], 40, NOW_MS, lastCheck);
+    expect(plain(rows)).toEqual(["🧹 next check 30s", "✗ failed #f fix the thing", "💀 killed #k fix the thing"]);
+  });
+
   test("a removal finished before the last check is gone", () => {
     expect(plain(cleanupRows([], [record("old", 40_000)], 40, NOW_MS, lastCheck))).toEqual(["🧹 next check 30s"]);
   });

@@ -1,6 +1,7 @@
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
 import { AppStatus, stopApp } from "./apps";
+import { stopChecksFor } from "./check-queue";
 import { CleanupCause, CleanupOutcome, recordCleanup } from "./cleanup-log";
 import { removeWorkspace } from "./commands";
 import { landingTab } from "./next";
@@ -9,7 +10,7 @@ import { metaDir, root, selfCommand } from "./paths";
 import { defaultMux, type Mux } from "./mux";
 import { entries, switchTab } from "./sidebar";
 import { openTab, tabCommand } from "./tab";
-import { getWorkspace, isRemoving, readState, withState } from "./state";
+import { getWorkspace, isRemoving, readState, RemovalMode, withState } from "./state";
 import { cleanable, noUnsavedWork, readTopCache, refreshTop, sidebarLabel, snapshotTop } from "./top";
 import { errorMessage, fail, log } from "./util";
 
@@ -66,10 +67,10 @@ export type Landing = (typeof Landing)[keyof typeof Landing];
  * Remove `ws` without making the user wait: refuse at once when git holds unsaved work, otherwise mark it
  * removing (every sidebar hides it), start the worker that does the slow part, switch to the landing tab
  * and close `ws`'s tab. `previous` is the tab the user came from, when known; `cause` is what the cleanup log
- * credits, the Cleanup button unless set. `CleanupCause.Kill` skips every unsaved-work check and discards that work. Returns a refusal message,
+ * credits, the Cleanup button unless set; `mode` is `RemovalMode.Safe` unless set. Returns a refusal message,
  * or undefined once the removal is under way.
  */
-export function beginRemoval(ws: string, opts: { previous?: string; landing?: Landing; cause?: CleanupCause; deps?: RemovalDeps } = {}): string | undefined {
+export function beginRemoval(ws: string, opts: { previous?: string; landing?: Landing; cause?: CleanupCause; mode?: RemovalMode; deps?: RemovalDeps } = {}): string | undefined {
   if (isOrchestrationTab(ws)) {
     return orchestrationRemoveMessage(ws);
   }
@@ -81,7 +82,9 @@ export function beginRemoval(ws: string, opts: { previous?: string; landing?: La
     return alreadyRemoving;
   }
 
-  if (!isKill(opts.cause) && !noUnsavedWork(ws)) {
+  const mode = opts.mode ?? RemovalMode.Safe;
+
+  if (mode === RemovalMode.Safe && !noUnsavedWork(ws)) {
     return `${ws} has uncommitted changes or unpushed commits; not removing`;
   }
 
@@ -96,7 +99,7 @@ export function beginRemoval(ws: string, opts: { previous?: string; landing?: La
     }
 
     const { removeError: _, ...rest } = current;
-    s.workspaces[ws] = { ...rest, removing: { since: new Date().toISOString(), cause: opts.cause ?? CleanupCause.Cleanup } };
+    s.workspaces[ws] = { ...rest, removing: { since: new Date().toISOString(), cause: opts.cause ?? CleanupCause.Cleanup, mode } };
 
     return true;
   });
@@ -122,9 +125,6 @@ export function beginRemoval(ws: string, opts: { previous?: string; landing?: La
   return undefined;
 }
 
-/** A kill removes the workspace whatever its git or PR state, so nothing checks for unsaved work. */
-const isKill = (cause: CleanupCause | undefined) => cause === CleanupCause.Kill;
-
 /** Switch to `landing` first, then close `ws`'s tab by id, so the close never depends on which tab has focus. */
 export function leaveTab(ws: string, landing: string | undefined, mux: Mux) {
   if (landing !== undefined) {
@@ -145,7 +145,7 @@ function waitTabGone(ws: string) {
 
 /**
  * The worker's half: re-check from the network that `ws` is still cleanable, stop its apps and run a
- * non-force remove. A kill skips the re-check and forces the remove. On any failure the workspace comes back with the error on its sidebar card and its tab reopened.
+ * non-force remove. `RemovalMode.Force` skips the re-check, also stops the workspace's checks, and forces the remove. On any failure the workspace comes back with the error on its sidebar card and its tab reopened.
  * Either way the outcome goes in the cleanup log the sidebar lists.
  */
 export async function finishRemoval(ws: string): Promise<void> {
@@ -154,14 +154,16 @@ export async function finishRemoval(ws: string): Promise<void> {
   }
 
   const label = sidebarLabel(ws, readTopCache(ws));
-  const cause = readState().workspaces[ws]?.removing?.cause ?? CleanupCause.Cleanup;
+  const removing = readState().workspaces[ws]?.removing;
+  const cause = removing?.cause ?? CleanupCause.Cleanup;
+  const force = removing?.mode === RemovalMode.Force;
 
   try {
     if (defaultMux().inSession()) {
       waitTabGone(ws);
     }
 
-    if (!isKill(cause)) {
+    if (!force) {
       refreshTop(ws);
 
       if (!cleanable(ws)) {
@@ -170,7 +172,12 @@ export async function finishRemoval(ws: string): Promise<void> {
     }
 
     await stopApps(ws);
-    removeWorkspace(ws, isKill(cause));
+
+    if (force) {
+      stopChecksFor(ws);
+    }
+
+    removeWorkspace(ws, force);
     recordCleanup({ ws, label, atMs: Date.now(), outcome: CleanupOutcome.Removed, cause });
   } catch (e) {
     restore(ws, errorMessage(e));
