@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { cacheStale } from "../src/agent-hook";
-import { createHandler, type HandlerDeps, shouldReplace } from "../src/server";
+import { createHandler, type HandlerDeps, workerFileGone } from "../src/server";
 import { staleCandidates } from "../src/merge-sweep";
 import { serverRefresh, serverRefreshAll } from "../src/server-client";
 import type { ServerStatus } from "../src/server-cmd";
@@ -192,7 +193,7 @@ describe("routes", () => {
   });
 
   test("a server whose code an upgrade removed answers 503 and goes, whoever calls", async () => {
-    const { deps, refreshed, mismatches } = handlerDeps({ codeGone: () => true });
+    const { deps, refreshed, mismatches } = handlerDeps({ workerFileGone: () => true });
     const h = createHandler(deps);
     const r = await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v1" });
     expect(r.status).toBe(503);
@@ -201,16 +202,26 @@ describe("routes", () => {
   });
 
   test("a server whose code is still there serves as usual", async () => {
-    const { deps, mismatches } = handlerDeps({ codeGone: () => false });
+    const { deps, mismatches } = handlerDeps({ workerFileGone: () => false });
     expect((await post(createHandler(deps), "/refresh/top/w1")).status).toBe(200);
     expect(mismatches()).toBe(0);
   });
 
-  test("shouldReplace takes a later build time or a later release", () => {
-    expect(shouldReplace({ version: "abc", buildTime: 2 }, { version: "def", buildTime: 1 })).toBe(true);
-    expect(shouldReplace({ version: "v1.2.0" }, { version: "v1.1.0", buildTime: 5 })).toBe(true);
-    expect(shouldReplace({ version: "abc", buildTime: 2 }, { version: "def" })).toBe(false);
-    expect(shouldReplace({ version: "v1.1.0", buildTime: 1 }, { version: "v1.2.0", buildTime: 2 })).toBe(false);
+  test("a server whose code is gone still answers /status, and goes", async () => {
+    const { deps, mismatches } = handlerDeps({ workerFileGone: () => true });
+    const r = await createHandler(deps).handle(new Request("http://x/status"));
+    expect(r.status).toBe(200);
+    expect(mismatches()).toBe(0);
+  });
+
+  test("the real refresh worker file is found, and a deleted one reads as gone", () => {
+    expect(workerFileGone()).toBe(false);
+    const dir = mkdtempSync(join(tmpdir(), "ob-worker-"));
+    const worker = join(dir, "server-worker.ts");
+    writeFileSync(worker, "");
+    expect(workerFileGone(pathToFileURL(worker))).toBe(false);
+    rmSync(dir, { recursive: true });
+    expect(workerFileGone(pathToFileURL(worker))).toBe(true);
   });
 
   test("a client started after the server does not replace it unless its build is newer", async () => {

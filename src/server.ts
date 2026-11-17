@@ -17,7 +17,7 @@ import { createWorklistRefresher } from "./server-worklist";
 import { finishWorklist } from "./worklist-data";
 import { cachedClaimedPrs, prefetchFor } from "./server-prs";
 import { log } from "./util";
-import { isNewerRelease, overbridgeBuildTime, overbridgeVersion, parseBuildTime } from "./version";
+import { overbridgeBuildTime, overbridgeVersion, parseBuildTime, shouldReplace } from "./version";
 
 /**
  * `overbridge serve`: one process per workspaces root that owns the network refreshes and serves one cache over HTTP on
@@ -62,30 +62,16 @@ export interface HandlerDeps {
   /** The sweep timer's counters; present when the server runs the merged-PR sweep. `GET /sweep` answers 404 without it. */
   sweepStats?: () => object;
   sweepBusy?: () => boolean;
-  /** This build's time (seconds since epoch), when it has one; a server without it is never replaced. */
+  /** This build's time (seconds since epoch), when it has one; a server without it is replaced only by a later release. */
   buildTime?: number;
-  /** Whether an upgrade removed the files this server loads its workers from. */
-  codeGone?: () => boolean;
+  /** Whether an upgrade removed the file this server loads its refresh worker from. */
+  workerFileGone?: () => boolean;
   /** Called when a client of a newer build calls, or the server's code is gone: finish what is running, then exit. */
   onVersionMismatch: () => void;
   /** Where a failed refresh is reported; the server's own stdio is ignored. */
   log?: (msg: string) => void;
   now?: () => number;
 }
-
-/** The identity a client and the server compare. */
-export interface BuildId {
-  version: string;
-  /** Seconds since epoch; absent on a build without one (a pnpm install, a dev checkout). */
-  buildTime?: number | undefined;
-}
-
-/**
- * Whether `client` may replace `server`: its build time is strictly later, or its release version is. A rev or a dev
- * build is never newer, so builds side by side cannot keep replacing each other.
- */
-export const shouldReplace = (client: BuildId, server: BuildId): boolean =>
-  (server.buildTime !== undefined && client.buildTime !== undefined && client.buildTime > server.buildTime) || isNewerRelease(client.version, server.version);
 
 /** The body of `GET /status`: the server's counters and what each optional part reports. */
 interface StatusBody extends CacheStats {
@@ -203,8 +189,10 @@ export function createHandler(deps: HandlerDeps) {
     const url = new URL(req.url);
     const theirs = req.headers.get(VERSION_HEADER);
 
-    if (deps.codeGone?.()) {
+    // `/status` still answers, so `overbridge server status` shows why the server is draining
+    if (url.pathname !== "/status" && deps.workerFileGone?.()) {
       // an upgrade deleted this server's files, so every worker it starts fails: go, and the caller's next call starts the installed version
+      report("server code was removed by an upgrade; exiting so the next client starts the installed version");
       draining = true;
       deps.onVersionMismatch();
 
@@ -394,9 +382,14 @@ const refreshJob = (ws: string, prefetched: PrefetchedPrs, paused?: string): Ref
   return job;
 };
 
+const REFRESH_WORKER = "./server-worker.ts";
+
+/** Whether the refresh worker's file is gone: pnpm deletes the old package folder on upgrade while its server still runs. */
+export const workerFileGone = (worker: URL = new URL(REFRESH_WORKER, import.meta.url)): boolean => !existsSync(fileURLToPath(worker));
+
 /** Run `refreshTop` in a worker thread, so the server stays responsive while `gh` runs. */
 export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000, paused?: string, onLimited?: (text: string) => void): Promise<TopCache> =>
-  workerJob("./server-worker.ts", refreshJob(ws, prefetched, paused), {
+  workerJob(REFRESH_WORKER, refreshJob(ws, prefetched, paused), {
     timeoutMs,
     label: `refresh of ${ws}`,
     fallback: "refresh failed",
@@ -420,9 +413,6 @@ export const workerCall = <T, Message extends object>(file: string, message: Mes
     // SAFETY: the caller names T for this worker file; the worker's reply value is not checked here, so T is the caller's contract with that worker
     pick: (r) => r.value as T | undefined,
   });
-
-/** Whether this server's refresh worker file is gone: pnpm deletes the old package folder on upgrade while the server still runs. */
-const workerCodeGone = (): boolean => !existsSync(fileURLToPath(new URL("./server-worker.ts", import.meta.url)));
 
 /** `overbridge serve`: runs until idle, killed, its code is removed, or a client of a newer version calls. */
 export async function serve(): Promise<void> {
@@ -527,6 +517,7 @@ export async function serve(): Promise<void> {
     log,
     version: overbridgeVersion(),
     buildTime: overbridgeBuildTime(),
+    workerFileGone,
     onVersionMismatch: () => void shutdown(),
   });
 
@@ -579,7 +570,19 @@ export async function serve(): Promise<void> {
   process.on("SIGINT", () => void shutdown());
   // sidebars ask `GET /sweep` and skip their own, so this is the one sweep; `claimSweep` keeps it to one per MERGE_SWEEP_MS
   setInterval(() => {
-    if (!exiting) void sweeper.tick();
+    if (exiting) {
+      return;
+    }
+
+    // a server no client calls must still go, or the sweep keeps judging workspaces from caches that never refresh
+    if (workerFileGone()) {
+      log("server code was removed by an upgrade; exiting so the next client starts the installed version");
+      void shutdown();
+
+      return;
+    }
+
+    void sweeper.tick();
   }, SWEEP_TICK_MS);
   setInterval(() => {
     if (handler.idleForMs() >= IDLE_EXIT_MS && !handler.busy()) void shutdown();
