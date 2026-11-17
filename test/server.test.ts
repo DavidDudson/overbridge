@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cacheStale } from "../src/agent-hook";
-import { createHandler, type HandlerDeps } from "../src/server";
+import { createHandler, type HandlerDeps, shouldReplace } from "../src/server";
 import { staleCandidates } from "../src/merge-sweep";
 import { serverRefresh, serverRefreshAll } from "../src/server-client";
 import type { ServerStatus } from "../src/server-cmd";
@@ -171,6 +171,46 @@ describe("routes", () => {
     const h = createHandler(deps);
     expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v2", [BUILD_HEADER]: "1001" })).status).toBe(409);
     expect(mismatches()).toBe(0);
+  });
+
+  test("a client of a newer release replaces a server with no build time, as a pnpm install has", async () => {
+    const { deps, mismatches } = handlerDeps({ version: "v1.49.0" });
+    const h = createHandler(deps);
+    expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v1.54.0" })).status).toBe(409);
+    expect(mismatches()).toBe(1);
+  });
+
+  test("a client of an older release, a rev or a dev build does not replace a release server", async () => {
+    const { deps, mismatches } = handlerDeps({ version: "v1.54.0" });
+    const h = createHandler(deps);
+
+    for (const version of ["v1.49.0", "3870b2a", "dev"]) {
+      expect((await post(h, "/refresh/top/w1", { [VERSION_HEADER]: version })).status).toBe(409);
+    }
+
+    expect(mismatches()).toBe(0);
+  });
+
+  test("a server whose code an upgrade removed answers 503 and goes, whoever calls", async () => {
+    const { deps, refreshed, mismatches } = handlerDeps({ codeGone: () => true });
+    const h = createHandler(deps);
+    const r = await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v1" });
+    expect(r.status).toBe(503);
+    expect(refreshed).toEqual([]);
+    expect(mismatches()).toBe(1);
+  });
+
+  test("a server whose code is still there serves as usual", async () => {
+    const { deps, mismatches } = handlerDeps({ codeGone: () => false });
+    expect((await post(createHandler(deps), "/refresh/top/w1")).status).toBe(200);
+    expect(mismatches()).toBe(0);
+  });
+
+  test("shouldReplace takes a later build time or a later release", () => {
+    expect(shouldReplace({ version: "abc", buildTime: 2 }, { version: "def", buildTime: 1 })).toBe(true);
+    expect(shouldReplace({ version: "v1.2.0" }, { version: "v1.1.0", buildTime: 5 })).toBe(true);
+    expect(shouldReplace({ version: "abc", buildTime: 2 }, { version: "def" })).toBe(false);
+    expect(shouldReplace({ version: "v1.1.0", buildTime: 1 }, { version: "v1.2.0", buildTime: 2 })).toBe(false);
   });
 
   test("a client started after the server does not replace it unless its build is newer", async () => {

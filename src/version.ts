@@ -22,6 +22,25 @@ const readPackageVersion = (): string | undefined => {
 /** The version of the code this process runs. */
 export const overbridgeVersion = (): string => resolveVersion(readPackageVersion(), process.env.OVERBRIDGE_VERSION);
 
+/** A release version as `resolveVersion` shows it; a rev or `dev` does not match. */
+const RELEASE_RE = /^v(\d+)\.(\d+)\.(\d+)$/;
+
+const releaseParts = (version: string): number[] | undefined => RELEASE_RE.exec(version)?.slice(1).map(Number);
+
+/** Whether `candidate` is a later release than `current`. A rev or `dev` on either side cannot be ordered, so it is never newer. */
+export function isNewerRelease(candidate: string, current: string): boolean {
+  const a = releaseParts(candidate);
+  const b = releaseParts(current);
+
+  if (!a || !b) {
+    return false;
+  }
+
+  const diff = a.map((n, i) => n - (b[i] ?? 0)).find((d) => d !== 0);
+
+  return diff !== undefined && diff > 0;
+}
+
 /** Reads a build time (seconds since epoch) from the environment; anything that is not a positive number is no build time. */
 export const parseBuildTime = (raw: string | undefined): number | undefined => {
   const n = Number(raw);

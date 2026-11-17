@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseBuildTime, resolveVersion } from "../src/version";
+import { isNewerRelease, parseBuildTime, resolveVersion } from "../src/version";
 
 describe("resolveVersion", () => {
   test("a real package.json version wins", () => {
@@ -27,5 +27,25 @@ describe("parseBuildTime", () => {
 
   test("anything else is none", () => {
     for (const raw of [undefined, "", "0", "-5", "soon", "NaN"]) expect(parseBuildTime(raw)).toBeUndefined();
+  });
+});
+
+describe("isNewerRelease", () => {
+  test("a later major, minor or patch release is newer", () => {
+    expect(isNewerRelease("v1.54.0", "v1.49.0")).toBe(true);
+    expect(isNewerRelease("v2.0.0", "v1.99.99")).toBe(true);
+    expect(isNewerRelease("v1.49.1", "v1.49.0")).toBe(true);
+    expect(isNewerRelease("v1.10.0", "v1.9.0")).toBe(true);
+  });
+
+  test("the same or an older release is not newer", () => {
+    expect(isNewerRelease("v1.49.0", "v1.49.0")).toBe(false);
+    expect(isNewerRelease("v1.49.0", "v1.54.0")).toBe(false);
+  });
+
+  test("a rev or a dev build on either side cannot be ordered", () => {
+    for (const [a, b] of [["3870b2a", "v1.0.0"], ["v2.0.0", "3870b2a"], ["dev", "v1.0.0"], ["v2.0.0", "dev"], ["v2.0.0-beta.1", "v1.0.0"]]) {
+      expect(isNewerRelease(a!, b!)).toBe(false);
+    }
   });
 });
