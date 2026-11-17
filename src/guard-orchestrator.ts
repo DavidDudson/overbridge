@@ -139,6 +139,7 @@ const OVERBRIDGE_ALLOWED = new Map<string, readonly string[]>(
     layout: [],
     sync: [],
     diff: [],
+    history: [],
     help: [],
     "--help": [],
     "-h": [],

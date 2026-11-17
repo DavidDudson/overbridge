@@ -179,7 +179,7 @@ before this may still carry an auto name: match it through \`overbridge status -
 restart that tab. To find branches still worth finishing, use the \`revisit\` skill: it reads
 \`overbridge ahead --json\` and asks each workspace's Claude whether its commits are still relevant.
 
-You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge worklist show\` (the ranked list the @work tab keeps; ask the user what to start next from it), \`overbridge item view\`, read-only
+You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge worklist show\` (the ranked list the @work tab keeps; ask the user what to start next from it), \`overbridge item view\`, \`overbridge history\` (where each workspace's time went), read-only
 \`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`icebox\`, \`thaw\`, \`release\`, \`up\`, \`repo add\`). You may also message
 workspace Claudes with \`ListAgents\` and \`SendMessage\`, for example to tell every tab to resume its work; the
 \`whip\` skill does that for every workspace whose work is still outstanding. The \`cleanup\` skill finds finished
