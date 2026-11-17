@@ -189,12 +189,14 @@ export function createHandler(deps: HandlerDeps) {
     const url = new URL(req.url);
     const theirs = req.headers.get(VERSION_HEADER);
 
-    // `/status` still answers, so `overbridge server status` shows why the server is draining
+    // `/status` reads no worker, so it keeps answering and `overbridge server status` still works until the server exits
     if (url.pathname !== "/status" && deps.workerFileGone?.()) {
       // an upgrade deleted this server's files, so every worker it starts fails: go, and the caller's next call starts the installed version
-      report("server code was removed by an upgrade; exiting so the next client starts the installed version");
-      draining = true;
-      deps.onVersionMismatch();
+      if (!draining) {
+        report(WORKER_GONE_MESSAGE);
+        draining = true;
+        deps.onVersionMismatch();
+      }
 
       return json(503, { error: "server code was removed by an upgrade; restarting" });
     }
@@ -383,9 +385,36 @@ const refreshJob = (ws: string, prefetched: PrefetchedPrs, paused?: string): Ref
 };
 
 const REFRESH_WORKER = "./server-worker.ts";
+const WORKER_GONE_MESSAGE = "server code was removed by an upgrade; exiting so the next client starts the installed version";
 
 /** Whether the refresh worker's file is gone: pnpm deletes the old package folder on upgrade while its server still runs. */
 export const workerFileGone = (worker: URL = new URL(REFRESH_WORKER, import.meta.url)): boolean => !existsSync(fileURLToPath(worker));
+
+/** What one sweep-timer tick reads and calls. */
+export interface SweepTickDeps {
+  exiting: () => boolean;
+  workerFileGone: () => boolean;
+  shutdown: () => void;
+  tick: () => void;
+  log: (line: string) => void;
+}
+
+/** One sweep-timer tick: sweep, or exit when an upgrade removed the worker file. */
+export function sweepTick(deps: SweepTickDeps): void {
+  if (deps.exiting()) {
+    return;
+  }
+
+  // a server no client calls must still go, or the sweep keeps judging workspaces from caches that never refresh
+  if (deps.workerFileGone()) {
+    deps.log(WORKER_GONE_MESSAGE);
+    deps.shutdown();
+
+    return;
+  }
+
+  deps.tick();
+}
 
 /** Run `refreshTop` in a worker thread, so the server stays responsive while `gh` runs. */
 export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000, paused?: string, onLimited?: (text: string) => void): Promise<TopCache> =>
@@ -569,21 +598,17 @@ export async function serve(): Promise<void> {
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
   // sidebars ask `GET /sweep` and skip their own, so this is the one sweep; `claimSweep` keeps it to one per MERGE_SWEEP_MS
-  setInterval(() => {
-    if (exiting) {
-      return;
-    }
-
-    // a server no client calls must still go, or the sweep keeps judging workspaces from caches that never refresh
-    if (workerFileGone()) {
-      log("server code was removed by an upgrade; exiting so the next client starts the installed version");
-      void shutdown();
-
-      return;
-    }
-
-    void sweeper.tick();
-  }, SWEEP_TICK_MS);
+  setInterval(
+    () =>
+      sweepTick({
+        exiting: () => exiting,
+        workerFileGone,
+        shutdown: () => void shutdown(),
+        tick: () => void sweeper.tick(),
+        log,
+      }),
+    SWEEP_TICK_MS,
+  );
   setInterval(() => {
     if (handler.idleForMs() >= IDLE_EXIT_MS && !handler.busy()) void shutdown();
   }, 30_000);

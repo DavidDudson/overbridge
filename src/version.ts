@@ -48,9 +48,10 @@ export interface BuildId {
   buildTime?: number | undefined;
 }
 
-/** Whether `client` may replace `server`: its build time or its release version is strictly later. */
+/** Whether `client` may replace `server`: its build time is later when both have one, else its release version is. */
 export const shouldReplace = (client: BuildId, server: BuildId): boolean =>
-  (server.buildTime !== undefined && client.buildTime !== undefined && client.buildTime > server.buildTime) || isNewerRelease(client.version, server.version);
+  // one ordering decides, so two builds can never each count as newer than the other
+  client.buildTime !== undefined && server.buildTime !== undefined ? client.buildTime > server.buildTime : isNewerRelease(client.version, server.version);
 
 /** Reads a build time (seconds since epoch) from the environment; anything that is not a positive number is no build time. */
 export const parseBuildTime = (raw: string | undefined): number | undefined => {

@@ -64,4 +64,16 @@ describe("shouldReplace", () => {
     expect(shouldReplace({ version: "abc", buildTime: 2 }, { version: "def" })).toBe(false);
     expect(shouldReplace({ version: "v1.1.0", buildTime: 1 }, { version: "v1.2.0", buildTime: 2 })).toBe(false);
   });
+
+  test("build time decides when both have one, so a later release with an older build cannot replace and be replaced back", () => {
+    const a = { version: "v1.2.0", buildTime: 100 };
+    const b = { version: "v1.1.0", buildTime: 200 };
+    expect(shouldReplace(a, b)).toBe(false);
+    expect(shouldReplace(b, a)).toBe(true);
+    expect(shouldReplace({ version: "v1.2.0", buildTime: 100 }, { version: "v1.1.0", buildTime: 100 })).toBe(false);
+  });
+
+  test("a release decides when only the client has a build time", () => {
+    expect(shouldReplace({ version: "v1.2.0", buildTime: 5 }, { version: "v1.1.0" })).toBe(true);
+  });
 });

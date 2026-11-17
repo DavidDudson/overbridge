@@ -860,7 +860,7 @@ still read `top/<ws>.json`, so the server is a faster writer, not a dependency f
   `<meta>/server.sock` (mode 0600; under `$XDG_RUNTIME_DIR` when that path is too long), pid in `<meta>/server.pid`
   (a second `serve` finds a live pid and exits; a dead pid and a leftover socket are replaced).
 - Every call carries the client's version and, on a nix build, its build time. A client of another version gets a 409 and
-  falls back for that call. When the client has a later build time or a later release version, the server also finishes
+  falls back for that call. When the client has a later build time (both sides have one) or else a later release version, the server also finishes
   what runs and exits, so the next call starts the new version. A rev or a dev build is never newer, so a pane that
   outlived an upgrade never replaces a newer server.
 - An upgrade that deletes the server's own files (pnpm removes the old package folder) makes the server exit on its next
