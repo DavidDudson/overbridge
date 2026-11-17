@@ -901,8 +901,14 @@ export type KillBegin = (ws: string) => string | undefined;
 
 const beginKill: KillBegin = (ws) => beginRemoval(ws, { cause: CleanupCause.Kill, mode: RemovalMode.Force });
 
-/** One press of `KILL_KEY` in `ws`'s sidebar: the arm to keep, and the footer to show (none once the removal is under way). */
-export function pressKill(ws: string, armedAtMs: number | undefined, nowMs: number, begin: KillBegin = beginKill): { armedAtMs?: number; footer?: Footer } {
+/** What one press of `KILL_KEY` leaves: the arm to keep, and the footer to show (none once the removal is under way). */
+export interface KillPress {
+  armedAtMs?: number;
+  footer?: Footer;
+}
+
+/** One press of `KILL_KEY` in `ws`'s sidebar. */
+export function pressKill(ws: string, armedAtMs: number | undefined, nowMs: number, begin: KillBegin = beginKill): KillPress {
   const step = killStep(ws, armedAtMs, nowMs);
 
   switch (step.kind) {

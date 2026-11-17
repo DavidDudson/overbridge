@@ -55,7 +55,14 @@ export const isCleanupRecord = (r: unknown): r is CleanupRecord => isJsonObject(
 /** The usable records of `State.cleanups` as read from disk; every consumer of that field goes through here. */
 export const cleanupRecords = (log: JsonValue | undefined): CleanupRecord[] => (Array.isArray(log) ? log : []).filter(isCleanupRecord);
 
-function rowStyle(r: CleanupRecord): { glyph: string; word: string; color: Color } {
+/** How one finished removal's row looks. */
+interface RowStyle {
+  glyph: string;
+  word: string;
+  color: Color;
+}
+
+function rowStyle(r: CleanupRecord): RowStyle {
   if (r.outcome === CleanupOutcome.Failed) {
     return { glyph: "✗", word: "failed", color: "red" };
   }
