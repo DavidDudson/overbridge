@@ -135,4 +135,22 @@ describe("lifecycle", () => {
 
     expect(hookLog()).toBe(`post-pr w3 app branch=topic pr=42 pwd=${join(root, "w3", "app")}\n`);
   });
+
+  test("hooks are told the work item id in the branch, or nothing when there is none", () => {
+    rmSync(logFile, { force: true });
+    writeRoot(`defaults:\n  project-management: { name: github, project: o/r }\n  hooks:\n    post-pr: 'echo "item=$OVERBRIDGE_ITEM" >> "$HOOK_LOG"'\n`);
+    const saved = { root: process.env.OVERBRIDGE_ROOT, log: process.env.HOOK_LOG };
+    process.env.OVERBRIDGE_ROOT = root;
+    process.env.HOOK_LOG = logFile;
+
+    try {
+      expect(runHooks("post-pr", { ws: "w3", repo: "app", branch: "feat/12-x", pr: 42 })).toBe(true);
+      expect(runHooks("post-pr", { ws: "w3", repo: "app", branch: "topic", pr: 42 })).toBe(true);
+    } finally {
+      saved.root === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = saved.root);
+      saved.log === undefined ? delete process.env.HOOK_LOG : (process.env.HOOK_LOG = saved.log);
+    }
+
+    expect(hookLog()).toBe("item=12\nitem=\n");
+  });
 });

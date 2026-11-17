@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { registerBuiltins } from "../src/pm";
 import { parseConfig, type ButtonSpec } from "../src/project-config";
 import { withState } from "../src/state";
 import {
@@ -24,7 +25,7 @@ const custom = (over: Partial<CustomButton> = {}): CustomButton => ({
   repo: "app",
   spec: spec(),
   dir: "/w/w1/app",
-  env: buttonEnv("w1", "app", { branch: "feat/x y", pr: 7 }),
+  env: buttonEnv("w1", "app", { branch: "feat/x y", pr: 7 }, "ENG-9"),
   ...over,
 });
 
@@ -58,7 +59,11 @@ describe("parseButtonStatus", () => {
 
 describe("buttonUrl", () => {
   test("fills and encodes the placeholders", () => {
-    expect(buttonUrl("https://c/{repo}/{branch}?pr={pr}&ws={ws}", custom().env)).toBe("https://c/app/feat%2Fx%20y?pr=7&ws=w1");
+    expect(buttonUrl("https://c/{repo}/{branch}?pr={pr}&ws={ws}&item={item}", custom().env)).toBe("https://c/app/feat%2Fx%20y?pr=7&ws=w1&item=ENG-9");
+  });
+
+  test("an unknown item fills in empty", () => {
+    expect(buttonUrl("https://c/{item}", buttonEnv("w1", "app", { branch: "main" }))).toBe("https://c/");
   });
 });
 
@@ -104,6 +109,8 @@ describe("refresh and snapshot", () => {
   const savedRoot = process.env.OVERBRIDGE_ROOT;
 
   beforeEach(() => {
+    // snapshotTop reads the item through the real registry, which other test files clear
+    registerBuiltins();
     tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-buttons-")));
     process.env.OVERBRIDGE_ROOT = tmp;
     mkdirSync(join(tmp, "w1", "app"), { recursive: true });
@@ -111,6 +118,7 @@ describe("refresh and snapshot", () => {
       join(tmp, "config.yml"),
       [
         "defaults:",
+        "  project-management: { name: github, project: o/r }",
         "  buttons:",
         "    - { id: checks, label: Checks, status: 'my-status', url: 'https://c/{pr}' }",
         "    - { id: quiet, label: Quiet, status: 'print-nothing', run: x }",
@@ -139,8 +147,10 @@ describe("refresh and snapshot", () => {
 
     const cache = refreshTop("w1", { provider: () => fakeProvider(), exec });
     expect(cache.buttons).toEqual({ "app/checks": { text: "green", color: "green" } });
-    expect(ran[0]).toEqual(["env", "OVERBRIDGE_NAME=w1", "OVERBRIDGE_REPO=app", "OVERBRIDGE_BRANCH=feat/12-x", "OVERBRIDGE_PR=3", "sh", "-c", "my-status"]);
-    const shown = (await snapshotTop("w1", {})).custom?.map((c) => [c.spec.id, c.state?.text]);
+    expect(ran[0]).toEqual(["env", "OVERBRIDGE_NAME=w1", "OVERBRIDGE_REPO=app", "OVERBRIDGE_BRANCH=feat/12-x", "OVERBRIDGE_PR=3", "OVERBRIDGE_ITEM=12", "sh", "-c", "my-status"]);
+    const snapshot = await snapshotTop("w1", {});
+    expect(snapshot.custom?.[0]?.env.OVERBRIDGE_ITEM).toBe("12");
+    const shown = snapshot.custom?.map((c) => [c.spec.id, c.state?.text]);
     // `quiet` printed nothing, so it stays hidden; `docs` has no status, so it always shows
     expect(shown).toEqual([
       ["checks", "green"],

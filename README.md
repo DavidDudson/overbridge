@@ -425,6 +425,10 @@ defaults:             # under every repo's overbridge.yml
     name: jira
     project: ENG
     url: https://example.atlassian.net
+owners:               # under the repo's overbridge.yml, for every repo a GitHub owner holds
+  my-org:
+    commands:
+      lint: pnpm lint
 repos:                # over one repo's overbridge.yml, by its name in repos.toml
   app:
     commands:
@@ -437,21 +441,25 @@ The layers apply in this order, and a later layer wins:
 
 1. Built-in defaults.
 2. `defaults` in the root `config.yml`.
-3. The repo's `overbridge.yml`.
-4. `repos.<name>` in the root `config.yml`.
+3. `owners.<owner>` in the root `config.yml`.
+4. The repo's `overbridge.yml`.
+5. `repos.<name>` in the root `config.yml`.
 
 Mappings merge key by key. Lists, such as `apps` and `review.personas`, replace the list below them whole. A
 `null` (`~`) removes the key. Each layer can be partial: a required key, such as `project-management.project`,
 only has to be set once the layers are merged. `overbridge start` reads the repo's file from its default branch, so
 the root `config.yml` is how to set up a repo that has no `overbridge.yml`.
 
-`repos.<name>` applies inside a workspace, where overbridge knows which repo a directory belongs to. Outside a
-workspace, only `defaults` applies.
+`owners.<owner>` matches the GitHub owner in the repo's URL in `repos.toml`, ignoring case. A repo that is not on
+GitHub gets no owner layer.
+
+`owners.<owner>` and `repos.<name>` apply inside a workspace, where overbridge knows which repo a directory belongs
+to. Outside a workspace, only `defaults` applies.
 
 ### Hooks
 
 `hooks` in the root `config.yml` runs shell commands at points in a worktree's life. Each hook takes one command
-or a list. They can sit under `defaults` or `repos.<name>`.
+or a list. They can sit under `defaults`, `owners.<owner>`, or `repos.<name>`.
 
 ```yaml
 defaults:
@@ -471,7 +479,8 @@ repos:
 
 Each command runs with `sh -c` in the worktree. Its stdout goes to stderr, so it can't mix with the output of
 commands such as `overbridge new`. It gets `OVERBRIDGE_HOOK`, `OVERBRIDGE_NAME` (the workspace), `OVERBRIDGE_REPO`,
-`OVERBRIDGE_BRANCH`, `OVERBRIDGE_PR`, `OVERBRIDGE_ROOT`, and `OVERBRIDGE_SELF`. A hook runs after the state lock is
+`OVERBRIDGE_BRANCH`, `OVERBRIDGE_PR`, `OVERBRIDGE_ITEM` (the work item id in the branch name, empty when there is
+none), `OVERBRIDGE_ROOT`, and `OVERBRIDGE_SELF`. A hook runs after the state lock is
 released, so it may call overbridge itself.
 
 The commands in a hook run in order and stop at the first failure. A failing `post-*` hook prints a warning and the
@@ -484,7 +493,7 @@ checking out someone's branch would run whatever that branch says.
 ### Top panel buttons
 
 `buttons` in the root `config.yml` adds buttons to the top panel, for each repo the workspace holds. They can sit
-under `defaults` or `repos.<name>`.
+under `defaults`, `owners.<owner>`, or `repos.<name>`.
 
 ```yaml
 defaults:
@@ -500,7 +509,7 @@ defaults:
 ```
 
 - **`id`** and **`label`**: required. The id must be unique within the list.
-- **`url`**: opened when the button is pressed. `{ws}`, `{repo}`, `{branch}`, and `{pr}` are filled in and URL-encoded.
+- **`url`**: opened when the button is pressed. `{ws}`, `{repo}`, `{branch}`, `{pr}`, and `{item}` are filled in and URL-encoded.
 - **`run`**: a shell command run in the worktree, detached, when the button is pressed. Set `run` or `url`, not both.
 - **`status`**: a shell command run in the worktree each time the panel refreshes (every minute, or `r`). It prints
   the text shown after the label, or a JSON object `{ "text": "…", "color": "green" }`. The colours are `red`,
@@ -508,15 +517,27 @@ defaults:
   prints something, so a command that fails or prints nothing hides it.
 - **`side`**: `right` (the default) with the launchers, or `left` with the links.
 
-The commands get `OVERBRIDGE_NAME`, `OVERBRIDGE_REPO`, `OVERBRIDGE_BRANCH`, and `OVERBRIDGE_PR`. When a workspace
-holds more than one repo, each button's label starts with its repo. The buttons have no keys, because the panel's
+The commands get `OVERBRIDGE_NAME`, `OVERBRIDGE_REPO`, `OVERBRIDGE_BRANCH`, `OVERBRIDGE_PR`, and `OVERBRIDGE_ITEM`
+(the work item id in the branch name, such as `ENG-1234`, empty when there is none). This button copies a release
+note for every repo the `megaport` org owns:
+
+```yaml
+owners:
+  megaport:
+    buttons:
+      - id: release-note
+        label: 📝 Release Note
+        run: mega release-note "$OVERBRIDGE_ITEM"
+```
+
+When a workspace holds more than one repo, each button's label starts with its repo. The buttons have no keys, because the panel's
 keys are taken.
 
 Like hooks, buttons are only read from the root `config.yml`, because `status` runs without anyone pressing anything.
 
 ### Project MCP servers
 
-In every new workspace, Claude asks before it starts a server from the repo's `.mcp.json`. `mcp-servers` in the root `config.yml` lists the servers to approve ahead of time, under `defaults` or `repos.<name>`.
+In every new workspace, Claude asks before it starts a server from the repo's `.mcp.json`. `mcp-servers` in the root `config.yml` lists the servers to approve ahead of time, under `defaults`, `owners.<owner>`, or `repos.<name>`.
 
 ```yaml
 repos:

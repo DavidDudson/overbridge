@@ -1,5 +1,6 @@
 import { root, selfCommand, worktreePath } from "./paths";
-import { type HookName, loadRepoConfig } from "./project-config";
+import { itemIdOf } from "./pm";
+import { type HookName, loadRepoConfig, type ProjectConfig } from "./project-config";
 import { errorMessage, log } from "./util";
 
 /** What a hook is told about the worktree it runs in. */
@@ -18,15 +19,17 @@ export interface HookContext {
  */
 export function runHooks(name: HookName, ctx: HookContext): boolean {
   const dir = worktreePath(ctx.ws, ctx.repo);
-  let commands: string[];
+  let config: ProjectConfig;
 
   try {
-    commands = loadRepoConfig(dir, ctx.repo).hooks?.[name] ?? [];
+    config = loadRepoConfig(dir, ctx.repo);
   } catch (e) {
     log(`${name} hooks skipped for ${ctx.ws}/${ctx.repo}: ${errorMessage(e)}`);
 
     return true;
   }
+
+  const commands = config.hooks?.[name] ?? [];
 
   const env = {
     ...process.env,
@@ -37,6 +40,7 @@ export function runHooks(name: HookName, ctx: HookContext): boolean {
     OVERBRIDGE_REPO: ctx.repo,
     OVERBRIDGE_BRANCH: ctx.branch ?? "",
     OVERBRIDGE_PR: ctx.pr === undefined ? "" : String(ctx.pr),
+    OVERBRIDGE_ITEM: itemIdOf(config.projectManagement, dir, ctx.branch),
   };
 
   for (const command of commands) {

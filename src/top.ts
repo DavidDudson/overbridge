@@ -7,7 +7,7 @@ import * as git from "./git";
 import { isOrchestrationTab } from "./orchestration";
 import { metaDir, wsDir, worktreePath } from "./paths";
 import { isJsonNumber, isJsonBoolean, isJsonObject, isJsonString, type JsonObject, type JsonValue } from "./json";
-import { providerFor, refreshTitle, TITLE_TTL_MS } from "./pm";
+import { itemIdOf, providerFor, refreshTitle, TITLE_TTL_MS } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, isTaskClaim, readState } from "./state";
@@ -177,16 +177,28 @@ export function parseButtonStatus(out: string): ButtonState {
   return line ? { text: line } : {};
 }
 
-/** The env a configured button's commands run with. */
-export function buttonEnv(ws: string, repo: string, claim: { branch?: string; pr?: number }) {
-  return { OVERBRIDGE_NAME: ws, OVERBRIDGE_REPO: repo, OVERBRIDGE_BRANCH: claim.branch ?? "", OVERBRIDGE_PR: claim.pr === undefined ? "" : String(claim.pr) };
+/** The env a configured button's commands run with. `item` is the work item id of the claimed branch, "" when none. */
+export function buttonEnv(ws: string, repo: string, claim: { branch?: string; pr?: number }, item = "") {
+  return {
+    OVERBRIDGE_NAME: ws,
+    OVERBRIDGE_REPO: repo,
+    OVERBRIDGE_BRANCH: claim.branch ?? "",
+    OVERBRIDGE_PR: claim.pr === undefined ? "" : String(claim.pr),
+    OVERBRIDGE_ITEM: item,
+  };
 }
 
-/** Fill `{ws}`, `{repo}`, `{branch}` and `{pr}` in a button's URL, each URL-encoded. */
+/** Fill `{ws}`, `{repo}`, `{branch}`, `{pr}` and `{item}` in a button's URL, each URL-encoded. */
 export function buttonUrl(template: string, env: Record<string, string>): string {
-  const vars = { ws: env.OVERBRIDGE_NAME ?? "", repo: env.OVERBRIDGE_REPO ?? "", branch: env.OVERBRIDGE_BRANCH ?? "", pr: env.OVERBRIDGE_PR ?? "" };
+  const vars = {
+    ws: env.OVERBRIDGE_NAME ?? "",
+    repo: env.OVERBRIDGE_REPO ?? "",
+    branch: env.OVERBRIDGE_BRANCH ?? "",
+    pr: env.OVERBRIDGE_PR ?? "",
+    item: env.OVERBRIDGE_ITEM ?? "",
+  };
 
-  return template.replace(/\{(ws|repo|branch|pr)\}/g, (_, k: keyof typeof vars) => encodeURIComponent(vars[k]));
+  return template.replace(/\{(ws|repo|branch|pr|item)\}/g, (_, k: keyof typeof vars) => encodeURIComponent(vars[k]));
 }
 
 export interface TopApp {
@@ -401,7 +413,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 
     for (const spec of config.buttons) {
       if (!spec.status) continue;
-      const env = Object.entries(buttonEnv(ws, repo, claim)).map(([k, v]) => `${k}=${v}`);
+      const env = Object.entries(buttonEnv(ws, repo, claim, itemIdOf(pm, dir, claim.branch, provider))).map(([k, v]) => `${k}=${v}`);
       const out = exec(["env", ...env, "sh", "-c", spec.status], dir);
 
       if (out !== undefined) buttonStates[`${repo}/${spec.id}`] = parseButtonStatus(out);
@@ -634,7 +646,7 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
 
         // a button with a status command waits for it to print something
         if (spec.status && !state) continue;
-        const button: CustomButton = { repo, spec, dir: repoDir, env: buttonEnv(ws, repo, claimed[repo] ?? {}) };
+        const button: CustomButton = { repo, spec, dir: repoDir, env: buttonEnv(ws, repo, claimed[repo] ?? {}, itemIdOf(config.projectManagement, repoDir, claimed[repo]?.branch)) };
 
         if (state) button.state = state;
         custom.push(button);
