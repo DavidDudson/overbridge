@@ -15,7 +15,7 @@ Take the target from the argument: file paths, skill names, or a plugin director
 wc -c -w -l <files>
 ```
 
-Keep the numbers for the report. Note any `SKILL.md` over about 300 lines (150 to 200 is a good size) as a step 2 candidate. Leave out copies of another project's skills that a reinstall or sync overwrites, such as a skill whose frontmatter names the repo it came from; ask when unsure. Then copy each target into a new temporary directory (`mktemp -d`) before you edit it. Step 5 compares against these copies, so changes the user made earlier are not mistaken for yours, and an untracked file can still be checked.
+Keep the numbers for the report. Note any `SKILL.md` over about 300 lines (150 to 200 is a good size). In step 2, look in it first for a mode most runs skip. Leave out copies of another project's skills that a reinstall or sync overwrites, such as a skill whose frontmatter names the repo it came from; ask when unsure. Then copy each target into a new temporary directory (`mktemp -d`) before you edit it. Step 5 compares against these copies, so changes the user made earlier are not mistaken for yours, and an untracked file can still be checked.
 
 ## 2. Find what repeats across files
 
