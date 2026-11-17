@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { cacheStale } from "../src/agent-hook";
-import { createHandler, type HandlerDeps, shouldReplace } from "../src/server";
+import { createHandler, type HandlerDeps, sweepTick, type SweepTickDeps, workerFileGone } from "../src/server";
 import { staleCandidates } from "../src/merge-sweep";
 import { serverRefresh, serverRefreshAll } from "../src/server-client";
 import type { ServerStatus } from "../src/server-cmd";
@@ -192,7 +193,7 @@ describe("routes", () => {
   });
 
   test("a server whose code an upgrade removed answers 503 and goes, whoever calls", async () => {
-    const { deps, refreshed, mismatches } = handlerDeps({ codeGone: () => true });
+    const { deps, refreshed, mismatches } = handlerDeps({ workerFileGone: () => true });
     const h = createHandler(deps);
     const r = await post(h, "/refresh/top/w1", { [VERSION_HEADER]: "v1" });
     expect(r.status).toBe(503);
@@ -200,17 +201,50 @@ describe("routes", () => {
     expect(mismatches()).toBe(1);
   });
 
+  test("a server whose code is gone reports and drains once, however many calls arrive", async () => {
+    const { deps, mismatches } = handlerDeps({ workerFileGone: () => true });
+    const h = createHandler(deps);
+    expect((await post(h, "/refresh/top/w1")).status).toBe(503);
+    expect((await post(h, "/refresh/top/w1")).status).toBe(503);
+    expect(mismatches()).toBe(1);
+  });
+
+  test("drain shows on /status, so a shutdown that waits on running work is visible", async () => {
+    const { deps } = handlerDeps({});
+    const h = createHandler(deps);
+    const before: unknown = await (await h.handle(new Request("http://x/status"))).json();
+    expect(before).toMatchObject({ draining: false });
+    h.drain();
+    const after: unknown = await (await h.handle(new Request("http://x/status"))).json();
+    expect(after).toMatchObject({ draining: true });
+  });
+
   test("a server whose code is still there serves as usual", async () => {
-    const { deps, mismatches } = handlerDeps({ codeGone: () => false });
+    const { deps, mismatches } = handlerDeps({ workerFileGone: () => false });
     expect((await post(createHandler(deps), "/refresh/top/w1")).status).toBe(200);
     expect(mismatches()).toBe(0);
   });
 
-  test("shouldReplace takes a later build time or a later release", () => {
-    expect(shouldReplace({ version: "abc", buildTime: 2 }, { version: "def", buildTime: 1 })).toBe(true);
-    expect(shouldReplace({ version: "v1.2.0" }, { version: "v1.1.0", buildTime: 5 })).toBe(true);
-    expect(shouldReplace({ version: "abc", buildTime: 2 }, { version: "def" })).toBe(false);
-    expect(shouldReplace({ version: "v1.1.0", buildTime: 1 }, { version: "v1.2.0", buildTime: 2 })).toBe(false);
+  test("a server whose code is gone still answers /status and does not drain on it", async () => {
+    const { deps, mismatches } = handlerDeps({ workerFileGone: () => true });
+    const r = await createHandler(deps).handle(new Request("http://x/status"));
+    expect(r.status).toBe(200);
+    expect(mismatches()).toBe(0);
+  });
+
+  test("the real refresh worker file is found, and a deleted one reads as gone", () => {
+    expect(workerFileGone()).toBe(false);
+    const dir = mkdtempSync(join(tmpdir(), "ob-worker-"));
+    const worker = join(dir, "server-worker.ts");
+
+    try {
+      writeFileSync(worker, "");
+      expect(workerFileGone(pathToFileURL(worker))).toBe(false);
+      rmSync(worker);
+      expect(workerFileGone(pathToFileURL(worker))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("a client started after the server does not replace it unless its build is newer", async () => {
@@ -249,6 +283,43 @@ describe("routes", () => {
   test("a malformed percent escape is a 400", async () => {
     const h = createHandler(handlerDeps().deps);
     expect((await post(h, "/refresh/top/%zz")).status).toBe(400);
+  });
+});
+
+describe("sweepTick", () => {
+  const tickDeps = (o: { exiting?: boolean; gone?: boolean }) => {
+    const logged: string[] = [];
+    const calls = { shutdown: 0, tick: 0, logged };
+
+    const deps: SweepTickDeps = {
+      exiting: () => o.exiting ?? false,
+      workerFileGone: () => o.gone ?? false,
+      shutdown: () => void calls.shutdown++,
+      tick: () => void calls.tick++,
+      log: (line) => void calls.logged.push(line),
+    };
+
+    return { deps, calls };
+  };
+
+  test("a server already exiting neither sweeps nor shuts down again", () => {
+    const { deps, calls } = tickDeps({ exiting: true, gone: true });
+    sweepTick(deps);
+    expect(calls).toEqual({ shutdown: 0, tick: 0, logged: [] });
+  });
+
+  test("a server whose worker file is gone shuts down instead of sweeping", () => {
+    const { deps, calls } = tickDeps({ gone: true });
+    sweepTick(deps);
+    expect(calls.shutdown).toBe(1);
+    expect(calls.tick).toBe(0);
+    expect(calls.logged).toHaveLength(1);
+  });
+
+  test("a server whose worker file is there sweeps", () => {
+    const { deps, calls } = tickDeps({});
+    sweepTick(deps);
+    expect(calls).toEqual({ shutdown: 0, tick: 1, logged: [] });
   });
 });
 

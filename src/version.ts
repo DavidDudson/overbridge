@@ -29,17 +29,29 @@ const releaseParts = (version: string): number[] | undefined => RELEASE_RE.exec(
 
 /** Whether `candidate` is a later release than `current`. A rev or `dev` on either side cannot be ordered, so it is never newer. */
 export function isNewerRelease(candidate: string, current: string): boolean {
-  const a = releaseParts(candidate);
-  const b = releaseParts(current);
+  const candidateParts = releaseParts(candidate);
+  const currentParts = releaseParts(current);
 
-  if (!a || !b) {
+  if (!candidateParts || !currentParts) {
     return false;
   }
 
-  const diff = a.map((n, i) => n - (b[i] ?? 0)).find((d) => d !== 0);
+  const diff = candidateParts.map((n, i) => n - (currentParts[i] ?? 0)).find((d) => d !== 0);
 
   return diff !== undefined && diff > 0;
 }
+
+/** The identity a client and the server compare. */
+export interface BuildId {
+  version: string;
+  /** Seconds since epoch; absent on a build without one (a pnpm install, a dev checkout). */
+  buildTime?: number | undefined;
+}
+
+/** Whether `client` may replace `server`: its build time is later when both have one, else its release version is. */
+export const shouldReplace = (client: BuildId, server: BuildId): boolean =>
+  // one ordering decides, so two builds can never each count as newer than the other
+  client.buildTime !== undefined && server.buildTime !== undefined ? client.buildTime > server.buildTime : isNewerRelease(client.version, server.version);
 
 /** Reads a build time (seconds since epoch) from the environment; anything that is not a positive number is no build time. */
 export const parseBuildTime = (raw: string | undefined): number | undefined => {
