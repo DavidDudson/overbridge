@@ -11,7 +11,7 @@ import { recentToolCalls } from "./history-tail";
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
-import { type CleanupInFlight, cleanupRecords, cleanupRows } from "./cleanup-log";
+import { CleanupCause, type CleanupInFlight, cleanupRecords, cleanupRows } from "./cleanup-log";
 import { Motion, sidebarMotion } from "./config";
 import { animate } from "./sidebar-motion";
 import { nextSort, SORT_LABEL, type SortMode, sortBy } from "./sort-mode";
@@ -30,7 +30,8 @@ import { serverOwnsSweep } from "./server-client";
 import { childError, type Finished, type Spawner, spawnAsync } from "./child";
 import { claimSweep, createSweepTrigger, startSweep } from "./sweep-trigger";
 import { bold, boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
-import { readTopCache, readTopCacheChecked, sidebarLabel, type PrStatus, type TopCache } from "./top";
+import { beginRemoval } from "./remove";
+import { CLEANUP_ARM_MS, pressCleanup, readTopCache, readTopCacheChecked, sidebarLabel, type PrStatus, type TopCache } from "./top";
 import { defaultMux, type Mux } from "./mux";
 import { currentTab, tabOrder } from "./tab";
 import { createPainter, readView, shouldPoll } from "./zellij-view";
@@ -43,6 +44,9 @@ export const PERF_TAB = "@perf";
 
 /** Ices this sidebar's workspace (`overbridge icebox`); the @frozen tab thaws it. */
 export const FREEZE_KEY = "f";
+
+/** Pressed twice within `CLEANUP_ARM_MS`, removes this sidebar's workspace and discards its unsaved work. */
+export const KILL_KEY = "X";
 
 /** Cycles how the workspaces are ordered: a-z, by status, by age. */
 export const SORT_KEY = "o";
@@ -58,7 +62,7 @@ export function legend(count: number, pending = ""): string {
 
   const digits = count > 1 ? `1-${count} go  ` : count === 1 ? "1 go  " : "";
 
-  return `${digits}←→ back  ⌥w next  s new ws  f freeze  p perf  o sort`;
+  return `${digits}←→ back  ⌥w next  s new ws  f freeze  X kill  p perf  o sort`;
 }
 
 /**
@@ -863,6 +867,28 @@ export async function runStart(repo: string, id: string, spawn: Spawner = spawnA
   return result.code === 0 ? LEGEND_FOOTER : { kind: FooterKind.Error, message: startError(repo, id, result) };
 }
 
+export const KillStepKind = { Refuse: "refuse", Arm: "arm", Kill: "kill" } as const;
+
+export type KillStepKind = (typeof KillStepKind)[keyof typeof KillStepKind];
+
+export type KillStep =
+  | { kind: typeof KillStepKind.Refuse; message: string }
+  | { kind: typeof KillStepKind.Arm; armedAtMs: number; message: string }
+  | { kind: typeof KillStepKind.Kill };
+
+/** What a press of `KILL_KEY` in `ws`'s sidebar does: the first arms the kill, a second within `CLEANUP_ARM_MS` confirms it. */
+export function killStep(ws: string, armedAtMs: number | undefined, nowMs: number): KillStep {
+  if (orchestrationTab(ws)) {
+    return { kind: KillStepKind.Refuse, message: `${ws} is an orchestration tab; only a workspace can be killed` };
+  }
+
+  if (pressCleanup(armedAtMs, nowMs).confirmed) {
+    return { kind: KillStepKind.Kill };
+  }
+
+  return { kind: KillStepKind.Arm, armedAtMs: nowMs, message: `press ${KILL_KEY} again within ${CLEANUP_ARM_MS / 1000}s to kill ${ws}; unsaved work is lost` };
+}
+
 /** Runs `overbridge icebox <ws>` as a child; resolves to the legend, or the error when icebox refuses. */
 export async function runFreeze(ws: string, spawn: Spawner = spawnAsync): Promise<Footer> {
   const result = await spawn([...selfCommand(), "icebox", ws]).catch((cause: unknown): Finished => ({ code: -1, stderr: `could not run overbridge icebox: ${errorMessage(cause)}` }));
@@ -1063,6 +1089,7 @@ export async function sidebar(wsOpt?: string) {
   let expanded = false;
   let view: CardView = {};
   let sortMode: SortMode = "alpha";
+  let killArmedAtMs: number | undefined;
   let digitTimer: ReturnType<typeof setTimeout> | undefined;
 
   const hold = (digit: string) => {
@@ -1230,6 +1257,11 @@ export async function sidebar(wsOpt?: string) {
 
         // an open prompt takes q and ctrl-c as text and cancel, so quit only once the footer has passed on the key
         if (input.kind === "key" && (input.key === "q" || input.key === "ctrl-c")) return quit();
+
+        // a kill is confirmed only by two presses in a row, so any other input disarms it
+        if (input.kind !== "key" || input.key !== KILL_KEY) {
+          killArmedAtMs = undefined;
+        }
         guarded("key", () => {
           if (input.kind === "key" && input.key === "n") {
             hold("");
@@ -1261,6 +1293,25 @@ export async function sidebar(wsOpt?: string) {
             show({ kind: FooterKind.Busy, id: self, verb: BusyVerb.Freezing });
 
             return void runFreeze(self).then(show);
+          }
+
+          if (input.kind === "key" && input.key === KILL_KEY) {
+            hold("");
+
+            if (footer.kind === FooterKind.Busy) {
+              return;
+            }
+
+            const step = killStep(self, killArmedAtMs, Date.now());
+            killArmedAtMs = step.kind === KillStepKind.Arm ? step.armedAtMs : undefined;
+
+            if (step.kind !== KillStepKind.Kill) {
+              return show({ kind: FooterKind.Error, message: step.message });
+            }
+
+            const refusal = beginRemoval(self, { cause: CleanupCause.Kill });
+
+            return refusal === undefined ? undefined : show({ kind: FooterKind.Error, message: refusal });
           }
 
           if (input.kind === "key" && input.key === SORT_KEY) {

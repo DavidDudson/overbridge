@@ -8,8 +8,8 @@ export const CleanupOutcome = { Removed: "removed", Failed: "failed" } as const;
 
 export type CleanupOutcome = (typeof CleanupOutcome)[keyof typeof CleanupOutcome];
 
-/** What removed a workspace: the Cleanup button, the merged-PR sweep, or the session-end reaper. */
-export const CleanupCause = { Cleanup: "cleanup", Merged: "merged", SessionEnded: "session-ended" } as const;
+/** What removed a workspace: the Cleanup button, the merged-PR sweep, the session-end reaper, or a sidebar kill. */
+export const CleanupCause = { Cleanup: "cleanup", Merged: "merged", SessionEnded: "session-ended", Kill: "kill" } as const;
 
 export type CleanupCause = (typeof CleanupCause)[keyof typeof CleanupCause];
 

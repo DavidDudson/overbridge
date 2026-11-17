@@ -8,7 +8,7 @@ import { Motion, sidebarMotion, sidebarWidth } from "../src/config";
 import { animate, BUSY_FRAMES, busyFrame, FRAME_MS } from "../src/sidebar-motion";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { BusyVerb, bodyRowsFor, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
+import { BusyVerb, bodyRowsFor, KILL_KEY, killStep, KillStepKind, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
 import { readHistory, Travel, writeHistory } from "../src/sidebar-history";
 import type { Finished } from "../src/child";
 import { type Input, textWidth } from "../src/term";
@@ -445,6 +445,28 @@ describe("new workspace prompt", () => {
     expect(parseStart({ text: "a b c" }, []).kind).toBe(StartPlanKind.Invalid);
     expect(parseStart({ text: "", id: "79" }, []).kind).toBe(StartPlanKind.Invalid);
     expect(parseStart({ text: "a b", id: "79" }, []).kind).toBe(StartPlanKind.Invalid);
+  });
+});
+
+describe("killStep", () => {
+  test("the first press arms the kill and says how to confirm it", () => {
+    expect(killStep("w1", undefined, 1_000)).toEqual({ kind: KillStepKind.Arm, armedAtMs: 1_000, message: `press ${KILL_KEY} again within 5s to kill w1; unsaved work is lost` });
+  });
+
+  test("a second press within 5s kills", () => {
+    expect(killStep("w1", 1_000, 6_000)).toEqual({ kind: KillStepKind.Kill });
+  });
+
+  test("a second press after 5s arms again", () => {
+    expect(killStep("w1", 1_000, 6_001)).toMatchObject({ kind: KillStepKind.Arm, armedAtMs: 6_001 });
+  });
+
+  test("an orchestration tab is refused, armed or not", () => {
+    expect(killStep("@root", 1_000, 1_500)).toEqual({ kind: KillStepKind.Refuse, message: "@root is an orchestration tab; only a workspace can be killed" });
+  });
+
+  test("the legend names the key", () => {
+    expect(legend(3)).toContain(`${KILL_KEY} kill`);
   });
 });
 

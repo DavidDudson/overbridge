@@ -389,6 +389,19 @@ describe("the background worker", () => {
     expect(readState().cleanups?.filter((c) => c.ws === "f1").map((c) => c.outcome)).toEqual([CleanupOutcome.Failed]);
   });
 
+  test("a kill removes a workspace with uncommitted changes, unpushed commits and no PR", async () => {
+    ob(["new", "k1", "-r", "app"]);
+    ob(["checkout", "app", "feat/77-kill", "--ws", "k1"]);
+    const wt = join(root, "k1", "app");
+    sh(["git", "commit", "-q", "--allow-empty", "-m", "unpushed"], wt);
+    writeFileSync(join(wt, "dirty.txt"), "x");
+    expect(beginRemoval("k1", { deps: noZellij() })).toContain("uncommitted changes or unpushed commits");
+    expect(beginRemoval("k1", { deps: noZellij(), cause: CleanupCause.Kill })).toBeUndefined();
+    expect(await until(() => !readState().workspaces.k1)).toBe(true);
+    expect(existsSync(join(root, "k1"))).toBe(false);
+    expect(readState().cleanups?.filter((c) => c.ws === "k1").map((c) => [c.outcome, c.cause])).toEqual([[CleanupOutcome.Removed, CleanupCause.Kill]]);
+  });
+
   test("a new Cleanup clears the old error", () => {
     const { deps } = fakeDeps("");
     beginRemoval("f1", { deps });
