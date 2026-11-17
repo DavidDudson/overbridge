@@ -1,4 +1,5 @@
-import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { NAME_RE, metaDir, selfCommand } from "./paths";
 import { pidAlive } from "./proc";
 import { Cache, type CacheStats, errorText, type Served } from "./server-cache";
@@ -16,7 +17,7 @@ import { createWorklistRefresher } from "./server-worklist";
 import { finishWorklist } from "./worklist-data";
 import { cachedClaimedPrs, prefetchFor } from "./server-prs";
 import { log } from "./util";
-import { overbridgeBuildTime, overbridgeVersion } from "./version";
+import { isNewerRelease, overbridgeBuildTime, overbridgeVersion, parseBuildTime } from "./version";
 
 /**
  * `overbridge serve`: one process per workspaces root that owns the network refreshes and serves one cache over HTTP on
@@ -63,15 +64,28 @@ export interface HandlerDeps {
   sweepBusy?: () => boolean;
   /** This build's time (seconds since epoch), when it has one; a server without it is never replaced. */
   buildTime?: number;
-  /** Called when a client of a newer build calls: finish what is running, then exit. */
+  /** Whether an upgrade removed the files this server loads its workers from. */
+  codeGone?: () => boolean;
+  /** Called when a client of a newer build calls, or the server's code is gone: finish what is running, then exit. */
   onVersionMismatch: () => void;
   /** Where a failed refresh is reported; the server's own stdio is ignored. */
   log?: (msg: string) => void;
   now?: () => number;
 }
 
-/** A client replaces the server only when both have a build time and the client's is strictly later. */
-const isNewerBuild = (client: number, server: number | undefined): boolean => server !== undefined && client > server;
+/** The identity a client and the server compare. */
+export interface BuildId {
+  version: string;
+  /** Seconds since epoch; absent on a build without one (a pnpm install, a dev checkout). */
+  buildTime?: number | undefined;
+}
+
+/**
+ * Whether `client` may replace `server`: its build time is strictly later, or its release version is. A rev or a dev
+ * build is never newer, so builds side by side cannot keep replacing each other.
+ */
+export const shouldReplace = (client: BuildId, server: BuildId): boolean =>
+  (server.buildTime !== undefined && client.buildTime !== undefined && client.buildTime > server.buildTime) || isNewerRelease(client.version, server.version);
 
 /** The body of `GET /status`: the server's counters and what each optional part reports. */
 interface StatusBody extends CacheStats {
@@ -189,10 +203,18 @@ export function createHandler(deps: HandlerDeps) {
     const url = new URL(req.url);
     const theirs = req.headers.get(VERSION_HEADER);
 
+    if (deps.codeGone?.()) {
+      // an upgrade deleted this server's files, so every worker it starts fails: go, and the caller's next call starts the installed version
+      draining = true;
+      deps.onVersionMismatch();
+
+      return json(503, { error: "server code was removed by an upgrade; restarting" });
+    }
+
     if (theirs && theirs !== deps.version) {
       // only a client of a newer build may replace this server, so builds running side by side (an older pane that
-      // outlived an upgrade, a dev checkout) cannot keep killing each other's server; no build time on either side, no replace
-      if (isNewerBuild(Number(req.headers.get(BUILD_HEADER)), deps.buildTime)) {
+      // outlived an upgrade, a dev checkout) cannot keep killing each other's server
+      if (shouldReplace({ version: theirs, buildTime: parseBuildTime(req.headers.get(BUILD_HEADER) ?? undefined) }, { version: deps.version, buildTime: deps.buildTime })) {
         draining = true;
         deps.onVersionMismatch();
       }
@@ -399,7 +421,10 @@ export const workerCall = <T, Message extends object>(file: string, message: Mes
     pick: (r) => r.value as T | undefined,
   });
 
-/** `overbridge serve`: runs until idle, killed or a client of another version calls. */
+/** Whether this server's refresh worker file is gone: pnpm deletes the old package folder on upgrade while the server still runs. */
+const workerCodeGone = (): boolean => !existsSync(fileURLToPath(new URL("./server-worker.ts", import.meta.url)));
+
+/** `overbridge serve`: runs until idle, killed, its code is removed, or a client of a newer version calls. */
 export async function serve(): Promise<void> {
   mkdirSync(metaDir(), { recursive: true });
   const pid = pidFile();
