@@ -12,7 +12,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   for extensions. Load repo config through `loadRepoConfig`/`loadConfigFile` so the layers apply.
   Lifecycle hooks (`src/hooks.ts`, `runHooks`) come only from the root `config.yml`; `validateConfig` rejects them
   in a repo file. Call `runHooks` outside `withState` so a hook can run overbridge. Top panel `buttons` are
-  root-only too (`validateConfig`'s `root` option): `refreshTop` runs their `status` into `TopCache.buttons`.
+  root-only too (`validateConfig`'s `root` option): `refreshTop` runs their `status` into `TopCache.buttons`, reusing it while the PR view is unchanged (`refreshButtons`, `TopCache.buttonRuns`, `BUTTON_MAX_AGE_MS`; a forced refresh always runs) and never running it while `gh` is paused; buttons get the path of a file holding that view (`prViewFile`) as `OVERBRIDGE_PR_JSON` (empty with no PR view); a forced refresh reads PRs through a rate-limit pause but buttons still wait (`buttonsPaused`).
   Global config is `repos.toml` (`src/config.ts`, e.g. `[sidebar] width`).
   Keep code generic: no repo names, ports, URLs or branch conventions outside that config.
   This repo dogfoods its own `overbridge.yml` (checked by `test/config-errors.test.ts`).

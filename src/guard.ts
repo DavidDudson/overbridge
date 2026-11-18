@@ -54,7 +54,7 @@ const BASH_RULES: [RegExp, string][] = [
     "only `gh stack init/add/up/down/top/bottom/push/submit/rebase/sync/view` are allowed here; ask the user to run other stack commands",
   ],
   [new RegExp(GIT + String.raw`worktree\b`), "worktrees are managed by overbridge; ask the user"],
-  [new RegExp(CMD + String.raw`(?:overbridge|ws)\s+(?:new|rm|up|claude|init|layout|spinup)\b`),"workspace admin commands are for the user, not a workspace Claude"],
+  [new RegExp(CMD + String.raw`(?:overbridge|ws)\s+(?:new|rm|up|claude|init|layout|spinup|config\s+set)\b`),"workspace admin commands are for the user, not a workspace Claude"],
 ];
 
 // Absolute, home-relative or parent-relative path tokens in a shell command.

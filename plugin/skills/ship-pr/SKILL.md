@@ -1,14 +1,14 @@
 ---
 name: ship-pr
-description: Commit, push and open (or update) a GitHub PR from an overbridge workspace, then record the PR against the workspace, wait for a green build, run the mob-review panel on the open PR and apply its fixes (required; `review.ship-pr: false` turns it off), then request Copilot and CodeRabbit reviews (CodeRabbit also on drafts) and resolve their feedback. Fills the PR body from the shared template (visible change summary and gaps, a benchmark table on performance PRs, screenshots; everything else collapsed). Handles a single PR on the default branch, a stacked PR on top of another branch or PR (always a real gh stack), and splitting one oversized branch into a stack. Use when the user says "ship it", "open a PR", "raise a PR", "push this up", "update the PR", "stack this on X", "on top of #123", "restack this onto X", "split this into a stack", "break this PR up", or "stacked PR".
+description: Commit, run the mob-review panel on the branch and apply its fixes before anything is pushed (required; `review.ship-pr: false` turns it off), then push and open (or update) a GitHub PR from an overbridge workspace, record the PR against the workspace, wait for a green build, then request Copilot and CodeRabbit reviews (CodeRabbit also on drafts) and resolve their feedback. Fills the PR body from the shared template (visible change summary and gaps, a benchmark table on performance PRs, screenshots; everything else collapsed). Handles a single PR on the default branch, a stacked PR on top of another branch or PR (always a real gh stack), and splitting one oversized branch into a stack. Use when the user says "ship it", "open a PR", "raise a PR", "push this up", "update the PR", "stack this on X", "on top of #123", "restack this onto X", "split this into a stack", "break this PR up", or "stacked PR".
 requires: gh-stack
 ---
 
 # Ship a PR from a workspace
 
-> Prerequisites: the `gh-stack` skill (run `overbridge prereqs` first; if it fails, stop and tell the user to install it) and, unless From the repo directory, `overbridge config get review.ship-pr` prints `false`, the `overbridge-review` plugin for `mob-review`. If the plugin is missing, stop and tell the user to install it or set `review.ship-pr: false` in `overbridge.yml`.
+> Prerequisites: the `gh-stack` skill (run `overbridge prereqs` first; if it fails, stop and tell the user to install it) and, unless `overbridge config get review.ship-pr` (run from the repo directory) prints `false`, the `overbridge-review` plugin for `mob-review`. If the plugin is missing, stop and tell the user to install it or set `review.ship-pr: false` in `overbridge.yml`.
 
-Commit the work, push the branch, open a PR with the shared body template, get the build green and the review feedback resolved. Everything runs from the repo directory inside the workspace, on the branch the workspace has claimed.
+Commit the work, run the review panel, push the branch, open a PR with the shared body template, get the build green and the review feedback resolved. Everything runs from the repo directory inside the workspace, on the branch the workspace has claimed.
 
 `overbridge` owns branch changes. Never `git switch`, `git checkout <branch>` or `gh pr checkout`: the guard blocks them and they bypass the claim. To discard file changes use `git restore <path>`.
 
@@ -20,7 +20,7 @@ the two conflict, the extension wins. It prints nothing when there is no extensi
 
 ## Run to completion
 
-Invoking this skill ("ship it", "open a PR", "stack this") is the approval to commit, push, open the PR as a draft and drive it to a green build, with no question in between. Do steps 1 to 13 in one run. Never stop to ask "want me to push / submit / write the descriptions?" and never end the turn on a list of what is not done yet: do it, or say in the final summary why a step was skipped.
+Invoking this skill ("ship it", "open a PR", "stack this") is the approval to commit, push, open the PR as a draft and drive it to a green build, with no question in between. Do steps 1 to 12 in one run. Never stop to ask "want me to push / submit / write the descriptions?" and never end the turn on a list of what is not done yet: do it, or say in the final summary why a step was skipped.
 
 That holds when you own the repo. Check once, at step 1:
 
@@ -97,7 +97,15 @@ All changes already committed → skip.
 
 ## 5. Review panel
 
-`mob-review` is required, but it reviews the PR, so it runs at step 11, once the PR is open and the build is green. Nothing to do here. A stacked PR is reviewed per layer: a review of the layer below says nothing about this one.
+Required, and it runs **before the first push** of this run, so no PR is opened (or updated) on code the panel has not seen. Fixes pushed later for a red build (step 10) or bot feedback (step 11) do not get a second panel.
+
+`overbridge config get review.ship-pr` prints `false` when the repo turned the step off: skip this step, say so in the final summary, and go to step 6. Anything else (it prints `true` by default) means run it.
+
+1. Run `overbridge phase mob-review`, then invoke `mob-review` (from the `overbridge-review` plugin) on the branch against its base, named explicitly: `origin/<default>`, or for a stacked layer the **local** branch of the layer below (`gh stack view` shows it; it may not be on origin yet, and a new layer has no PR for mob-review to read the base from). Skip its clean-thread prompt (Step 0) and proceed without asking: this run is unattended. It commits its small clear-cut fixes on your own branch (report-only on someone else's). Tell it **not to push**, even when the branch already has a PR: step 6 pushes, after mob-review's own fix checks and, on a stack, the lower-branch checks.
+2. Anything it leaves at `change-requested` is a stop: fix it, or accept it with a stated reason.
+3. Its fixes are checked and committed by mob-review itself. Go on to step 6. Do not run mob-review a second time in this run.
+
+A stacked PR is reviewed per layer: a review of the layer below says nothing about this one. `gh stack push` pushes every layer, so before it, review every layer that has commits the panel has not seen, bottom first, and run `gh stack rebase --upstack` from any layer that got fixes before reviewing the next. When this run only updates an existing PR, the panel still runs before the push, over the whole branch.
 
 ## 6. Push
 
@@ -174,17 +182,7 @@ The PR isn't done until CI passes. The push already happened, so CI is running.
 4. Re-watch after every fix or rerun, and after every later push to the PR (review fixes, a merge of main, a rebase). Loop until every non-gate check is green, a failure is confirmed real and unfixable, or the rerun budget is spent.
 5. **Never declare the build green without confirming on GitHub that the checks passed.** Never rerun an approval gate hoping it turns green.
 
-## 11. Run mob-review
-
-Required. Run it once the PR is open and step 10 is green, before any bot review is requested, so the bots see the branch after the panel's fixes.
-
-`overbridge config get review.ship-pr` prints `false` when the repo turned the step off: skip this step, say so in the final summary, and go to step 12. Anything else (it prints `true` by default) means run it.
-
-1. Invoke `mob-review` (from the `overbridge-review` plugin) on the branch. Skip its clean-thread prompt (Step 0) and proceed without asking: this run is unattended. It applies its small clear-cut fixes on your own branch (report-only on someone else's, so nothing is pushed) and pushes them when the branch has a PR; on a stack, push with `gh stack push` (run the lower-branch checks first), never a plain `git push`. A stacked PR is reviewed per layer.
-2. Anything it leaves at `change-requested` is a stop: fix it, or accept it with a stated reason.
-3. If it pushed, redo step 10 for the new head and wait for a green build, then go straight to step 12. Do not run mob-review a second time.
-
-## 12. Request Copilot and CodeRabbit, wait, then resolve feedback
+## 11. Request Copilot and CodeRabbit, wait, then resolve feedback
 
 **Copilot.** The reviewer is the bot `copilot-pull-request-reviewer[bot]`; `--reviewer` does not accept it, so use the REST API:
 
@@ -217,7 +215,7 @@ Then record in the report: Copilot and CodeRabbit reviews requested (or why not)
 3. **Go round again while the PR is a draft.** Fixes are pushed, and a draft's pushes are not reviewed automatically, so when the repo uses CodeRabbit post `@coderabbitai review` again and wait for the review that follows. Repeat steps 1 and 2 until no bot thread is left unresolved and no review is still in flight, at most three rounds; then report what is left.
 4. When it finishes, confirm the build is still green (step 10's rules) before reporting done.
 
-## 13. Link the item
+## 12. Link the item
 
 `ext: post-pr`: run `overbridge ext ship-pr post-pr` first (what to do with the item once the PR is open).
 
@@ -261,9 +259,9 @@ BASE_BRANCH=$(gh pr view <number|url> --json headRefName --jq .headRefName)
   gh stack link <base-pr> <head-pr>
   gh stack view
   ```
-  The commits and PRs exist already, so skip commit, template and create. Push (`gh stack push`), then do the build, panel and review steps. Re-run the checks on each layer: the base moved under them. Update a PR body only where it is now wrong. GitHub renders the stack itself, so a hand-written "stacked on #X" note duplicates it and goes stale.
+  The commits and PRs exist already, so skip commit, template and create. Run the panel on each layer, bottom first, restacking after fixes (step 5), push (`gh stack push`), then do the build and review steps. Re-run the checks on each layer: the base moved under them. Update a PR body only where it is now wrong. GitHub renders the stack itself, so a hand-written "stacked on #X" note duplicates it and goes stale.
 - **B. The changes are not on their own branch yet.** The claimed branch the work sits on becomes the base, and a new head branch holds the changes.
-  1. `BASE_BRANCH=$(git branch --show-current)`. If it is the default branch, this is not a stacked PR: say so and carry on with a normal PR (or confirm which branch they actually want as the base). The base must exist on origin (`git ls-remote --exit-code --heads origin "$BASE_BRANCH"`); push it first if not, since a stacked PR cannot target a branch that isn't on the remote.
+  1. `BASE_BRANCH=$(git branch --show-current)`. If it is the default branch, this is not a stacked PR: say so and carry on with a normal PR (or confirm which branch they actually want as the base). The base must exist on origin (`git ls-remote --exit-code --heads origin "$BASE_BRANCH"`), since a stacked PR cannot target a branch that isn't on the remote. If it is not there, run the panel on it (step 5) first, then push it.
   2. Name the head branch in the repo's convention (`<type>/<id>-<slug>`); ask when you cannot infer one, offering `<BASE_BRANCH>-followup`. Create it with `gh stack add "<head-branch>"`, which chains it on the current base and carries uncommitted changes across. If the base isn't in a stack yet, `gh stack link <its PR url|number>` adopts it first. Then `overbridge pr <repo>` records the new layer.
   3. Never commit the stacked changes onto the base itself: that yields an empty-diff PR.
 
@@ -308,7 +306,7 @@ If either check prints `STOP`, don't push. Show the user what it found. A lower 
 - **Merge conflicts or behind-base**: `gh stack sync` (fetches, rebases the whole stack onto its bases, updates PR targets; never orphans upper branches). Never plain-`git rebase` one mid-stack branch; it orphans the ones above. Push with `gh stack push`.
 - **When the base's PR merges**, GitHub retargets this one to the default branch. Check how it merged: a squash-merged base means its commits are not ancestors of the default branch, so `gh stack sync` (or `git rebase --onto origin/<default> <old-base-head>`) drops that layer cleanly, where a plain rebase replays it as duplicates. Tell the user the stack collapses on merge.
 - **Rebase the whole stack onto the latest default branch** with `gh stack rebase`. Merging into it is `merge-main`'s job for a single branch only: on a stack, do not use it.
-- Drive the layers **bottom PR first**: it is the one that can merge. Each layer still needs its own green build, its own mob-review and its own Copilot and CodeRabbit review and resolution.
+- Drive the layers **bottom PR first**: it is the one that can merge. Each layer still needs its own mob-review before its push, its own green build and its own Copilot and CodeRabbit review and resolution.
 
 ## Splitting an oversized branch
 
@@ -354,12 +352,12 @@ Turn one big branch into a stack of smaller PRs, one slice per layer. This rewri
    git diff "<Ln-branch>" "$SRC" --stat     # expect empty
    ```
    Non-empty means a file was missed or misassigned. Fix the layer before submitting; never open PRs on an incomplete split.
-7. **Submit.** Run the lower-branch checks from *Stacked PRs* first when the stack sits on an existing branch, then `gh stack push` and `gh stack submit --auto`. Fill every layer's description from the template, scoped to that layer, so none is left as a bare commit subject. Run `overbridge pr <repo>`. Report the bottom→top list of PR links, which is the base of which, and that the bottom PR merges first.
-8. Then drive each PR through steps 10 to 12, bottom first: build, then `mob-review` (step 11), then Copilot and, where the repo uses it, CodeRabbit (step 12), once per PR.
+7. **Submit.** Run `mob-review` (step 5) on each layer, bottom first, against the layer below. When it commits fixes on a layer, run `gh stack rebase --upstack` from that layer before reviewing the next, so the layers above carry the fix; the step 6 tree check no longer holds once fixes land. Then run the lower-branch checks from *Stacked PRs* first when the stack sits on an existing branch, then `gh stack push` and `gh stack submit --auto`. Fill every layer's description from the template, scoped to that layer, so none is left as a bare commit subject. Run `overbridge pr <repo>`. Report the bottom→top list of PR links, which is the base of which, and that the bottom PR merges first.
+8. Then drive each PR through steps 10 and 11, bottom first: build, then Copilot and, where the repo uses it, CodeRabbit (step 11), once per PR.
 
 ## Rules
 
-- **Always run `mob-review` (step 11) after the PR is open and the build is green, and apply its fixes before requesting Copilot or CodeRabbit.** Only `review.ship-pr: false` in `overbridge.yml` skips it. On someone else's branch it reports and fixes nothing.
+- **Always run `mob-review` (step 5) before the first push, and apply its fixes before the PR is opened or updated.** Never open a PR on code the panel has not reviewed. Only `review.ship-pr: false` in `overbridge.yml` skips it. On someone else's branch it reports and fixes nothing.
 - **Draft PRs, and request a Copilot review and, where the repo uses CodeRabbit, a CodeRabbit review** (by comment, since it skips drafts) on every PR. Only open one ready when the user says so.
 - **Attribution**: end commits and PR bodies with exactly the attribution lines the session's instructions specify, and add none if none are specified. Never invent one. Always commit with the user's git identity.
 - **Always use `TEMPLATE.md`** for the PR body, unless the repo's `CLAUDE.md` says otherwise. Tick the checkboxes that match the real changes.

@@ -139,7 +139,7 @@ export interface ReviewConfig {
   exclude: string[];
   /** Repo-relative directory of repo-local personas. */
   localDir: string;
-  /** Whether `ship-pr` runs `mob-review` on the open PR before requesting bot reviews. Default true. */
+  /** Whether `ship-pr` runs `mob-review` on the branch before pushing and opening the PR. Default true. */
   shipPr: boolean;
 }
 
@@ -780,10 +780,12 @@ export interface RootLayers {
 
 /** Read and check `<root>/config.yml`. A missing or empty file has no layers. */
 export function loadRootLayers(file = rootConfigPath()): RootLayers {
-  const layers: RootLayers = { file, owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] };
+  return rootLayersFrom(existsSync(file) ? parseYaml(readFileSync(file, "utf8"), file) : undefined, file);
+}
 
-  if (!existsSync(file)) return layers;
-  const raw = parseYaml(readFileSync(file, "utf8"), file);
+/** Check parsed root config YAML (`file` names it in errors), validating every layer with `validateConfig`. */
+export function rootLayersFrom(raw: Json | undefined, file: string): RootLayers {
+  const layers: RootLayers = { file, owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] };
 
   if (raw === null || raw === undefined) return layers;
 
