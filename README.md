@@ -193,7 +193,7 @@ github-actions, shell, typing, a11y, async-state, ac-check, production-protector
 from `overbridge.yml` (see below). It is enabled in the same way as the first.
 
 `mob-review` uses only the built-in `code-review` skill. `review-pr` claims the PR with `overbridge checkout`.
-`loop-item` calls `mob-review` when this plugin is installed. Nothing in it needs `pickup`; `merge-main` and
+`ship-pr` runs `mob-review` before the push when this plugin is installed (`loop-item` runs it instead when `review.ship-pr` is `false`). Nothing in it needs `pickup`; `merge-main` and
 `resolve-feedback` from `overbridge` are optional extras.
 
 Repo-local personas go in `review.local-dir` (default `.overbridge/personas`) as `<name>/SKILL.md` or `<name>.md`,

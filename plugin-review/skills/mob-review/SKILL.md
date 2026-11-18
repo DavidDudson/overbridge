@@ -67,7 +67,7 @@ git fetch origin main --quiet
 ```
 
 - **No arg / branch:** review the current (or named) branch vs `origin/main`.
-- **Stacked PR** (`gh pr view --json baseRefName` is not `main`): review vs `origin/<baseRefName>` instead, in every `git diff` below and in what the personas and `code-review` are told. The base branch's commits are its own PR's to review.
+- **Stacked PR** (`gh pr view --json baseRefName` is not `main`, or, for a layer with no PR yet, `gh stack view` shows a base below it, or the caller named a base): review vs `origin/<baseRefName>` instead, in every `git diff` below and in what the personas and `code-review` are told. The base branch's commits are its own PR's to review.
 - **PR number/URL:** the branch must already be checked out through `overbridge checkout <repo> '#<n>'`. If it isn't, run `review-pr` instead.
 
 Compute the changed-file list and the diff **once, to disk**, and hand every persona those paths instead of a command each one re-runs. Use the session's scratchpad directory when the system prompt names one, else `${TMPDIR:-/tmp}`:
@@ -283,7 +283,7 @@ Then, for everything you applied:
    overbridge config get commands.format
    overbridge config get commands.test      # a single file or project first; ask before a full suite
    ```
-   Run each through the repo's dev shell: `overbridge shell <repo> -- <command>` (it runs the command as it is when the repo declares no `shell`).
+   Run each through the check queue: `overbridge check <repo> -- <command>` (it runs in the repo's dev shell).
    A key that is unset means the repo has no such command: say so rather than guessing one. Follow the repo's `CLAUDE.md`/`AGENTS.md` for how to scope a run.
 3. **Re-review your own fixes: narrowly.** The panel read the original diff; your fix commit went in unreviewed, and a fix is where a fresh defect lands (a moved symbol, a weakened assertion, a rename that missed a caller). But this round is the most expensive thing the panel does: it fires at the deepest context of the session, so it is scoped to where a fix can actually go wrong, not re-run across the board.
 
@@ -307,7 +307,7 @@ Then, for everything you applied:
    A persona whose lane a fix merely passed through, without that persona having asked for the fix, is **not** in this round.
 
    **One round, hard cap.** Drop its findings Copilot already raised (Step 4's filter), apply the same size-and-certainty judgement to the rest, then report whatever remains rather than spawning a third round.
-4. Commit as one commit in the repo's commit convention (Conventional Commits by default, e.g. `refactor(<scope>): act on mob-review findings`, or `fix(...)` if behaviour changed), body listing what changed and why. Push if the branch already has a PR.
+4. Commit as one commit in the repo's commit convention (Conventional Commits by default, e.g. `refactor(<scope>): act on mob-review findings`, or `fix(...)` if behaviour changed), body listing what changed and why. Push if the branch already has a PR, unless the caller said not to (`ship-pr` pushes after its own checks).
 5. In the final summary, mark every finding `applied` / `left for you`, so the report stays a complete account of the panel's output.
 
 ## Step 7: Persona calibration (apply confident refinements)

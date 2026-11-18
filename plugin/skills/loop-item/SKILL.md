@@ -63,7 +63,7 @@ Run `overbridge phase implement` (`overbridge phase implement --stack <n>/<m>` f
 
 ## 4. Commit, then self-review
 
-Run `overbridge phase mob-review` before a panel run here.
+When `review.ship-pr` is `false`, run `overbridge phase mob-review` before the panel run below.
 
 Commit the change (Conventional Commits, `Refs <id>` in the body, no secrets) but do not push yet.
 Review sees only committed work.

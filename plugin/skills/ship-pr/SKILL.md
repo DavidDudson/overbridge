@@ -97,13 +97,13 @@ All changes already committed → skip.
 
 ## 5. Review panel
 
-Required, and it runs **before the push**, so no PR is opened (or updated) on code the panel has not seen.
+Required, and it runs **before the first push** of this run, so no PR is opened (or updated) on code the panel has not seen. Fixes pushed later for a red build (step 10) or bot feedback (step 11) do not get a second panel.
 
 `overbridge config get review.ship-pr` prints `false` when the repo turned the step off: skip this step, say so in the final summary, and go to step 6. Anything else (it prints `true` by default) means run it.
 
-1. Run `overbridge phase mob-review`, then invoke `mob-review` (from the `overbridge-review` plugin) on the branch against its base (the default branch, or the stack base for a stacked PR). Skip its clean-thread prompt (Step 0) and proceed without asking: this run is unattended. It commits its small clear-cut fixes on your own branch (report-only on someone else's).
+1. Run `overbridge phase mob-review`, then invoke `mob-review` (from the `overbridge-review` plugin) on the branch against its base, named explicitly: `origin/<default>`, or for a stacked layer the **local** branch of the layer below (`gh stack view` shows it; it may not be on origin yet, and a new layer has no PR for mob-review to read the base from). Skip its clean-thread prompt (Step 0) and proceed without asking: this run is unattended. It commits its small clear-cut fixes on your own branch (report-only on someone else's). Tell it **not to push**, even when the branch already has a PR: step 6 pushes, after the checks below and, on a stack, the lower-branch checks.
 2. Anything it leaves at `change-requested` is a stop: fix it, or accept it with a stated reason.
-3. If it committed fixes, rerun step 3's checks on the files it touched, then go on to step 6. Do not run mob-review a second time in this run.
+3. Its fixes are checked and committed by mob-review itself. Go on to step 6. Do not run mob-review a second time in this run.
 
 A stacked PR is reviewed per layer, each before its own push: a review of the layer below says nothing about this one. When this run only updates an existing PR, the panel still runs before the push, over the whole branch.
 
@@ -352,12 +352,12 @@ Turn one big branch into a stack of smaller PRs, one slice per layer. This rewri
    git diff "<Ln-branch>" "$SRC" --stat     # expect empty
    ```
    Non-empty means a file was missed or misassigned. Fix the layer before submitting; never open PRs on an incomplete split.
-7. **Submit.** Run `mob-review` (step 5) on each layer, bottom first, against the layer below. Then run the lower-branch checks from *Stacked PRs* first when the stack sits on an existing branch, then `gh stack push` and `gh stack submit --auto`. Fill every layer's description from the template, scoped to that layer, so none is left as a bare commit subject. Run `overbridge pr <repo>`. Report the bottom→top list of PR links, which is the base of which, and that the bottom PR merges first.
+7. **Submit.** Run `mob-review` (step 5) on each layer, bottom first, against the layer below. When it commits fixes on a layer, run `gh stack rebase --upstack` from that layer before reviewing the next, so the layers above carry the fix; the step 6 tree check no longer holds once fixes land. Then run the lower-branch checks from *Stacked PRs* first when the stack sits on an existing branch, then `gh stack push` and `gh stack submit --auto`. Fill every layer's description from the template, scoped to that layer, so none is left as a bare commit subject. Run `overbridge pr <repo>`. Report the bottom→top list of PR links, which is the base of which, and that the bottom PR merges first.
 8. Then drive each PR through steps 10 and 11, bottom first: build, then Copilot and, where the repo uses it, CodeRabbit (step 11), once per PR.
 
 ## Rules
 
-- **Always run `mob-review` (step 5) before the push, and apply its fixes before the PR is opened or updated.** Never open a PR on code the panel has not reviewed. Only `review.ship-pr: false` in `overbridge.yml` skips it. On someone else's branch it reports and fixes nothing.
+- **Always run `mob-review` (step 5) before the first push, and apply its fixes before the PR is opened or updated.** Never open a PR on code the panel has not reviewed. Only `review.ship-pr: false` in `overbridge.yml` skips it. On someone else's branch it reports and fixes nothing.
 - **Draft PRs, and request a Copilot review and, where the repo uses CodeRabbit, a CodeRabbit review** (by comment, since it skips drafts) on every PR. Only open one ready when the user says so.
 - **Attribution**: end commits and PR bodies with exactly the attribution lines the session's instructions specify, and add none if none are specified. Never invent one. Always commit with the user's git identity.
 - **Always use `TEMPLATE.md`** for the PR body, unless the repo's `CLAUDE.md` says otherwise. Tick the checkboxes that match the real changes.
