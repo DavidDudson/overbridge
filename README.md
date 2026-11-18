@@ -106,9 +106,11 @@ iceboxing a workspace whose claimed PRs are all drafts and untouched that long: 
 **Explore.** The `@explore` orchestration tab (`overbridge explore`) is for looking at a repo as it is on its default
 branch, with nothing claimed. Pick a repo and it gets a detached checkout of `origin/<default>` at `<root>/@explore/<repo>`,
 the top panel's app and editor buttons over it, and a terminal below in the repo's dev shell. `b` goes back to the picker.
-The checkout moves to the latest default branch on every pick and every 5 minutes, but only while it is clean and has no
-commits of its own (`overbridge explore sync <repo>` does it by hand). Apps started there take ports from the same pool
-as the workspaces'. Apps marked `when: feature-branch` are not offered.
+The checkout moves to the latest default branch on every pick, and every 5 minutes while the tab is focused. It moves
+only when no tracked file is changed and it has no commits of its own; untracked files don't block it. Run
+`overbridge explore sync <repo>` to do it by hand. When a sync leaves the checkout where it is, the panel says why.
+Apps started there take ports from the same pool as the workspaces', and stop when you switch to another repo. Apps
+marked `when: feature-branch` are not offered. `q` closes the pane.
 
 Nothing is reclaimed unless you ask. `icebox <name> --prune` deletes the paths listed in the repo's
 `icebox.prune` (`node_modules`, `target`) once the workspace is marked iceboxed, skipping anything git does not ignore,

@@ -263,6 +263,42 @@ describe("workflow", () => {
     expect(ws(["release", "app"], join(root, "ia")).code).toBe(0);
     expect(ws(["checkout", "app", "fix/383-defences"], join(root, "ib")).code).toBe(0);
   });
+
+  test("explore sync checks out the default branch, follows it, and leaves local work alone", () => {
+    const dir = join(root, "@explore", "app");
+    const head = () => sh(["git", "rev-parse", "HEAD"], dir);
+    const tip = () => sh(["git", "rev-parse", "main"], remote);
+
+    expect(ws(["explore", "sync", "app"]).code).toBe(0);
+    expect(head()).toBe(tip());
+
+    const src = join(tmp, "src");
+    writeFileSync(join(src, "a.txt"), "one\n");
+    sh(["git", "add", "a.txt"], src);
+    sh(["git", "commit", "-q", "-m", "add a"], src);
+    sh(["git", "push", "-q", remote, "main"], src);
+    expect(ws(["explore", "sync", "app"]).code).toBe(0);
+    expect(head()).toBe(tip());
+
+    writeFileSync(join(dir, "stray.log"), "untracked\n");
+    writeFileSync(join(src, "a.txt"), "two\n");
+    sh(["git", "commit", "-q", "-am", "change a"], src);
+    sh(["git", "push", "-q", remote, "main"], src);
+    expect(ws(["explore", "sync", "app"]).err).toBe("");
+    expect(head()).toBe(tip());
+
+    writeFileSync(join(dir, "a.txt"), "edited\n");
+    const dirty = ws(["explore", "sync", "app"]);
+    expect(dirty.err).toContain("has local changes");
+    expect(head()).toBe(tip());
+    sh(["git", "checkout", "--", "a.txt"], dir);
+
+    sh(["git", "commit", "-q", "--allow-empty", "-m", "local"], dir);
+    const local = head();
+    const ahead = ws(["explore", "sync", "app"]);
+    expect(ahead.err).toContain("has commits not on origin/main");
+    expect(head()).toBe(local);
+  });
 });
 
 describe("dev shells", () => {

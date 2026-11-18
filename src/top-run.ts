@@ -38,17 +38,26 @@ export interface PanelOptions {
   /** The name apps and the cache are kept under. */
   name: string;
   scope: TopScope;
-  /** Label of the button that leaves the panel; the panel resolves when it is pressed. */
+  /** Label of the button that leaves the panel. */
   back: string;
   pane: (pane: PaneKind) => string | undefined;
+  /** Shown on the message row when the panel opens. */
+  message?: string;
+  /** Called once with a function that puts a message on the message row, for work that finishes later. */
+  onMessage?: (show: (message: string) => void) => void;
 }
+
+/** How a panel ended: its back button, or `q` / Ctrl-C. */
+export const PanelExit = { Back: "back", Quit: "quit" } as const;
+
+export type PanelExit = (typeof PanelExit)[keyof typeof PanelExit];
 
 /**
  * `overbridge top [--ws]`: the interactive panel. Mouse click or Enter activates a button,
  * arrows/Tab move the cursor, `o` opens a running app, `L` shows its log, `r` refreshes, `q` quits.
  * With `panel` it draws that scope instead and never refreshes the PR cache; `b` (or its button) leaves.
  */
-export async function topPanel(wsOpt?: string, panel?: PanelOptions) {
+export async function topPanel(wsOpt?: string, panel?: PanelOptions): Promise<PanelExit> {
   const ws = panel ? panel.name : requireWs(wsOpt);
 
   if (!process.stdin.isTTY) throw new Error("overbridge top needs a terminal");
@@ -61,10 +70,10 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions) {
 
   let snap: TopSnapshot = await snapshot();
 
-  let leave = () => {};
+  let leave = (_exit: PanelExit) => {};
 
   /** Set once the panel quits, so a reload still in flight draws nothing over what comes next. */
-  let left = false;
+  let hasLeft = false;
   let cursor = 0;
   let note: string | undefined;
   let frame = layoutTop(snap, process.stdout.columns ?? 80, process.stdout.rows ?? 0);
@@ -100,7 +109,7 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions) {
     stop: (app: TopApp) => void stopApp(ws, app.repo, app.spec, app.repoDir),
     pane: (pane) => (panel ? panel.pane(pane) : togglePane(ws, pane)),
     back: () => {
-      leave();
+      leave(PanelExit.Back);
 
       return undefined;
     },
@@ -148,7 +157,7 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions) {
   const painter = createPainter((text) => process.stdout.write(text));
 
   const draw = () => {
-    if (left) return;
+    if (hasLeft) return;
     const shown: TopSnapshot = { ...snap };
 
     if (note) shown.message = note;
@@ -208,15 +217,15 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions) {
     await reload();
   };
 
-  const done = new Promise<void>((resolve) => {
-    const quit = () => {
-      left = true;
-      // the @explore pane draws its picker in this process next, so nothing of the panel may keep listening
+  const done = new Promise<PanelExit>((resolve) => {
+    const quit = (exit: PanelExit = PanelExit.Quit) => {
+      hasLeft = true;
+      // a caller may draw in this process next, so the panel stops listening to the terminal before it resolves
       process.stdin.removeAllListeners("data");
       process.stdout.removeAllListeners("resize");
       process.stdout.write(LEAVE_SCREEN);
       process.stdin.setRawMode(false);
-      resolve();
+      resolve(exit);
     };
 
     leave = quit;
@@ -246,7 +255,7 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions) {
       note = undefined;
       const n = frame.placed.length;
 
-      if (key === "q" || key === "\x03") return quit();
+      if (key === "q" || key === "\x03") return quit(PanelExit.Quit);
       const byKey = key.length === 1 ? frame.placed.findIndex((p) => p.button.key === key) : -1;
 
       if (byKey >= 0) {
@@ -304,8 +313,16 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions) {
   });
 
   liveEvents = events.live;
-  refresh();
-  await done;
+  refresh(panel?.message);
+
+  panel?.onMessage?.((message) => {
+    note = message;
+    draw();
+  });
+
+  const exit = await done;
   clearInterval(poll);
   events.stop();
+
+  return exit;
 }

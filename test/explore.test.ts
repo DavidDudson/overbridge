@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { pickerHit, renderPicker, showTerminal, SyncStep, syncPlan, terminalTitle, toggleTerminal, type TerminalDeps } from "../src/explore";
+import { pickerHit, pickerOffset, renderPicker, showTerminal, SyncStep, syncPlan, terminalTitle, toggleTerminal, type TerminalDeps } from "../src/explore";
 import { type Mux, type MuxPane, type NewPane, zellijMux } from "../src/mux";
 import { buttons, type TopSnapshot } from "../src/top";
 import { ORCHESTRATION_TABS } from "../src/orchestration";
@@ -8,25 +8,25 @@ const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 describe("syncPlan", () => {
   test("adds a missing checkout", () => {
-    expect(syncPlan({ exists: false, dirty: false, onMain: true })).toBe(SyncStep.Add);
+    expect(syncPlan({ exists: false, dirty: false, onDefaultBranch: true })).toBe(SyncStep.Add);
   });
 
   test("moves a clean checkout on the default branch's history", () => {
-    expect(syncPlan({ exists: true, dirty: false, onMain: true })).toBe(SyncStep.Move);
+    expect(syncPlan({ exists: true, dirty: false, onDefaultBranch: true })).toBe(SyncStep.Move);
   });
 
   test("leaves local changes alone", () => {
-    expect(syncPlan({ exists: true, dirty: true, onMain: true })).toBe(SyncStep.KeepDirty);
+    expect(syncPlan({ exists: true, dirty: true, onDefaultBranch: true })).toBe(SyncStep.KeepDirty);
   });
 
   test("leaves local commits alone", () => {
-    expect(syncPlan({ exists: true, dirty: false, onMain: false })).toBe(SyncStep.KeepAhead);
+    expect(syncPlan({ exists: true, dirty: false, onDefaultBranch: false })).toBe(SyncStep.KeepAhead);
   });
 });
 
 describe("renderPicker", () => {
   test("marks checked-out repos and inverts the selected row", () => {
-    const rows = renderPicker({ repos: ["api", "web"], selected: 1, checkedOut: new Set(["web"]), width: 40 });
+    const rows = renderPicker({ repos: ["api", "web"], selected: 1, checkedOut: new Set(["web"]), width: 40, height: 24 });
 
     expect(strip(rows[2]!).trim()).toBe("○ api");
     expect(strip(rows[3]!).trim()).toBe("● web");
@@ -35,14 +35,33 @@ describe("renderPicker", () => {
   });
 
   test("says how to register a repo when there are none", () => {
-    expect(renderPicker({ repos: [], selected: 0, checkedOut: new Set(), width: 80 }).join("\n")).toContain("overbridge repo add");
+    expect(renderPicker({ repos: [], selected: 0, checkedOut: new Set(), width: 80, height: 24 }).join("\n")).toContain("overbridge repo add");
   });
 
-  test("pickerHit maps a screen row to its repo", () => {
-    expect(pickerHit(1, 2)).toBeUndefined();
-    expect(pickerHit(2, 2)).toBe(0);
-    expect(pickerHit(3, 2)).toBe(1);
-    expect(pickerHit(4, 2)).toBeUndefined();
+  test("scrolls a long list so the selected repo and the footer stay on screen", () => {
+    const repos = Array.from({ length: 40 }, (_, i) => `r${i}`);
+    const rows = renderPicker({ repos, selected: 30, checkedOut: new Set(), width: 80, height: 10 });
+
+    expect(rows).toHaveLength(10);
+    expect(rows.map(strip).some((r) => r.trim() === "○ r30")).toBe(true);
+    expect(strip(rows.at(-1)!)).toContain("q: quit");
+  });
+
+  test("pickerOffset keeps the window inside the list", () => {
+    expect(pickerOffset(0, 40, 10)).toBe(0);
+    expect(pickerOffset(30, 40, 10)).toBe(27);
+    expect(pickerOffset(39, 40, 10)).toBe(34);
+    expect(pickerOffset(1, 3, 24)).toBe(0);
+  });
+
+  test("pickerHit maps a screen row to the repo shown there", () => {
+    expect(pickerHit(1, ["api", "web"], 0, 24)).toBeUndefined();
+    expect(pickerHit(2, ["api", "web"], 0, 24)).toBe("api");
+    expect(pickerHit(3, ["api", "web"], 0, 24)).toBe("web");
+    expect(pickerHit(4, ["api", "web"], 0, 24)).toBeUndefined();
+
+    const repos = Array.from({ length: 40 }, (_, i) => `r${i}`);
+    expect(pickerHit(2, repos, 30, 10)).toBe("r27");
   });
 });
 

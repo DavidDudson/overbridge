@@ -4,18 +4,17 @@ import { getRepo, loadRepos } from "./config";
 import * as git from "./git";
 import { isJsonObject, isJsonString, type JsonValue } from "./json";
 import type { Mux, MuxPane } from "./mux";
+import { EXPLORE_TAB } from "./orchestration";
 import { metaDir, worktreePath } from "./paths";
 import { dim, fit, inverse } from "./term";
 import { run } from "./util";
 
 /**
- * The @explore tab: a checkout of each repo's default branch, kept up to date, to run its apps and open it in the
- * editor without claiming anything. Each repo gets a detached worktree at `<root>/@explore/<repo>`; nothing is ever
- * committed there, so `syncPlan` only moves it while it is clean and still on the default branch's history.
+ * The @explore tab: a detached checkout of each repo's default branch at `<root>/@explore/<repo>`, to run its apps and
+ * open it in the editor without claiming anything. `syncPlan` moves it only when that loses no local work.
  */
-export const EXPLORE_TAB = "@explore";
 
-/** How often the chosen repo's checkout is fast-forwarded while the panel is open. */
+/** How often the chosen repo's checkout is fast-forwarded while its tab is focused. */
 export const SYNC_MS = 5 * 60_000;
 
 export const exploreDir = (repo: string) => worktreePath(EXPLORE_TAB, repo);
@@ -42,9 +41,10 @@ export const exploreRepos = (): string[] => Object.keys(loadRepos()).sort();
 
 export interface SyncFacts {
   exists: boolean;
+  /** Tracked files changed. Untracked files don't count: checking out the tip keeps them. */
   dirty: boolean;
   /** HEAD is already in the default branch's history, so moving to its tip loses nothing. */
-  onMain: boolean;
+  onDefaultBranch: boolean;
 }
 
 export const SyncStep = { Add: "add", Move: "move", KeepDirty: "keep-dirty", KeepAhead: "keep-ahead" } as const;
@@ -57,10 +57,12 @@ export function syncPlan(f: SyncFacts): SyncStep {
 
   if (f.dirty) return SyncStep.KeepDirty;
 
-  return f.onMain ? SyncStep.Move : SyncStep.KeepAhead;
+  return f.onDefaultBranch ? SyncStep.Move : SyncStep.KeepAhead;
 }
 
-/** Bring `repo`'s explore checkout to the tip of its default branch. Returns a note for the panel, or undefined. */
+const trackedDirty = (dir: string) => run(["git", "-C", dir, "status", "--porcelain", "--untracked-files=no"]).stdout.trim() !== "";
+
+/** Bring `repo`'s explore checkout to the tip of its default branch. Returns a message for the panel, or undefined. */
 export function syncExplore(repo: string): string | undefined {
   const spec = getRepo(repo);
   const dir = exploreDir(repo);
@@ -71,8 +73,8 @@ export function syncExplore(repo: string): string | undefined {
   const tip = `origin/${git.defaultBranch(spec)}`;
 
   const facts: SyncFacts = exists
-    ? { exists, dirty: git.isDirty(dir), onMain: run(["git", "-C", dir, "merge-base", "--is-ancestor", "HEAD", tip]).ok }
-    : { exists, dirty: false, onMain: true };
+    ? { exists, dirty: trackedDirty(dir), onDefaultBranch: run(["git", "-C", dir, "merge-base", "--is-ancestor", "HEAD", tip]).ok }
+    : { exists, dirty: false, onDefaultBranch: true };
 
   switch (syncPlan(facts)) {
     case SyncStep.Add:
@@ -144,34 +146,43 @@ export function toggleTerminal(repo: string, deps: TerminalDeps): string | undef
 /** Rows above and below the repo list in `renderPicker`. */
 export const PICKER_CHROME = 4;
 
+/** The first repo shown, so the selected one stays inside a list `height` rows tall (chrome included). */
+export function pickerOffset(selected: number, count: number, height: number): number {
+  const body = Math.max(1, height - PICKER_CHROME);
+
+  return Math.max(0, Math.min(selected - Math.floor(body / 2), count - body));
+}
+
 export interface PickerView {
   repos: string[];
   selected: number;
   /** Repos with a checkout already, marked in the list. */
   checkedOut: ReadonlySet<string>;
   width: number;
+  height: number;
   message?: string;
 }
 
-/** The repo picker: one row per registered repo, the selected one inverted. Pure, so it is unit-tested. */
+/** The repo picker: the registered repos that fit, the selected one inverted. */
 export function renderPicker(v: PickerView): string[] {
-  const rows = [fit(" explore: pick a repo to run on its default branch", v.width), ""];
+  const offset = pickerOffset(v.selected, v.repos.length, v.height);
+  const shown = v.repos.slice(offset, offset + Math.max(1, v.height - PICKER_CHROME));
 
-  if (!v.repos.length) rows.push(fit("  no repos registered; add one with `overbridge repo add <name> <url>`", v.width));
-
-  v.repos.forEach((repo, i) => {
+  const list = shown.map((repo, i) => {
     const line = fit(`  ${v.checkedOut.has(repo) ? "●" : "○"} ${repo}`, v.width);
-    rows.push(i === v.selected ? inverse(line) : line);
+
+    return offset + i === v.selected ? inverse(line) : line;
   });
 
-  rows.push("", fit(v.message ?? dim(" enter/click: open · j/k: move · q: quit"), v.width));
+  const empty = v.repos.length ? [] : [fit("  no repos registered; add one with `overbridge repo add <name> <url>`", v.width)];
 
-  return rows;
+  return [fit(" explore: pick a repo to run on its default branch", v.width), "", ...empty, ...list, "", fit(v.message ?? dim(" enter/click: open · j/k: move · q: quit"), v.width)];
 }
 
-/** Index of the repo row at 0-based screen `row`, if any. */
-export const pickerHit = (row: number, count: number): number | undefined => {
+/** The repo at 0-based screen `row`, if that row shows one. */
+export function pickerHit(row: number, repos: readonly string[], selected: number, height: number): string | undefined {
   const i = row - 2;
+  const body = Math.max(1, height - PICKER_CHROME);
 
-  return i >= 0 && i < count ? i : undefined;
-};
+  return i >= 0 && i < body ? repos[pickerOffset(selected, repos.length, height) + i] : undefined;
+}

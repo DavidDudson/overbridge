@@ -1,33 +1,38 @@
 import { existsSync } from "node:fs";
+import { readRecord, stopApp } from "./apps";
 import { spawnAsync } from "./child";
-import { exploreDir, exploreRepos, pickerHit, type PickerView, readSelected, renderPicker, showTerminal, SYNC_MS, type TerminalDeps, toggleTerminal, writeSelected, EXPLORE_TAB } from "./explore";
+import { getRepo } from "./config";
+import { exploreDir, exploreRepos, pickerHit, type PickerView, readSelected, renderPicker, showTerminal, SYNC_MS, type TerminalDeps, toggleTerminal, writeSelected } from "./explore";
+import * as git from "./git";
 import { defaultMux } from "./mux";
+import { EXPLORE_TAB } from "./orchestration";
 import { selfCommand } from "./paths";
 import { loadRepoConfig } from "./project-config";
 import { shellInvocation } from "./shell";
 import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN } from "./term";
-import { topPanel } from "./top-run";
+import { PanelExit, type PanelOptions, topPanel } from "./top-run";
 import { errorMessage, exec } from "./util";
-import { createPainter } from "./zellij-view";
+import { createPainter, isFocused, readView } from "./zellij-view";
 
 /** `overbridge explore shell <repo>`: the user's shell in the explore checkout, inside the repo's dev shell when it has one. */
 export function exploreShell(repo: string) {
   const dir = exploreDir(repo);
-  const argv = [process.env.SHELL || "sh"];
   let spec;
 
   try {
     spec = loadRepoConfig(dir, repo).shell;
-  } catch {
+  } catch (e) {
+    process.stderr.write(`overbridge explore: ${repo}'s config did not load (${errorMessage(e)}); starting a shell without its dev shell\n`);
     spec = undefined;
   }
 
-  const inv = shellInvocation(repo, dir, spec, argv);
+  const inv = shellInvocation(repo, dir, spec, [process.env.SHELL || "sh"]);
   process.exit(exec(inv.cmd, { cwd: inv.cwd, env: inv.env }));
 }
 
-/** Runs `overbridge explore sync <repo>` as a child so the pane keeps drawing; resolves to a note, empty on success. */
-async function sync(repo: string): Promise<string> {
+const inFlight = new Map<string, Promise<string>>();
+
+async function runSync(repo: string): Promise<string> {
   try {
     const r = await spawnAsync([...selfCommand(), "explore", "sync", repo]);
 
@@ -37,21 +42,50 @@ async function sync(repo: string): Promise<string> {
   }
 }
 
+/**
+ * Runs `overbridge explore sync <repo>` as a child so the pane keeps drawing; resolves to a message, empty on success.
+ * A sync already running for `repo` is joined, so two never fetch or check out the same worktree at once.
+ */
+function sync(repo: string): Promise<string> {
+  const running = inFlight.get(repo);
+
+  if (running) return running;
+
+  const started = runSync(repo).finally(() => inFlight.delete(repo));
+
+  inFlight.set(repo, started);
+
+  return started;
+}
+
+/** Stop every explore app of `repo`, so a repo you have left holds no pool port. */
+function stopExploreApps(repo: string) {
+  const dir = exploreDir(repo);
+
+  try {
+    for (const spec of loadRepoConfig(dir, repo).apps) {
+      if (readRecord(EXPLORE_TAB, repo, spec.id)) stopApp(EXPLORE_TAB, repo, spec, dir);
+    }
+  } catch (e) {
+    process.stderr.write(`overbridge explore: could not stop ${repo}'s apps: ${errorMessage(e)}\n`);
+  }
+}
+
 /** Show the picker until a repo is chosen; resolves to it, or exits on `q`. */
-function pick(initial: string | undefined, message?: string): Promise<string> {
+function pick(initial: string | undefined, initialMessage?: string): Promise<string> {
   const repos = exploreRepos();
   let selected = Math.max(0, initial ? repos.indexOf(initial) : 0);
-  let note = message;
+  let message = initialMessage;
   const painter = createPainter((text) => process.stdout.write(text));
+  const height = () => process.stdout.rows ?? 24;
 
   const draw = () => {
-    const height = process.stdout.rows ?? 24;
     const width = process.stdout.columns ?? 80;
     const checkedOut = new Set(repos.filter((r) => existsSync(exploreDir(r))));
-    const view: PickerView = { repos, selected, checkedOut, width };
+    const view: PickerView = { repos, selected, checkedOut, width, height: height() };
 
-    if (note) view.message = note;
-    painter.paint(frame(renderPicker(view), height, width));
+    if (message) view.message = message;
+    painter.paint(frame(renderPicker(view), height(), width));
   };
 
   return new Promise((resolve) => {
@@ -68,21 +102,23 @@ function pick(initial: string | undefined, message?: string): Promise<string> {
     process.stdin.resume();
     process.stdin.on("data", (data) => {
       for (const input of decodeInput(data.toString())) {
-        note = undefined;
+        message = undefined;
 
         if (input.kind === "click") {
-          const i = pickerHit(input.row, repos.length);
+          const hit = pickerHit(input.row, repos, selected, height());
 
-          if (i !== undefined) return leave(repos[i]!);
+          if (hit !== undefined) return leave(hit);
           continue;
         }
+
+        const current = repos[selected];
 
         if (input.key === "q" || input.key === "ctrl-c") {
           process.stdout.write(LEAVE_SCREEN);
           process.exit(0);
         } else if (input.key === "j" || input.key === "down") selected = Math.min(repos.length - 1, selected + 1);
         else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
-        else if ((input.key === "enter" || input.key === " ") && repos[selected]) return leave(repos[selected]!);
+        else if ((input.key === "enter" || input.key === " ") && current !== undefined) return leave(current);
       }
 
       draw();
@@ -95,25 +131,26 @@ function pick(initial: string | undefined, message?: string): Promise<string> {
   });
 }
 
-/**
- * `overbridge explore`: the pane of the @explore tab. Pick a repo, then its top panel (apps, editor, terminal) runs
- * over a checkout of its default branch, with a terminal opened below. `b` goes back to the picker. The checkout is
- * fast-forwarded on pick and every `SYNC_MS` while it is clean.
- */
+/** The repo to open first: the last one picked while its checkout is still there, else the picker's choice. */
+async function firstRepo(): Promise<string> {
+  const last = readSelected();
+
+  return last && existsSync(exploreDir(last)) ? last : pick(last);
+}
+
+/** The @explore pane: a repo picker, then the top panel and a terminal over that repo's default-branch checkout. */
 export async function explorePane() {
   if (!process.stdin.isTTY) throw new Error("overbridge explore needs a terminal");
   const deps: TerminalDeps = { mux: defaultMux(), self: selfCommand() };
-  let repo = readSelected();
-  let message: string | undefined;
-
-  // a restarted pane goes straight back to the repo it showed
-  if (!repo || !existsSync(exploreDir(repo))) repo = await pick(repo);
+  let repo = await firstRepo();
+  let shown: string | undefined;
 
   for (;;) {
-    const chosen: string = repo!;
+    const chosen = repo;
+    let message: string | undefined;
 
     if (!existsSync(exploreDir(chosen))) {
-      process.stdout.write(`${ENTER_SCREEN}\x1b[1;1Hchecking out ${chosen} on its default branch…`);
+      process.stdout.write(`${ENTER_SCREEN}\x1b[1;1Hchecking out ${chosen} on ${git.defaultBranch(getRepo(chosen))}…`);
       message = await sync(chosen);
       process.stdout.write(LEAVE_SCREEN);
 
@@ -121,21 +158,43 @@ export async function explorePane() {
         repo = await pick(chosen, message);
         continue;
       }
-    } else {
-      void sync(chosen);
     }
 
+    if (shown !== undefined && shown !== chosen) stopExploreApps(shown);
     writeSelected(chosen);
-    showTerminal(chosen, deps);
-    const timer = setInterval(() => void sync(chosen), SYNC_MS);
 
-    await topPanel(undefined, {
+    // the terminal opens on a new repo only, so one the user closed stays closed on a return to the same repo
+    if (shown !== chosen) message = showTerminal(chosen, deps) ?? message;
+    shown = chosen;
+
+    let show = (_: string) => {};
+
+    const report = (m: string) => {
+      if (m) show(m);
+    };
+
+    if (!message) void sync(chosen).then(report);
+
+    const timer = setInterval(() => {
+      if (isFocused(EXPLORE_TAB, readView())) void sync(chosen).then(report);
+    }, SYNC_MS);
+
+    const panel: PanelOptions = {
       name: EXPLORE_TAB,
-      scope: { dir: exploreDir(chosen), repos: [{ repo: chosen, dir: exploreDir(chosen), claim: {} }], panes: ["terminal"] },
+      scope: { dir: exploreDir(chosen), repos: [{ repo: chosen, dir: exploreDir(chosen), claim: { branch: git.defaultBranch(getRepo(chosen)) } }], panes: ["terminal"] },
       back: `${chosen} · repos`,
-      pane: (kind) => (kind === "terminal" ? toggleTerminal(chosen, deps) : undefined),
-    });
+      pane: () => toggleTerminal(chosen, deps),
+      onMessage: (s) => {
+        show = s;
+      },
+    };
+
+    if (message) panel.message = message;
+
+    const exit = await topPanel(undefined, panel);
     clearInterval(timer);
+
+    if (exit === PanelExit.Quit) process.exit(0);
     repo = await pick(chosen);
   }
 }

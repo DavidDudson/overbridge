@@ -1,7 +1,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getRepo } from "./config";
-import { EXPLORE_TAB } from "./explore";
+import { EXPLORE_TAB } from "./orchestration";
 import * as git from "./git";
 import { wsDir } from "./paths";
 import { groupAlive } from "./proc";

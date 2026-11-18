@@ -15,6 +15,7 @@ import {
   stopApp,
   withPort,
 } from "../src/apps";
+import { EXPLORE_TAB } from "../src/orchestration";
 import { parseConfig, type AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
 
@@ -162,6 +163,15 @@ describe("ports", () => {
     expect(start("ws2", s).port).toBe(b);
     expect(() => allocatePort(s, "app")).toThrow(`held by ws1:${a}, ws2:${b}`);
     expect(() => startApp("ws3", "app", s, dirOf("ws3"))).toThrow("no free port for srv");
+  });
+
+  test("an app running in the @explore tab holds its port too", () => {
+    const [a, b] = freePortPair();
+    const s = spec(`start: exec sleep 300\nports: [${a}, ${b}]`);
+    mkdirSync(dirOf(EXPLORE_TAB), { recursive: true });
+    expect(start(EXPLORE_TAB, s).port).toBe(a);
+    expect(start("ws1", s).port).toBe(b);
+    expect(() => allocatePort(s, "app")).toThrow(`held by ws1:${b}, ${EXPLORE_TAB}:${a}`);
   });
 
   test("a port freed by stop is handed out again", () => {
