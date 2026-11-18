@@ -19,12 +19,13 @@ describe("generated layout", () => {
 
   test("structure: the orchestration tab is sidebar | agent, every workspace tab sidebar | (top panel over agent)", () => {
     const kdl = layoutKdl(["a", "b", "c"], ["overbridge"]);
-    const [orchestration, work, prs, reviews, perf, frozen, ...tabs] = kdl.split(/\n(?=  tab )/).slice(1);
+    const [orchestration, work, prs, reviews, perf, checks, frozen, ...tabs] = kdl.split(/\n(?=  tab )/).slice(1);
     expect([...orchestration!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@root · claude"]);
     expect([...work!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@work · worklist"]);
     expect([...prs!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@prs · prs"]);
     expect([...reviews!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@reviews · reviews"]);
     expect([...perf!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@perf · perf"]);
+    expect([...checks!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@checks · checks"]);
     expect([...frozen!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@frozen · frozen"]);
     expect(tabs).toHaveLength(3);
 

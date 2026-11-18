@@ -7,6 +7,7 @@ import * as git from "./git";
 import { isOrchestrationTab } from "./orchestration";
 import { metaDir, wsDir, worktreePath } from "./paths";
 import { isJsonNumber, isJsonBoolean, isJsonObject, isJsonString, type JsonObject, type JsonValue } from "./json";
+import { highest, isPriority, type Priority, priorityOf } from "./check-priority";
 import { itemIdOf, providerFor, refreshTitle, TITLE_TTL_MS } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
@@ -125,6 +126,8 @@ export interface TopCache {
   merged?: Record<string, string>;
   /** The branch each claimed repo was on when this was built, so `merged` and `prsOpen` are not trusted once a claim moves. */
   branches?: Record<string, string>;
+  /** The workspace's check queue class: the highest of its claims' (`check-queue.priority`). */
+  priority?: Priority;
   /** What each configured button's `status` printed, keyed `<repo>/<id>`. A missing entry hides the button. */
   buttons?: Record<string, ButtonState>;
   message?: string;
@@ -226,6 +229,18 @@ export function sidebarLabel(ws: string, cache: Pick<TopCache, "headline" | "tit
   return title ? stripConventional(title) : ws;
 }
 
+/** The sidebar card's label: the item id, then the task name (`ENG-12: add dark mode`; GitHub ids as `#12`); the task name alone when no item is known. */
+export function cardLabel(ws: string, cache: Pick<TopCache, "headline" | "title">): string {
+  const id = cache.headline?.split(/\s+/)[0];
+  const name = sidebarLabel(ws, cache);
+
+  if (!id) {
+    return name;
+  }
+
+  return `${/^\d+$/.test(id) ? `#${id}` : id}: ${name}`;
+}
+
 export interface TopSnapshot {
   ws: string;
   dir: string;
@@ -269,6 +284,7 @@ export function topCacheFault(raw: JsonValue | undefined): string | undefined {
     optional("merged", isJsonObject(raw.merged)) ??
     optional("branches", isJsonObject(raw.branches)) ??
     optional("buttons", isJsonObject(raw.buttons)) ??
+    optional("priority", isPriority(raw.priority)) ??
     wrong("links", Array.isArray(raw.links)) ??
     wrong("at", isJsonNumber(raw.at))
   );
@@ -381,6 +397,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   let itemTitle: string | undefined;
   let itemLink: TopLink | undefined;
   const buttonStates: Record<string, ButtonState> = {};
+  const priorities: Priority[] = [];
 
   for (const [repo, claim] of claims) {
     const dir = worktreePath(ws, repo);
@@ -394,6 +411,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     }
 
     const pm = config.projectManagement;
+    priorities.push(priorityOf(config.checkQueue.priority, { branch: claim.branch, item: itemIdOf(pm, dir, claim.branch, provider) || undefined }));
 
     if (pm && claim.branch && !itemLink) {
       try {
@@ -501,6 +519,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   if (headlineNow) cache.headline = headlineNow;
 
   if (titleNow) cache.title = titleNow;
+
+  if (priorities.length) cache.priority = highest(priorities);
 
   if (deps.paused) {
     // the PR facts are the last ones read: gh was not asked

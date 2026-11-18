@@ -55,6 +55,7 @@ Setup
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
   overbridge worklist [refresh|show]            work list pane (the @work tab); refresh reads every board into its cache; show prints it
   overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
+  overbridge checks                             the check queue (the @checks tab); K/J/t/b move a waiting check
   overbridge frozen                             iceboxed workspaces (the @frozen tab); t thaws the selected one
   overbridge perf                               performance pane (the @perf tab): dashboard, sessions, commands (v switches)
   overbridge history [--ws name] [--hours n] [--by repo|commands|total] [--json]   where time went: Claude turns, tools, waiting, checks
@@ -254,6 +255,13 @@ async function main(argv: string[]): Promise<number> {
     case "perf":
       await perfPane();
       break;
+    case "checks": {
+      opts(rest, {});
+      const { checksPane } = await import("./checks-run");
+      await checksPane();
+      break;
+    }
+
     case "frozen": {
       opts(rest, {});
       const { frozenPane } = await import("./frozen-run");

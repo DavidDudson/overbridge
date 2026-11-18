@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, constants, loadavg } from "node:os";
 import { join } from "node:path";
+import { defaultKey, type Priority, type QueueOrder, readOrder } from "./check-priority";
 import { classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
 import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidAlive } from "./proc";
@@ -10,8 +11,9 @@ import { exec, isNumber, isRecord, log } from "./util";
 
 /**
  * `overbridge check`: heavy commands from every workspace, started in queue order while the load leaves room.
- * Each caller drops a ticket in `<meta>/check-queue/`. A ticket starts once every live ticket ahead of it is
- * running, fewer than `max-parallel` of them are, and the load allows. Only a ticket's owner writes it, and
+ * Each caller drops a ticket in `<meta>/check-queue/`. Tickets queue by their workspace's priority class, then by
+ * when they were queued; the @checks tab can move a waiting one (`order.state`). A ticket starts once every live
+ * ticket ahead of it is running, fewer than `max-parallel` of them are, and the load allows. Only a ticket's owner writes it, and
  * only the first waiting ticket may start, so the queue needs no lock. Each run has its own process group,
  * which its owner kills on a timeout or a stall.
  */
@@ -39,6 +41,8 @@ export interface Ticket {
   repo: string;
   command: string;
   queuedAtMs: number;
+  /** The claim's class when it was queued; unset sorts as the default class. */
+  priority?: Priority;
   /** Group leader of the running command, once it has the turn. */
   runPid?: number;
   runningSinceMs?: number;
@@ -68,12 +72,22 @@ export const queueDir = () => join(metaDir(), "check-queue");
 /** Zero-padded so the file names sort in queue order. */
 export const ticketName = (t: Pick<Ticket, "queuedAtMs" | "pid">) => `${String(t.queuedAtMs).padStart(15, "0")}-${t.pid}.json`;
 
-export const byQueueOrder = (a: Ticket, b: Ticket) => a.queuedAtMs - b.queuedAtMs || a.pid - b.pid;
+/** A ticket's place in the queue: the @checks tab's override, else its class and when it was queued. */
+export const ticketKey = (t: Ticket, order: QueueOrder = {}) => order[ticketName(t)] ?? defaultKey(t.priority, t.queuedAtMs);
+
+/** Queue order under the @checks tab's overrides. */
+export const queueOrder =
+  (order: QueueOrder = {}) =>
+  (a: Ticket, b: Ticket) =>
+    ticketKey(a, order) - ticketKey(b, order) || a.queuedAtMs - b.queuedAtMs || a.pid - b.pid;
+
+/** Queue order with no overrides. */
+export const byQueueOrder = queueOrder();
 
 const isTicket = (v: unknown): v is Ticket => isRecord(v) && Number.isInteger(v.pid) && Number.isFinite(v.queuedAtMs);
 
 /** Every readable ticket, in queue order. A torn or foreign file is skipped. */
-export function readTickets(dir = queueDir()): Ticket[] {
+export function readTickets(dir = queueDir(), order: QueueOrder = readOrder(dir)): Ticket[] {
   const names = (() => {
     try {
       return readdirSync(dir).filter((name) => name.endsWith(".json"));
@@ -92,7 +106,7 @@ export function readTickets(dir = queueDir()): Ticket[] {
         return [];
       }
     })
-    .toSorted(byQueueOrder);
+    .toSorted(queueOrder(order));
 }
 
 export interface SplitQueue {
@@ -152,8 +166,9 @@ export interface Machine {
 }
 
 /** Whether `me` may start now, given the live queue, or what holds it back. */
-export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machine: Machine, nowMs: number): Gate {
-  const ahead = live.filter((t) => byQueueOrder(t, me) < 0);
+export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machine: Machine, nowMs: number, order: QueueOrder = {}): Gate {
+  const cmp = queueOrder(order);
+  const ahead = live.filter((t) => cmp(t, me) < 0);
 
   if (!ahead.every(isRunning)) {
     return Gate.Queue;
@@ -176,8 +191,8 @@ export function queueView(tickets: Ticket[]): QueueView {
   return { running: tickets.filter(isRunning), waiting: tickets.filter((t) => !isRunning(t)) };
 }
 
-/** The live queue as the sidebar shows it. */
-export const readQueue = () => queueView(splitQueue(readTickets(), pidAlive).live);
+/** The live queue as the sidebar and the @checks tab show it. */
+export const readQueue = (dir = queueDir()) => queueView(splitQueue(readTickets(dir), pidAlive).live);
 
 function writeTicket(file: string, ticket: Ticket) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -268,12 +283,14 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
   let announced: string | undefined;
 
   for (;;) {
-    const { live, dead } = splitQueue(readTickets(dir), pidAlive);
+    const order = readOrder(dir);
+    const { live, dead } = splitQueue(readTickets(dir, order), pidAlive);
     dead.forEach((t) => reap(t, dir));
     const now = Date.now();
-    const ahead = live.filter((t) => byQueueOrder(t, me) < 0);
+    const cmp = queueOrder(order);
+    const ahead = live.filter((t) => cmp(t, me) < 0);
     const load1 = loadavg()[0] ?? 0;
-    const gate = gateFor(me, live, settings, { load1, cores }, now);
+    const gate = gateFor(me, live, settings, { load1, cores }, now, order);
 
     if (gate === Gate.Start) {
       return true;
@@ -372,7 +389,7 @@ async function runHeld(inv: ShellInvocation, me: Ticket, file: string, settings:
  * Run `inv` when the queue and the load allow, and return its exit code: the command's own, or
  * `CheckExit.GaveUp`, `TimedOut` or `Stalled`. Inside a held run (`HELD_ENV` set) it runs at once.
  */
-export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "repo" | "command">, settings: CheckQueue): Promise<number> {
+export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "repo" | "command" | "priority">, settings: CheckQueue): Promise<number> {
   if (process.env[HELD_ENV]) {
     return exec(inv.cmd, { cwd: inv.cwd, env: inv.env });
   }

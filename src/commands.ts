@@ -16,6 +16,8 @@ import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, w
 import { defaultMux, layoutPath, type Mux, MuxKind, tmuxConfPath } from "./mux";
 import { requireTab, TabFocus } from "./tab";
 import { runCheck } from "./check-queue";
+import { priorityOf } from "./check-priority";
+import { itemIdOf } from "./pm";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
 import { chain, cover, displayStacks, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
@@ -585,8 +587,10 @@ export async function check(repoArg: string | undefined, cmd: string[], wsOpt?: 
 
   const { config, inv } = inRepoShell(ws, repo, cmd);
   const settings = timeoutSeconds === undefined ? config.checkQueue : { ...config.checkQueue, timeoutSeconds };
+  const branch = getWorkspace(readState(), ws).repos[repo]?.branch;
+  const priority = priorityOf(settings.priority, { branch, item: itemIdOf(config.projectManagement, worktreePath(ws, repo), branch) || undefined });
 
-  return runCheck(inv, { ws, repo, command: cmd.map(shellQuote).join(" ") }, settings);
+  return runCheck(inv, { ws, repo, command: cmd.map(shellQuote).join(" "), priority }, settings);
 }
 
 /** `overbridge ahead`: the workspaces whose branch is ahead of the default branch. */

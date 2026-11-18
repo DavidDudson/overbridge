@@ -170,7 +170,26 @@
           "type": "integer",
           "minimum": 1
         },
-        "wait-seconds": { "description": "Give up waiting for a turn after this long. Default 900.", "type": "integer", "minimum": 1 }
+        "wait-seconds": { "description": "Give up waiting for a turn after this long. Default 900.", "type": "integer", "minimum": 1 },
+        "priority": {
+          "description": "The class this repo's checks queue at when no priority-rules entry matches. Classes start in this order: feature, overbridge, tip, tech-debt. Default feature.",
+          "enum": ["feature", "overbridge", "tip", "tech-debt"]
+        },
+        "priority-rules": {
+          "description": "Rules tried in order; the first whose patterns all match a claim's branch and item id sets its class.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["priority"],
+            "anyOf": [{ "required": ["branch"] }, { "required": ["item"] }],
+            "properties": {
+              "priority": { "enum": ["feature", "overbridge", "tip", "tech-debt"] },
+              "branch": { "description": "Regex the claimed branch must match.", "type": "string", "minLength": 1 },
+              "item": { "description": "Regex the work item id (from the branch) must match.", "type": "string", "minLength": 1 }
+            }
+          }
+        }
       }
     }
   }

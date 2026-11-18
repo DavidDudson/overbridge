@@ -11,6 +11,7 @@ import { recentToolCalls } from "./history-tail";
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
+import { DEFAULT_PRIORITY, type Priority, PRIORITY_ICON } from "./check-priority";
 import { CleanupCause, type CleanupInFlight, cleanupRecords, cleanupRows } from "./cleanup-log";
 import { Motion, sidebarMotion } from "./config";
 import { animate } from "./sidebar-motion";
@@ -31,7 +32,7 @@ import { childError, type Finished, type Spawner, spawnAsync } from "./child";
 import { claimSweep, createSweepTrigger, startSweep } from "./sweep-trigger";
 import { bold, boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
 import { beginRemoval } from "./remove";
-import { CLEANUP_ARM_MS, pressCleanup, readTopCache, readTopCacheChecked, sidebarLabel, type PrStatus, type TopCache } from "./top";
+import { cardLabel, CLEANUP_ARM_MS, pressCleanup, readTopCache, readTopCacheChecked, sidebarLabel, type PrStatus, type TopCache } from "./top";
 import { defaultMux, type Mux } from "./mux";
 import { currentTab, tabOrder } from "./tab";
 import { createPainter, readView, shouldPoll } from "./zellij-view";
@@ -117,9 +118,11 @@ export interface Entry {
   receipt?: Receipt;
   /** A PR-listing tab: how many it lists and an icon per PR for what it needs. Replaces the status line. */
   badge?: TabBadge;
+  /** A workspace's check queue class; its icon leads the status line, under the agent glyph. */
+  priority?: Priority;
 }
 
-export { sidebarLabel, stripConventional } from "./top";
+export { cardLabel, sidebarLabel, stripConventional } from "./top";
 
 export { currentTab, tabOrder };
 
@@ -183,7 +186,7 @@ function workspaceEntry(ws: string, w: WorkspaceState): Entry {
 
   const { removeError: error, removalBlocked: blocked } = w;
   const { cache, fault } = readTopCacheChecked(ws);
-  const entry = entryFor(ws, Section.Workspaces, sidebarLabel(ws, cache));
+  const entry = entryFor(ws, Section.Workspaces, cardLabel(ws, cache));
   const stacks = stacksOf(cache);
   const prs = prsOf(cache);
   const idleHint = fault ? undefined : iceboxHint(ws, cache);
@@ -209,6 +212,8 @@ function workspaceEntry(ws: string, w: WorkspaceState): Entry {
   if (blocked) card.blocked = blocked;
 
   if (idleHint) card.idleHint = idleHint;
+
+  if (!fault) card.priority = cache.priority ?? DEFAULT_PRIORITY;
 
   return card;
 }
@@ -477,17 +482,30 @@ export const entryHeights = (list: Entry[], width: number, view: CardView = {}) 
 /** The expanded card: the whole title, the state, the PR and CI rows and the last tool calls. */
 function expandedLines(e: Entry, index: number, selected: boolean, inner: number, view: CardView): string[] {
   const { toolCalls = [], now = 0 } = view.expanded ?? {};
-  const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
+  const indent = statusIndent(e);
   const status = statusFor(e);
   const titles = titleRows(e, index, inner, EXPANDED_TITLE_ROWS).map((r) => fit(r, inner));
   const statusRow = status ? [fit(`${indent}${status.text}`, inner)] : [];
-  const details = detailRows(e, toolCalls, now).map((r) => fit(`${indent}${r}`, inner));
+  const details = detailRows(e, toolCalls, now).map((r) => fit(`${" ".repeat(textWidth(indent))}${r}`, inner));
 
   if (selected) return [...titles, ...statusRow, ...details].map(inverse);
 
   const painted = status ? statusRow.map((r) => paintStatus(r, status)) : [];
 
   return [...titles, ...painted, ...details];
+}
+
+/** What leads a status row: the priority icon under the agent glyph, else blanks as wide as the title's lead. */
+export function statusIndent(e: Pick<Entry, "glyph" | "priority">): string {
+  const width = 3 + textWidth(e.glyph) + 1;
+
+  if (!e.priority) {
+    return " ".repeat(width);
+  }
+
+  const lead = `   ${PRIORITY_ICON[e.priority]}`;
+
+  return lead + " ".repeat(Math.max(1, width - textWidth(lead)));
 }
 
 /** Narrowest text a status row keeps when a gauge shares it. */
@@ -547,11 +565,12 @@ export function entryLines(e: Entry, index: number, selected: boolean, inner: nu
   if (isExpanded(e, view)) return expandedLines(e, index, selected, inner, view);
   const plan = cardPlan(e, view);
   const titles = titleRows(e, index, inner).map((l) => fit(l, inner));
-  const indent = " ".repeat(3 + textWidth(e.glyph) + 1);
+  const indent = statusIndent(e);
   const status = e.badge ? { text: badgeText(e.badge, Math.max(1, inner - textWidth(indent))), color: badgeColor(e.badge) } : statusFor(e);
   const sub = statusRow(`${indent}${status?.text ?? ""}`, edgeFor(e), inner);
-  const stacks = (plan.stacks ? (e.stacks ?? []) : []).map((st) => fit(`${indent}${stackText(st)}`, inner));
-  const receipt = plan.stacks && e.receipt ? [fit(`${indent}${receiptText(e.receipt)}`, inner)] : [];
+  const pad = " ".repeat(textWidth(indent));
+  const stacks = (plan.stacks ? (e.stacks ?? []) : []).map((st) => fit(`${pad}${stackText(st)}`, inner));
+  const receipt = plan.stacks && e.receipt ? [fit(`${pad}${receiptText(e.receipt)}`, inner)] : [];
   const subRow = plan.status ? [status ? paintStatus(sub, status) : sub] : [];
 
   if (selected) return [...titles, ...(plan.status ? [sub] : []), ...stacks, ...receipt].map(inverse);

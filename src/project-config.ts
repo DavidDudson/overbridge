@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_PRIORITY, isPriority, PRIORITIES, type PriorityRule, type PrioritySettings } from "./check-priority";
 import { repoOf, root, worktreePath } from "./paths";
 import { loadRepos } from "./config";
 import { slugFromUrl, WORKLIST_SCOPES, type WorklistScope } from "./pm/board-github";
@@ -126,9 +127,17 @@ export interface CheckQueue {
   stallSeconds: number;
   /** Give up waiting for a turn after this long. */
   waitSeconds: number;
+  /** The class a claim's checks queue at; higher classes start first. */
+  priority: PrioritySettings;
 }
 
-export const defaultCheckQueue = (): CheckQueue => ({ maxLoadPercent: 70, timeoutSeconds: 180, stallSeconds: 300, waitSeconds: 900 });
+export const defaultCheckQueue = (): CheckQueue => ({
+  maxLoadPercent: 70,
+  timeoutSeconds: 180,
+  stallSeconds: 300,
+  waitSeconds: 900,
+  priority: { fallback: DEFAULT_PRIORITY, rules: [] },
+});
 
 export const DEFAULT_PERSONA_DIR = ".overbridge/personas";
 
@@ -189,7 +198,8 @@ export const defaultConfig = (): ProjectConfig => ({
 
 const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons", "mcp-servers"];
 const SHELL_KEYS = ["enter", "env", "key"];
-const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
+const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds", "priority", "priority-rules"];
+const PRIORITY_RULE_KEYS = ["priority", "branch", "item"];
 const ICEBOX_KEYS = ["prune", "idle-days"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir", "ship-pr"];
 const BOARD_KEYS = ["columns"];
@@ -719,12 +729,86 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
       set(p.positiveInt(checkQueue, "timeout-seconds", "check-queue"), "timeoutSeconds");
       set(p.positiveInt(checkQueue, "stall-seconds", "check-queue"), "stallSeconds");
       set(p.positiveInt(checkQueue, "wait-seconds", "check-queue"), "waitSeconds");
+      const priority = parsePriority(p, checkQueue);
+
+      if (priority) config.checkQueue = { ...config.checkQueue, priority: { ...config.checkQueue.priority, ...priority } };
     }
   }
 
   if (p.list.length) fail(`${file}:\n${p.list.map((line) => `  ${line}`).join("\n")}`);
 
   return config;
+}
+
+const priorityValue = (p: Problems, v: Json | undefined, at: string) => {
+  if (isPriority(v)) return v;
+  p.add(at, `expected one of ${PRIORITIES.join(", ")} (got ${JSON.stringify(v)})`);
+
+  return undefined;
+};
+
+/** A regex pattern, reported when it does not compile. */
+const pattern = (p: Problems, obj: JsonObject, key: string, at: string): string | undefined => {
+  const source = p.string(obj, key, at, false);
+
+  if (source === undefined) return undefined;
+
+  try {
+    new RegExp(source);
+
+    return source;
+  } catch (e) {
+    p.add(`${at}.${key}`, `not a valid regex: ${errorMessage(e)}`);
+
+    return undefined;
+  }
+};
+
+/** `check-queue.priority` and `priority-rules`, as far as they are set. */
+function parsePriority(p: Problems, checkQueue: JsonObject): Partial<PrioritySettings> | undefined {
+  const out: Partial<PrioritySettings> = {};
+  const fallback = checkQueue.priority;
+
+  if (fallback !== undefined && fallback !== null) {
+    const value = priorityValue(p, fallback, "check-queue.priority");
+
+    if (value) out.fallback = value;
+  }
+
+  const rules = checkQueue["priority-rules"];
+
+  if (rules !== undefined && rules !== null) {
+    if (!Array.isArray(rules)) p.add("check-queue.priority-rules", "expected a list of { priority, branch?, item? }");
+    else {
+      out.rules = rules.flatMap((rule, i): PriorityRule[] => {
+        const at = `check-queue.priority-rules[${i}]`;
+
+        if (!isRecord(rule)) {
+          p.add(at, "expected a mapping with priority and branch or item");
+
+          return [];
+        }
+
+        p.unknownKeys(rule, PRIORITY_RULE_KEYS, at);
+        const priority = priorityValue(p, rule.priority, `${at}.priority`);
+        const branch = pattern(p, rule, "branch", at);
+        const item = pattern(p, rule, "item", at);
+
+        if (branch === undefined && item === undefined && rule.branch === undefined && rule.item === undefined) p.add(at, "needs branch or item: a rule with neither matches every claim (use check-queue.priority for that)");
+
+        if (!priority) return [];
+        const parsed: PriorityRule = { priority };
+
+        if (branch !== undefined) parsed.branch = branch;
+
+        if (item !== undefined) parsed.item = item;
+
+        return [parsed];
+      });
+    }
+  }
+
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** Parse YAML text, naming `file` when it is not valid YAML. */
