@@ -10,6 +10,7 @@ import {
   activate,
   BUTTON_MAX_AGE_MS,
   buttonEnv,
+  buttonRunKey,
   buttons,
   buttonUrl,
   type CustomButton,
@@ -210,8 +211,10 @@ describe("refresh and snapshot", () => {
       expect(cache.buttons).toEqual({ "app/checks": { text: "run 3" } });
     });
 
+    const open = () => ({ url: "https://github.com/o/r/pull/3", state: "OPEN" });
+
     test("output older than the maximum age runs again", () => {
-      const { ran, exec } = fakeExec();
+      const { ran, exec } = fakeExec(open);
       refreshAt(T0, exec);
       const cache = refreshAt(T0 + BUTTON_MAX_AGE_MS, exec);
       expect(ran.length).toBe(4);
@@ -219,7 +222,7 @@ describe("refresh and snapshot", () => {
     });
 
     test("a moved claim runs again", () => {
-      const { ran, exec } = fakeExec();
+      const { ran, exec } = fakeExec(open);
       refreshAt(T0, exec);
       withState((s) => {
         s.workspaces.w1!.repos.app = { branch: "feat/12-x", pr: 4 };
@@ -228,13 +231,72 @@ describe("refresh and snapshot", () => {
       expect(ran.length).toBe(4);
     });
 
-    test("a paused gh runs no status command and keeps the last output", () => {
+    test("with no PR view the status commands run on every refresh", () => {
       const { ran, exec } = fakeExec();
+      refreshAt(T0, exec);
+      refreshAt(T0 + 1, exec);
+      expect(ran.length).toBe(4);
+    });
+
+    test("a forced refresh runs the status commands even when the PR is unchanged", () => {
+      const { ran, exec } = fakeExec(open);
+      refreshAt(T0, exec);
+      refreshTop("w1", { provider: () => fakeProvider(), exec, now: () => T0 + 1, force: true });
+      expect(ran.length).toBe(4);
+    });
+
+    test("a paused gh runs no status command and keeps the last output and the PR view file", async () => {
+      const { ran, exec } = fakeExec(open);
       refreshAt(T0, exec);
       const cache = refreshPausedAt(T0 + BUTTON_MAX_AGE_MS * 2, exec);
       expect(ran.length).toBe(2);
       expect(cache.buttons).toEqual({ "app/checks": { text: "run 1" } });
+      expect(cache.buttonRuns?.app?.at).toBe(T0);
+      const file = prViewFile("w1", "app", 3);
+      expect(existsSync(file)).toBe(true);
+      expect((await snapshotTop("w1", {})).custom?.find((c) => c.spec.id === "docs")?.env.OVERBRIDGE_PR_JSON).toBe(file);
     });
+
+    test("a paused gh never hands a re-bound claim the old PR's view", async () => {
+      const { exec } = fakeExec(open);
+      refreshAt(T0, exec);
+      withState((s) => {
+        s.workspaces.w1!.repos.app = { branch: "feat/12-x", pr: 4 };
+      });
+      refreshPausedAt(T0 + 1, exec);
+      expect((await snapshotTop("w1", {})).custom?.find((c) => c.spec.id === "docs")?.env.OVERBRIDGE_PR_JSON).toBeUndefined();
+    });
+  });
+
+  test("a failed PR view read removes the old view file", () => {
+    let answer: string | undefined = JSON.stringify({ url: "https://github.com/o/r/pull/3", state: "OPEN" });
+    const envs: string[][] = [];
+
+    const exec = (cmd: string[]) => {
+      if (cmd[0] === "gh" && cmd[1] === "pr") {
+        return answer;
+      }
+
+      if (cmd[0] === "env") {
+        envs.push(cmd);
+      }
+
+      return undefined;
+    };
+
+    refreshTop("w1", { provider: () => fakeProvider(), exec });
+    const file = prViewFile("w1", "app", 3);
+    expect(existsSync(file)).toBe(true);
+    answer = undefined;
+    envs.length = 0;
+    refreshTop("w1", { provider: () => fakeProvider(), exec });
+    expect(existsSync(file)).toBe(false);
+    expect(envs[0]?.some((e) => e.startsWith("OVERBRIDGE_PR_JSON="))).toBe(false);
+  });
+
+  test("buttonRunKey changes when a button's status command does", () => {
+    const claim = { branch: "b", pr: 3 };
+    expect(buttonRunKey(claim, {}, [spec({ status: "a" })])).not.toBe(buttonRunKey(claim, {}, [spec({ status: "b" })]));
   });
 
   test("status commands get the PR view the panel read as OVERBRIDGE_PR_JSON", async () => {
@@ -254,7 +316,7 @@ describe("refresh and snapshot", () => {
     };
 
     refreshTop("w1", { provider: () => fakeProvider(), exec });
-    const file = prViewFile("w1", "app");
+    const file = prViewFile("w1", "app", 3);
     expect(envs[0]).toContain(`OVERBRIDGE_PR_JSON=${file}`);
     expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject(view);
     expect((await snapshotTop("w1", {})).custom?.find((c) => c.spec.id === "docs")?.env.OVERBRIDGE_PR_JSON).toBe(file);
@@ -265,6 +327,5 @@ describe("refresh and snapshot", () => {
     envs.length = 0;
     refreshTop("w1", { provider: () => fakeProvider(), exec });
     expect(envs[0]?.some((e) => e.startsWith("OVERBRIDGE_PR_JSON="))).toBe(false);
-    expect(existsSync(file)).toBe(false);
   });
 });

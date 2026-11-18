@@ -51,7 +51,7 @@ Setup
   overbridge server status [--json]             what the server is doing: uptime, per-key hits, misses, in flight, last error
   overbridge server stop [--force]              stop it (it finishes what runs first; --force kills it)
   overbridge server restart                     stop it and start a fresh one
-  overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
+  overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache (--force reruns button status)
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
   overbridge worklist [refresh|show]            work list pane (the @work tab); refresh reads every board into its cache; show prints it
   overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
@@ -301,11 +301,11 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case "top": {
-      const { values, positionals } = opts(rest, ws);
+      const { values, positionals } = opts(rest, { ...ws, force: { type: "boolean" as const } });
 
-      if (positionals[0] === "refresh") topRefresh(values.ws);
+      if (positionals[0] === "refresh") topRefresh(values.ws, values.force === true);
       else if (positionals[0] === "sweep") await sweepWithServer();
-      else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh|sweep] [--ws name]");
+      else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh|sweep] [--ws name] [--force]");
       else await topPanel(values.ws);
       break;
     }

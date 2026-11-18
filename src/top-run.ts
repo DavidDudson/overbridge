@@ -18,9 +18,9 @@ const READY_TIMEOUT_MS = 60_000;
 
 const ESC = "\x1b";
 
-/** `overbridge top refresh [--ws]`: update the cache the panel reads. */
-export function topRefresh(wsOpt?: string) {
-  const cache = refreshTop(requireWs(wsOpt));
+/** `overbridge top refresh [--ws] [--force]`: update the cache the panel reads; `force` reruns button `status` commands. */
+export function topRefresh(wsOpt?: string, force = false) {
+  const cache = refreshTop(requireWs(wsOpt), { force });
 
   if (cache.message) log(cache.message);
 }
@@ -149,7 +149,7 @@ export async function topPanel(wsOpt?: string) {
       const served = await serverRefresh(ws, { force });
 
       if (!served) {
-        const child = Bun.spawn({ cmd: [...selfCommand(), "top", "refresh", "--ws", ws], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+        const child = Bun.spawn({ cmd: [...selfCommand(), "top", "refresh", "--ws", ws, ...(force ? ["--force"] : [])], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
         await child.exited;
       }
 

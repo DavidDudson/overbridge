@@ -11,9 +11,9 @@ declare const self: Worker;
 
 type RefreshReply = { ok: true; cache: TopCache; limited?: string };
 
-self.onmessage = (event: MessageEvent<{ ws: string; prefetched?: PrefetchedPrs; /** Set while `gh` is paused by a rate limit: the last values are kept and this is shown on the message row. */ paused?: string }>) => {
+self.onmessage = (event: MessageEvent<{ ws: string; prefetched?: PrefetchedPrs; /** Set while `gh` is paused by a rate limit: the last values are kept and this is shown on the message row. */ paused?: string; /** The user's `r`: button `status` commands run even when their last output could be reused. */ force?: boolean }>) => {
   try {
-    const { ws, prefetched, paused } = event.data;
+    const { ws, prefetched, paused, force } = event.data;
     let limited: string | undefined;
 
     const deps: RefreshDeps = {
@@ -24,6 +24,8 @@ self.onmessage = (event: MessageEvent<{ ws: string; prefetched?: PrefetchedPrs; 
     };
 
     if (paused) deps.paused = paused;
+
+    if (force) deps.force = true;
     const cache = refreshTop(ws, deps);
     const reply: RefreshReply = { ok: true, cache };
 

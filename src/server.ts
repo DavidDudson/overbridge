@@ -378,12 +378,16 @@ interface RefreshJob {
   ws: string;
   prefetched: PrefetchedPrs;
   paused?: string;
+  /** The user asked for this refresh (`r`): button `status` commands run even when their last output could be reused. */
+  force?: boolean;
 }
 
-const refreshJob = (ws: string, prefetched: PrefetchedPrs, paused?: string): RefreshJob => {
+const refreshJob = (ws: string, prefetched: PrefetchedPrs, paused?: string, force = false): RefreshJob => {
   const job: RefreshJob = { ws, prefetched };
 
   if (paused) job.paused = paused;
+
+  if (force) job.force = true;
 
   return job;
 };
@@ -421,8 +425,8 @@ export function sweepTick(deps: SweepTickDeps): void {
 }
 
 /** Run `refreshTop` in a worker thread, so the server stays responsive while `gh` runs. */
-export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000, paused?: string, onLimited?: (text: string) => void): Promise<TopCache> =>
-  workerJob(REFRESH_WORKER, refreshJob(ws, prefetched, paused), {
+export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000, paused?: string, onLimited?: (text: string) => void, force = false): Promise<TopCache> =>
+  workerJob(REFRESH_WORKER, refreshJob(ws, prefetched, paused, force), {
     timeoutMs,
     label: `refresh of ${ws}`,
     fallback: "refresh failed",
@@ -540,7 +544,7 @@ export async function serve(): Promise<void> {
       // a forced refresh (the user's `r`) goes past a pause once, to learn whether the limit is still on; every call that sees one feeds the gate
       const forced = o?.force === true && gate.allowForced();
 
-      return refreshInWorker(ws, await prefetchFor(ws, batcher, { force: forced }), 120_000, forced ? undefined : gate.message(), (text) => void gate.observe(text));
+      return refreshInWorker(ws, await prefetchFor(ws, batcher, { force: forced }), 120_000, forced ? undefined : gate.message(), (text) => void gate.observe(text), forced);
     },
     prBatch: () => batcher.stats(),
     prBusy: () => batcher.busy,
