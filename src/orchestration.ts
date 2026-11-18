@@ -15,6 +15,9 @@ export interface OrchestrationTab {
   pane?: string;
 }
 
+/** The tab that runs a repo's apps and editor on its default branch (`src/explore.ts`). */
+export const EXPLORE_TAB = "@explore";
+
 export const ORCHESTRATION_TABS: readonly OrchestrationTab[] = [
   { tab: "@root", label: "overbridge root", dir: root },
   { tab: "@work", label: "work list", dir: root, pane: "worklist" },
@@ -23,6 +26,7 @@ export const ORCHESTRATION_TABS: readonly OrchestrationTab[] = [
   { tab: "@perf", label: "performance", dir: root, pane: "perf" },
   { tab: "@checks", label: "check queue", dir: root, pane: "checks" },
   { tab: "@frozen", label: "frozen", dir: root, pane: "frozen" },
+  { tab: EXPLORE_TAB, label: "explore", dir: root, pane: "explore" },
 ];
 
 export const orchestrationTab = (tab: string): OrchestrationTab | undefined => ORCHESTRATION_TABS.find((t) => t.tab === tab);

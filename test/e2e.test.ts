@@ -159,10 +159,10 @@ describe("workflow", () => {
     expect(r.out).toContain("nothing assigned to you");
   });
 
-  test("layout opens the orchestration tabs (root, work list, PRs, reviews, performance, check queue, frozen), then one tab per workspace, each with sidebar and top panel", () => {
+  test("layout opens the orchestration tabs (root, work list, PRs, reviews, performance, check queue, frozen, explore), then one tab per workspace, each with sidebar and top panel", () => {
     for (const n of ["ws3", "ws4", "ws5"]) ws(["new", n]);
     const kdl = ws(["layout"]).out;
-    expect(kdl.match(/\btab name=/g)?.length).toBe(12);
+    expect(kdl.match(/\btab name=/g)?.length).toBe(13);
     expect(kdl.indexOf('tab name="@root"')).toBeLessThan(kdl.indexOf('tab name="ws'));
     expect(kdl).toContain('"claude" "@root"');
     expect(kdl).toMatch(/args .*"worklist"/);
@@ -264,6 +264,73 @@ describe("workflow", () => {
     expect(ws(["checkout", "app", "fix/384-defences-panel"], join(root, "ib")).code).toBe(0);
     expect(ws(["release", "app"], join(root, "ia")).code).toBe(0);
     expect(ws(["checkout", "app", "fix/383-defences"], join(root, "ib")).code).toBe(0);
+  });
+
+  test("explore sync checks out the default branch, follows it, and leaves local work alone", () => {
+    const dir = join(root, "@explore", "app");
+    const head = () => sh(["git", "rev-parse", "HEAD"], dir);
+    const tip = () => sh(["git", "rev-parse", "main"], remote);
+
+    expect(ws(["explore", "sync", "app"]).code).toBe(0);
+    expect(head()).toBe(tip());
+
+    const src = join(tmp, "src");
+    writeFileSync(join(src, "a.txt"), "one\n");
+    sh(["git", "add", "a.txt"], src);
+    sh(["git", "commit", "-q", "-m", "add a"], src);
+    sh(["git", "push", "-q", remote, "main"], src);
+    expect(ws(["explore", "sync", "app"]).code).toBe(0);
+    expect(head()).toBe(tip());
+
+    writeFileSync(join(dir, "stray.log"), "untracked\n");
+    writeFileSync(join(src, "a.txt"), "two\n");
+    sh(["git", "commit", "-q", "-am", "change a"], src);
+    sh(["git", "push", "-q", remote, "main"], src);
+    expect(ws(["explore", "sync", "app"]).err).toBe("");
+    expect(head()).toBe(tip());
+
+    writeFileSync(join(dir, "a.txt"), "edited\n");
+    const dirty = ws(["explore", "sync", "app"]);
+    expect(dirty.err).toContain("has local changes");
+    expect(head()).toBe(tip());
+    sh(["git", "checkout", "--", "a.txt"], dir);
+
+    writeFileSync(join(dir, "b.txt"), "mine\n");
+    writeFileSync(join(src, "b.txt"), "theirs\n");
+    sh(["git", "add", "b.txt"], src);
+    sh(["git", "commit", "-q", "-m", "add b"], src);
+    const before = head();
+    sh(["git", "push", "-q", remote, "main"], src);
+    expect(ws(["explore", "sync", "app"]).err).toContain("could not move to origin/main");
+    expect(head()).toBe(before);
+    expect(readFileSync(join(dir, "b.txt"), "utf8")).toBe("mine\n");
+    rmSync(join(dir, "b.txt"));
+    expect(ws(["explore", "sync", "app"]).err).toBe("");
+    expect(head()).toBe(tip());
+
+    writeFileSync(join(src, ".gitignore"), "*.local\n");
+    sh(["git", "add", ".gitignore"], src);
+    sh(["git", "commit", "-q", "-m", "ignore local files"], src);
+    sh(["git", "push", "-q", remote, "main"], src);
+    expect(ws(["explore", "sync", "app"]).err).toBe("");
+    writeFileSync(join(dir, "c.local"), "mine\n");
+    writeFileSync(join(src, "c.local"), "theirs\n");
+    sh(["git", "add", "-f", "c.local"], src);
+    sh(["git", "commit", "-q", "-m", "add c.local"], src);
+    const beforeIgnored = head();
+    sh(["git", "push", "-q", remote, "main"], src);
+    expect(ws(["explore", "sync", "app"]).err).toContain("could not move to origin/main");
+    expect(head()).toBe(beforeIgnored);
+    expect(readFileSync(join(dir, "c.local"), "utf8")).toBe("mine\n");
+    rmSync(join(dir, "c.local"));
+    expect(ws(["explore", "sync", "app"]).err).toBe("");
+    expect(head()).toBe(tip());
+
+    sh(["git", "commit", "-q", "--allow-empty", "-m", "local"], dir);
+    const local = head();
+    const ahead = ws(["explore", "sync", "app"]);
+    expect(ahead.err).toContain("has commits not on origin/main");
+    expect(head()).toBe(local);
   });
 });
 

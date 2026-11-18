@@ -63,6 +63,8 @@ Setup
   overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
   overbridge checks                             the check queue (the @checks tab); K/J/t/b move a waiting check
   overbridge frozen                             iceboxed workspaces (the @frozen tab); t thaws the selected one
+  overbridge explore [sync <repo>|shell <repo>] the @explore tab: pick a repo, then its apps, editor and a terminal on a
+                                        checkout of its default branch; sync fast-forwards that checkout when clean
   overbridge perf                               performance pane (the @perf tab): dashboard, sessions, commands (v switches)
   overbridge history [--ws name] [--hours n] [--by repo|commands|total] [--json]   where time went: Claude turns, tools, waiting, checks
 
@@ -275,6 +277,27 @@ async function main(argv: string[]): Promise<number> {
     case "perf":
       await perfPane();
       break;
+    case "explore": {
+      const [sub, repo, ...extra] = rest;
+
+      if (sub === undefined) {
+        const { explorePane } = await import("./explore-run");
+        await explorePane();
+      } else if (sub === "sync" && repo && !extra.length) {
+        const { syncExplore } = await import("./explore");
+        const note = syncExplore(repo);
+
+        if (note) log(note);
+      } else if (sub === "shell" && repo && !extra.length) {
+        const { exploreShell } = await import("./explore-run");
+        exploreShell(repo);
+      } else {
+        throw new OverbridgeError("usage: overbridge explore [sync <repo>|shell <repo>]");
+      }
+
+      break;
+    }
+
     case "checks": {
       opts(rest, {});
       const { checksPane } = await import("./checks-run");

@@ -97,6 +97,10 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   `up`/`layout`. Any new code that lists workspaces for tabs must skip `isIceboxed`.
   `f` in a sidebar runs `icebox` on its own workspace in a child (`runFreeze`); the `@frozen` tab (`src/frozen.ts` pure rows and
   render, `src/frozen-run.ts` pane) lists iceboxed workspaces from state and `t` runs `thaw` in a child (`runThaw`).
+- `src/explore.ts` is the `@explore` tab (`overbridge explore`, pane in `src/explore-run.ts`): a repo picker, then the top
+  panel (`topPanel` with `PanelOptions`: its own `TopScope`, only the terminal pane, a `back` button) over a detached
+  checkout of the default branch at `<root>/@explore/<repo>`. `syncPlan` moves that checkout only while it is clean and on
+  the default branch's history (untracked files do not block it); syncs are single-flight and run only while the tab is focused. App ports count `EXPLORE_TAB` (in `src/orchestration.ts`) as a holder (`holders` in `src/apps.ts`); leaving a repo stops its explore apps.
 - `overbridge cleanup` reports what the sweep leaves behind and removes nothing: `src/cleanup-scan.ts` is the pure `classify`
   (facts → `CleanupVerdict` + `CleanupReason`; blockers turn a removal into a review, a failed read into `keep`),
   `src/cleanup-gather.ts` reads the facts through injectable `GatherDeps` (git, `gh`, `Provider.status`), and `src/orphan.ts`

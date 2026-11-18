@@ -48,6 +48,7 @@ overbridge icebox <name> [--prune] [--drop-worktree]  # pause: stop apps and che
 overbridge thaw <name>                            # reopen an iceboxed workspace; its agent resumes and reads the handoff; recreates dropped worktrees
 overbridge checks                                 # the @checks tab's pane: the check queue; K/J move a waiting check, t/b to top/bottom
 overbridge frozen                                 # the @frozen tab's pane: lists iceboxed workspaces, t thaws one (f in a sidebar iceboxes its workspace)
+overbridge explore [sync <repo>|shell <repo>]     # the @explore tab's pane: pick a repo, run its apps and editor on a default-branch checkout; sync fast-forwards it when clean
 overbridge status --all
 
 overbridge spinup                                 # rebuild the zellij session over existing workspaces

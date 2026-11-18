@@ -7,14 +7,17 @@ import {
   AppStatus,
   appStatus,
   groupAlive,
+  killApp,
   logPath,
   portFree,
   processAlive,
   readRecord,
+  recordIds,
   startApp,
   stopApp,
   withPort,
 } from "../src/apps";
+import { EXPLORE_TAB } from "../src/orchestration";
 import { parseConfig, type AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
 
@@ -154,6 +157,20 @@ describe("lifecycle", () => {
   });
 });
 
+describe("killApp", () => {
+  test("stops an app from its record alone and frees its port", () => {
+    const a = freePort();
+    const s = spec(`start: exec sleep 300\nports: [${a}]`);
+    const { pid } = start("ws1", s);
+    expect(recordIds("ws1", "app")).toEqual(["srv"]);
+    expect(killApp("ws1", "app", "srv")).toBe(true);
+    expect(alive(pid)).toBe(false);
+    expect(recordIds("ws1", "app")).toEqual([]);
+    expect(allocatePort(s, "app")).toBe(a);
+    expect(killApp("ws1", "app", "srv")).toBe(false);
+  });
+});
+
 describe("ports", () => {
   test("each workspace gets the next port; exhaustion names the holders", () => {
     const [a, b] = freePortPair();
@@ -162,6 +179,15 @@ describe("ports", () => {
     expect(start("ws2", s).port).toBe(b);
     expect(() => allocatePort(s, "app")).toThrow(`held by ws1:${a}, ws2:${b}`);
     expect(() => startApp("ws3", "app", s, dirOf("ws3"))).toThrow("no free port for srv");
+  });
+
+  test("an app running in the @explore tab holds its port too", () => {
+    const [a, b] = freePortPair();
+    const s = spec(`start: exec sleep 300\nports: [${a}, ${b}]`);
+    mkdirSync(dirOf(EXPLORE_TAB), { recursive: true });
+    expect(start(EXPLORE_TAB, s).port).toBe(a);
+    expect(start("ws1", s).port).toBe(b);
+    expect(() => allocatePort(s, "app")).toThrow(`held by ws1:${b}, ${EXPLORE_TAB}:${a}`);
   });
 
   test("a port freed by stop is handed out again", () => {
