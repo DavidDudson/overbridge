@@ -139,7 +139,7 @@ export interface ReviewConfig {
   exclude: string[];
   /** Repo-relative directory of repo-local personas. */
   localDir: string;
-  /** Whether `ship-pr` runs `mob-review` on the open PR before requesting bot reviews. Default true. */
+  /** Whether `ship-pr` runs `mob-review` on the branch before pushing and opening the PR. Default true. */
   shipPr: boolean;
 }
 
