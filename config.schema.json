@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "overbridge root config.yml",
-  "description": "Settings that live outside the repos, at <OVERBRIDGE_ROOT>/config.yml. Each layer uses overbridge.yml's keys (see overbridge.schema.json), and any key may be left out because the layers merge.",
+  "description": "Settings that live outside the repos, at <OVERBRIDGE_ROOT>/config.yml. Each layer uses overbridge.yml's keys (see overbridge.schema.json), and any key may be left out because the layers merge. `overbridge config set <key> <value> [--repo name]` writes one value, such as defaults.ide zed, and refuses keys this schema and overbridge.schema.json do not describe.",
   "type": "object",
   "additionalProperties": false,
   "properties": {

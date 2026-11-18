@@ -5,6 +5,7 @@ import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
 import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
+import { configSet } from "./config-set";
 import { icebox, thaw } from "./icebox";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
@@ -37,6 +38,10 @@ Setup
   overbridge repo ls                            list registered repos
   overbridge config check|show [path]           validate / print a repo's overbridge.yml
   overbridge config get <key> [path]            print one value, e.g. commands.test
+  overbridge config set <key> <value> [--repo name]
+                                        write one value to the root config.yml (under repos.<name> with
+                                        --repo), keeping its comments; refuses keys the schema does not
+                                        know, e.g. config set defaults.ide zed
   overbridge app [id [action]]                  list or start|stop|restart|status|log repo apps
   overbridge next                               go to the next tab needing you: waiting for input, then finished,
                                         then finished with background tasks (zellij binds it to a key)
@@ -169,7 +174,15 @@ async function main(argv: string[]): Promise<number> {
       else if (action === "get") {
         if (!target) throw new OverbridgeError("usage: overbridge config get <key> [path]");
         cmd.configGet(target, rest[2]);
-      } else throw new OverbridgeError("usage: overbridge config check|show|get [path]");
+      } else if (action === "set") {
+        const { values, positionals } = opts(rest.slice(1), { repo: { type: "string" } });
+
+        if (positionals.length !== 2) {
+          throw new OverbridgeError("usage: overbridge config set <key> <value> [--repo name]");
+        }
+
+        configSet(positionals[0]!, positionals[1]!, values.repo);
+      } else throw new OverbridgeError("usage: overbridge config check|show|get|set [path]");
       break;
     }
 
