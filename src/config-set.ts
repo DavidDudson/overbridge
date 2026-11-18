@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { loadRepos } from "./config";
-import { packageRoot } from "./paths";
+import { ORCHESTRATION_ENV, packageRoot } from "./paths";
 import { parseYaml, rootConfigPath, rootLayersFrom, suggest } from "./project-config";
 import { errorMessage, fail, isBoolean, isNumber, isRecord, isString, log, type Json, type JsonObject } from "./util";
 
@@ -121,9 +121,9 @@ export function unknownKeyProblem(path: readonly string[], rootSchema: KeySchema
 }
 
 /**
- * Read a value given on the command line. `[...]` and `{...}` are YAML flow collections; a number, `true`,
- * `false` or `null` written exactly so takes that type; anything else stays the string as typed, so a command
- * keeps a ` # ...` or `: ` and `1.10` stays `1.10`.
+ * Read a value given on the command line. `[...]` and `{...}` are YAML flow collections and `"..."` or `'...'` a
+ * quoted string; a number, `true`, `false` or `null` written exactly so takes that type; anything else stays the
+ * string as typed, so a command keeps a ` # ...` or `: ` and `1.10` stays `1.10`.
  */
 export function parseConfigValue(text: string): Json {
   const trimmed = text.trim();
@@ -131,7 +131,7 @@ export function parseConfigValue(text: string): Json {
   try {
     const value = yamlJson(text);
 
-    if (/^[[{]/.test(trimmed)) {
+    if (/^[[{]/.test(trimmed) || (/^(["']).*\1$/s.test(trimmed) && isString(value))) {
       return value ?? text;
     }
 
@@ -347,6 +347,17 @@ export function setYamlValue(text: string, path: readonly string[], value: Json)
 function readSchema(name: string): KeySchema {
   // SAFETY: the schema files ship with the package and are JSON Schema documents.
   return JSON.parse(readFileSync(join(packageRoot(), name), "utf8")) as KeySchema;
+}
+
+/**
+ * Why `config set` must not run here, or undefined. A Claude session in a workspace or an orchestration tab
+ * (Claude Code sets `CLAUDECODE` for its tools) is refused: the root config holds the guard and the hooks, so
+ * the agent must not change them, and the guard's command patterns can be dodged with an env prefix or `sh -c`.
+ */
+export function agentRefusal(env: Record<string, string | undefined>): string | undefined {
+  const inOverbridge = Boolean(env.OVERBRIDGE_NAME) || Boolean(env[ORCHESTRATION_ENV]);
+
+  return env.CLAUDECODE && inOverbridge ? "config set changes the root config.yml, which is for the user: ask them to run it" : undefined;
 }
 
 /** `overbridge config set <key> <value> [--repo name]`: write one value to the root `config.yml`. */

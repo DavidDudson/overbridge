@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configSet, inlineYaml, type KeySchema, parseConfigValue, setYamlValue, unknownKeyProblem } from "../src/config-set";
+import { agentRefusal, configSet, inlineYaml, type KeySchema, parseConfigValue, setYamlValue, unknownKeyProblem } from "../src/config-set";
 import { parseYaml, rootConfigPath } from "../src/project-config";
 import { isRecord, type Json } from "../src/util";
 
@@ -60,6 +60,19 @@ describe("unknownKeyProblem", () => {
   });
 });
 
+describe("agentRefusal", () => {
+  test.each<[Record<string, string>, boolean]>([
+    [{ CLAUDECODE: "1", OVERBRIDGE_NAME: "ws1" }, true],
+    [{ CLAUDECODE: "1", OVERBRIDGE_TAB: "@root" }, true],
+    [{ OVERBRIDGE_NAME: "ws1" }, false],
+    [{ CLAUDECODE: "1" }, false],
+    [{ CLAUDECODE: "1", OVERBRIDGE_NAME: "" }, false],
+    [{}, false],
+  ])("%p refused: %p", (env, refused) => {
+    expect(agentRefusal(env) !== undefined).toBe(refused);
+  });
+});
+
 describe("parseConfigValue", () => {
   test.each<[string, Json]>([
     ["zed", "zed"],
@@ -76,6 +89,15 @@ describe("parseConfigValue", () => {
     ["1.10", "1.10"],
     ["null", null],
     ["yes", "yes"],
+    ["~", "~"],
+    ["Null", "Null"],
+    ["[a, b", "[a, b"],
+    ["false", false],
+    ["-5", -5],
+    ["1e3", "1e3"],
+    ['"5"', "5"],
+    ["'true'", "true"],
+    ['"a" "b"', '"a" "b"'],
   ])("%p", (text, value) => {
     expect(parseConfigValue(text)).toEqual(value);
   });
@@ -249,6 +271,22 @@ describe("configSet", () => {
 
   test("says nothing was written when validation fails", () => {
     expect(() => configSet("defaults.ide", "emacs")).toThrow("not written:");
+  });
+
+  test("reports a repos.toml it cannot read and still writes", () => {
+    writeFileSync(join(tmp, "repos.toml"), "not = [toml");
+    const messages: string[] = [];
+    const spy = spyOn(console, "error").mockImplementation((msg: string) => messages.push(msg));
+
+    try {
+      configSet("ide", "zed", "web");
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(messages.some((msg) => msg.includes("could not read repos.toml"))).toBe(true);
+    expect(messages.some((msg) => msg.includes("is not in repos.toml"))).toBe(false);
+    expect(readFileSync(rootConfigPath(), "utf8")).toBe("repos:\n  web:\n    ide: zed\n");
   });
 
   test("keeps the file's mode", () => {

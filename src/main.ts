@@ -5,7 +5,7 @@ import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
 import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
-import { configSet } from "./config-set";
+import { agentRefusal, configSet } from "./config-set";
 import { icebox, thaw } from "./icebox";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
@@ -180,6 +180,12 @@ async function main(argv: string[]): Promise<number> {
 
         if (positionals.length !== 2) {
           throw new OverbridgeError("usage: overbridge config set [--repo name] <key> [--] <value>");
+        }
+
+        const refusal = agentRefusal(process.env);
+
+        if (refusal) {
+          throw new OverbridgeError(refusal);
         }
 
         configSet(positionals[0]!, positionals[1]!, values.repo);
