@@ -70,7 +70,8 @@ Review sees only committed work.
 
 `ship-pr` runs `mob-review` on the branch before it pushes (its step 5, unless `review.ship-pr` is `false`), so
 that is the self-review: do not run the panel here as well. When `review.ship-pr` is `false` and the `mob-review`
-skill is available, run it here on the branch against the default branch instead. It fixes the small clear-cut
+skill is available, run it here on the branch instead, against the default branch, or on a stacked layer against
+the local branch of the layer below. Tell it not to push: `ship-pr` pushes after its own checks. It fixes the small clear-cut
 findings on your own branch. Anything left at `change-requested` is a stop: fix it now, or accept it with a
 stated reason, with the user. If `mob-review` is not installed, read your own diff once for correctness, tests
 and leftovers before moving on.

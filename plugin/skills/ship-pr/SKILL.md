@@ -105,7 +105,7 @@ Required, and it runs **before the first push** of this run, so no PR is opened 
 2. Anything it leaves at `change-requested` is a stop: fix it, or accept it with a stated reason.
 3. Its fixes are checked and committed by mob-review itself. Go on to step 6. Do not run mob-review a second time in this run.
 
-A stacked PR is reviewed per layer, each before its own push: a review of the layer below says nothing about this one. When this run only updates an existing PR, the panel still runs before the push, over the whole branch.
+A stacked PR is reviewed per layer: a review of the layer below says nothing about this one. `gh stack push` pushes every layer, so before it, review every layer that has commits the panel has not seen, bottom first, and run `gh stack rebase --upstack` from any layer that got fixes before reviewing the next. When this run only updates an existing PR, the panel still runs before the push, over the whole branch.
 
 ## 6. Push
 
@@ -259,9 +259,9 @@ BASE_BRANCH=$(gh pr view <number|url> --json headRefName --jq .headRefName)
   gh stack link <base-pr> <head-pr>
   gh stack view
   ```
-  The commits and PRs exist already, so skip commit, template and create. Run the panel on each layer (step 5), push (`gh stack push`), then do the build and review steps. Re-run the checks on each layer: the base moved under them. Update a PR body only where it is now wrong. GitHub renders the stack itself, so a hand-written "stacked on #X" note duplicates it and goes stale.
+  The commits and PRs exist already, so skip commit, template and create. Run the panel on each layer, bottom first, restacking after fixes (step 5), push (`gh stack push`), then do the build and review steps. Re-run the checks on each layer: the base moved under them. Update a PR body only where it is now wrong. GitHub renders the stack itself, so a hand-written "stacked on #X" note duplicates it and goes stale.
 - **B. The changes are not on their own branch yet.** The claimed branch the work sits on becomes the base, and a new head branch holds the changes.
-  1. `BASE_BRANCH=$(git branch --show-current)`. If it is the default branch, this is not a stacked PR: say so and carry on with a normal PR (or confirm which branch they actually want as the base). The base must exist on origin (`git ls-remote --exit-code --heads origin "$BASE_BRANCH"`); push it first if not, since a stacked PR cannot target a branch that isn't on the remote.
+  1. `BASE_BRANCH=$(git branch --show-current)`. If it is the default branch, this is not a stacked PR: say so and carry on with a normal PR (or confirm which branch they actually want as the base). The base must exist on origin (`git ls-remote --exit-code --heads origin "$BASE_BRANCH"`), since a stacked PR cannot target a branch that isn't on the remote. If it is not there, run the panel on it (step 5) first, then push it.
   2. Name the head branch in the repo's convention (`<type>/<id>-<slug>`); ask when you cannot infer one, offering `<BASE_BRANCH>-followup`. Create it with `gh stack add "<head-branch>"`, which chains it on the current base and carries uncommitted changes across. If the base isn't in a stack yet, `gh stack link <its PR url|number>` adopts it first. Then `overbridge pr <repo>` records the new layer.
   3. Never commit the stacked changes onto the base itself: that yields an empty-diff PR.
 
