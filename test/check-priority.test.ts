@@ -92,6 +92,28 @@ describe("queue order by class", () => {
     expect(gateFor(debt, [debt, feature], settings, machine, 10, { [ticketName(debt)]: 0 })).toBe(Gate.Start);
   });
 
+  test("while a ticket from an older build is live, the gate uses time order and ignores overrides", () => {
+    const settings = defaultCheckQueue();
+    const machine = { load1: 0, cores: 8 };
+    const legacy = ticket(1, 1);
+    const debt = ranked(2, 2, 2);
+    const feature = ranked(3, 3, 0);
+    expect(gateFor(feature, [legacy, feature], settings, machine, 10)).toBe(Gate.Queue);
+    expect(gateFor(feature, [feature], settings, machine, 10)).toBe(Gate.Start);
+    expect(gateFor(debt, [legacy, debt, feature], settings, machine, 10, { [ticketName(debt)]: 0 })).toBe(Gate.Queue);
+    expect(gateFor(debt, [debt, feature], settings, machine, 10, { [ticketName(debt)]: 0 })).toBe(Gate.Start);
+  });
+
+  test("the load cap counts a just-started run that sorts behind the waiting ticket", () => {
+    const NOW_MS = 10_000_000;
+    const fresh = ticket(1, 1, { rank: 2, runPid: 10, runningSinceMs: NOW_MS });
+    const settled = { ...fresh, runningSinceMs: 0 };
+    const feature = ranked(5, 5, 0);
+    const nearLimit = { load1: 5, cores: 8 };
+    expect(gateFor(feature, [fresh, feature], defaultCheckQueue(), nearLimit, NOW_MS)).toBe(Gate.Load);
+    expect(gateFor(feature, [settled, feature], defaultCheckQueue(), nearLimit, NOW_MS)).toBe(Gate.Start);
+  });
+
   test("max-parallel counts runs that sort behind the waiting ticket", () => {
     const settings = { ...defaultCheckQueue(), maxParallel: 2 };
     const running = (pid: number) => ticket(pid, pid, { rank: 2, runPid: pid * 10, runningSinceMs: 0 });

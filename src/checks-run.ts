@@ -18,8 +18,22 @@ const MOVE_KEYS = new Map<string, Move>([
 export async function checksPane() {
   const dir = queueDir();
 
+  /** `fault` is why order.state is ignored, shown until the file reads again. */
+  let fault = "";
+
   const read = (): CheckRow[] => {
-    const overrides = readOverrides(dir);
+    const overrides = (() => {
+      try {
+        const good = readOverridesForWrite(dir);
+        fault = "";
+
+        return good;
+      } catch (e) {
+        fault = `error: moves are ignored: ${errorMessage(e)}`;
+
+        return readOverrides(dir);
+      }
+    })();
 
     return checkRows(readQueue(dir, overrides), overrides);
   };
@@ -44,7 +58,7 @@ export async function checksPane() {
       offset = selected - body + 1;
     }
 
-    painter.paint(frame(renderChecks(rows, { selected, offset, height, width, message, now: Date.now() }), height, width));
+    painter.paint(frame(renderChecks(rows, { selected, offset, height, width, message: message || fault, now: Date.now() }), height, width));
   };
 
   /** Re-read the queue; the cursor stays on the same check while it is queued. */

@@ -208,7 +208,12 @@ export function queueView(tickets: Ticket[]): QueueView {
 }
 
 /** The live queue as the sidebar and the @checks tab show it. */
-export const readQueue = (dir = queueDir(), overrides: QueueOverrides = readOverrides(dir)) => queueView(splitQueue(readTickets(dir, overrides), pidAlive).live);
+export function readQueue(dir = queueDir(), overrides: QueueOverrides = readOverrides(dir)): QueueView {
+  const { live } = splitQueue(readTickets(dir, overrides), pidAlive);
+
+  // sorted by the live tickets alone, as `gateFor` sorts, so a dead ticket left by an older build cannot change the order shown
+  return queueView(live.toSorted(comparatorFor(live, overrides)));
+}
 
 function writeTicket(file: string, ticket: Ticket) {
   const tmp = `${file}.${process.pid}.tmp`;

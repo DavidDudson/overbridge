@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, 
 import { basename, dirname, join, resolve } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
-import { configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, type ProjectConfig, rootConfigPath } from "./project-config";
+import { checkClassNames, configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, type ProjectConfig, rootConfigPath } from "./project-config";
 import { aheadRows } from "./ahead";
 import { clearPhase, parseLayer, PHASES, writePhase } from "./task-status";
 import { agentDirOf, chooseLayout, userLayoutPath } from "./layout";
@@ -605,7 +605,9 @@ function claimContexts(ws: string, repo: string, config: ProjectConfig): ClaimCo
 
     try {
       return [{ config: name === repo ? config : loadRepoConfig(dir, name), dir, branch: claim.branch }];
-    } catch {
+    } catch (e) {
+      log(`overbridge check: ${name}'s config did not load, so its class is left out of ${ws}'s: ${errorMessage(e)}`);
+
       return [];
     }
   });
@@ -681,7 +683,8 @@ export function configCheck(arg?: string) {
   const present = [file, rootFile].filter((f) => existsSync(f));
 
   if (!present.length) fail(`${file} does not exist`);
-  loadConfigFile(file, repo);
+  const config = loadConfigFile(file, repo);
+  checkClassNames(config.checkQueue, config.checkQueue.classes).forEach((line) => log(`warning: ${line}; it falls back to the default class`));
   log(`${present.join(" + ")}: ok`);
 }
 

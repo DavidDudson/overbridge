@@ -804,7 +804,7 @@ function parsePriorityRules(p: Problems, checkQueue: JsonObject): PriorityRule[]
   });
 }
 
-/** Problems with the class names `queue` uses that `classes` does not list. */
+/** The class names `queue` uses that `classes` does not list; each falls back to the default class. */
 export function checkClassNames(queue: Pick<CheckQueue, "priority" | "priorityRules">, classes: readonly PriorityClass[]): string[] {
   const names = new Set(classes.map((c) => c.name));
   const known = `priority-classes in the root config.yml lists ${classes.map((c) => c.name).join(", ")}`;
@@ -1076,10 +1076,8 @@ export function resolveConfig(
   const label = sources.join(" + ") || file;
   // the repo file was checked for root-only keys above, so any left come from the root config
   const config = validateConfig(overlay(overlay(overlay(layers.defaults, under?.layer), repoRaw), over), label, { root: true });
-  const unknown = checkClassNames(config.checkQueue, layers.checkClasses);
 
-  if (unknown.length) fail(`${label}:\n${unknown.map((line) => `  ${line}`).join("\n")}`);
-
+  // an unknown class name falls back to the default class (`classInfo`), so a repo file naming a class this user's root lacks never blocks loading; `overbridge config check` reports it
   return { ...config, checkQueue: { ...config.checkQueue, classes: layers.checkClasses } };
 }
 
