@@ -256,22 +256,17 @@ export function parseButtonStatus(out: string): ButtonState {
 
 /**
  * The env a configured button's commands run with. `item` is the work item id of the claimed branch, "" when none.
- * `prJson` is the file holding the claimed PR's view (`OVERBRIDGE_PR_JSON`); left out when there is none.
+ * `prJson` is the file holding the claimed PR's view (`OVERBRIDGE_PR_JSON`); empty when there is none, so an inherited value never leaks in.
  */
-export function buttonEnv(ws: string, repo: string, claim: { branch?: string; pr?: number }, item = "", prJson?: string) {
-  const env = {
+export function buttonEnv(ws: string, repo: string, claim: { branch?: string; pr?: number }, item = "", prJson = "") {
+  return {
     OVERBRIDGE_NAME: ws,
     OVERBRIDGE_REPO: repo,
     OVERBRIDGE_BRANCH: claim.branch ?? "",
     OVERBRIDGE_PR: claim.pr === undefined ? "" : String(claim.pr),
     OVERBRIDGE_ITEM: item,
+    OVERBRIDGE_PR_JSON: prJson,
   };
-
-  if (!prJson) {
-    return env;
-  }
-
-  return { ...env, OVERBRIDGE_PR_JSON: prJson };
 }
 
 /** The `OVERBRIDGE_PR_JSON` path for a claim, when it has a PR and its view file exists. */
@@ -446,6 +441,8 @@ export interface RefreshDeps {
   now?: () => number;
   /** The user asked for this refresh (`r`): button `status` commands run even when their last output could be reused. */
   force?: boolean;
+  /** The rate-limit gate is paused, though this refresh may read PRs (a forced probe): button `status` commands keep their last output. */
+  buttonsPaused?: string;
 }
 
 interface ButtonRefresh {
@@ -457,7 +454,7 @@ interface ButtonRefresh {
   view: PrView | undefined;
   specs: ButtonSpec[];
   old: TopCache;
-  deps: Pick<RefreshDeps, "paused" | "force">;
+  deps: Pick<RefreshDeps, "paused" | "force" | "buttonsPaused">;
   now: number;
   exec: (cmd: string[], cwd: string) => string | undefined;
   item: () => string;
@@ -483,7 +480,7 @@ function refreshButtons(o: ButtonRefresh): ButtonRefreshed {
 
   // a paused gh would refuse the status commands' own calls, so they keep what they last printed. Without a PR view the
   // key can't see what a command reads (local git, a missing PR), so it runs on every refresh
-  if (o.deps.paused || (!o.deps.force && o.view !== undefined && reuseButtons(last, key, o.now))) {
+  if (o.deps.paused || o.deps.buttonsPaused || (!o.deps.force && o.view !== undefined && reuseButtons(last, key, o.now))) {
     const states = Object.fromEntries(
       o.specs.flatMap((spec) => {
         const kept = o.old.buttons?.[buttonKey(o.repo, spec.id)];

@@ -525,7 +525,7 @@ The commands get `OVERBRIDGE_NAME`, `OVERBRIDGE_REPO`, `OVERBRIDGE_BRANCH`, `OVE
 `OVERBRIDGE_PR_JSON` names a file holding the PR as the panel last read it, with the fields of `gh pr view --json
 url,title,isDraft,updatedAt,state,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments`
 and `unresolved`, the count of unresolved review threads. Read the fields you need and ignore the rest: the panel may
-read the PR through one batched query, which leaves out fields it doesn't use.
+read the PR through one batched query, which leaves out fields it doesn't use. With no PR, or none read yet, it is empty.
 A `status` command that reads it doesn't need to call GitHub itself. This button copies a release
 note for every repo the `megaport` org owns:
 

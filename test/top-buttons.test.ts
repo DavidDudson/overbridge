@@ -150,7 +150,7 @@ describe("refresh and snapshot", () => {
 
     const cache = refreshTop("w1", { provider: () => fakeProvider(), exec });
     expect(cache.buttons).toEqual({ "app/checks": { text: "green", color: "green" } });
-    expect(ran[0]).toEqual(["env", "OVERBRIDGE_NAME=w1", "OVERBRIDGE_REPO=app", "OVERBRIDGE_BRANCH=feat/12-x", "OVERBRIDGE_PR=3", "OVERBRIDGE_ITEM=12", "sh", "-c", "my-status"]);
+    expect(ran[0]).toEqual(["env", "OVERBRIDGE_NAME=w1", "OVERBRIDGE_REPO=app", "OVERBRIDGE_BRANCH=feat/12-x", "OVERBRIDGE_PR=3", "OVERBRIDGE_ITEM=12", "OVERBRIDGE_PR_JSON=", "sh", "-c", "my-status"]);
     const snapshot = await snapshotTop("w1", {});
     expect(snapshot.custom?.[0]?.env.OVERBRIDGE_ITEM).toBe("12");
     const shown = snapshot.custom?.map((c) => [c.spec.id, c.state?.text]);
@@ -257,6 +257,14 @@ describe("refresh and snapshot", () => {
       expect((await snapshotTop("w1", {})).custom?.find((c) => c.spec.id === "docs")?.env.OVERBRIDGE_PR_JSON).toBe(file);
     });
 
+    test("a forced refresh while the gate is paused runs no status command", () => {
+      const { ran, exec } = fakeExec(open);
+      refreshAt(T0, exec);
+      const cache = refreshTop("w1", { provider: () => fakeProvider(), exec, now: () => T0 + BUTTON_MAX_AGE_MS * 2, force: true, buttonsPaused: "GitHub rate limit reached" });
+      expect(ran.length).toBe(2);
+      expect(cache.buttons).toEqual({ "app/checks": { text: "run 1" } });
+    });
+
     test("a paused gh never hands a re-bound claim the old PR's view", async () => {
       const { exec } = fakeExec(open);
       refreshAt(T0, exec);
@@ -264,7 +272,7 @@ describe("refresh and snapshot", () => {
         s.workspaces.w1!.repos.app = { branch: "feat/12-x", pr: 4 };
       });
       refreshPausedAt(T0 + 1, exec);
-      expect((await snapshotTop("w1", {})).custom?.find((c) => c.spec.id === "docs")?.env.OVERBRIDGE_PR_JSON).toBeUndefined();
+      expect((await snapshotTop("w1", {})).custom?.find((c) => c.spec.id === "docs")?.env.OVERBRIDGE_PR_JSON).toBe("");
     });
   });
 
@@ -291,7 +299,7 @@ describe("refresh and snapshot", () => {
     envs.length = 0;
     refreshTop("w1", { provider: () => fakeProvider(), exec });
     expect(existsSync(file)).toBe(false);
-    expect(envs[0]?.some((e) => e.startsWith("OVERBRIDGE_PR_JSON="))).toBe(false);
+    expect(envs[0]).toContain("OVERBRIDGE_PR_JSON=");
   });
 
   test("buttonRunKey changes when a button's status command does", () => {
@@ -326,6 +334,6 @@ describe("refresh and snapshot", () => {
     });
     envs.length = 0;
     refreshTop("w1", { provider: () => fakeProvider(), exec });
-    expect(envs[0]?.some((e) => e.startsWith("OVERBRIDGE_PR_JSON="))).toBe(false);
+    expect(envs[0]).toContain("OVERBRIDGE_PR_JSON=");
   });
 });
