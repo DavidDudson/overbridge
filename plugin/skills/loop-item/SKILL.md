@@ -63,15 +63,18 @@ Run `overbridge phase implement` (`overbridge phase implement --stack <n>/<m>` f
 
 ## 4. Commit, then self-review
 
-Run `overbridge phase mob-review` before an early panel run.
+When `review.ship-pr` is `false`, run `overbridge phase mob-review` before the panel run below.
 
 Commit the change (Conventional Commits, `Refs <id>` in the body, no secrets) but do not push yet.
 Review sees only committed work.
 
-`ship-pr` runs `mob-review` on the open PR as a required step (unless `review.ship-pr` is `false`), so a pre-push panel run is optional here. If the `mob-review` skill is available and you want an early pass, run it on the branch against the default branch. It fixes
-the small clear-cut findings on your own branch. Anything left at `change-requested` is a stop: fix
-it now, or accept it with a stated reason, with the user. If `mob-review` is not installed, read your
-own diff once for correctness, tests and leftovers before moving on.
+`ship-pr` runs `mob-review` on the branch before it pushes (its step 5, unless `review.ship-pr` is `false`), so
+that is the self-review: do not run the panel here as well. When `review.ship-pr` is `false` and the `mob-review`
+skill is available, run it here on the branch instead, against the default branch, or on a stacked layer against
+the local branch of the layer below. Tell it not to push: `ship-pr` pushes after its own checks. It fixes the small clear-cut
+findings on your own branch. Anything left at `change-requested` is a stop: fix it now, or accept it with a
+stated reason, with the user. If `mob-review` is not installed, read your own diff once for correctness, tests
+and leftovers before moving on.
 
 ## 5. Ship
 
