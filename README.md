@@ -167,8 +167,8 @@ Run `overbridge help` for every command.
 
 ## Claude Code plugin
 
-`plugin/` ships skills: `workspace`, `ship-pr` (commit, PR, stacked PRs and splitting a branch into a stack,
-green build, mob-review panel and fixes, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
+`plugin/` ships skills: `workspace`, `ship-pr` (commit, mob-review panel and fixes before the push, PR, stacked PRs and splitting a branch into a stack,
+green build, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
 `scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`), `read-handoff` (continue from a handoff file after `/clear`), `perf-recommend` (read the performance history and rank where to get time back), `optimize-usage` (read the last 7 days of history and propose skill reductions and faster Bash commands) `revisit` (from the orchestration tab: find workspaces whose branch is ahead of main and ask each one's Claude whether the commits are still relevant, continuing if so) and `whip` (from the
 orchestration tab: find every workspace with work still outstanding, such as a draft PR, a conflict with main,
 review feedback, a red build, uncommitted or unpushed work or an item not yet shipped, and message its Claude a
@@ -193,7 +193,7 @@ github-actions, shell, typing, a11y, async-state, ac-check, production-protector
 from `overbridge.yml` (see below). It is enabled in the same way as the first.
 
 `mob-review` uses only the built-in `code-review` skill. `review-pr` claims the PR with `overbridge checkout`.
-`loop-item` calls `mob-review` when this plugin is installed. Nothing in it needs `pickup`; `merge-main` and
+`ship-pr` runs `mob-review` before the push when this plugin is installed (`loop-item` runs it instead when `review.ship-pr` is `false`). Nothing in it needs `pickup`; `merge-main` and
 `resolve-feedback` from `overbridge` are optional extras.
 
 Repo-local personas go in `review.local-dir` (default `.overbridge/personas`) as `<name>/SKILL.md` or `<name>.md`,
@@ -317,7 +317,7 @@ review:
   personas: [security, code-quality]   # optional; default is auto-select by diff signals
   exclude: [pr-size]                   # skipped after selection
   local-dir: .overbridge/personas      # repo-local personas (this is the default)
-  ship-pr: true                        # ship-pr runs mob-review before requesting bot reviews (this is the default)
+  ship-pr: true                        # ship-pr runs mob-review before pushing and opening the PR (this is the default)
 ide: vscode           # vscode | zed | webstorm
 ```
 
@@ -326,6 +326,13 @@ ide: vscode           # vscode | zed | webstorm
 `overbridge config show [path]` prints the resolved config as JSON, and says on stderr which files went into it.
 `overbridge config get <key> [path]` prints one resolved value (`commands.test`, `review.local-dir`) and exits
 non-zero when it is unset.
+`overbridge config set <key> <value> [--repo name]` writes one value to the root `config.yml`, such as
+`overbridge config set defaults.ide zed`. With `--repo web` the key goes under `repos.web`. A number, `true`, `false`,
+`null`, or a `[a, b]` or `{k: v}` flow collection keeps its type. Quote a value (`'"5"'`) to store it as a string. Any other value is stored as the string you typed. Put
+`--` before a value that starts with `-`. Comments and layout stay as they were. The command refuses a key that
+`config.schema.json` or `overbridge.schema.json` does not describe, and it checks the whole file before it writes, so
+a bad value leaves the file unchanged. It refuses to run from a Claude session in a workspace or an orchestration tab, because the root config holds the guard and the hooks. It edits block mappings only. Change a key inside a flow mapping
+(`{ ide: zed }`) or a list by hand.
 
 ### Dev shells
 
@@ -441,7 +448,7 @@ out, so move it up if it has to run.
 | `review.personas` | auto | reviewer personas to run; unset selects by diff signals |
 | `review.exclude` | `[]` | personas to skip, applied after selection |
 | `review.local-dir` | `.overbridge/personas` | repo-local personas, relative to the repo root |
-| `review.ship-pr` | `true` | `ship-pr` runs `mob-review` on the open PR once the build is green and applies its fixes before requesting Copilot and CodeRabbit. `false` skips that step |
+| `review.ship-pr` | `true` | `ship-pr` runs `mob-review` on the committed branch and applies its fixes before it pushes and opens the PR. `false` skips that step |
 | `ide` | `$OVERBRIDGE_IDE`, then `$EDITOR` | `vscode`, `zed` or `webstorm`; the top panel's editor button opens the workspace folder. Unset, the button runs `$OVERBRIDGE_IDE` (an ide name or a command) or else `$EDITOR`; set those per user, not in the repo file. GUI editors only, as it is launched detached |
 
 Providers shell out to `gh` (GitHub) and `jira` ([jira-cli](https://github.com/ankitpokhrel/jira-cli), Jira), so there
@@ -551,11 +558,19 @@ defaults:
 - **`status`**: a shell command run in the worktree each time the panel refreshes (every minute, or `r`). It prints
   the text shown after the label, or a JSON object `{ "text": "…", "color": "green" }`. The colours are `red`,
   `green`, `yellow`, `blue`, `purple`, `cyan`, and `grey`. A button with a `status` stays hidden until its command
-  prints something, so a command that fails or prints nothing hides it.
+  prints something, so a command that fails or prints nothing hides it. When the claim has a PR, the panel keeps a
+  repo's last `status` output while the PR looks the same as on the last run (same branch, PR number, PR view with
+  its checks and reviews, and button commands) and that run is under 5 minutes old; `r` runs them anyway. While a
+  GitHub rate limit pauses `gh`, no `status` runs.
 - **`side`**: `right` (the default) with the launchers, or `left` with the links.
 
 The commands get `OVERBRIDGE_NAME`, `OVERBRIDGE_REPO`, `OVERBRIDGE_BRANCH`, `OVERBRIDGE_PR`, and `OVERBRIDGE_ITEM`
-(the work item id in the branch name, such as `ENG-1234`, empty when there is none). This button copies a release
+(the work item id in the branch name, such as `ENG-1234`, empty when there is none). When the claim has a PR,
+`OVERBRIDGE_PR_JSON` names a file holding the PR as the panel last read it, with the fields of `gh pr view --json
+url,title,isDraft,updatedAt,state,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments`
+and `unresolved`, the count of unresolved review threads. Read the fields you need and ignore the rest: the panel may
+read the PR through one batched query, which leaves out fields it doesn't use. With no PR, or none read yet, it is empty.
+A `status` command that reads it doesn't need to call GitHub itself. This button copies a release
 note for every repo the `megaport` org owns:
 
 ```yaml

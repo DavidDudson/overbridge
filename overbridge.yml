@@ -4,6 +4,7 @@ version: 1
 project-management:
   name: github
   project: DavidDudson/overbridge
+  tech-debt: label:tech-debt
 
 shell:
   enter: nix develop --command

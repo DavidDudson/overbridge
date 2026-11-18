@@ -5,6 +5,7 @@ import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
 import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
+import { agentRefusal, configSet } from "./config-set";
 import { icebox, thaw } from "./icebox";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
@@ -22,7 +23,7 @@ import { perfPane } from "./perf-run";
 import { topPanel, topRefresh } from "./top-run";
 import { prListPane, refreshPrList, type PrListKind } from "./prlist-run";
 import { readWorklist, refreshWorklist, showWorklist, worklistPane } from "./worklist-run";
-import { silenceLegacyWarnings } from "./paths";
+import { currentWorkspace, silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
 import { errorMessage, exec, log, OverbridgeError } from "./util";
 
@@ -37,6 +38,11 @@ Setup
   overbridge repo ls                            list registered repos
   overbridge config check|show [path]           validate / print a repo's overbridge.yml
   overbridge config get <key> [path]            print one value, e.g. commands.test
+  overbridge config set <key> <value> [--repo name]
+                                        write one value to the root config.yml (under repos.<name> with
+                                        --repo), keeping its comments; refuses keys the schema does not
+                                        know, e.g. config set defaults.ide zed; put -- before a value
+                                        that starts with -
   overbridge app [id [action]]                  list or start|stop|restart|status|log repo apps
   overbridge next                               go to the next tab needing you: waiting for input, then finished,
                                         then finished with background tasks (zellij binds it to a key)
@@ -51,7 +57,7 @@ Setup
   overbridge server status [--json]             what the server is doing: uptime, per-key hits, misses, in flight, last error
   overbridge server stop [--force]              stop it (it finishes what runs first; --force kills it)
   overbridge server restart                     stop it and start a fresh one
-  overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache
+  overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache (--force reruns button status)
   overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
   overbridge worklist [refresh|show]            work list pane (the @work tab); refresh reads every board into its cache; show prints it
   overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
@@ -170,7 +176,21 @@ async function main(argv: string[]): Promise<number> {
       else if (action === "get") {
         if (!target) throw new OverbridgeError("usage: overbridge config get <key> [path]");
         cmd.configGet(target, rest[2]);
-      } else throw new OverbridgeError("usage: overbridge config check|show|get [path]");
+      } else if (action === "set") {
+        const { values, positionals } = opts(rest.slice(1), { repo: { type: "string" } });
+
+        if (positionals.length !== 2) {
+          throw new OverbridgeError("usage: overbridge config set [--repo name] <key> [--] <value>");
+        }
+
+        const refusal = agentRefusal(process.env, currentWorkspace());
+
+        if (refusal) {
+          throw new OverbridgeError(refusal);
+        }
+
+        configSet(positionals[0]!, positionals[1]!, values.repo);
+      } else throw new OverbridgeError("usage: overbridge config check|show|get|set [path]");
       break;
     }
 
@@ -309,11 +329,11 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case "top": {
-      const { values, positionals } = opts(rest, ws);
+      const { values, positionals } = opts(rest, { ...ws, force: { type: "boolean" as const } });
 
-      if (positionals[0] === "refresh") topRefresh(values.ws);
+      if (positionals[0] === "refresh") topRefresh(values.ws, values.force === true);
       else if (positionals[0] === "sweep") await sweepWithServer();
-      else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh|sweep] [--ws name]");
+      else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh|sweep] [--ws name] [--force]");
       else await topPanel(values.ws);
       break;
     }
