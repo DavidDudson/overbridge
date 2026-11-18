@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { stopApp } from "./apps";
+import { killApp, recordIds, stopApp } from "./apps";
 import { spawnAsync } from "./child";
 import { getRepo } from "./config";
 import { exploreDir, exploreRepos, pickerHit, type PickerView, readSelected, renderPicker, showTerminal, singleFlight, SYNC_MS, type TerminalDeps, toggleTerminal, writeSelected } from "./explore";
@@ -54,8 +54,12 @@ function stopExploreApps(repo: string): string | undefined {
   try {
     specs = loadRepoConfig(dir, repo).apps;
   } catch (e) {
-    return `could not read ${repo}'s apps to stop them: ${errorMessage(e)}`;
+    for (const id of recordIds(EXPLORE_TAB, repo)) killApp(EXPLORE_TAB, repo, id);
+
+    return `${repo}'s config did not load (${errorMessage(e)}), so its apps were killed without their stop commands`;
   }
+
+  const configured = new Set(specs.map((spec) => spec.id));
 
   const failed = specs.flatMap((spec) => {
     try {
@@ -66,6 +70,9 @@ function stopExploreApps(repo: string): string | undefined {
       return [`${spec.id} (${errorMessage(e)})`];
     }
   });
+
+  // a sync can drop an app from the config while it runs; its record still names the process to stop
+  for (const id of recordIds(EXPLORE_TAB, repo).filter((id) => !configured.has(id))) killApp(EXPLORE_TAB, repo, id);
 
   return failed.length ? `could not stop ${repo}'s ${failed.join(", ")}` : undefined;
 }

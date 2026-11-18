@@ -7,10 +7,12 @@ import {
   AppStatus,
   appStatus,
   groupAlive,
+  killApp,
   logPath,
   portFree,
   processAlive,
   readRecord,
+  recordIds,
   startApp,
   stopApp,
   withPort,
@@ -152,6 +154,20 @@ describe("lifecycle", () => {
     const { pid } = start("ws1", s);
     expect(existsSync(join(dirOf("ws1"), "flag.txt"))).toBe(true);
     expect(alive(pid)).toBe(true);
+  });
+});
+
+describe("killApp", () => {
+  test("stops an app from its record alone and frees its port", () => {
+    const a = freePort();
+    const s = spec(`start: exec sleep 300\nports: [${a}]`);
+    const { pid } = start("ws1", s);
+    expect(recordIds("ws1", "app")).toEqual(["srv"]);
+    expect(killApp("ws1", "app", "srv")).toBe(true);
+    expect(alive(pid)).toBe(false);
+    expect(recordIds("ws1", "app")).toEqual([]);
+    expect(allocatePort(s, "app")).toBe(a);
+    expect(killApp("ws1", "app", "srv")).toBe(false);
   });
 });
 

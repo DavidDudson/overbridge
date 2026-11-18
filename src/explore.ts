@@ -99,7 +99,8 @@ export function syncExplore(repo: string): string | undefined {
 
       return undefined;
     case SyncStep.Move: {
-      const moved = run(["git", "-C", dir, "checkout", "--quiet", "--detach", tip]);
+      // git overwrites ignored files by default; a local ignored file the tip adds is the user's to keep
+      const moved = run(["git", "-C", dir, "checkout", "--quiet", "--no-overwrite-ignore", "--detach", tip]);
 
       return moved.ok ? undefined : `${repo}: could not move to ${tip}: ${moved.stderr.trim()}`;
     }

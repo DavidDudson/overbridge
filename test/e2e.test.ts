@@ -308,6 +308,24 @@ describe("workflow", () => {
     expect(ws(["explore", "sync", "app"]).err).toBe("");
     expect(head()).toBe(tip());
 
+    writeFileSync(join(src, ".gitignore"), "*.local\n");
+    sh(["git", "add", ".gitignore"], src);
+    sh(["git", "commit", "-q", "-m", "ignore local files"], src);
+    sh(["git", "push", "-q", remote, "main"], src);
+    expect(ws(["explore", "sync", "app"]).err).toBe("");
+    writeFileSync(join(dir, "c.local"), "mine\n");
+    writeFileSync(join(src, "c.local"), "theirs\n");
+    sh(["git", "add", "-f", "c.local"], src);
+    sh(["git", "commit", "-q", "-m", "add c.local"], src);
+    const beforeIgnored = head();
+    sh(["git", "push", "-q", remote, "main"], src);
+    expect(ws(["explore", "sync", "app"]).err).toContain("could not move to origin/main");
+    expect(head()).toBe(beforeIgnored);
+    expect(readFileSync(join(dir, "c.local"), "utf8")).toBe("mine\n");
+    rmSync(join(dir, "c.local"));
+    expect(ws(["explore", "sync", "app"]).err).toBe("");
+    expect(head()).toBe(tip());
+
     sh(["git", "commit", "-q", "--allow-empty", "-m", "local"], dir);
     const local = head();
     const ahead = ws(["explore", "sync", "app"]);

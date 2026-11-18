@@ -1,4 +1,4 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getRepo } from "./config";
 import { EXPLORE_TAB } from "./orchestration";
@@ -199,6 +199,29 @@ export function stopApp(ws: string, repo: string, spec: AppSpec, repoDir: string
 
   killGroup(record.pid);
   rmSync(recordPath(ws, repo, spec.id), { force: true });
+
+  return true;
+}
+
+/** Ids of `repo`'s apps in `ws` that have a record, whether or not the config still lists them. */
+export function recordIds(ws: string, repo: string): string[] {
+  try {
+    return readdirSync(appsDir(ws, repo))
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => f.slice(0, -".json".length));
+  } catch {
+    return [];
+  }
+}
+
+/** Stop an app from its record alone, for one whose spec is gone: no `stop` command, only its process group. */
+export function killApp(ws: string, repo: string, id: string): boolean {
+  const record = readRecord(ws, repo, id);
+
+  if (!record) return false;
+
+  killGroup(record.pid);
+  rmSync(recordPath(ws, repo, id), { force: true });
 
   return true;
 }
