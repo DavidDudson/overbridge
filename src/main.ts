@@ -41,7 +41,8 @@ Setup
   overbridge config set <key> <value> [--repo name]
                                         write one value to the root config.yml (under repos.<name> with
                                         --repo), keeping its comments; refuses keys the schema does not
-                                        know, e.g. config set defaults.ide zed
+                                        know, e.g. config set defaults.ide zed; put -- before a value
+                                        that starts with -
   overbridge app [id [action]]                  list or start|stop|restart|status|log repo apps
   overbridge next                               go to the next tab needing you: waiting for input, then finished,
                                         then finished with background tasks (zellij binds it to a key)
@@ -178,7 +179,7 @@ async function main(argv: string[]): Promise<number> {
         const { values, positionals } = opts(rest.slice(1), { repo: { type: "string" } });
 
         if (positionals.length !== 2) {
-          throw new OverbridgeError("usage: overbridge config set <key> <value> [--repo name]");
+          throw new OverbridgeError("usage: overbridge config set [--repo name] <key> [--] <value>");
         }
 
         configSet(positionals[0]!, positionals[1]!, values.repo);

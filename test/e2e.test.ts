@@ -468,3 +468,20 @@ describe("check queue", () => {
     expect(tickets()).toEqual([]);
   }, CHECK_TEST_MS);
 });
+
+describe("config set", () => {
+  test("--repo writes under repos.<name>, and a missing value prints the usage", () => {
+    const file = join(root, "config.yml");
+    const r = ws(["config", "set", "ide", "zed", "--repo", "app"]);
+
+    try {
+      expect(r.code).toBe(0);
+      expect(readFileSync(file, "utf8")).toBe("repos:\n  app:\n    ide: zed\n");
+      const usage = ws(["config", "set", "defaults.ide"]);
+      expect(usage.code).not.toBe(0);
+      expect(usage.err).toContain("usage: overbridge config set");
+    } finally {
+      rmSync(file, { force: true });
+    }
+  });
+});

@@ -1,9 +1,9 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { loadRepos } from "./config";
 import { packageRoot } from "./paths";
 import { parseYaml, rootConfigPath, rootLayersFrom, suggest } from "./project-config";
-import { errorMessage, fail, isRecord, isString, log, type Json, type JsonObject } from "./util";
+import { errorMessage, fail, isBoolean, isNumber, isRecord, isString, log, type Json, type JsonObject } from "./util";
 
 /** The subset of JSON Schema that `config.schema.json` and `overbridge.schema.json` use to describe keys. */
 export interface KeySchema {
@@ -120,23 +120,31 @@ export function unknownKeyProblem(path: readonly string[], rootSchema: KeySchema
   return walk(rootSchema, 0);
 }
 
-/** Read a value given on the command line as YAML (`5`, `true`, `[a, b]`); anything YAML cannot read stays a string. */
+/**
+ * Read a value given on the command line. `[...]` and `{...}` are YAML flow collections; a number, `true`,
+ * `false` or `null` written exactly so takes that type; anything else stays the string as typed, so a command
+ * keeps a ` # ...` or `: ` and `1.10` stays `1.10`.
+ */
 export function parseConfigValue(text: string): Json {
-  if (text.trim() === "") {
-    return text;
-  }
+  const trimmed = text.trim();
 
   try {
-    // SAFETY: a YAML document parses to plain scalars, arrays and mappings, which is what `Json` describes.
-    const value = Bun.YAML.parse(text) as Json | undefined;
+    const value = yamlJson(text);
 
-    return value === undefined ? text : value;
+    if (/^[[{]/.test(trimmed)) {
+      return value ?? text;
+    }
+
+    return value === null ? (trimmed === "null" ? null : text) : isNumber(value) || isBoolean(value) ? (String(value) === trimmed ? value : text) : text;
   } catch {
     return text;
   }
 }
 
-const reads = (yaml: string, value: Json): boolean => {
+// SAFETY: a YAML document parses to plain scalars, arrays and mappings, which is what `Json` describes.
+const yamlJson = (text: string) => Bun.YAML.parse(text) as Json | undefined;
+
+const parsesTo = (yaml: string, value: Json): boolean => {
   try {
     return Bun.deepEquals(Bun.YAML.parse(yaml), value);
   } catch {
@@ -146,26 +154,18 @@ const reads = (yaml: string, value: Json): boolean => {
 
 /** `value` as YAML on one line: plain when that reads back the same, else JSON, which YAML reads as flow style. */
 export function inlineYaml(value: Json): string {
-  if (isString(value) && value !== "" && !/[\n\t]/.test(value) && reads(`k: ${value}`, { k: value })) {
+  if (isString(value) && value !== "" && !/[\n\t]/.test(value) && parsesTo(`k: ${value}`, { k: value })) {
     return value;
   }
 
   return JSON.stringify(value);
 }
 
-const yamlKey = (key: string) => (/^[A-Za-z0-9_][A-Za-z0-9_./-]*$/.test(key) && reads(`k: ${key}`, { k: key }) ? key : JSON.stringify(key));
-
-interface KeyLine {
-  indent: number;
-  key: string;
-  /** The text the key is written as, quotes included. */
-  keyText: string;
-  value: string;
-  /** The trailing comment with the whitespace before it, or "". */
-  comment: string;
-}
+const yamlKey = (key: string) => (/^[A-Za-z0-9_][A-Za-z0-9_./-]*$/.test(key) && parsesTo(`k: ${key}`, { k: key }) ? key : JSON.stringify(key));
 
 const isContent = (line: string) => line.trim() !== "" && !line.trimStart().startsWith("#");
+
+const isListItem = (line: string) => /^\s*-(\s|$)/.test(line);
 
 const indentOf = (line: string) => line.length - line.trimStart().length;
 
@@ -173,6 +173,13 @@ interface ValueAndComment {
   value: string;
   /** The trailing comment with the whitespace before it, or "". */
   comment: string;
+}
+
+interface KeyLine extends ValueAndComment {
+  indent: number;
+  key: string;
+  /** The text the key is written as, quotes included. */
+  keyText: string;
 }
 
 /** Split `rest` into its value and a trailing `# comment`, ignoring `#` inside quotes. */
@@ -222,7 +229,7 @@ function keyLine(line: string): KeyLine | undefined {
 
 /** The index of the last line that belongs to the entry at `start` (its own line when it has no block). */
 function blockEnd(lines: readonly string[], start: number, indent: number, end: number): number {
-  const isChild = (line: string) => indentOf(line) > indent || (indentOf(line) === indent && /^\s*-(\s|$)/.test(line));
+  const isChild = (line: string) => indentOf(line) > indent || (indentOf(line) === indent && isListItem(line));
   const next = lines.findIndex((line, i) => i > start && i < end && isContent(line) && !isChild(line));
   const stop = next < 0 ? end : next;
   const last = lines.slice(start + 1, stop).findLastIndex(isContent);
@@ -232,7 +239,7 @@ function blockEnd(lines: readonly string[], start: number, indent: number, end: 
 
 const EMPTY_VALUES = new Set(["", "~", "null", "{}"]);
 
-const unitOf = (lines: readonly string[]) => {
+const indentStepOf = (lines: readonly string[]) => {
   const indents = lines.flatMap((line) => (isContent(line) && indentOf(line) > 0 ? [indentOf(line)] : []));
 
   return indents.length ? Math.min(...indents) : 2;
@@ -258,6 +265,10 @@ export function setYamlValue(text: string, path: readonly string[], value: Json)
     throw new Error(`'${path.join(".")}' is not a key: use dotted names such as defaults.ide`);
   }
 
+  if (text.includes("\r")) {
+    throw new Error("the file has CRLF line endings; convert it to LF or edit it by hand");
+  }
+
   const lines = text === "" ? [] : text.replace(/\n$/, "").split("\n");
   const docMarkers = lines.flatMap((line, i) => (/^---(\s|$)/.test(line) ? [i] : []));
 
@@ -265,7 +276,7 @@ export function setYamlValue(text: string, path: readonly string[], value: Json)
     throw new Error("the file holds more than one YAML document; edit it by hand");
   }
 
-  const unit = unitOf(lines);
+  const indentStep = indentStepOf(lines);
   const valueText = inlineYaml(value);
 
   const edit = (lines: readonly string[], start: number, end: number, parentIndent: number, depth: number, parentPath: string): string[] => {
@@ -273,29 +284,40 @@ export function setYamlValue(text: string, path: readonly string[], value: Json)
     const keyPath = parentPath ? `${parentPath}.${segment}` : segment;
     const contentIndexes = lines.flatMap((line, i) => (i >= start && i < end && isContent(line) && !/^(---|\.\.\.|%)/.test(line) ? [i] : []));
     const childIndent = contentIndexes.length ? Math.min(...contentIndexes.map((i) => indentOf(lines[i]!))) : parentIndent;
-    const entries = contentIndexes.filter((i) => indentOf(lines[i]!) === childIndent);
-    const parsed = entries.map((i) => ({ i, line: keyLine(lines[i]!) }));
-    const notKey = parsed.find((entry) => entry.line === undefined);
+    const atChildIndent = contentIndexes.filter((i) => indentOf(lines[i]!) === childIndent);
 
-    if (notKey) {
-      throw new Error(`${parentPath || "the file"} is not a block mapping (line ${notKey.i + 1}); edit it by hand`);
+    // an indentless list (`key:` then `- item` at the same indent) belongs to the key above it
+    if (atChildIndent.length && isListItem(lines[atChildIndent[0]!]!)) {
+      throw new Error(`${parentPath || "the file"} is a list, not a block mapping (line ${atChildIndent[0]! + 1}); edit it by hand`);
     }
 
-    const found = parsed.find((entry) => entry.line!.key === segment);
+    const entries = atChildIndent.filter((i) => !isListItem(lines[i]!));
+
+    const parsed = entries.map((i) => {
+      const line = keyLine(lines[i]!);
+
+      if (line === undefined) {
+        throw new Error(`${parentPath || "the file"} is not a block mapping (line ${i + 1}); edit it by hand`);
+      }
+
+      return { i, line };
+    });
+
+    const found = parsed.find((entry) => entry.line.key === segment);
 
     if (found === undefined) {
       const added = path.slice(depth).map((key, n) => {
-        const pad = " ".repeat(childIndent + n * unit);
+        const pad = " ".repeat(childIndent + n * indentStep);
 
         return n === path.length - depth - 1 ? `${pad}${yamlKey(key)}: ${valueText}` : `${pad}${yamlKey(key)}:`;
       });
 
-      const at = contentIndexes.length ? contentIndexes.at(-1)! + 1 : start;
+      const at = contentIndexes.length ? contentIndexes.at(-1)! + 1 : end;
 
       return [...lines.slice(0, at), ...added, ...lines.slice(at)];
     }
 
-    const line = found.line!;
+    const { line } = found;
     const last = blockEnd(lines, found.i, childIndent, end);
     const pad = " ".repeat(line.indent);
 
@@ -309,14 +331,13 @@ export function setYamlValue(text: string, path: readonly string[], value: Json)
 
     const rewritten = line.value === "" ? lines : lines.with(found.i, `${pad}${line.keyText}:${line.comment}`);
 
-    return edit(rewritten, found.i + 1, last + 1, childIndent + unit, depth + 1, keyPath);
+    return edit(rewritten, found.i + 1, last + 1, childIndent + indentStep, depth + 1, keyPath);
   };
 
   const result = `${edit(lines, docMarkers.length ? docMarkers[0]! + 1 : 0, lines.length, 0, 0, "").join("\n")}\n`;
-  // SAFETY: a YAML document parses to plain scalars, arrays and mappings, which is what `Json` describes.
-  const before = text.trim() === "" ? undefined : (Bun.YAML.parse(text) as Json | undefined);
+  const before = text.trim() === "" ? undefined : yamlJson(text);
 
-  if (!reads(result, setIn(before ?? {}, path, value))) {
+  if (!parsesTo(result, setIn(before ?? {}, path, value))) {
     throw new Error(`could not set ${path.join(".")} without changing other keys; edit the file by hand`);
   }
 
@@ -338,20 +359,37 @@ export function configSet(key: string, valueText: string, repo?: string) {
     fail(`${shown}: ${problem}. See config.schema.json for the keys config.yml takes.`);
   }
 
-  if (repo !== undefined && !knownRepo(repo)) {
+  if (repo !== undefined && !isKnownRepo(repo)) {
     log(`warning: '${repo}' is not in repos.toml, so repos.${repo} applies to nothing yet`);
   }
 
-  const file = rootConfigPath();
+  const file = configFileToWrite();
   const before = existsSync(file) ? readFileSync(file, "utf8") : "";
   const value = parseConfigValue(valueText);
   const after = editedOrFail(file, before, path, value);
 
-  rootLayersFrom(parseYaml(after, file), file);
+  try {
+    rootLayersFrom(parseYaml(after, file), file);
+  } catch (e) {
+    fail(`not written: ${errorMessage(e)}`);
+  }
+
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, after);
+  // keep a file the user restricted (0600) restricted after the rename
+  writeFileSync(tmp, after, existsSync(file) ? { mode: statSync(file).mode & 0o777 } : {});
   renameSync(tmp, file);
   log(`${file}: ${shown} = ${JSON.stringify(value)}`);
+}
+
+/** The root config.yml, through any symlink so the rename replaces its target, not the link. */
+function configFileToWrite(): string {
+  const file = rootConfigPath();
+
+  if (!existsSync(dirname(file))) {
+    fail(`${dirname(file)} does not exist; run overbridge init first`);
+  }
+
+  return existsSync(file) ? realpathSync(file) : file;
 }
 
 function editedOrFail(file: string, text: string, path: readonly string[], value: Json): string {
@@ -362,10 +400,12 @@ function editedOrFail(file: string, text: string, path: readonly string[], value
   }
 }
 
-function knownRepo(repo: string): boolean {
+function isKnownRepo(repo: string): boolean {
   try {
     return loadRepos()[repo] !== undefined;
-  } catch {
-    return false;
+  } catch (e) {
+    log(`warning: could not read repos.toml to check '${repo}': ${errorMessage(e)}`);
+
+    return true;
   }
 }

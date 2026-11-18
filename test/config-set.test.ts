@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { configSet, inlineYaml, type KeySchema, parseConfigValue, setYamlValue, unknownKeyProblem } from "../src/config-set";
-import { rootConfigPath } from "../src/project-config";
-import type { Json } from "../src/util";
+import { parseYaml, rootConfigPath } from "../src/project-config";
+import { isRecord, type Json } from "../src/util";
 
 // SAFETY: both files are the JSON Schema documents the package ships.
 const schema = (name: string): KeySchema => JSON.parse(readFileSync(join(import.meta.dir, "..", name), "utf8")) as KeySchema;
@@ -45,6 +45,16 @@ describe("unknownKeyProblem", () => {
     expect(problem("x-acme.squad")).toStartWith("unknown key 'x-acme'");
   });
 
+  test("knows every mapping key in overbridge.example.yml as a defaults key", () => {
+    const keyPaths = (node: Json, path: string[]): string[][] =>
+      isRecord(node) ? Object.entries(node).flatMap(([key, child]) => [[...path, key], ...keyPaths(child, [...path, key])]) : [];
+
+    const example = parseYaml(readFileSync(join(import.meta.dir, "..", "overbridge.example.yml"), "utf8"), "overbridge.example.yml");
+    const problems = keyPaths(example, ["defaults"]).flatMap((path) => unknownKeyProblem(path, ROOT, LAYER) ?? []);
+
+    expect(problems).toEqual([]);
+  });
+
   test("refuses an unknown guard key", () => {
     expect(problem("guard.allow")).toStartWith("unknown key 'allow' under guard");
   });
@@ -60,6 +70,12 @@ describe("parseConfigValue", () => {
     ["nix develop --command", "nix develop --command"],
     ["", ""],
     ["a: b: c", "a: b: c"],
+    ["bun test # fast", "bun test # fast"],
+    ["echo a: b", "echo a: b"],
+    ["- x", "- x"],
+    ["1.10", "1.10"],
+    ["null", null],
+    ["yes", "yes"],
   ])("%p", (text, value) => {
     expect(parseConfigValue(text)).toEqual(value);
   });
@@ -146,12 +162,31 @@ repos:
     expect(() => setYamlValue("defaults: { ide: vscode }\n", ["defaults", "ide"], "zed")).toThrow("defaults is written inline");
   });
 
+  test("edits past an indentless list", () => {
+    expect(setYamlValue("skill-extensions:\n- a\ndefaults:\n  ide: vscode\n", ["defaults", "ide"], "zed")).toBe("skill-extensions:\n- a\ndefaults:\n  ide: zed\n");
+    expect(setYamlValue("defaults:\n  mcp-servers:\n  - a\n", ["defaults", "ide"], "zed")).toBe("defaults:\n  mcp-servers:\n  - a\n  ide: zed\n");
+  });
+
+  test("adds keys below the comments of a file with no keys", () => {
+    expect(setYamlValue("# managed by me\n", ["defaults", "ide"], "zed")).toBe("# managed by me\ndefaults:\n  ide: zed\n");
+  });
+
+  test("refuses CRLF line endings", () => {
+    expect(() => setYamlValue("defaults:\r\n  ide: vscode\r\n", ["defaults", "ide"], "zed")).toThrow("CRLF");
+  });
+
   test("refuses to edit through a list", () => {
-    expect(() => setYamlValue("defaults:\n  - a\n", ["defaults", "ide"], "zed")).toThrow("defaults is not a block mapping");
+    expect(() => setYamlValue("defaults:\n  - a\n", ["defaults", "ide"], "zed")).toThrow("defaults is a list, not a block mapping");
   });
 
   test("refuses a file with more than one document", () => {
     expect(() => setYamlValue("a: 1\n---\nb: 2\n", ["a"], 2)).toThrow("more than one YAML document");
+  });
+
+  test("refuses an edit that would change another key, such as one that drops an anchor an alias uses", () => {
+    expect(() => setYamlValue("defaults:\n  ide: &e vscode\nrepos:\n  web:\n    ide: *e\n", ["defaults", "ide"], "zed")).toThrow(
+      "without changing other keys",
+    );
   });
 
   test("refuses an empty key segment", () => {
@@ -194,6 +229,33 @@ describe("configSet", () => {
     writeFileSync(rootConfigPath(), "version: 1\n");
     expect(() => configSet("defaults.ide", "emacs")).toThrow("ide");
     expect(readFileSync(rootConfigPath(), "utf8")).toBe("version: 1\n");
+  });
+
+  test("leaves the file alone when the editor refuses", () => {
+    const yaml = "defaults:\n  ide: &e vscode\nrepos:\n  web:\n    ide: *e\n";
+    writeFileSync(rootConfigPath(), yaml);
+    expect(() => configSet("defaults.ide", "zed")).toThrow("without changing other keys");
+    expect(readFileSync(rootConfigPath(), "utf8")).toBe(yaml);
+  });
+
+  test("writes through a symlinked config.yml", () => {
+    const target = join(tmp, "real.yml");
+    writeFileSync(target, "version: 1\n");
+    symlinkSync(target, rootConfigPath());
+    configSet("defaults.ide", "zed");
+    expect(lstatSync(rootConfigPath()).isSymbolicLink()).toBe(true);
+    expect(readFileSync(target, "utf8")).toBe("version: 1\ndefaults:\n  ide: zed\n");
+  });
+
+  test("says nothing was written when validation fails", () => {
+    expect(() => configSet("defaults.ide", "emacs")).toThrow("not written:");
+  });
+
+  test("keeps the file's mode", () => {
+    writeFileSync(rootConfigPath(), "version: 1\n");
+    chmodSync(rootConfigPath(), 0o600);
+    configSet("defaults.ide", "zed");
+    expect(statSync(rootConfigPath()).mode & 0o777).toBe(0o600);
   });
 
   test("refuses a key the schema does not know before touching the file", () => {

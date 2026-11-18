@@ -327,8 +327,9 @@ ide: vscode           # vscode | zed | webstorm
 `overbridge config get <key> [path]` prints one resolved value (`commands.test`, `review.local-dir`) and exits
 non-zero when it is unset.
 `overbridge config set <key> <value> [--repo name]` writes one value to the root `config.yml`, such as
-`overbridge config set defaults.ide zed`. With `--repo web` the key goes under `repos.web`. The value is read as YAML,
-so `5`, `true`, and `[a, b]` keep their types. Comments and layout stay as they were. The command refuses a key that
+`overbridge config set defaults.ide zed`. With `--repo web` the key goes under `repos.web`. A number, `true`, `false`,
+`null`, or a `[a, b]` or `{k: v}` flow collection keeps its type. Any other value is stored as the string you typed. Put
+`--` before a value that starts with `-`. Comments and layout stay as they were. The command refuses a key that
 `config.schema.json` or `overbridge.schema.json` does not describe, and it checks the whole file before it writes, so
 a bad value leaves the file unchanged. It edits block mappings only. Change a key inside a flow mapping
 (`{ ide: zed }`) or a list by hand.
