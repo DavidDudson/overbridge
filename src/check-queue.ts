@@ -1,19 +1,18 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, constants, loadavg } from "node:os";
 import { join } from "node:path";
-import { defaultKey, type Priority, type QueueOrder, readOrder } from "./check-priority";
+import { defaultKey, type QueueOverrides, readOverrides } from "./check-priority";
 import { classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
 import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
 import type { ShellInvocation } from "./shell";
-import { exec, isNumber, isRecord, log } from "./util";
+import { exec, isNumber, isRecord, type Json, log } from "./util";
 
 /**
  * `overbridge check`: heavy commands from every workspace, started in queue order while the load leaves room.
- * Each caller drops a ticket in `<meta>/check-queue/`. Tickets queue by their workspace's priority class, then by
- * when they were queued; the @checks tab can move a waiting one (`order.state`). A ticket starts once every live
- * ticket ahead of it is running, fewer than `max-parallel` of them are, and the load allows. Only a ticket's owner writes it, and
+ * Each caller drops a ticket in `<meta>/check-queue/`; tickets queue by `queueComparator`. A ticket starts once every
+ * live ticket ahead of it is running, fewer than `max-parallel` live tickets are, and the load allows. Only a ticket's owner writes it, and
  * only the first waiting ticket may start, so the queue needs no lock. Each run has its own process group,
  * which its owner kills on a timeout or a stall.
  */
@@ -41,8 +40,10 @@ export interface Ticket {
   repo: string;
   command: string;
   queuedAtMs: number;
-  /** The claim's class when it was queued; unset sorts as the default class. */
-  priority?: Priority;
+  /** The workspace's class when it was queued (see `ClassInfo`); a ticket with no `rank` comes from an older overbridge. */
+  priority?: string;
+  rank?: number;
+  icon?: string;
   /** Group leader of the running command, once it has the turn. */
   runPid?: number;
   runningSinceMs?: number;
@@ -72,22 +73,36 @@ export const queueDir = () => join(metaDir(), "check-queue");
 /** Zero-padded so the file names sort in queue order. */
 export const ticketName = (t: Pick<Ticket, "queuedAtMs" | "pid">) => `${String(t.queuedAtMs).padStart(15, "0")}-${t.pid}.json`;
 
-/** A ticket's place in the queue: the @checks tab's override, else its class and when it was queued. */
-export const ticketKey = (t: Ticket, order: QueueOrder = {}) => order[ticketName(t)] ?? defaultKey(t.priority, t.queuedAtMs);
+export type TicketComparator = (a: Ticket, b: Ticket) => number;
 
-/** Queue order under the @checks tab's overrides. */
-export const queueOrder =
-  (order: QueueOrder = {}) =>
-  (a: Ticket, b: Ticket) =>
-    ticketKey(a, order) - ticketKey(b, order) || a.queuedAtMs - b.queuedAtMs || a.pid - b.pid;
+/** Queue order by time alone, as an older overbridge sorts. */
+export const byQueueOrder: TicketComparator = (a, b) => a.queuedAtMs - b.queuedAtMs || a.pid - b.pid;
 
-/** Queue order with no overrides. */
-export const byQueueOrder = queueOrder();
+/** A ticket's place in the queue: the @checks tab's override, else its class rank and when it was queued. */
+export const ticketKey = (t: Ticket, overrides: QueueOverrides = {}) => overrides[ticketName(t)] ?? defaultKey(t.rank ?? 0, t.queuedAtMs);
 
-const isTicket = (v: unknown): v is Ticket => isRecord(v) && Number.isInteger(v.pid) && Number.isFinite(v.queuedAtMs);
+/** Queue order by class, then time, under the @checks tab's overrides. */
+export const queueComparator =
+  (overrides: QueueOverrides = {}): TicketComparator =>
+  (a, b) =>
+    ticketKey(a, overrides) - ticketKey(b, overrides) || byQueueOrder(a, b);
+
+/**
+ * The comparator every process agrees on for `tickets`. An older overbridge sorts by time only, so while one of its
+ * tickets (no `rank`) is queued, every process sorts by time; two orders at once would leave each waiting on the other.
+ */
+export const comparatorFor = (tickets: readonly Ticket[], overrides: QueueOverrides): TicketComparator =>
+  tickets.some((t) => t.rank === undefined) ? byQueueOrder : queueComparator(overrides);
+
+/** The live tickets that sort ahead of `me`. */
+export const aheadOf = (me: Ticket, live: readonly Ticket[], cmp: TicketComparator): Ticket[] => live.filter((t) => cmp(t, me) < 0);
+
+const isRank = (v: Json | undefined) => v === undefined || (Number.isInteger(v) && isNumber(v) && v >= 0);
+
+const isTicket = (v: unknown): v is Ticket => isRecord(v) && Number.isInteger(v.pid) && Number.isFinite(v.queuedAtMs) && isRank(v.rank);
 
 /** Every readable ticket, in queue order. A torn or foreign file is skipped. */
-export function readTickets(dir = queueDir(), order: QueueOrder = readOrder(dir)): Ticket[] {
+export function readTickets(dir = queueDir(), overrides: QueueOverrides = readOverrides(dir)): Ticket[] {
   const names = (() => {
     try {
       return readdirSync(dir).filter((name) => name.endsWith(".json"));
@@ -96,7 +111,7 @@ export function readTickets(dir = queueDir(), order: QueueOrder = readOrder(dir)
     }
   })();
 
-  return names
+  const tickets = names
     .flatMap((name) => {
       try {
         const parsed: unknown = JSON.parse(readFileSync(join(dir, name), "utf8"));
@@ -105,8 +120,9 @@ export function readTickets(dir = queueDir(), order: QueueOrder = readOrder(dir)
       } catch {
         return [];
       }
-    })
-    .toSorted(queueOrder(order));
+    });
+
+  return tickets.toSorted(comparatorFor(tickets, overrides));
 }
 
 export interface SplitQueue {
@@ -166,19 +182,19 @@ export interface Machine {
 }
 
 /** Whether `me` may start now, given the live queue, or what holds it back. */
-export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machine: Machine, nowMs: number, order: QueueOrder = {}): Gate {
-  const cmp = queueOrder(order);
-  const ahead = live.filter((t) => cmp(t, me) < 0);
-
-  if (!ahead.every(isRunning)) {
+export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machine: Machine, nowMs: number, overrides: QueueOverrides = {}): Gate {
+  if (!aheadOf(me, live, comparatorFor(live, overrides)).every(isRunning)) {
     return Gate.Queue;
   }
 
-  if (settings.maxParallel !== undefined && ahead.length >= settings.maxParallel) {
+  // a higher class or a moved ticket can sort ahead of runs already going, so the caps count every run
+  const running = live.filter(isRunning);
+
+  if (settings.maxParallel !== undefined && running.length >= settings.maxParallel) {
     return Gate.Parallel;
   }
 
-  return loadAllows(machine.load1 + unsettledLoad(ahead, nowMs), machine.cores, settings.maxLoadPercent) ? Gate.Start : Gate.Load;
+  return loadAllows(machine.load1 + unsettledLoad(running, nowMs), machine.cores, settings.maxLoadPercent) ? Gate.Start : Gate.Load;
 }
 
 export interface QueueView {
@@ -192,7 +208,7 @@ export function queueView(tickets: Ticket[]): QueueView {
 }
 
 /** The live queue as the sidebar and the @checks tab show it. */
-export const readQueue = (dir = queueDir()) => queueView(splitQueue(readTickets(dir), pidAlive).live);
+export const readQueue = (dir = queueDir(), overrides: QueueOverrides = readOverrides(dir)) => queueView(splitQueue(readTickets(dir, overrides), pidAlive).live);
 
 function writeTicket(file: string, ticket: Ticket) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -283,20 +299,19 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
   let announced: string | undefined;
 
   for (;;) {
-    const order = readOrder(dir);
-    const { live, dead } = splitQueue(readTickets(dir, order), pidAlive);
+    const overrides = readOverrides(dir);
+    const { live, dead } = splitQueue(readTickets(dir, overrides), pidAlive);
     dead.forEach((t) => reap(t, dir));
     const now = Date.now();
-    const cmp = queueOrder(order);
-    const ahead = live.filter((t) => cmp(t, me) < 0);
+    const ahead = aheadOf(me, live, comparatorFor(live, overrides));
     const load1 = loadavg()[0] ?? 0;
-    const gate = gateFor(me, live, settings, { load1, cores }, now, order);
+    const gate = gateFor(me, live, settings, { load1, cores }, now, overrides);
 
     if (gate === Gate.Start) {
       return true;
     }
 
-    const running = ahead.filter(isRunning);
+    const running = live.filter(isRunning);
     const runningNow = running.length ? `running: ${running.map(label).join("; ")}` : "nothing running yet";
     const overLoad = `load ${(load1 + unsettledLoad(running, now)).toFixed(2)} is over ${limit.toFixed(1)} (${settings.maxLoadPercent}% of ${cores} cores)`;
 
@@ -389,7 +404,7 @@ async function runHeld(inv: ShellInvocation, me: Ticket, file: string, settings:
  * Run `inv` when the queue and the load allow, and return its exit code: the command's own, or
  * `CheckExit.GaveUp`, `TimedOut` or `Stalled`. Inside a held run (`HELD_ENV` set) it runs at once.
  */
-export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "repo" | "command" | "priority">, settings: CheckQueue): Promise<number> {
+export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "repo" | "command" | "priority" | "rank" | "icon">, settings: CheckQueue): Promise<number> {
   if (process.env[HELD_ENV]) {
     return exec(inv.cmd, { cwd: inv.cwd, env: inv.env });
   }

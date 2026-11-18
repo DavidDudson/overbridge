@@ -1,52 +1,47 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isNumber, isRecord } from "./util";
+import { errorMessage, isNumber, isRecord } from "./util";
 
-/**
- * Check queue priority: each workspace has a class, and queued checks start in class order, then in the order
- * they were queued. The @checks tab can move a waiting check, which writes an explicit sort key for its ticket.
- */
+/** A check queue class from the root `priority-classes`; the list is highest first. */
+export interface PriorityClass {
+  name: string;
+  /** Two columns wide, like the agent glyphs, so card rows stay aligned. */
+  icon: string;
+  /** The class a claim gets when no rule or repo setting names one; the first class when none is marked. */
+  default?: boolean;
+}
 
-/** Priority classes, highest first. */
-export const Priority = { Feature: "feature", Overbridge: "overbridge", Tip: "tip", TechDebt: "tech-debt" } as const;
+export const DEFAULT_CLASSES: readonly PriorityClass[] = [
+  { name: "high", icon: "🔺" },
+  { name: "normal", icon: "🔹", default: true },
+  { name: "low", icon: "🔻" },
+];
 
-export type Priority = (typeof Priority)[keyof typeof Priority];
+/** A claim's class as tickets and the sidebar carry it: `rank` 0 starts first. */
+export interface ClassInfo {
+  name: string;
+  rank: number;
+  icon: string;
+}
 
-export const PRIORITIES: readonly Priority[] = Object.values(Priority);
+export const defaultClassName = (classes: readonly PriorityClass[]): string => (classes.find((c) => c.default) ?? classes[0])?.name ?? "";
 
-export const DEFAULT_PRIORITY: Priority = Priority.Feature;
+/** `name`'s place in `classes`; an unknown name gets the default class's. */
+export function classInfo(classes: readonly PriorityClass[], name: string): ClassInfo {
+  const at = classes.findIndex((c) => c.name === name);
+  const rank = at >= 0 ? at : Math.max(0, classes.findIndex((c) => c.name === defaultClassName(classes)));
+  const cls = classes[rank];
 
-export const isPriority = (v: unknown): v is Priority => PRIORITIES.some((p) => p === v);
-
-/** Each class's icon on sidebar cards and in the @checks tab; all two columns wide, like the agent glyphs. */
-export const PRIORITY_ICON: Record<Priority, string> = {
-  [Priority.Feature]: "🚀",
-  [Priority.Overbridge]: "🌉",
-  [Priority.Tip]: "💡",
-  [Priority.TechDebt]: "🧹",
-};
-
-export const PRIORITY_LABEL: Record<Priority, string> = {
-  [Priority.Feature]: "feature",
-  [Priority.Overbridge]: "overbridge",
-  [Priority.Tip]: "TIP",
-  [Priority.TechDebt]: "tech debt",
-};
+  return { name: cls?.name ?? name, rank, icon: cls?.icon ?? "" };
+}
 
 /** A config rule: the class for a claim whose branch and item id match every pattern the rule sets. */
 export interface PriorityRule {
-  priority: Priority;
+  priority: string;
   branch?: string;
   item?: string;
 }
 
-/** The repo's priority settings: rules tried in order, then `fallback`. */
-export interface PrioritySettings {
-  fallback: Priority;
-  rules: PriorityRule[];
-}
-
-/** What a rule matches against. */
 export interface ClaimFacts {
   branch?: string | undefined;
   item?: string | undefined;
@@ -54,81 +49,100 @@ export interface ClaimFacts {
 
 const matches = (pattern: string | undefined, value: string | undefined) => pattern === undefined || (value !== undefined && new RegExp(pattern).test(value));
 
-/** The class of a claim: the first rule that matches, else the repo's fallback. */
-export function priorityOf(settings: PrioritySettings, facts: ClaimFacts): Priority {
-  return settings.rules.find((r) => matches(r.branch, facts.branch) && matches(r.item, facts.item))?.priority ?? settings.fallback;
-}
+/** The class name of a claim: the first matching rule, else `fallback`. */
+export const priorityOf = (rules: readonly PriorityRule[], fallback: string, facts: ClaimFacts): string =>
+  rules.find((r) => matches(r.branch, facts.branch) && matches(r.item, facts.item))?.priority ?? fallback;
 
-/** The highest of `priorities`, or the default when there are none. */
-export const highest = (priorities: readonly Priority[]): Priority =>
-  priorities.toSorted((a, b) => PRIORITIES.indexOf(a) - PRIORITIES.indexOf(b))[0] ?? DEFAULT_PRIORITY;
+/** The class that starts first among `classes`, or undefined for none. */
+export const highest = (classes: readonly ClassInfo[]): ClassInfo | undefined => classes.toSorted((a, b) => a.rank - b.rank)[0];
 
 /** Wider than any `queuedAtMs`, so a class's keys never overlap the next class's. */
 const CLASS_SPAN_MS = 1e14;
 
 /** Sort keys the @checks tab set, by ticket file name. */
-export type QueueOrder = Readonly<Record<string, number>>;
+export type QueueOverrides = Readonly<Record<string, number>>;
 
-/** A ticket's sort key with no override: its class, then when it was queued. */
-export const defaultKey = (priority: Priority | undefined, queuedAtMs: number) => PRIORITIES.indexOf(priority ?? DEFAULT_PRIORITY) * CLASS_SPAN_MS + queuedAtMs;
+export const defaultKey = (rank: number, queuedAtMs: number) => rank * CLASS_SPAN_MS + queuedAtMs;
 
-/** Kept beside the tickets; it has no `.json` suffix, so `readTickets` never reads it as one. */
-const ORDER_FILE = "order.state";
+/** No `.json` suffix, so `readTickets` never reads it as a ticket. */
+const OVERRIDES_FILE = "order.state";
 
-export const orderPath = (dir: string) => join(dir, ORDER_FILE);
+export const overridesPath = (dir: string) => join(dir, OVERRIDES_FILE);
 
-/** The overrides in `dir`; none when the file is missing or unreadable, so a bad file only loses manual moves. */
-export function readOrder(dir: string): QueueOrder {
+const parseOverrides = (text: string): QueueOverrides => {
+  const parsed: unknown = JSON.parse(text);
+
+  if (!isRecord(parsed)) {
+    throw new Error(`expected a mapping of ticket name to sort key, got ${JSON.stringify(parsed)}`);
+  }
+
+  return Object.fromEntries(Object.entries(parsed).filter((e): e is [string, number] => isNumber(e[1]) && Number.isFinite(e[1])));
+};
+
+/** The overrides for sorting; none when the file is missing or unreadable, so a bad file only loses manual moves. */
+export function readOverrides(dir: string): QueueOverrides {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(orderPath(dir), "utf8"));
-
-    return isRecord(parsed) ? Object.fromEntries(Object.entries(parsed).filter((e): e is [string, number] => isNumber(e[1]) && Number.isFinite(e[1]))) : {};
+    return parseOverrides(readFileSync(overridesPath(dir), "utf8"));
   } catch {
     return {};
   }
 }
 
-/** Replace the overrides with an atomic rename. Only the @checks tab writes this file. */
-export function writeOrder(dir: string, order: QueueOrder) {
-  const file = orderPath(dir);
+/** The overrides for a write: none when missing, a throw when unreadable, so a move never overwrites a file it cannot parse. */
+export function readOverridesForWrite(dir: string): QueueOverrides {
+  const file = overridesPath(dir);
+  let text: string;
+
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (e) {
+    if (e instanceof Error && "code" in e && e.code === "ENOENT") {
+      return {};
+    }
+
+    throw e;
+  }
+
+  try {
+    return parseOverrides(text);
+  } catch (e) {
+    throw new Error(`${file} is not valid (${errorMessage(e)}); fix or delete it to move checks again`, { cause: e });
+  }
+}
+
+/** Only the @checks tab writes this file. */
+export function writeOverrides(dir: string, overrides: QueueOverrides) {
+  const file = overridesPath(dir);
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(order) + "\n");
+  writeFileSync(tmp, JSON.stringify(overrides) + "\n");
   renameSync(tmp, file);
 }
 
-/** Where a waiting check moves. */
 export const Move = { Up: "up", Down: "down", Top: "top", Bottom: "bottom" } as const;
 
 export type Move = (typeof Move)[keyof typeof Move];
 
-/** One waiting check as `moveKey` sees it: its file name and current sort key. */
-export interface Keyed {
-  name: string;
-  key: number;
-}
-
-/**
- * The new sort key for `waiting[index]` after `move`, or undefined when it is already there. `waiting` is the
- * waiting checks in queue order; running ones never move, and only the waiting order decides who starts next.
- */
-export function moveKey(waiting: readonly Keyed[], index: number, move: Move): number | undefined {
-  const keys = waiting.map((w) => w.key);
-  const last = keys.length - 1;
+/** Where `index` lands after `move` in a list of `length`, or undefined when it is already there. */
+export function movedIndex(length: number, index: number, move: Move): number | undefined {
+  const last = length - 1;
 
   if (index < 0 || index > last) {
     return undefined;
   }
 
-  const between = (lo: number | undefined, hi: number | undefined) => (lo === undefined ? hi! - 1 : hi === undefined ? lo + 1 : (lo + hi) / 2);
+  const target = { [Move.Up]: index - 1, [Move.Down]: index + 1, [Move.Top]: 0, [Move.Bottom]: last }[move];
 
-  switch (move) {
-    case Move.Up:
-      return index === 0 ? undefined : between(keys[index - 2], keys[index - 1]);
-    case Move.Down:
-      return index === last ? undefined : between(keys[index + 1], keys[index + 2]);
-    case Move.Top:
-      return index === 0 ? undefined : keys[0]! - 1;
-    case Move.Bottom:
-      return index === last ? undefined : keys[last]! + 1;
+  return target < 0 || target > last || target === index ? undefined : target;
+}
+
+/** `keys` in ascending order with each tie nudged above the key before it, so every check keeps a distinct key. */
+export function spreadKeys(keys: readonly number[]): number[] {
+  const out: number[] = [];
+
+  for (const k of keys.toSorted((a, b) => a - b)) {
+    const prev = out.at(-1);
+    out.push(prev !== undefined && k <= prev ? prev + 1 : k);
   }
+
+  return out;
 }

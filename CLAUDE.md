@@ -38,10 +38,12 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   ticket ahead is running, fewer than `max-parallel` are, and the load allows (`unsettledLoad` counts runs the 1-minute
   average does not show yet); then the command runs in its own process group, killed on `timeout-seconds` or a CPU stall
   (`groupCpuSeconds` in `src/proc.ts`). Its pure parts are unit-tested; `test/e2e.test.ts` drives the real queue.
-  Tickets sort by `ticketKey`: the claim's class (`src/check-priority.ts`: `Priority`, `priorityOf` over `check-queue.priority`
-  and `priority-rules`, recorded in the ticket when queued), then queue time, unless `order.state` (written only by the
-  `@checks` tab, `src/checks.ts` pure rows/render + `src/checks-run.ts` pane) holds an override key. `refreshTop` stores the
-  workspace's highest class in `TopCache.priority` for the sidebar card's icon.
+  Tickets sort by `queueComparator`: the workspace's class rank (`src/workspace-class.ts` over `check-queue.priority` and
+  `priority-rules`; classes are the root-only `priority-classes`, `src/check-priority.ts`), recorded in the ticket when
+  queued, then queue time, unless `order.state` (written only by the `@checks` tab, `src/checks.ts` pure rows/render +
+  `src/checks-run.ts` pane) holds an override key. A ticket with no `rank` is from an older build: `comparatorFor`
+  then sorts everyone by time, as that build does. The caps in `gateFor` count every running ticket, not only those
+  ahead. `refreshTop` stores the workspace class in `TopCache.priority`/`priorityIcon` for the sidebar card.
 - `src/mux.ts` is the only code that runs `zellij` or `tmux`: the `Mux` interface (tabs, panes, sessions) with `zellijMux` and
   `tmuxMux`, chosen by `defaultMux` (`$TMUX`, `$ZELLIJ`, then `OVERBRIDGE_MUX`, else zellij; outside a session zellij is reached
   by `--session`). Call sites take an injectable `Mux`; tests fake the exec with `zellijMux(fake)` or `tmuxMux(fake)`. tmux

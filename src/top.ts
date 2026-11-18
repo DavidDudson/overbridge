@@ -7,7 +7,7 @@ import * as git from "./git";
 import { isOrchestrationTab } from "./orchestration";
 import { metaDir, wsDir, worktreePath } from "./paths";
 import { isJsonNumber, isJsonBoolean, isJsonObject, isJsonString, type JsonObject, type JsonValue } from "./json";
-import { highest, isPriority, type Priority, priorityOf } from "./check-priority";
+import { type ClaimContext, workspaceClass } from "./workspace-class";
 import { itemIdOf, providerFor, refreshTitle, TITLE_TTL_MS } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
@@ -126,8 +126,9 @@ export interface TopCache {
   merged?: Record<string, string>;
   /** The branch each claimed repo was on when this was built, so `merged` and `prsOpen` are not trusted once a claim moves. */
   branches?: Record<string, string>;
-  /** The workspace's check queue class: the highest of its claims' (`check-queue.priority`). */
-  priority?: Priority;
+  /** The workspace's check queue class and its icon (see `workspaceClass`). */
+  priority?: string;
+  priorityIcon?: string;
   /** What each configured button's `status` printed, keyed `<repo>/<id>`. A missing entry hides the button. */
   buttons?: Record<string, ButtonState>;
   message?: string;
@@ -284,7 +285,8 @@ export function topCacheFault(raw: JsonValue | undefined): string | undefined {
     optional("merged", isJsonObject(raw.merged)) ??
     optional("branches", isJsonObject(raw.branches)) ??
     optional("buttons", isJsonObject(raw.buttons)) ??
-    optional("priority", isPriority(raw.priority)) ??
+    optional("priority", isJsonString(raw.priority)) ??
+    optional("priorityIcon", isJsonString(raw.priorityIcon)) ??
     wrong("links", Array.isArray(raw.links)) ??
     wrong("at", isJsonNumber(raw.at))
   );
@@ -397,7 +399,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   let itemTitle: string | undefined;
   let itemLink: TopLink | undefined;
   const buttonStates: Record<string, ButtonState> = {};
-  const priorities: Priority[] = [];
+  const claimContexts: ClaimContext[] = [];
 
   for (const [repo, claim] of claims) {
     const dir = worktreePath(ws, repo);
@@ -411,7 +413,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     }
 
     const pm = config.projectManagement;
-    priorities.push(priorityOf(config.checkQueue.priority, { branch: claim.branch, item: itemIdOf(pm, dir, claim.branch, provider) || undefined }));
+    claimContexts.push({ config, dir, branch: claim.branch });
 
     if (pm && claim.branch && !itemLink) {
       try {
@@ -520,7 +522,12 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 
   if (titleNow) cache.title = titleNow;
 
-  if (priorities.length) cache.priority = highest(priorities);
+  const cls = workspaceClass(claimContexts, provider);
+
+  if (cls) {
+    cache.priority = cls.name;
+    cache.priorityIcon = cls.icon;
+  }
 
   if (deps.paused) {
     // the PR facts are the last ones read: gh was not asked

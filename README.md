@@ -374,12 +374,19 @@ workspace's only repo.
 `--timeout-seconds` raises or lowers the time limit for one run. The tab sidebar shows each running command, how long
 it has run, and who is waiting.
 
-**Priority.** Each claim has a class, and checks start in this order: `feature`, `overbridge`, `tip`, then `tech-debt`.
-A ticket records its claim's class when it is queued. `check-queue.priority` sets a repo's class, and
-`check-queue.priority-rules` sets it per claim: the first rule whose `branch` and `item` regexes both match the
-claimed branch and its work item id wins. Put them in the root `config.yml` to apply them across repos:
+**Priority.** Each workspace has a class, and checks start by class, then by queue time. The root `config.yml`
+lists the classes, highest first, under `priority-classes`; every repo shares one queue, so the list lives there
+only. With none set, the classes are `high`, `normal` (the default), and `low`. A claim's class comes from the first
+`check-queue.priority-rules` entry whose `branch` and `item` regexes both match the claimed branch and its work
+item id, else from `check-queue.priority`, else the default class. A workspace with several repos takes the highest
+class among them, and each check it queues records that class and its rank. For example:
 
 ```yaml
+priority-classes:
+  - { name: feature, icon: "🚀" }
+  - { name: overbridge, icon: "🌉" }
+  - { name: tip, icon: "💡" }
+  - { name: tech-debt, icon: "🧹" }
 defaults:
   check-queue:
     priority-rules:
@@ -390,8 +397,10 @@ repos:
     check-queue: { priority: overbridge }
 ```
 
-Each workspace card in the sidebar shows its class icon under the agent glyph: 🚀 feature, 🌉 overbridge, 💡 TIP,
-🧹 tech debt. A workspace with several repos shows the highest class among them.
+Each workspace card in the sidebar shows its class icon under the agent glyph.
+
+While a check queued by an older overbridge is waiting or running, every process sorts by queue time alone, as the
+older one does, so the two never wait on each other. Classes and moves apply again once it has left the queue.
 
 The `@checks` orchestration tab (`overbridge checks`) lists the queue: running checks first, then the waiting ones in
 the order they will start. `j`/`k` select a check, `K`/`J` move a waiting one up or down, `t` moves it to the top
@@ -424,7 +433,7 @@ out, so move it up if it has to run.
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
 | `check-queue.wait-seconds` | `900` | give up (exit 75) when a run cannot start for this long, because of the queue ahead, `max-parallel`, or the load |
-| `check-queue.priority` | `feature` | the class this repo's checks queue at when no rule matches: `feature`, `overbridge`, `tip` or `tech-debt`, started in that order |
+| `check-queue.priority` | the default class | the class this repo's claims get when no rule matches: a name from the root `priority-classes` |
 | `check-queue.priority-rules` | none | list of `{ priority, branch?, item? }`; the first rule whose regexes match the claimed branch and its item id sets the class |
 | `icebox.idle-days` | none | suggest iceboxing a workspace whose claimed PRs are all drafts and idle this many days (last commit, PR update and agent activity, whichever is latest). The sidebar card shows `draft PRs idle <n>d · icebox?`; nothing is iceboxed automatically. Unset turns it off. Set it for every repo in the root `config.yml` under `defaults.icebox` |
 | `icebox.prune` | `[]` | repo-relative paths `overbridge icebox --prune` deletes, such as `node_modules` or `target`; only paths git ignores and does not track. No `..`, absolute paths, globs, `.git` or `.claude` |

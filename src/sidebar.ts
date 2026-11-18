@@ -11,7 +11,6 @@ import { recentToolCalls } from "./history-tail";
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { readQueue, type Ticket } from "./check-queue";
-import { DEFAULT_PRIORITY, type Priority, PRIORITY_ICON } from "./check-priority";
 import { CleanupCause, type CleanupInFlight, cleanupRecords, cleanupRows } from "./cleanup-log";
 import { Motion, sidebarMotion } from "./config";
 import { animate } from "./sidebar-motion";
@@ -30,7 +29,7 @@ import { subscribeEvents } from "./events-client";
 import { serverOwnsSweep } from "./server-client";
 import { childError, type Finished, type Spawner, spawnAsync } from "./child";
 import { claimSweep, createSweepTrigger, startSweep } from "./sweep-trigger";
-import { bold, boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, textWidth } from "./term";
+import { bold, boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, stripControl, textWidth } from "./term";
 import { beginRemoval } from "./remove";
 import { cardLabel, CLEANUP_ARM_MS, pressCleanup, readTopCache, readTopCacheChecked, sidebarLabel, type PrStatus, type TopCache } from "./top";
 import { defaultMux, type Mux } from "./mux";
@@ -118,8 +117,8 @@ export interface Entry {
   receipt?: Receipt;
   /** A PR-listing tab: how many it lists and an icon per PR for what it needs. Replaces the status line. */
   badge?: TabBadge;
-  /** A workspace's check queue class; its icon leads the status line, under the agent glyph. */
-  priority?: Priority;
+  /** A workspace's check queue class icon; it leads the status line, under the agent glyph. */
+  priorityIcon?: string;
 }
 
 export { cardLabel, sidebarLabel, stripConventional } from "./top";
@@ -213,7 +212,7 @@ function workspaceEntry(ws: string, w: WorkspaceState): Entry {
 
   if (idleHint) card.idleHint = idleHint;
 
-  if (!fault) card.priority = cache.priority ?? DEFAULT_PRIORITY;
+  if (!fault && cache.priorityIcon) card.priorityIcon = cache.priorityIcon;
 
   return card;
 }
@@ -496,14 +495,14 @@ function expandedLines(e: Entry, index: number, selected: boolean, inner: number
 }
 
 /** What leads a status row: the priority icon under the agent glyph, else blanks as wide as the title's lead. */
-export function statusIndent(e: Pick<Entry, "glyph" | "priority">): string {
+export function statusIndent(e: Pick<Entry, "glyph" | "priorityIcon">): string {
   const width = 3 + textWidth(e.glyph) + 1;
 
-  if (!e.priority) {
+  if (!e.priorityIcon) {
     return " ".repeat(width);
   }
 
-  const lead = `   ${PRIORITY_ICON[e.priority]}`;
+  const lead = `   ${stripControl(e.priorityIcon)}`;
 
   return lead + " ".repeat(Math.max(1, width - textWidth(lead)));
 }

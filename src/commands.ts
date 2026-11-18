@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, 
 import { basename, dirname, join, resolve } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
-import { configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, rootConfigPath } from "./project-config";
+import { configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, type ProjectConfig, rootConfigPath } from "./project-config";
 import { aheadRows } from "./ahead";
 import { clearPhase, parseLayer, PHASES, writePhase } from "./task-status";
 import { agentDirOf, chooseLayout, userLayoutPath } from "./layout";
@@ -16,8 +16,7 @@ import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, w
 import { defaultMux, layoutPath, type Mux, MuxKind, tmuxConfPath } from "./mux";
 import { requireTab, TabFocus } from "./tab";
 import { runCheck } from "./check-queue";
-import { priorityOf } from "./check-priority";
-import { itemIdOf } from "./pm";
+import { type ClaimContext, workspaceClass } from "./workspace-class";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
 import { chain, cover, displayStacks, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
@@ -587,10 +586,29 @@ export async function check(repoArg: string | undefined, cmd: string[], wsOpt?: 
 
   const { config, inv } = inRepoShell(ws, repo, cmd);
   const settings = timeoutSeconds === undefined ? config.checkQueue : { ...config.checkQueue, timeoutSeconds };
-  const branch = getWorkspace(readState(), ws).repos[repo]?.branch;
-  const priority = priorityOf(settings.priority, { branch, item: itemIdOf(config.projectManagement, worktreePath(ws, repo), branch) || undefined });
+  const cls = workspaceClass(claimContexts(ws, repo, config));
+  const who: Parameters<typeof runCheck>[1] = { ws, repo, command: cmd.map(shellQuote).join(" ") };
 
-  return runCheck(inv, { ws, repo, command: cmd.map(shellQuote).join(" "), priority }, settings);
+  if (cls) {
+    who.priority = cls.name;
+    who.rank = cls.rank;
+    who.icon = cls.icon;
+  }
+
+  return runCheck(inv, who, settings);
+}
+
+/** Every claimed repo of `ws` for its class; `repo`'s config is already loaded, and a repo whose config fails to load is left out. */
+function claimContexts(ws: string, repo: string, config: ProjectConfig): ClaimContext[] {
+  return Object.entries(getWorkspace(readState(), ws).repos).flatMap(([name, claim]): ClaimContext[] => {
+    const dir = worktreePath(ws, name);
+
+    try {
+      return [{ config: name === repo ? config : loadRepoConfig(dir, name), dir, branch: claim.branch }];
+    } catch {
+      return [];
+    }
+  });
 }
 
 /** `overbridge ahead`: the workspaces whose branch is ahead of the default branch. */

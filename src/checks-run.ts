@@ -1,6 +1,6 @@
 import { queueDir, readQueue, ticketName } from "./check-queue";
-import { Move, readOrder, writeOrder } from "./check-priority";
-import { CHECKS_CHROME, type CheckRow, checkRows, movedOrder, renderChecks } from "./checks";
+import { Move, readOverrides, readOverridesForWrite, writeOverrides } from "./check-priority";
+import { CHECKS_CHROME, type CheckRow, checkRows, movedOverrides, renderChecks } from "./checks";
 import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN } from "./term";
 import { errorMessage } from "./util";
 import { createPainter } from "./zellij-view";
@@ -17,7 +17,12 @@ const MOVE_KEYS = new Map<string, Move>([
 /** `overbridge checks`: the pane of the @checks tab. Lists the check queue; K/J/t/b move the selected waiting check. */
 export async function checksPane() {
   const dir = queueDir();
-  const read = (): CheckRow[] => checkRows(readQueue(dir), readOrder(dir));
+
+  const read = (): CheckRow[] => {
+    const overrides = readOverrides(dir);
+
+    return checkRows(readQueue(dir, overrides), overrides);
+  };
 
   let rows = read();
   let selected = 0;
@@ -65,16 +70,20 @@ export async function checksPane() {
       return;
     }
 
-    const next = movedOrder(rows, selected, move, readOrder(dir));
+    if (rows.some((r) => r.ticket.rank === undefined)) {
+      message = "an older overbridge has a check queued, so the queue runs in time order until it leaves";
 
-    if (!next) {
       return;
     }
 
     try {
-      writeOrder(dir, next);
+      const next = movedOverrides(rows, selected, move, readOverridesForWrite(dir));
+
+      if (next) {
+        writeOverrides(dir, next);
+      }
     } catch (e) {
-      message = `error: could not save the queue order in ${dir}: ${errorMessage(e)}`;
+      message = `error: could not save the queue order: ${errorMessage(e)}`;
     }
 
     reload();

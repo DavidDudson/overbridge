@@ -2,101 +2,129 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultKey, highest, Move, moveKey, orderPath, Priority, priorityOf, readOrder, writeOrder } from "../src/check-priority";
-import { byQueueOrder, Gate, gateFor, queueOrder, readTickets, type Ticket, ticketName } from "../src/check-queue";
+import {
+  classInfo,
+  DEFAULT_CLASSES,
+  defaultClassName,
+  defaultKey,
+  highest,
+  Move,
+  movedIndex,
+  overridesPath,
+  type PriorityClass,
+  priorityOf,
+  readOverrides,
+  readOverridesForWrite,
+  spreadKeys,
+  writeOverrides,
+} from "../src/check-priority";
+import { byQueueOrder, comparatorFor, Gate, gateFor, queueComparator, readTickets, type Ticket, ticketName } from "../src/check-queue";
 import { defaultCheckQueue } from "../src/project-config";
 
 const ticket = (pid: number, queuedAtMs: number, extra: Partial<Ticket> = {}): Ticket => ({ pid, ws: `w${pid}`, repo: "app", command: "just test", queuedAtMs, ...extra });
 
+const CLASSES: readonly PriorityClass[] = [
+  { name: "feature", icon: "🚀" },
+  { name: "tool", icon: "🌉" },
+  { name: "debt", icon: "🧹" },
+];
+
+describe("classes", () => {
+  test("the default class is the one marked, else the first", () => {
+    expect(defaultClassName(DEFAULT_CLASSES)).toBe("normal");
+    expect(defaultClassName(CLASSES)).toBe("feature");
+  });
+
+  test("classInfo ranks a name by its place; an unknown name gets the default's", () => {
+    expect(classInfo(CLASSES, "debt")).toEqual({ name: "debt", rank: 2, icon: "🧹" });
+    expect(classInfo(DEFAULT_CLASSES, "renamed")).toEqual({ name: "normal", rank: 1, icon: "🔹" });
+  });
+
+  test("highest picks the lowest rank, or none for no claims", () => {
+    expect(highest([classInfo(CLASSES, "debt"), classInfo(CLASSES, "tool")])?.name).toBe("tool");
+    expect(highest([])).toBeUndefined();
+  });
+});
+
 describe("priorityOf", () => {
-  const settings = {
-    fallback: Priority.Feature,
-    rules: [
-      { priority: Priority.Tip, item: "^TIP-" },
-      { priority: Priority.TechDebt, branch: "^chore/" },
-    ],
-  };
+  const rules = [
+    { priority: "tool", item: "^TIP-" },
+    { priority: "debt", branch: "^chore/" },
+  ];
 
   test("the first matching rule wins, else the fallback", () => {
-    expect(priorityOf(settings, { branch: "chore/TIP-3-x", item: "TIP-3" })).toBe(Priority.Tip);
-    expect(priorityOf(settings, { branch: "chore/ENG-1-x", item: "ENG-1" })).toBe(Priority.TechDebt);
-    expect(priorityOf(settings, { branch: "feat/ENG-1-x", item: "ENG-1" })).toBe(Priority.Feature);
+    expect(priorityOf(rules, "feature", { branch: "chore/TIP-3-x", item: "TIP-3" })).toBe("tool");
+    expect(priorityOf(rules, "feature", { branch: "chore/ENG-1-x", item: "ENG-1" })).toBe("debt");
+    expect(priorityOf(rules, "feature", { branch: "feat/ENG-1-x", item: "ENG-1" })).toBe("feature");
   });
 
   test("a rule on a field the claim lacks never matches", () => {
-    expect(priorityOf(settings, { branch: "task/foo" })).toBe(Priority.Feature);
-    expect(priorityOf({ fallback: Priority.Overbridge, rules: [] }, {})).toBe(Priority.Overbridge);
+    expect(priorityOf(rules, "feature", { branch: "task/foo" })).toBe("feature");
   });
 });
 
-describe("highest", () => {
-  test("picks the class that starts first, or the default for none", () => {
-    expect(highest([Priority.TechDebt, Priority.Overbridge, Priority.Tip])).toBe(Priority.Overbridge);
-    expect(highest([])).toBe(Priority.Feature);
-  });
-});
+describe("queue order by class", () => {
+  const ranked = (pid: number, queuedAtMs: number, rank: number) => ticket(pid, queuedAtMs, { rank });
 
-describe("queue order by priority", () => {
-  test("feature, then overbridge, then TIP, then tech debt; each class by queue time", () => {
-    const tickets = [
-      ticket(1, 1, { priority: Priority.TechDebt }),
-      ticket(2, 2, { priority: Priority.Tip }),
-      ticket(3, 3, { priority: Priority.Overbridge }),
-      ticket(4, 4),
-      ticket(5, 5, { priority: Priority.Feature }),
-    ];
-
-    expect(tickets.toSorted(byQueueOrder).map((t) => t.pid)).toEqual([4, 5, 3, 2, 1]);
+  test("lower rank first, then queue time", () => {
+    const tickets = [ranked(1, 1, 2), ranked(2, 2, 1), ranked(3, 3, 0), ranked(4, 4, 0)];
+    expect(tickets.toSorted(queueComparator()).map((t) => t.pid)).toEqual([3, 4, 2, 1]);
   });
 
   test("an override places a ticket by its own key", () => {
-    const late = ticket(2, 2, { priority: Priority.TechDebt });
-    const order = { [ticketName(late)]: defaultKey(Priority.Feature, 0) };
-    expect([ticket(1, 1), late].toSorted(queueOrder(order)).map((t) => t.pid)).toEqual([2, 1]);
+    const late = ranked(2, 2, 2);
+    expect([ranked(1, 1, 0), late].toSorted(queueComparator({ [ticketName(late)]: defaultKey(0, 0) })).map((t) => t.pid)).toEqual([2, 1]);
   });
 
-  test("a higher class queued later starts ahead of a waiting lower one", () => {
+  test("a ticket from an older overbridge (no rank) puts everyone on time order, so both builds agree", () => {
+    const tickets = [ranked(1, 1, 2), ticket(2, 2)];
+    expect(comparatorFor(tickets, {})).toBe(byQueueOrder);
+    expect(comparatorFor([ranked(1, 1, 2), ranked(2, 2, 0)], {})(ranked(2, 2, 0), ranked(1, 1, 2))).toBeLessThan(0);
+  });
+
+  test("a higher class queued later starts ahead of a waiting lower one, unless an override moves it", () => {
     const settings = defaultCheckQueue();
     const machine = { load1: 0, cores: 8 };
-    const debt = ticket(1, 1, { priority: Priority.TechDebt });
-    const feature = ticket(2, 2);
+    const debt = ranked(1, 1, 2);
+    const feature = ranked(2, 2, 0);
     expect(gateFor(feature, [debt, feature], settings, machine, 10)).toBe(Gate.Start);
     expect(gateFor(debt, [debt, feature], settings, machine, 10)).toBe(Gate.Queue);
     expect(gateFor(debt, [debt, feature], settings, machine, 10, { [ticketName(debt)]: 0 })).toBe(Gate.Start);
   });
-});
 
-describe("moveKey", () => {
-  const waiting = [10, 20, 30, 40].map((key) => ({ name: String(key), key }));
-
-  const after = (index: number, move: Move) => {
-    const key = moveKey(waiting, index, move);
-
-    return key === undefined ? undefined : waiting.map((w, i) => (i === index ? { ...w, key } : w)).toSorted((a, b) => a.key - b.key).map((w) => w.name);
-  };
-
-  test("up and down swap with the neighbour", () => {
-    expect(after(2, Move.Up)).toEqual(["10", "30", "20", "40"]);
-    expect(after(1, Move.Up)).toEqual(["20", "10", "30", "40"]);
-    expect(after(1, Move.Down)).toEqual(["10", "30", "20", "40"]);
-    expect(after(2, Move.Down)).toEqual(["10", "20", "40", "30"]);
-  });
-
-  test("top and bottom go to the ends", () => {
-    expect(after(2, Move.Top)).toEqual(["30", "10", "20", "40"]);
-    expect(after(1, Move.Bottom)).toEqual(["10", "30", "40", "20"]);
-  });
-
-  test("a check already at that end does not move", () => {
-    expect(moveKey(waiting, 0, Move.Up)).toBeUndefined();
-    expect(moveKey(waiting, 0, Move.Top)).toBeUndefined();
-    expect(moveKey(waiting, 3, Move.Down)).toBeUndefined();
-    expect(moveKey(waiting, 3, Move.Bottom)).toBeUndefined();
-    expect(moveKey(waiting, 9, Move.Up)).toBeUndefined();
+  test("max-parallel counts runs that sort behind the waiting ticket", () => {
+    const settings = { ...defaultCheckQueue(), maxParallel: 2 };
+    const running = (pid: number) => ticket(pid, pid, { rank: 2, runPid: pid * 10, runningSinceMs: 0 });
+    const feature = ranked(9, 9, 0);
+    expect(gateFor(feature, [running(1), running(2), feature], settings, { load1: 0, cores: 8 }, 10_000_000)).toBe(Gate.Parallel);
   });
 });
 
-describe("order file", () => {
+describe("movedIndex", () => {
+  test("up, down, top and bottom", () => {
+    expect(movedIndex(4, 2, Move.Up)).toBe(1);
+    expect(movedIndex(4, 1, Move.Down)).toBe(2);
+    expect(movedIndex(4, 2, Move.Top)).toBe(0);
+    expect(movedIndex(4, 1, Move.Bottom)).toBe(3);
+  });
+
+  test("already at that end, or out of range, is no move", () => {
+    expect(movedIndex(4, 0, Move.Up)).toBeUndefined();
+    expect(movedIndex(4, 0, Move.Top)).toBeUndefined();
+    expect(movedIndex(4, 3, Move.Down)).toBeUndefined();
+    expect(movedIndex(4, 3, Move.Bottom)).toBeUndefined();
+    expect(movedIndex(4, 9, Move.Up)).toBeUndefined();
+  });
+});
+
+describe("spreadKeys", () => {
+  test("keeps distinct keys and nudges ties apart", () => {
+    expect(spreadKeys([30, 10, 20])).toEqual([10, 20, 30]);
+    expect(spreadKeys([5, 5, 5, 7])).toEqual([5, 6, 7, 8]);
+  });
+});
+
+describe("overrides file", () => {
   let dir: string;
 
   beforeEach(() => {
@@ -106,19 +134,30 @@ describe("order file", () => {
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   test("round-trips, and readTickets applies it without reading it as a ticket", () => {
-    const first = ticket(1, 1);
-    const second = ticket(2, 2);
+    const first = ticket(1, 1, { rank: 0 });
+    const second = ticket(2, 2, { rank: 0 });
     [first, second].forEach((t) => writeFileSync(join(dir, ticketName(t)), JSON.stringify(t)));
-    writeOrder(dir, { [ticketName(second)]: -1 });
-    expect(readOrder(dir)).toEqual({ [ticketName(second)]: -1 });
+    writeOverrides(dir, { [ticketName(second)]: -1 });
+    expect(readOverrides(dir)).toEqual({ [ticketName(second)]: -1 });
     expect(readTickets(dir).map((t) => t.pid)).toEqual([2, 1]);
   });
 
-  test("a missing or bad file means no overrides; non-numbers are dropped", () => {
-    expect(readOrder(dir)).toEqual({});
-    writeFileSync(orderPath(dir), "{nope");
-    expect(readOrder(dir)).toEqual({});
-    writeFileSync(orderPath(dir), JSON.stringify({ a: 1, b: "2", c: null }));
-    expect(readOrder(dir)).toEqual({ a: 1 });
+  test("a ticket with a bad rank is skipped", () => {
+    writeFileSync(join(dir, ticketName(ticket(1, 1))), JSON.stringify(ticket(1, 1, { rank: -1 })));
+    expect(readTickets(dir)).toEqual([]);
+  });
+
+  test("for sorting, a missing or bad file means no overrides; non-numbers are dropped", () => {
+    expect(readOverrides(dir)).toEqual({});
+    writeFileSync(overridesPath(dir), "{nope");
+    expect(readOverrides(dir)).toEqual({});
+    writeFileSync(overridesPath(dir), JSON.stringify({ a: 1, b: "2", c: null }));
+    expect(readOverrides(dir)).toEqual({ a: 1 });
+  });
+
+  test("for a write, a missing file is empty but a bad one throws, so it is never overwritten", () => {
+    expect(readOverridesForWrite(dir)).toEqual({});
+    writeFileSync(overridesPath(dir), "{nope");
+    expect(() => readOverridesForWrite(dir)).toThrow("fix or delete it to move checks again");
   });
 });
