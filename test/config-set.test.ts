@@ -61,15 +61,15 @@ describe("unknownKeyProblem", () => {
 });
 
 describe("agentRefusal", () => {
-  test.each<[Record<string, string>, boolean]>([
-    [{ CLAUDECODE: "1", OVERBRIDGE_NAME: "ws1" }, true],
-    [{ CLAUDECODE: "1", OVERBRIDGE_TAB: "@root" }, true],
-    [{ OVERBRIDGE_NAME: "ws1" }, false],
-    [{ CLAUDECODE: "1" }, false],
-    [{ CLAUDECODE: "1", OVERBRIDGE_NAME: "" }, false],
-    [{}, false],
-  ])("%p refused: %p", (env, refused) => {
-    expect(agentRefusal(env) !== undefined).toBe(refused);
+  test.each<[Record<string, string>, string | undefined, boolean]>([
+    [{ CLAUDECODE: "1" }, "ws1", true],
+    [{ CLAUDECODE: "1", OVERBRIDGE_TAB: "@root" }, undefined, true],
+    [{}, "ws1", false],
+    [{ CLAUDECODE: "1" }, undefined, false],
+    [{ CLAUDECODE: "1" }, "", false],
+    [{}, undefined, false],
+  ])("%p in workspace %p refused: %p", (env, workspace, refused) => {
+    expect(agentRefusal(env, workspace) !== undefined).toBe(refused);
   });
 });
 
@@ -161,6 +161,16 @@ repos:
 
   test("writes into an empty or null mapping", () => {
     expect(setYamlValue("defaults:\nrepos: ~ # none yet\n", ["repos", "web", "ide"], "zed")).toBe("defaults:\nrepos: # none yet\n  web:\n    ide: zed\n");
+  });
+
+  test("keeps a comment after a plain value holding a quote", () => {
+    expect(setYamlValue("commands:\n  test: echo don't # keep\n", ["commands", "test"], "t")).toBe("commands:\n  test: t # keep\n");
+  });
+
+  test("keeps a comment after a quoted value holding a #", () => {
+    expect(setYamlValue('ide: "a # b" # keep\n', ["ide"], "zed")).toBe("ide: zed # keep\n");
+    expect(setYamlValue("ide: 'it''s # x' # keep\n", ["ide"], "zed")).toBe("ide: zed # keep\n");
+    expect(setYamlValue('orgs: ["a # b", c] # keep\n', ["orgs"], ["d"])).toBe('orgs: ["d"] # keep\n');
   });
 
   test("starts an empty file", () => {

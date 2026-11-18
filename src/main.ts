@@ -23,7 +23,7 @@ import { perfPane } from "./perf-run";
 import { topPanel, topRefresh } from "./top-run";
 import { prListPane, refreshPrList, type PrListKind } from "./prlist-run";
 import { readWorklist, refreshWorklist, showWorklist, worklistPane } from "./worklist-run";
-import { silenceLegacyWarnings } from "./paths";
+import { currentWorkspace, silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
 import { errorMessage, exec, log, OverbridgeError } from "./util";
 
@@ -182,7 +182,7 @@ async function main(argv: string[]): Promise<number> {
           throw new OverbridgeError("usage: overbridge config set [--repo name] <key> [--] <value>");
         }
 
-        const refusal = agentRefusal(process.env);
+        const refusal = agentRefusal(process.env, currentWorkspace());
 
         if (refusal) {
           throw new OverbridgeError(refusal);

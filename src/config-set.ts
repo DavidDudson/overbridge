@@ -182,11 +182,24 @@ interface KeyLine extends ValueAndComment {
   keyText: string;
 }
 
-/** Split `rest` into its value and a trailing `# comment`, ignoring `#` inside quotes. */
-function splitComment(rest: string): ValueAndComment {
-  const at = [...rest].reduce<{ quote: string; index: number }>(
+/** Where a quoted scalar at the start of `rest` ends: the index after its closing quote, or 0 when it is not quoted. */
+function quotedEnd(rest: string): number {
+  const match = rest.match(/^\s*(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')/);
+
+  return match ? match[0].length : 0;
+}
+
+/**
+ * The index of the `#` that starts a comment, or -1. A quote opens a quoted scalar only at the start of the value
+ * or, in a flow collection, after `[`, `{`, `,` or `:`; anywhere else (`echo don't`) it is a literal character.
+ */
+function commentStart(rest: string): number {
+  const from = quotedEnd(rest);
+  const flow = /^\s*[[{]/.test(rest);
+
+  return [...rest].reduce<{ quote: string; index: number }>(
     (state, ch, i) => {
-      if (state.index >= 0) {
+      if (i < from || state.index >= 0) {
         return state;
       }
 
@@ -194,7 +207,7 @@ function splitComment(rest: string): ValueAndComment {
         return ch === state.quote ? { ...state, quote: "" } : state;
       }
 
-      if (ch === '"' || ch === "'") {
+      if (flow && (ch === '"' || ch === "'") && /[[{,:]\s*$/.test(rest.slice(0, i))) {
         return { ...state, quote: ch };
       }
 
@@ -202,6 +215,11 @@ function splitComment(rest: string): ValueAndComment {
     },
     { quote: "", index: -1 },
   ).index;
+}
+
+/** Split `rest` into its value and a trailing `# comment`. */
+function splitComment(rest: string): ValueAndComment {
+  const at = commentStart(rest);
 
   if (at < 0) {
     return { value: rest.trim(), comment: "" };
@@ -350,12 +368,13 @@ function readSchema(name: string): KeySchema {
 }
 
 /**
- * Why `config set` must not run here, or undefined. A Claude session in a workspace or an orchestration tab
+ * Why `config set` must not run here, or undefined. `workspace` is `currentWorkspace()`. A Claude session in a
+ * workspace or an orchestration tab
  * (Claude Code sets `CLAUDECODE` for its tools) is refused: the root config holds the guard and the hooks, so
  * the agent must not change them, and the guard's command patterns can be dodged with an env prefix or `sh -c`.
  */
-export function agentRefusal(env: Record<string, string | undefined>): string | undefined {
-  const inOverbridge = Boolean(env.OVERBRIDGE_NAME) || Boolean(env[ORCHESTRATION_ENV]);
+export function agentRefusal(env: Record<string, string | undefined>, workspace: string | undefined): string | undefined {
+  const inOverbridge = Boolean(workspace) || Boolean(env[ORCHESTRATION_ENV]);
 
   return env.CLAUDECODE && inOverbridge ? "config set changes the root config.yml, which is for the user: ask them to run it" : undefined;
 }
