@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { classInfo, DEFAULT_CLASSES, defaultClassName } from "../src/check-priority";
 import { configCheck, configGet } from "../src/commands";
 import { repoOf } from "../src/paths";
 import {
+  checkClassNames,
   getConfigValue,
   loadRepoConfig,
   loadRootLayers,
@@ -67,9 +69,9 @@ describe("overlay", () => {
 
 describe("loadRootLayers", () => {
   test("a missing or empty file has no layers", () => {
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES });
     writeRoot("");
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES });
   });
 
   test("reads defaults and per-repo layers", () => {
@@ -82,7 +84,41 @@ describe("loadRootLayers", () => {
       skillExtensions: [],
       guard: { readPaths: [], deny: [] },
       githubOrgs: [],
+      checkClasses: DEFAULT_CLASSES,
     });
+  });
+
+  test("priority-classes replaces the built-in classes, and resolveConfig checks names against it", () => {
+    writeRoot("priority-classes:\n  - { name: feature, icon: '🚀' }\n  - { name: debt, icon: '🧹' }\ndefaults:\n  check-queue:\n    priority-rules:\n      - { priority: debt, branch: '^chore/' }\n");
+    expect(loadRootLayers().checkClasses).toEqual([
+      { name: "feature", icon: "🚀" },
+      { name: "debt", icon: "🧹" },
+    ]);
+    expect(resolveConfig(undefined, "app", "overbridge.yml").checkQueue.classes.map((c) => c.name)).toEqual(["feature", "debt"]);
+    const foreign = resolveConfig({ "check-queue": { priority: "high" } }, "app", "overbridge.yml").checkQueue;
+    expect(checkClassNames(foreign, foreign.classes)).toEqual(['check-queue.priority: unknown class "high" (priority-classes in the root config.yml lists feature, debt)']);
+    expect(classInfo(foreign.classes, foreign.priority ?? "").name).toBe("feature");
+  });
+
+  test("a class marked default is the one an unruled claim gets", () => {
+    writeRoot("priority-classes:\n  - { name: hot, icon: a }\n  - { name: usual, icon: b, default: true }\n  - { name: cold, icon: c }\n");
+    const classes = resolveConfig(undefined, "app", "overbridge.yml").checkQueue.classes;
+    expect(classes[1]?.default).toBe(true);
+    expect(defaultClassName(classes)).toBe("usual");
+    writeRoot("priority-classes: foo\n");
+    expect(thrown(() => loadRootLayers())).toContain("priority-classes: expected a non-empty list");
+    writeRoot("priority-classes:\n  - { name: a, icon: x, default: 'yes' }\n");
+    expect(thrown(() => loadRootLayers())).toContain("priority-classes[0].default: expected true or false");
+  });
+
+  test("priority-classes must be a non-empty list of distinct names with one default at most", () => {
+    writeRoot("priority-classes: []\n");
+    expect(thrown(() => loadRootLayers())).toContain("priority-classes: expected a non-empty list");
+    writeRoot("priority-classes:\n  - { name: a, icon: x, default: true }\n  - { name: a, icon: y, default: true }\n  - { name: b }\n");
+    const message = thrown(() => loadRootLayers());
+    expect(message).toContain('priority-classes: "a" is listed twice');
+    expect(message).toContain("priority-classes: only one class can be the default");
+    expect(message).toContain("priority-classes[2].icon: required");
   });
 
   test("reports bad top-level keys and shapes together", () => {

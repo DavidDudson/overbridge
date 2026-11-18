@@ -115,30 +115,31 @@ describe("go", () => {
   });
 
   test("switches tab and lands on its claude pane", () => {
-    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "@frozen", "@explore", "b", "a"], "a", [claudePane("b", 9)]);
-    expect(go("8", z.mux)).toBe("→ b");
+    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "@checks", "@frozen", "@explore", "b", "a"], "a", [claudePane("b", 9)]);
+    expect(go("9", z.mux)).toBe("→ b");
     expect(z.actions()).toEqual(["query-tab-names", "current-tab-info", "go-to-tab-name b", "list-panes --json", "focus-pane-id terminal_9"]);
   });
   test("numbers follow the sidebar: orchestration tabs first, then workspaces in tab order", () => {
-    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "@frozen", "@explore", "b", "a"], "a");
+    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "@checks", "@frozen", "@explore", "b", "a"], "a");
     expect(go("1", z.mux)).toBe("→ @root");
     expect(go("2", z.mux)).toBe("→ @work");
     expect(go("5", z.mux)).toBe("→ @perf");
     expect(go("perf", z.mux)).toBe("→ @perf");
-    expect(go("6", z.mux)).toBe("→ @frozen");
-    expect(go("7", z.mux)).toBe("→ @explore");
-    expect(go("9", z.mux)).toBe("→ a");
+    expect(go("6", z.mux)).toBe("→ @checks");
+    expect(go("7", z.mux)).toBe("→ @frozen");
+    expect(go("8", z.mux)).toBe("→ @explore");
+    expect(go("10", z.mux)).toBe("→ a");
     expect(go("next", z.mux)).toBe("→ @root");
     expect(go("prev", z.mux)).toBe("→ b");
   });
   test("the switch stands when the tab has no claude pane", () => {
-    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "@frozen", "@explore", "a", "b"], "a");
+    const z = fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "@checks", "@frozen", "@explore", "a", "b"], "a");
     expect(go("b", z.mux)).toBe("→ b");
     expect(z.actions()).toEqual(["query-tab-names", "current-tab-info", "go-to-tab-name b", "list-panes --json"]);
   });
   test("a bad target or a failed switch is an error", () => {
-    expect(() => go("10", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "@frozen", "@explore", "a", "b"], "a").mux)).toThrow("no tab 10: 9 tabs");
-    expect(() => go("next", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "@frozen", "@explore", "a", "b"], undefined).mux)).toThrow("not on a tab");
-    expect(() => go("b", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "@frozen", "@explore", "a", "b"], "a", [], false).mux)).toThrow("could not switch to b: no such tab");
+    expect(() => go("11", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "@checks", "@frozen", "@explore", "a", "b"], "a").mux)).toThrow("no tab 11: 10 tabs");
+    expect(() => go("next", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "@checks", "@frozen", "@explore", "a", "b"], undefined).mux)).toThrow("not on a tab");
+    expect(() => go("b", fakeZellij(["@root", "@work", "@prs", "@reviews", "@perf", "@checks", "@frozen", "@explore", "a", "b"], "a", [], false).mux)).toThrow("could not switch to b: no such tab");
   });
 });

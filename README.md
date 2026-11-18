@@ -373,8 +373,9 @@ test or build, in queue order across every workspace. Several run at once while 
 `typecheck`, `test`, and `build` through it. The repo defaults to the one the current directory is in, then to the
 workspace's only repo.
 
-1. **Queue.** Each call writes a ticket to `.overbridge/check-queue/`. Tickets start in the order they were queued:
-   a ticket waits until every ticket ahead of it, whose process is still alive, has started. Waiters remove tickets
+1. **Queue.** Each call writes a ticket to `.overbridge/check-queue/`. Tickets start by priority class (see
+   **Priority** below), then in the order they were queued: a ticket waits until every ticket ahead of it, whose
+   process is still alive, has started. Waiters remove tickets
    whose process has died. If a dead ticket left its command running, they kill that command too.
 2. **Load.** The next ticket in line starts once the 1-minute load average is under `max-load-percent` of the cores,
    whether or not other runs are still going. The average takes about a minute to show a new run, so each run that
@@ -388,6 +389,40 @@ workspace's only repo.
 
 `--timeout-seconds` raises or lowers the time limit for one run. The tab sidebar shows each running command, how long
 it has run, and who is waiting.
+
+**Priority.** Each workspace has a class, and checks start by class, then by queue time. The root `config.yml`
+lists the classes, highest first, under `priority-classes`; every repo shares one queue, so the list lives there
+only. With none set, the classes are `high`, `normal` (the default), and `low`. A claim's class comes from the first
+`check-queue.priority-rules` entry whose `branch` and `item` regexes both match the claimed branch and its work
+item id, else from `check-queue.priority`, else the default class. A workspace with several repos takes the highest
+class among them, and each check it queues records that class and its rank. For example:
+
+```yaml
+priority-classes:
+  - { name: feature, icon: "🚀" }
+  - { name: overbridge, icon: "🌉" }
+  - { name: tip, icon: "💡" }
+  - { name: tech-debt, icon: "🧹" }
+defaults:
+  check-queue:
+    priority-rules:
+      - { priority: tip, item: "^TIP-" }
+      - { priority: tech-debt, branch: "^chore/" }
+repos:
+  overbridge:
+    check-queue: { priority: overbridge }
+```
+
+Each workspace card in the sidebar shows its class icon under the agent glyph.
+
+While a check queued by an older overbridge is waiting or running, every process sorts by queue time alone, as the
+older one does, so the two never wait on each other. Classes and moves apply again once it has left the queue.
+
+The `@checks` orchestration tab (`overbridge checks`) lists the queue: running checks first, then the waiting ones in
+the order they will start. `j`/`k` select a check, `K`/`J` move a waiting one up or down, `t` moves it to the top
+and `b` to the bottom. A move is saved in `.overbridge/check-queue/order.state` and lasts until the check leaves the
+queue. A running check never moves. A low class can wait behind a stream of higher ones until `wait-seconds` runs
+out, so move it up if it has to run.
 
 ### Keys and defaults
 
@@ -414,6 +449,8 @@ it has run, and who is waiting.
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
 | `check-queue.wait-seconds` | `900` | give up (exit 75) when a run cannot start for this long, because of the queue ahead, `max-parallel`, or the load |
+| `check-queue.priority` | the default class | the class this repo's claims get when no rule matches: a name from the root `priority-classes` |
+| `check-queue.priority-rules` | none | list of `{ priority, branch?, item? }`; the first rule whose regexes match the claimed branch and its item id sets the class |
 | `icebox.idle-days` | none | suggest iceboxing a workspace whose claimed PRs are all drafts and idle this many days (last commit, PR update and agent activity, whichever is latest). The sidebar card shows `draft PRs idle <n>d · icebox?`; nothing is iceboxed automatically. Unset turns it off. Set it for every repo in the root `config.yml` under `defaults.icebox` |
 | `icebox.prune` | `[]` | repo-relative paths `overbridge icebox --prune` deletes, such as `node_modules` or `target`; only paths git ignores and does not track. No `..`, absolute paths, globs, `.git` or `.claude` |
 | `shell` | none | the repo's dev shell: a command prefix (`nix develop --command`, `direnv exec .`), or a mapping `enter` (the prefix), `env` (a command printing the env NUL-separated, as `env -0` does) and `key` (repo-relative files whose contents invalidate the cached env; needs `env`). See [Dev shells](#dev-shells) |
@@ -706,8 +743,8 @@ The `perf-recommend` skill reads this history and recommends where to get time b
 
 `overbridge sidebar` is the pane down the left of every tab. It lists each workspace with
 an agent state emoji (🆕 empty: just started or cleared, 💤 idle, 🔄 busy, ✅ done, ⏳ done but background shells or subagents still running, ❓ blocked on you (a permission prompt or question), ❌ ended, `·` unknown)
-and its item title when cached (no id, no conventional-commit prefix; the workspace name until then), with its number in tab order (`⌥1` to `⌥9`, then `10` and up). Each tab runs its own copy and marks its own tab.
-Under each title a status line reads `claude status - task status`. Claude status is `empty`, `working`, `needs input`,
+and its item id and title when cached (`ENG-1234: add dark mode`, GitHub ids as `#12: ...`; no conventional-commit prefix; the workspace name until then), with its number in tab order (`⌥1` to `⌥9`, then `10` and up). Each tab runs its own copy and marks its own tab.
+Under each title a status line reads `claude status - task status`, led by the workspace's check queue class icon under the agent glyph (see [Check queue](#check-queue)). Claude status is `empty`, `working`, `needs input`,
 `finished`, `background tasks`, `idle`, `ended` or `no session`. Task status is where the work is in its lifecycle:
 `ticket` (no item yet), `started`, `plan`, `implement` (with `(stack n/m)` on a stack), `mob review`, `draft PR`, `open PR`,
 `waiting AI review`, `review feedback`, `build failing`, `conflicts`, `mergeable`, `merged`; a stacked PR adds `(stack n/m)`.

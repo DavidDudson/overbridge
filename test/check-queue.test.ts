@@ -20,6 +20,7 @@ import {
   ticketName,
   unsettledLoad,
 } from "../src/check-queue";
+import { defaultCheckQueue } from "../src/project-config";
 
 const ticket = (pid: number, queuedAtMs: number, extra: Partial<Ticket> = {}): Ticket => ({
   pid,
@@ -101,7 +102,7 @@ describe("stall tracking", () => {
 });
 
 describe("start gate", () => {
-  const settings = { maxLoadPercent: 70, timeoutSeconds: 180, stallSeconds: 300, waitSeconds: 900 };
+  const settings = defaultCheckQueue();
   const idle = { load1: 0, cores: 8 };
   const NOW_MS = 10_000_000;
   /** Started long enough ago that the load average shows it. */

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseConfig } from "../src/project-config";
+import { DEFAULT_CLASSES } from "../src/check-priority";
+import { checkClassNames, parseConfig } from "../src/project-config";
 import { errorMessage } from "../src/util";
 
 /** The message `parseConfig` throws for `yaml`, without the file-name header. */
@@ -117,18 +118,41 @@ describe("shipped example", () => {
 
 describe("check-queue", () => {
   test("defaults apply and each key overrides its own value", () => {
-    expect(parseConfig("", "f.yml").checkQueue).toEqual({ maxLoadPercent: 70, timeoutSeconds: 180, stallSeconds: 300, waitSeconds: 900 });
+    expect(parseConfig("", "f.yml").checkQueue).toEqual({ maxLoadPercent: 70, timeoutSeconds: 180, stallSeconds: 300, waitSeconds: 900, priorityRules: [], classes: DEFAULT_CLASSES });
     expect(parseConfig("check-queue:\n  timeout-seconds: 360\n  max-load-percent: 50\n", "f.yml").checkQueue).toEqual({
       maxLoadPercent: 50,
       timeoutSeconds: 360,
       stallSeconds: 300,
       waitSeconds: 900,
+      priorityRules: [],
+      classes: DEFAULT_CLASSES,
     });
+  });
+
+  test("priority and priority-rules parse, and bad ones name their key", () => {
+    const yml = "check-queue:\n  priority: low\n  priority-rules:\n    - { priority: high, item: '^TIP-' }\n    - { priority: low, branch: '^chore/' }\n";
+    const queue = parseConfig(yml, "f.yml").checkQueue;
+    expect(queue.priority).toBe("low");
+    expect(queue.priorityRules).toEqual([
+      { priority: "high", item: "^TIP-" },
+      { priority: "low", branch: "^chore/" },
+    ]);
+    expect(checkClassNames(queue, DEFAULT_CLASSES)).toEqual([]);
+    expect(checkClassNames({ priority: "urgent", priorityRules: [{ priority: "soon", branch: "x" }] }, DEFAULT_CLASSES)).toEqual([
+      'check-queue.priority: unknown class "urgent" (priority-classes in the root config.yml lists high, normal, low)',
+      'check-queue.priority-rules[0].priority: unknown class "soon" (priority-classes in the root config.yml lists high, normal, low)',
+    ]);
+    expect(problems("check-queue:\n  priority-rules: tip\n")).toEqual(["check-queue.priority-rules: expected a list of { priority, branch?, item? }"]);
+    expect(problems("check-queue:\n  priority-rules:\n    - { priority: high }\n")).toEqual([
+      "check-queue.priority-rules[0]: needs branch or item: a rule with neither matches every claim (use check-queue.priority for that)",
+    ]);
+    expect(problems("check-queue:\n  priority-rules:\n    - { priority: high, branch: '(' }\n")[0]).toStartWith("check-queue.priority-rules[0].branch: not a valid regex");
+    expect(problems("check-queue:\n  priority-rules:\n    - { priority: high, branch: x, label: y }\n")[0]).toStartWith("check-queue.priority-rules[0].label: unknown key");
   });
 
   test("bad values name their key", () => {
     expect(problems("check-queue: 5\n")).toEqual([
-      "check-queue: expected a mapping with max-load-percent, max-parallel, timeout-seconds, stall-seconds, wait-seconds",
+      "check-queue: expected a mapping with max-load-percent, max-parallel, timeout-seconds, stall-seconds, wait-seconds, priority, priority-rules",
     ]);
     expect(problems("check-queue:\n  max-load-percent: 1.5\n")).toEqual(["check-queue.max-load-percent: expected a whole number from 1 up (got 1.5)"]);
     expect(parseConfig("check-queue:\n  max-load-percent: 400\n", "f.yml").checkQueue.maxLoadPercent).toBe(400);

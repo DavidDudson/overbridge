@@ -32,6 +32,21 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
+    "priority-classes": {
+      "description": "The check queue classes, highest first. Every repo shares one queue, so the list lives here only. Default: high, normal (the default class), low.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "icon"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "icon": { "description": "Shown on the sidebar card and in the @checks tab; two columns wide, like an emoji.", "type": "string", "minLength": 1 },
+          "default": { "description": "The class a claim gets when no rule or repo priority names one. Default: the first class.", "type": "boolean" }
+        }
+      }
+    },
     "github-orgs": {
       "description": "GitHub owners (users or orgs) the @prs and @reviews tabs search. Leave out to search every owner gh can see.",
       "type": "array",

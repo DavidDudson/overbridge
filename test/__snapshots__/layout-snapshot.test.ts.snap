@@ -52,6 +52,16 @@ exports[`generated layout two workspaces, one resuming 1`] = `
       }
     }
   }
+  tab name="@checks" {
+    pane split_direction="vertical" {
+      pane name="sidebar" command="overbridge" cwd="/ws-root" size=60 borderless=true focus=true {
+        args "sidebar" "--ws" "@checks"
+      }
+      pane name="@checks · checks" command="overbridge" cwd="/ws-root" {
+        args "checks"
+      }
+    }
+  }
   tab name="@frozen" {
     pane split_direction="vertical" {
       pane name="sidebar" command="overbridge" cwd="/ws-root" size=60 borderless=true focus=true {
@@ -155,6 +165,16 @@ exports[`generated layout a wide sidebar and a self command with arguments 1`] =
       }
       pane name="@perf · perf" command="/usr/bin/bun" cwd="/ws-root" {
         args "/opt/overbridge/src/cli.ts" "perf"
+      }
+    }
+  }
+  tab name="@checks" {
+    pane split_direction="vertical" {
+      pane name="sidebar" command="/usr/bin/bun" cwd="/ws-root" size=40 borderless=true focus=true {
+        args "/opt/overbridge/src/cli.ts" "sidebar" "--ws" "@checks"
+      }
+      pane name="@checks · checks" command="/usr/bin/bun" cwd="/ws-root" {
+        args "/opt/overbridge/src/cli.ts" "checks"
       }
     }
   }
