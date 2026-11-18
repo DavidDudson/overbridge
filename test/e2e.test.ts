@@ -293,6 +293,19 @@ describe("workflow", () => {
     expect(head()).toBe(tip());
     sh(["git", "checkout", "--", "a.txt"], dir);
 
+    writeFileSync(join(dir, "b.txt"), "mine\n");
+    writeFileSync(join(src, "b.txt"), "theirs\n");
+    sh(["git", "add", "b.txt"], src);
+    sh(["git", "commit", "-q", "-m", "add b"], src);
+    const before = head();
+    sh(["git", "push", "-q", remote, "main"], src);
+    expect(ws(["explore", "sync", "app"]).err).toContain("could not move to origin/main");
+    expect(head()).toBe(before);
+    expect(readFileSync(join(dir, "b.txt"), "utf8")).toBe("mine\n");
+    rmSync(join(dir, "b.txt"));
+    expect(ws(["explore", "sync", "app"]).err).toBe("");
+    expect(head()).toBe(tip());
+
     sh(["git", "commit", "-q", "--allow-empty", "-m", "local"], dir);
     const local = head();
     const ahead = ws(["explore", "sync", "app"]);

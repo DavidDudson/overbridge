@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
-import { readRecord, stopApp } from "./apps";
+import { stopApp } from "./apps";
 import { spawnAsync } from "./child";
 import { getRepo } from "./config";
-import { exploreDir, exploreRepos, pickerHit, type PickerView, readSelected, renderPicker, showTerminal, SYNC_MS, type TerminalDeps, toggleTerminal, writeSelected } from "./explore";
+import { exploreDir, exploreRepos, pickerHit, type PickerView, readSelected, renderPicker, showTerminal, singleFlight, SYNC_MS, type TerminalDeps, toggleTerminal, writeSelected } from "./explore";
 import * as git from "./git";
 import { defaultMux } from "./mux";
 import { EXPLORE_TAB } from "./orchestration";
@@ -30,8 +30,6 @@ export function exploreShell(repo: string) {
   process.exit(exec(inv.cmd, { cwd: inv.cwd, env: inv.env }));
 }
 
-const inFlight = new Map<string, Promise<string>>();
-
 async function runSync(repo: string): Promise<string> {
   try {
     const r = await spawnAsync([...selfCommand(), "explore", "sync", repo]);
@@ -46,29 +44,54 @@ async function runSync(repo: string): Promise<string> {
  * Runs `overbridge explore sync <repo>` as a child so the pane keeps drawing; resolves to a message, empty on success.
  * A sync already running for `repo` is joined, so two never fetch or check out the same worktree at once.
  */
-function sync(repo: string): Promise<string> {
-  const running = inFlight.get(repo);
+const sync = singleFlight(runSync);
 
-  if (running) return running;
-
-  const started = runSync(repo).finally(() => inFlight.delete(repo));
-
-  inFlight.set(repo, started);
-
-  return started;
-}
-
-/** Stop every explore app of `repo`, so a repo you have left holds no pool port. */
-function stopExploreApps(repo: string) {
+/** Stop every explore app of `repo`, so a repo you have left holds no pool port. Returns what failed, for the panel. */
+function stopExploreApps(repo: string): string | undefined {
   const dir = exploreDir(repo);
+  let specs;
 
   try {
-    for (const spec of loadRepoConfig(dir, repo).apps) {
-      if (readRecord(EXPLORE_TAB, repo, spec.id)) stopApp(EXPLORE_TAB, repo, spec, dir);
-    }
+    specs = loadRepoConfig(dir, repo).apps;
   } catch (e) {
-    process.stderr.write(`overbridge explore: could not stop ${repo}'s apps: ${errorMessage(e)}\n`);
+    return `could not read ${repo}'s apps to stop them: ${errorMessage(e)}`;
   }
+
+  const failed = specs.flatMap((spec) => {
+    try {
+      stopApp(EXPLORE_TAB, repo, spec, dir);
+
+      return [];
+    } catch (e) {
+      return [`${spec.id} (${errorMessage(e)})`];
+    }
+  });
+
+  return failed.length ? `could not stop ${repo}'s ${failed.join(", ")}` : undefined;
+}
+
+/**
+ * A message row a background sync can report to before the panel has opened: what arrives early is held and shown
+ * once the panel hands over its `show`.
+ */
+function messageSink() {
+  let show: ((message: string) => void) | undefined;
+  let held: string | undefined;
+
+  return {
+    report: (message: string) => {
+      if (!message) return;
+
+      if (show) show(message);
+      else held = message;
+    },
+    bind: (next: (message: string) => void) => {
+      show = next;
+
+      if (held) next(held);
+      held = undefined;
+    },
+  };
 }
 
 /** Show the picker until a repo is chosen; resolves to it, or exits on `q`. */
@@ -148,10 +171,12 @@ export async function explorePane() {
   for (;;) {
     const chosen = repo;
     let message: string | undefined;
+    let justSynced = false;
 
     if (!existsSync(exploreDir(chosen))) {
       process.stdout.write(`${ENTER_SCREEN}\x1b[1;1Hchecking out ${chosen} on ${git.defaultBranch(getRepo(chosen))}…`);
       message = await sync(chosen);
+      justSynced = true;
       process.stdout.write(LEAVE_SCREEN);
 
       if (!existsSync(exploreDir(chosen))) {
@@ -160,23 +185,19 @@ export async function explorePane() {
       }
     }
 
-    if (shown !== undefined && shown !== chosen) stopExploreApps(shown);
+    if (shown !== undefined && shown !== chosen) message = stopExploreApps(shown) ?? message;
     writeSelected(chosen);
 
     // the terminal opens on a new repo only, so one the user closed stays closed on a return to the same repo
     if (shown !== chosen) message = showTerminal(chosen, deps) ?? message;
     shown = chosen;
 
-    let show = (_: string) => {};
+    const sink = messageSink();
 
-    const report = (m: string) => {
-      if (m) show(m);
-    };
-
-    if (!message) void sync(chosen).then(report);
+    if (!justSynced) void sync(chosen).then(sink.report);
 
     const timer = setInterval(() => {
-      if (isFocused(EXPLORE_TAB, readView())) void sync(chosen).then(report);
+      if (isFocused(EXPLORE_TAB, readView())) void sync(chosen).then(sink.report);
     }, SYNC_MS);
 
     const panel: PanelOptions = {
@@ -184,15 +205,18 @@ export async function explorePane() {
       scope: { dir: exploreDir(chosen), repos: [{ repo: chosen, dir: exploreDir(chosen), claim: { branch: git.defaultBranch(getRepo(chosen)) } }], panes: ["terminal"] },
       back: `${chosen} · repos`,
       pane: () => toggleTerminal(chosen, deps),
-      onMessage: (s) => {
-        show = s;
-      },
+      onMessage: sink.bind,
     };
 
     if (message) panel.message = message;
 
-    const exit = await topPanel(undefined, panel);
-    clearInterval(timer);
+    let exit: PanelExit;
+
+    try {
+      exit = await topPanel(undefined, panel);
+    } finally {
+      clearInterval(timer);
+    }
 
     if (exit === PanelExit.Quit) process.exit(0);
     repo = await pick(chosen);

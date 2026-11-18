@@ -39,6 +39,22 @@ export function writeSelected(repo: string) {
 
 export const exploreRepos = (): string[] => Object.keys(loadRepos()).sort();
 
+/** `run` with at most one call per key in flight: a call while one runs gets its promise, a later call starts anew. */
+export function singleFlight<V>(run: (key: string) => Promise<V>): (key: string) => Promise<V> {
+  const inFlight = new Map<string, Promise<V>>();
+
+  return (key) => {
+    const running = inFlight.get(key);
+
+    if (running) return running;
+
+    const started = run(key).finally(() => inFlight.delete(key));
+    inFlight.set(key, started);
+
+    return started;
+  };
+}
+
 export interface SyncFacts {
   exists: boolean;
   /** Tracked files changed. Untracked files don't count: checking out the tip keeps them. */
@@ -146,9 +162,12 @@ export function toggleTerminal(repo: string, deps: TerminalDeps): string | undef
 /** Rows above and below the repo list in `renderPicker`. */
 export const PICKER_CHROME = 4;
 
+/** Rows the repo list gets in a picker `height` rows tall. */
+const pickerBody = (height: number) => Math.max(1, height - PICKER_CHROME);
+
 /** The first repo shown, so the selected one stays inside a list `height` rows tall (chrome included). */
 export function pickerOffset(selected: number, count: number, height: number): number {
-  const body = Math.max(1, height - PICKER_CHROME);
+  const body = pickerBody(height);
 
   return Math.max(0, Math.min(selected - Math.floor(body / 2), count - body));
 }
@@ -166,7 +185,7 @@ export interface PickerView {
 /** The repo picker: the registered repos that fit, the selected one inverted. */
 export function renderPicker(v: PickerView): string[] {
   const offset = pickerOffset(v.selected, v.repos.length, v.height);
-  const shown = v.repos.slice(offset, offset + Math.max(1, v.height - PICKER_CHROME));
+  const shown = v.repos.slice(offset, offset + pickerBody(v.height));
 
   const list = shown.map((repo, i) => {
     const line = fit(`  ${v.checkedOut.has(repo) ? "●" : "○"} ${repo}`, v.width);
@@ -182,7 +201,7 @@ export function renderPicker(v: PickerView): string[] {
 /** The repo at 0-based screen `row`, if that row shows one. */
 export function pickerHit(row: number, repos: readonly string[], selected: number, height: number): string | undefined {
   const i = row - 2;
-  const body = Math.max(1, height - PICKER_CHROME);
+  const body = pickerBody(height);
 
   return i >= 0 && i < body ? repos[pickerOffset(selected, repos.length, height) + i] : undefined;
 }

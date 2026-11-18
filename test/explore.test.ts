@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { pickerHit, pickerOffset, renderPicker, showTerminal, SyncStep, syncPlan, terminalTitle, toggleTerminal, type TerminalDeps } from "../src/explore";
+import { pickerHit, pickerOffset, renderPicker, showTerminal, singleFlight, SyncStep, syncPlan, terminalTitle, toggleTerminal, type TerminalDeps } from "../src/explore";
 import { type Mux, type MuxPane, type NewPane, zellijMux } from "../src/mux";
 import { buttons, type TopSnapshot } from "../src/top";
 import { ORCHESTRATION_TABS } from "../src/orchestration";
@@ -21,6 +21,45 @@ describe("syncPlan", () => {
 
   test("leaves local commits alone", () => {
     expect(syncPlan({ exists: true, dirty: false, onDefaultBranch: false })).toBe(SyncStep.KeepAhead);
+  });
+});
+
+describe("singleFlight", () => {
+  test("joins a call in flight for the same key, and starts again once it settles", async () => {
+    const calls: string[] = [];
+    let finish = (_: string) => {};
+
+    const run = singleFlight((key: string) => {
+      calls.push(key);
+
+      return new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+    });
+
+    const first = run("web");
+    const joined = run("web");
+    expect(calls).toEqual(["web"]);
+    finish("done");
+    expect(await first).toBe("done");
+    expect(await joined).toBe("done");
+
+    void run("web");
+    expect(calls).toEqual(["web", "web"]);
+  });
+
+  test("keeps keys apart", () => {
+    const calls: string[] = [];
+
+    const run = singleFlight((key: string) => {
+      calls.push(key);
+
+      return new Promise<string>(() => {});
+    });
+
+    void run("web");
+    void run("api");
+    expect(calls).toEqual(["web", "api"]);
   });
 });
 
