@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_CLASSES, type PriorityClass, type PriorityRule } from "./check-priority";
 import { repoOf, root, worktreePath } from "./paths";
 import { loadRepos } from "./config";
 import { slugFromUrl, WORKLIST_SCOPES, type WorklistScope } from "./pm/board-github";
@@ -126,9 +127,22 @@ export interface CheckQueue {
   stallSeconds: number;
   /** Give up waiting for a turn after this long. */
   waitSeconds: number;
+  /** The class a claim's checks queue at; higher classes start first. */
+  priority?: string;
+  /** Tried in order before `priority`; the first whose patterns match the claim names its class. */
+  priorityRules: PriorityRule[];
+  /** From the root `priority-classes`, highest first; shared by every repo because they share one queue. */
+  classes: readonly PriorityClass[];
 }
 
-export const defaultCheckQueue = (): CheckQueue => ({ maxLoadPercent: 70, timeoutSeconds: 180, stallSeconds: 300, waitSeconds: 900 });
+export const defaultCheckQueue = (): CheckQueue => ({
+  maxLoadPercent: 70,
+  timeoutSeconds: 180,
+  stallSeconds: 300,
+  waitSeconds: 900,
+  priorityRules: [],
+  classes: DEFAULT_CLASSES,
+});
 
 export const DEFAULT_PERSONA_DIR = ".overbridge/personas";
 
@@ -189,7 +203,8 @@ export const defaultConfig = (): ProjectConfig => ({
 
 const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons", "mcp-servers"];
 const SHELL_KEYS = ["enter", "env", "key"];
-const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds"];
+const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds", "priority", "priority-rules"];
+const PRIORITY_RULE_KEYS = ["priority", "branch", "item"];
 const ICEBOX_KEYS = ["prune", "idle-days"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir", "ship-pr"];
 const BOARD_KEYS = ["columns"];
@@ -719,12 +734,124 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
       set(p.positiveInt(checkQueue, "timeout-seconds", "check-queue"), "timeoutSeconds");
       set(p.positiveInt(checkQueue, "stall-seconds", "check-queue"), "stallSeconds");
       set(p.positiveInt(checkQueue, "wait-seconds", "check-queue"), "waitSeconds");
+      const priority = p.string(checkQueue, "priority", "check-queue", false);
+      const rules = parsePriorityRules(p, checkQueue);
+
+      if (priority) config.checkQueue = { ...config.checkQueue, priority };
+
+      if (rules) config.checkQueue = { ...config.checkQueue, priorityRules: rules };
     }
   }
 
   if (p.list.length) fail(`${file}:\n${p.list.map((line) => `  ${line}`).join("\n")}`);
 
   return config;
+}
+
+/** A regex pattern, reported when it does not compile. */
+const pattern = (p: Problems, obj: JsonObject, key: string, at: string): string | undefined => {
+  const source = p.string(obj, key, at, false);
+
+  if (source === undefined) return undefined;
+
+  try {
+    new RegExp(source);
+
+    return source;
+  } catch (e) {
+    p.add(`${at}.${key}`, `not a valid regex: ${errorMessage(e)}`);
+
+    return undefined;
+  }
+};
+
+/** `check-queue.priority-rules`, or undefined when unset. Class names are checked against the classes in `checkClassNames`. */
+function parsePriorityRules(p: Problems, checkQueue: JsonObject): PriorityRule[] | undefined {
+  const rules = checkQueue["priority-rules"];
+
+  if (rules === undefined || rules === null) return undefined;
+
+  if (!Array.isArray(rules)) {
+    p.add("check-queue.priority-rules", "expected a list of { priority, branch?, item? }");
+
+    return undefined;
+  }
+
+  return rules.flatMap((rule, i): PriorityRule[] => {
+    const at = `check-queue.priority-rules[${i}]`;
+
+    if (!isRecord(rule)) {
+      p.add(at, "expected a mapping with priority and branch or item");
+
+      return [];
+    }
+
+    p.unknownKeys(rule, PRIORITY_RULE_KEYS, at);
+    const priority = p.string(rule, "priority", at, true);
+    const branch = pattern(p, rule, "branch", at);
+    const item = pattern(p, rule, "item", at);
+
+    if (rule.branch === undefined && rule.item === undefined) p.add(at, "needs branch or item: a rule with neither matches every claim (use check-queue.priority for that)");
+
+    if (!priority) return [];
+    const parsed: PriorityRule = { priority };
+
+    if (branch !== undefined) parsed.branch = branch;
+
+    if (item !== undefined) parsed.item = item;
+
+    return [parsed];
+  });
+}
+
+/** The class names `queue` uses that `classes` does not list; each falls back to the default class. */
+export function checkClassNames(queue: Pick<CheckQueue, "priority" | "priorityRules">, classes: readonly PriorityClass[]): string[] {
+  const names = new Set(classes.map((c) => c.name));
+  const known = `priority-classes in the root config.yml lists ${classes.map((c) => c.name).join(", ")}`;
+  const fallback = queue.priority !== undefined && !names.has(queue.priority) ? [`check-queue.priority: unknown class "${queue.priority}" (${known})`] : [];
+  const rules = queue.priorityRules.flatMap((r, i) => (names.has(r.priority) ? [] : [`check-queue.priority-rules[${i}].priority: unknown class "${r.priority}" (${known})`]));
+
+  return [...fallback, ...rules];
+}
+
+/** The root `priority-classes`: a list of `{ name, icon, default? }`, highest first. */
+function parseClasses(p: Problems, raw: JsonObject): PriorityClass[] | undefined {
+  const list = raw["priority-classes"];
+
+  if (list === undefined || list === null) return undefined;
+
+  if (!Array.isArray(list) || list.length === 0) {
+    p.add("priority-classes", "expected a non-empty list of { name, icon, default? }, highest first");
+
+    return undefined;
+  }
+
+  const classes = list.flatMap((entry, i): PriorityClass[] => {
+    const at = `priority-classes[${i}]`;
+
+    if (!isRecord(entry)) {
+      p.add(at, "expected a mapping with name and icon");
+
+      return [];
+    }
+
+    p.unknownKeys(entry, ["name", "icon", "default"], at);
+    const name = p.string(entry, "name", at, true);
+    const icon = p.string(entry, "icon", at, true);
+
+    if (entry.default !== undefined && !isBoolean(entry.default)) p.add(`${at}.default`, "expected true or false");
+
+    if (!name || !icon) return [];
+
+    return [entry.default === true ? { name, icon, default: true } : { name, icon }];
+  });
+
+  const names = classes.map((c) => c.name);
+  names.filter((n, i) => names.indexOf(n) !== i).forEach((n) => p.add("priority-classes", `"${n}" is listed twice`));
+
+  if (classes.filter((c) => c.default).length > 1) p.add("priority-classes", "only one class can be the default");
+
+  return classes;
 }
 
 /** Parse YAML text, naming `file` when it is not valid YAML. */
@@ -747,7 +874,7 @@ export const configPath = (repoDir: string) => join(repoDir, CONFIG_FILE);
 /** The root config, `<root>/config.yml`: settings that live outside the repos. */
 export const ROOT_CONFIG_FILE = "config.yml";
 export const rootConfigPath = () => join(root(), ROOT_CONFIG_FILE);
-const ROOT_KEYS = ["version", "defaults", "owners", "repos", "skill-extensions", "guard", "github-orgs"];
+const ROOT_KEYS = ["version", "defaults", "owners", "repos", "skill-extensions", "guard", "github-orgs", "priority-classes"];
 const GUARD_KEYS = ["read-paths", "deny"];
 
 /**
@@ -776,6 +903,8 @@ export interface RootLayers {
   guard: GuardConfig;
   /** GitHub owners the `@prs` and `@reviews` tabs search. Empty means every owner. */
   githubOrgs: string[];
+  /** The check queue classes, highest first. */
+  checkClasses: readonly PriorityClass[];
 }
 
 /** Read and check `<root>/config.yml`. A missing or empty file has no layers. */
@@ -785,7 +914,7 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
 
 /** Check parsed root config YAML (`file` names it in errors), validating every layer with `validateConfig`. */
 export function rootLayersFrom(raw: Json | undefined, file: string): RootLayers {
-  const layers: RootLayers = { file, owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [] };
+  const layers: RootLayers = { file, owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES };
 
   if (raw === null || raw === undefined) return layers;
 
@@ -823,6 +952,9 @@ export function rootLayersFrom(raw: Json | undefined, file: string): RootLayers 
 
   layers.skillExtensions = p.stringList(raw, "skill-extensions", "") ?? [];
   layers.githubOrgs = p.stringList(raw, "github-orgs", "") ?? [];
+  const classes = parseClasses(p, raw);
+
+  if (classes?.length) layers.checkClasses = classes;
 
   if (raw.guard !== undefined && raw.guard !== null) {
     if (!isRecord(raw.guard)) p.add("guard", "expected a mapping with read-paths and deny");
@@ -943,8 +1075,12 @@ export function resolveConfig(
     over && `${layers.file} (repos.${repo})`,
   ].filter(Boolean);
 
+  const label = sources.join(" + ") || file;
   // the repo file was checked for root-only keys above, so any left come from the root config
-  return validateConfig(overlay(overlay(overlay(layers.defaults, under?.layer), repoRaw), over), sources.join(" + ") || file, { root: true });
+  const config = validateConfig(overlay(overlay(overlay(layers.defaults, under?.layer), repoRaw), over), label, { root: true });
+
+  // an unknown class name falls back to the default class (`classInfo`), so a repo file naming a class this user's root lacks never blocks loading; `overbridge config check` reports it
+  return { ...config, checkQueue: { ...config.checkQueue, classes: layers.checkClasses } };
 }
 
 /** Load a config file for `repo` with the root layers applied. A missing file means the root layers alone. */

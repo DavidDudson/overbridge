@@ -159,10 +159,10 @@ describe("workflow", () => {
     expect(r.out).toContain("nothing assigned to you");
   });
 
-  test("layout opens the orchestration tabs (root, work list, PRs, reviews, performance, frozen), then one tab per workspace, each with sidebar and top panel", () => {
+  test("layout opens the orchestration tabs (root, work list, PRs, reviews, performance, check queue, frozen), then one tab per workspace, each with sidebar and top panel", () => {
     for (const n of ["ws3", "ws4", "ws5"]) ws(["new", n]);
     const kdl = ws(["layout"]).out;
-    expect(kdl.match(/\btab name=/g)?.length).toBe(11);
+    expect(kdl.match(/\btab name=/g)?.length).toBe(12);
     expect(kdl.indexOf('tab name="@root"')).toBeLessThan(kdl.indexOf('tab name="ws'));
     expect(kdl).toContain('"claude" "@root"');
     expect(kdl).toMatch(/args .*"worklist"/);
@@ -419,6 +419,30 @@ describe("check queue", () => {
     expect(await second.exited).toBe(0);
     expect(await new Response(second.stderr).text()).toContain("waiting behind 1 in the queue (max-parallel 1)");
     expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "end a", "start b", "end b"]);
+  }, CHECK_TEST_MS);
+
+  test("the ticket records the workspace's class: the repo's priority, from the default classes", () => {
+    config("  priority: low\n");
+    const r = check(["--", "sh", "-c", `cat ${queue()}/*.json`]);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out.trim())).toMatchObject({ priority: "low", rank: 2, icon: "🔻" });
+  }, CHECK_TEST_MS);
+
+  test("a waiting check moved in order.state starts before the one queued ahead of it", async () => {
+    config("  max-parallel: 1\n");
+    const log = join(tmp, "moved.log");
+    const step = (name: string, secs: number) => ["--", "sh", "-c", `echo ${name} >> ${log}; sleep ${secs}`];
+    const first = spawnCheck(step("a", 2));
+    await waitFor(() => existsSync(log));
+    const second = spawnCheck(step("b", 0));
+    await waitFor(() => tickets().length === 2);
+    const third = spawnCheck(step("c", 0));
+    await waitFor(() => tickets().length === 3);
+    const thirdTicket = tickets().toSorted().at(-1);
+    expect(thirdTicket).toBeDefined();
+    writeFileSync(join(queue(), "order.state"), JSON.stringify({ [thirdTicket ?? ""]: 0 }));
+    expect([await first.exited, await second.exited, await third.exited]).toEqual([0, 0, 0]);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["a", "c", "b"]);
   }, CHECK_TEST_MS);
 
   test("a nested check inside a held run runs at once", () => {
