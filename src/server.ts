@@ -378,12 +378,31 @@ interface RefreshJob {
   ws: string;
   prefetched: PrefetchedPrs;
   paused?: string;
+  /** The user asked for this refresh (`r`): button `status` commands run even when their last output could be reused. */
+  force?: boolean;
+  /** Set while the rate-limit gate is paused, even on a forced refresh that may read PRs: button `status` commands keep their last output. */
+  buttonsPaused?: string;
 }
 
-const refreshJob = (ws: string, prefetched: PrefetchedPrs, paused?: string): RefreshJob => {
+/** How a top refresh runs in its worker. */
+export interface RefreshOptions {
+  timeoutMs?: number;
+  /** Why `gh` is paused: no PR is read and the last values are kept. */
+  paused?: string;
+  /** Told the first rate-limit failure the worker's `gh` calls hit. */
+  onLimited?: (text: string) => void;
+  force?: boolean;
+  buttonsPaused?: string;
+}
+
+const refreshJob = (ws: string, prefetched: PrefetchedPrs, o: RefreshOptions): RefreshJob => {
   const job: RefreshJob = { ws, prefetched };
 
-  if (paused) job.paused = paused;
+  if (o.paused) job.paused = o.paused;
+
+  if (o.force) job.force = true;
+
+  if (o.buttonsPaused) job.buttonsPaused = o.buttonsPaused;
 
   return job;
 };
@@ -421,13 +440,13 @@ export function sweepTick(deps: SweepTickDeps): void {
 }
 
 /** Run `refreshTop` in a worker thread, so the server stays responsive while `gh` runs. */
-export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, timeoutMs = 120_000, paused?: string, onLimited?: (text: string) => void): Promise<TopCache> =>
-  workerJob(REFRESH_WORKER, refreshJob(ws, prefetched, paused), {
-    timeoutMs,
+export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, o: RefreshOptions = {}): Promise<TopCache> =>
+  workerJob(REFRESH_WORKER, refreshJob(ws, prefetched, o), {
+    timeoutMs: o.timeoutMs ?? 120_000,
     label: `refresh of ${ws}`,
     fallback: "refresh failed",
     pick: (r) => {
-      if (r.limited) onLimited?.(r.limited);
+      if (r.limited) o.onLimited?.(r.limited);
 
       return r.cache;
     },
@@ -540,7 +559,16 @@ export async function serve(): Promise<void> {
       // a forced refresh (the user's `r`) goes past a pause once, to learn whether the limit is still on; every call that sees one feeds the gate
       const forced = o?.force === true && gate.allowForced();
 
-      return refreshInWorker(ws, await prefetchFor(ws, batcher, { force: forced }), 120_000, forced ? undefined : gate.message(), (text) => void gate.observe(text));
+      const prefetched = await prefetchFor(ws, batcher, { force: forced });
+      const job: RefreshOptions = { onLimited: (text) => void gate.observe(text), force: forced };
+      // a forced refresh reads PRs through a pause to learn whether it is over; the button commands call GitHub themselves, so they wait for the gate
+      const paused = gate.message();
+
+      if (paused) job.buttonsPaused = paused;
+
+      if (paused && !forced) job.paused = paused;
+
+      return refreshInWorker(ws, prefetched, job);
     },
     prBatch: () => batcher.stats(),
     prBusy: () => batcher.busy,

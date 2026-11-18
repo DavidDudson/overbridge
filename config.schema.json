@@ -79,7 +79,7 @@
         "properties": {
           "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
           "label": { "type": "string", "minLength": 1 },
-          "status": { "type": "string", "minLength": 1, "description": "Run in the worktree on each refresh. Prints text, or {\"text\", \"color\"}; printing nothing hides the button." },
+          "status": { "type": "string", "minLength": 1, "description": "Run in the worktree on a refresh: with a PR, only when the PR or the buttons changed, the last run is 5 minutes old, or on r; never while gh is rate limited. Prints text, or {\"text\", \"color\"}; printing nothing hides the button. Gets OVERBRIDGE_PR_JSON, the path of a file holding the PR view; empty with no PR." },
           "run": { "type": "string", "minLength": 1, "description": "Run in the worktree, detached, when the button is pressed." },
           "url": { "type": "string", "minLength": 1, "description": "Opened when the button is pressed. {ws}, {repo}, {branch} and {pr} are filled in." },
           "side": { "enum": ["left", "right"] }

@@ -514,11 +514,19 @@ defaults:
 - **`status`**: a shell command run in the worktree each time the panel refreshes (every minute, or `r`). It prints
   the text shown after the label, or a JSON object `{ "text": "…", "color": "green" }`. The colours are `red`,
   `green`, `yellow`, `blue`, `purple`, `cyan`, and `grey`. A button with a `status` stays hidden until its command
-  prints something, so a command that fails or prints nothing hides it.
+  prints something, so a command that fails or prints nothing hides it. When the claim has a PR, the panel keeps a
+  repo's last `status` output while the PR looks the same as on the last run (same branch, PR number, PR view with
+  its checks and reviews, and button commands) and that run is under 5 minutes old; `r` runs them anyway. While a
+  GitHub rate limit pauses `gh`, no `status` runs.
 - **`side`**: `right` (the default) with the launchers, or `left` with the links.
 
 The commands get `OVERBRIDGE_NAME`, `OVERBRIDGE_REPO`, `OVERBRIDGE_BRANCH`, `OVERBRIDGE_PR`, and `OVERBRIDGE_ITEM`
-(the work item id in the branch name, such as `ENG-1234`, empty when there is none). This button copies a release
+(the work item id in the branch name, such as `ENG-1234`, empty when there is none). When the claim has a PR,
+`OVERBRIDGE_PR_JSON` names a file holding the PR as the panel last read it, with the fields of `gh pr view --json
+url,title,isDraft,updatedAt,state,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments`
+and `unresolved`, the count of unresolved review threads. Read the fields you need and ignore the rest: the panel may
+read the PR through one batched query, which leaves out fields it doesn't use. With no PR, or none read yet, it is empty.
+A `status` command that reads it doesn't need to call GitHub itself. This button copies a release
 note for every repo the `megaport` org owns:
 
 ```yaml
