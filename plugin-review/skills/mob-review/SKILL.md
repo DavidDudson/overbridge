@@ -67,7 +67,7 @@ git fetch origin main --quiet
 ```
 
 - **No arg / branch:** review the current (or named) branch vs `origin/main`.
-- **Stacked PR** (`gh pr view --json baseRefName` is not `main`, or, for a layer with no PR yet, `gh stack view` shows a base below it, or the caller named a base): review vs `origin/<baseRefName>` instead, in every `git diff` below and in what the personas and `code-review` are told. The base branch's commits are its own PR's to review.
+- **Stacked PR** (`gh pr view --json baseRefName` is not `main`): review vs `origin/<baseRefName>` instead. For a layer with no PR yet, a base the caller named or the branch below it in `gh stack view` is used as given, the local branch with no `origin/` prefix (it may not be pushed yet). Either way that ref replaces `origin/main` in every `git diff` below and in what the personas and `code-review` are told. The base branch's commits are its own PR's to review.
 - **PR number/URL:** the branch must already be checked out through `overbridge checkout <repo> '#<n>'`. If it isn't, run `review-pr` instead.
 
 Compute the changed-file list and the diff **once, to disk**, and hand every persona those paths instead of a command each one re-runs. Use the session's scratchpad directory when the system prompt names one, else `${TMPDIR:-/tmp}`:
