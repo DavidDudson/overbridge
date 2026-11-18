@@ -64,7 +64,9 @@ overbridge claude <name|@root>                    # run a bound Claude, or the r
 Per-repo rules go in the repo's `overbridge.yml` (see the README for every key and
 `overbridge.example.yml` for a commented copy); validate with `overbridge config check`. Settings
 that should not be committed to a repo go in `<root>/config.yml`: `defaults` sits under every repo's
-file and `repos.<name>` over one repo's file. `overbridge config show` prints the merged result. Global
+file and `repos.<name>` over one repo's file. `overbridge config show` prints the merged result. Change one
+value with `overbridge config set <key> <value> [--repo name]`, such as `overbridge config set defaults.ide zed`.
+It keeps comments, refuses unknown keys, and validates the file before it writes. Global
 settings live in `repos.toml`: `[sidebar] width = 28` sets the tab sidebar width (12 to 80).
 
 ## Notes

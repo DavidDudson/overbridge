@@ -19,7 +19,7 @@
           installPhase = ''
             mkdir -p $out/share/overbridge $out/bin
             # the plugins load from here: see pluginSettings in src/plugins.ts
-            cp -r src .claude-plugin plugin plugin-review $out/share/overbridge/
+            cp -r src .claude-plugin plugin plugin-review config.schema.json overbridge.schema.json $out/share/overbridge/
             # OVERBRIDGE_SELF=overbridge keeps generated hooks/layouts pointing at the PATH binary,
             # not a store path that goes stale after the next rebuild.
             makeWrapper ${pkgs.bun}/bin/bun $out/bin/overbridge \

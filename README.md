@@ -326,6 +326,13 @@ ide: vscode           # vscode | zed | webstorm
 `overbridge config show [path]` prints the resolved config as JSON, and says on stderr which files went into it.
 `overbridge config get <key> [path]` prints one resolved value (`commands.test`, `review.local-dir`) and exits
 non-zero when it is unset.
+`overbridge config set <key> <value> [--repo name]` writes one value to the root `config.yml`, such as
+`overbridge config set defaults.ide zed`. With `--repo web` the key goes under `repos.web`. A number, `true`, `false`,
+`null`, or a `[a, b]` or `{k: v}` flow collection keeps its type. Quote a value (`'"5"'`) to store it as a string. Any other value is stored as the string you typed. Put
+`--` before a value that starts with `-`. Comments and layout stay as they were. The command refuses a key that
+`config.schema.json` or `overbridge.schema.json` does not describe, and it checks the whole file before it writes, so
+a bad value leaves the file unchanged. It refuses to run from a Claude session in a workspace or an orchestration tab, because the root config holds the guard and the hooks. It edits block mappings only. Change a key inside a flow mapping
+(`{ ide: zed }`) or a list by hand.
 
 ### Dev shells
 
