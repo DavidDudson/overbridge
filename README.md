@@ -103,6 +103,13 @@ workspace merges, the merged-PR check removes it like any other. With `icebox.id
 iceboxing a workspace whose claimed PRs are all drafts and untouched that long: its card reads
 `draft PRs idle <n>d · icebox?` unless the agent is waiting on you. It only suggests; run `overbridge icebox <name>` to act.
 
+**Explore.** The `@explore` orchestration tab (`overbridge explore`) is for looking at a repo as it is on its default
+branch, with nothing claimed. Pick a repo and it gets a detached checkout of `origin/<default>` at `<root>/@explore/<repo>`,
+the top panel's app and editor buttons over it, and a terminal below in the repo's dev shell. `b` goes back to the picker.
+The checkout moves to the latest default branch on every pick and every 5 minutes, but only while it is clean and has no
+commits of its own (`overbridge explore sync <repo>` does it by hand). Apps started there take ports from the same pool
+as the workspaces'. Apps marked `when: feature-branch` are not offered.
+
 Nothing is reclaimed unless you ask. `icebox <name> --prune` deletes the paths listed in the repo's
 `icebox.prune` (`node_modules`, `target`) once the workspace is marked iceboxed, skipping anything git does not ignore,
 anything it tracks, and anything that leaves the repo through a symlink. `.git` and `.claude` are never valid paths. `icebox <name> --drop-worktree` removes the worktrees, keeping every claimed branch, so the

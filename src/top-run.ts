@@ -6,7 +6,7 @@ import { serverRefresh } from "./server-client";
 import { beginRemoval } from "./remove";
 import { togglePane } from "./panes";
 import { mergePr, setReady } from "./pr-actions";
-import { ALT_COMMANDS, type ActDeps, activate, applyOptimistic, type PrChange, type Button, CLEANUP_ARM_MS, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopSnapshot } from "./top";
+import { ALT_COMMANDS, type ActDeps, activate, applyOptimistic, type PaneKind, type PrChange, type Button, CLEANUP_ARM_MS, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopScope, type TopSnapshot } from "./top";
 import { ENTER_SCREEN, LEAVE_SCREEN } from "./term";
 import { errorMessage, log, spawnCwd } from "./util";
 import { subscribeEvents } from "./events-client";
@@ -33,16 +33,38 @@ const lastLine = (path: string): string => {
   }
 };
 
+/** A panel over something other than a workspace (the @explore tab): no PR cache to refresh, its own scope and panes. */
+export interface PanelOptions {
+  /** The name apps and the cache are kept under. */
+  name: string;
+  scope: TopScope;
+  /** Label of the button that leaves the panel; the panel resolves when it is pressed. */
+  back: string;
+  pane: (pane: PaneKind) => string | undefined;
+}
+
 /**
  * `overbridge top [--ws]`: the interactive panel. Mouse click or Enter activates a button,
  * arrows/Tab move the cursor, `o` opens a running app, `L` shows its log, `r` refreshes, `q` quits.
+ * With `panel` it draws that scope instead and never refreshes the PR cache; `b` (or its button) leaves.
  */
-export async function topPanel(wsOpt?: string) {
-  const ws = requireWs(wsOpt);
+export async function topPanel(wsOpt?: string, panel?: PanelOptions) {
+  const ws = panel ? panel.name : requireWs(wsOpt);
 
   if (!process.stdin.isTTY) throw new Error("overbridge top needs a terminal");
 
-  let snap: TopSnapshot = await snapshotTop(ws);
+  const snapshot = async (): Promise<TopSnapshot> => {
+    const s = await snapshotTop(ws, process.env, panel?.scope);
+
+    return panel ? { ...s, back: panel.back } : s;
+  };
+
+  let snap: TopSnapshot = await snapshot();
+
+  let leave = () => {};
+
+  /** Set once the panel quits, so a reload still in flight draws nothing over what comes next. */
+  let left = false;
   let cursor = 0;
   let note: string | undefined;
   let frame = layoutTop(snap, process.stdout.columns ?? 80, process.stdout.rows ?? 0);
@@ -76,7 +98,12 @@ export async function topPanel(wsOpt?: string) {
       }
     },
     stop: (app: TopApp) => void stopApp(ws, app.repo, app.spec, app.repoDir),
-    pane: (pane) => togglePane(ws, pane),
+    pane: (pane) => (panel ? panel.pane(pane) : togglePane(ws, pane)),
+    back: () => {
+      leave();
+
+      return undefined;
+    },
     ready: (pr, ready) => {
       showNow({ kind: "ready", pr, ready });
 
@@ -121,6 +148,7 @@ export async function topPanel(wsOpt?: string) {
   const painter = createPainter((text) => process.stdout.write(text));
 
   const draw = () => {
+    if (left) return;
     const shown: TopSnapshot = { ...snap };
 
     if (note) shown.message = note;
@@ -134,7 +162,7 @@ export async function topPanel(wsOpt?: string) {
 
   const reload = async () => {
     lastReloadAtMs = Date.now();
-    snap = await snapshotTop(ws);
+    snap = await snapshot();
     cursor = Math.min(cursor, Math.max(0, frame.placed.length - 1));
     draw();
   };
@@ -142,6 +170,13 @@ export async function topPanel(wsOpt?: string) {
   /** Rebuild the cache and redraw; `keep` is a message (an action's result) to leave on the message row afterwards. */
   const refresh = (keep?: string, force = false) => {
     lastRefreshAtMs = Date.now();
+
+    if (panel) {
+      note = keep;
+
+      return void reload();
+    }
+
     note = keep ?? "refreshing…";
     draw();
     void (async () => {
@@ -175,10 +210,16 @@ export async function topPanel(wsOpt?: string) {
 
   const done = new Promise<void>((resolve) => {
     const quit = () => {
+      left = true;
+      // the @explore pane draws its picker in this process next, so nothing of the panel may keep listening
+      process.stdin.removeAllListeners("data");
+      process.stdout.removeAllListeners("resize");
       process.stdout.write(LEAVE_SCREEN);
       process.stdin.setRawMode(false);
       resolve();
     };
+
+    leave = quit;
 
     process.stdout.write(ENTER_SCREEN);
     painter.invalidate();

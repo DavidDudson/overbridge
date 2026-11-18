@@ -22,6 +22,7 @@ export const ORCHESTRATION_TABS: readonly OrchestrationTab[] = [
   { tab: "@reviews", label: "reviews", dir: root, pane: "reviews" },
   { tab: "@perf", label: "performance", dir: root, pane: "perf" },
   { tab: "@frozen", label: "frozen", dir: root, pane: "frozen" },
+  { tab: "@explore", label: "explore", dir: root, pane: "explore" },
 ];
 
 export const orchestrationTab = (tab: string): OrchestrationTab | undefined => ORCHESTRATION_TABS.find((t) => t.tab === tab);

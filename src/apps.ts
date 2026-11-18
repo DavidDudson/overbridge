@@ -1,6 +1,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getRepo } from "./config";
+import { EXPLORE_TAB } from "./explore";
 import * as git from "./git";
 import { wsDir } from "./paths";
 import { groupAlive } from "./proc";
@@ -108,9 +109,9 @@ export interface Holder {
   port?: number;
 }
 
-/** Workspaces currently running `repo`'s app `id`. */
+/** Workspaces (and the @explore tab) currently running `repo`'s app `id`. */
 export function holders(repo: string, id: string): Holder[] {
-  return Object.keys(readState().workspaces).flatMap((ws) => {
+  return [...Object.keys(readState().workspaces), EXPLORE_TAB].flatMap((ws) => {
     const record = readRecord(ws, repo, id);
 
     return record && processAlive(record.pid) ? [{ ws, port: record.port }] : [];

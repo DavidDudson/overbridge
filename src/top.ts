@@ -239,6 +239,10 @@ export interface TopSnapshot {
   apps: TopApp[];
   /** Buttons from the root config. */
   custom?: CustomButton[];
+  /** The pane toggles to offer; all of `PANE_BUTTONS` when unset. */
+  panes?: PaneKind[];
+  /** Shown first on the left: a button that leaves this panel (the @explore tab's repo picker). */
+  back?: string;
   /** The workspace can be wiped: PRs open, nothing uncommitted, nothing unpushed. */
   cleanup?: boolean;
   message?: string;
@@ -624,18 +628,31 @@ export function pressCleanup(armedAt: number | undefined, now: number) {
   return { confirmed: false, armedAt: now };
 }
 
-/** Everything the panel draws, from the cache and local app records. */
-export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.env): Promise<TopSnapshot> {
-  const cache = readTopCache(ws);
+/**
+ * What a panel covers: the folder the editor opens, each repo's checkout and claim, and the pane toggles it offers.
+ * A workspace's comes from state (`workspaceScope`); the @explore tab passes its own main checkout.
+ */
+export interface TopScope {
+  dir: string;
+  repos: { repo: string; dir: string; claim: { branch?: string; pr?: number } }[];
+  panes?: PaneKind[];
+}
+
+export function workspaceScope(ws: string): TopScope {
   const claimed = getWorkspace(readState(), ws).repos;
-  const claims = Object.keys(claimed);
+
+  return { dir: wsDir(ws), repos: Object.entries(claimed).map(([repo, claim]) => ({ repo, dir: worktreePath(ws, repo), claim })) };
+}
+
+/** Everything the panel draws, from the cache and local app records. */
+export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.env, scope: TopScope = workspaceScope(ws)): Promise<TopSnapshot> {
+  const cache = readTopCache(ws);
   const apps: TopApp[] = [];
   const custom: CustomButton[] = [];
   let ide: Ide | undefined;
   const problems: string[] = cache.message ? [cache.message] : [];
 
-  for (const repo of claims) {
-    const repoDir = worktreePath(ws, repo);
+  for (const { repo, dir: repoDir, claim } of scope.repos) {
 
     try {
       const config = loadRepoConfig(repoDir, repo);
@@ -646,7 +663,7 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
 
         // a button with a status command waits for it to print something
         if (spec.status && !state) continue;
-        const button: CustomButton = { repo, spec, dir: repoDir, env: buttonEnv(ws, repo, claimed[repo] ?? {}, itemIdOf(config.projectManagement, repoDir, claimed[repo]?.branch)) };
+        const button: CustomButton = { repo, spec, dir: repoDir, env: buttonEnv(ws, repo, claim, itemIdOf(config.projectManagement, repoDir, claim.branch)) };
 
         if (state) button.state = state;
         custom.push(button);
@@ -666,7 +683,9 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
 
   const editor = ide ? undefined : env.OVERBRIDGE_IDE?.trim() || env.EDITOR?.trim() || undefined;
 
-  const snapshot: TopSnapshot = { ws, dir: wsDir(ws), title: sidebarLabel(ws, cache), links: cache.links, apps };
+  const snapshot: TopSnapshot = { ws, dir: scope.dir, title: sidebarLabel(ws, cache), links: cache.links, apps };
+
+  if (scope.panes) snapshot.panes = scope.panes;
 
   if (cache.headline) snapshot.headline = cache.headline;
 
@@ -693,6 +712,7 @@ export type Action =
   | { kind: "ready"; pr: PrInfo }
   | { kind: "merge"; pr: PrInfo }
   | { kind: "cleanup" }
+  | { kind: "back" }
   | { kind: "custom"; button: CustomButton };
 
 export interface Button {
@@ -748,7 +768,7 @@ function editorFromEnv(editor: string | undefined): { label: string; cmd: string
 
 /**
  * Give each button its key: `i` the work item, `p` the PR (then u, y, w, z), `1` to `9` the apps,
- * `e` the editor, `c` `t` `d` the panes, `x` Cleanup, and on the first PR's row `g` ready/draft, `m` merge. Buttons past the available keys get none.
+ * `e` the editor, `c` `t` `d` the panes, `x` Cleanup, `b` back, and on the first PR's row `g` ready/draft, `m` merge. Buttons past the available keys get none.
  */
 function withKeys(list: Button[]): Button[] {
   let app = 0;
@@ -763,6 +783,7 @@ function withKeys(list: Button[]): Button[] {
     else if (a.kind === "app") key = app < 9 ? String(++app) : undefined;
     else if (a.kind === "editor") key = "e";
     else if (a.kind === "pane") key = { claude: "c", terminal: "t", diff: "d" }[a.pane];
+    else if (a.kind === "back") key = "b";
     else key = "x";
 
     return key ? { ...b, key } : b;
@@ -797,6 +818,8 @@ export function buttons(snap: TopSnapshot): Button[] {
   const prKeys = [...PR_KEYS];
   const issueKeys = ["i"];
   const out: Button[] = [];
+
+  if (snap.back) out.push({ label: `⇄ ${snap.back}`, action: { kind: "back" }, side: "left" });
   let prRow = 0;
 
   for (const l of snap.links) {
@@ -853,7 +876,9 @@ export function buttons(snap: TopSnapshot): Button[] {
 
   if (editor) out.push({ label: `📝 ${editor.label}`, action: { kind: "editor", cmd: editor.cmd, dir: snap.dir }, side: "right" });
 
-  for (const p of PANE_BUTTONS) out.push({ label: p.label, action: { kind: "pane", pane: p.pane }, side: "right" });
+  for (const p of PANE_BUTTONS) {
+    if (!snap.panes || snap.panes.includes(p.pane)) out.push({ label: p.label, action: { kind: "pane", pane: p.pane }, side: "right" });
+  }
 
   return withKeys(out);
 }
@@ -1044,6 +1069,8 @@ export interface ActDeps {
   merge: (pr: PrInfo) => string | undefined;
   /** Run a configured button's shell command, detached, in `dir` with `env` added. */
   run: (command: string, dir: string, env: Record<string, string>) => void;
+  /** Leave the panel for the @explore tab's repo picker. */
+  back?: () => string | undefined;
 }
 
 /** Do what a button says; returns a message for the message row, or undefined. */
@@ -1063,6 +1090,8 @@ export function activate(button: Button, deps: ActDeps): string | undefined {
       return deps.pane(a.pane);
     case "cleanup":
       return deps.cleanup();
+    case "back":
+      return deps.back?.();
     case "ready":
       return deps.ready(a.pr, a.pr.draft);
     case "merge":
