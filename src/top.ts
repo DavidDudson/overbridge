@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { AppStatus, appAvailable, appStatus, appUrl, readRecord } from "./apps";
 import { readAgentState, sessionEndedForGood } from "./agent-state";
 import { getRepo } from "./config";
@@ -127,8 +128,54 @@ export interface TopCache {
   branches?: Record<string, string>;
   /** What each configured button's `status` printed, keyed `<repo>/<id>`. A missing entry hides the button. */
   buttons?: Record<string, ButtonState>;
+  /** Per repo, what its buttons' `status` commands last ran against (`buttonRunKey`) and when, so an unchanged PR reuses `buttons`. */
+  buttonRuns?: Record<string, ButtonRun>;
   message?: string;
   at: number;
+}
+
+/** When a repo's button `status` commands last ran, and the fingerprint of what they saw. */
+export interface ButtonRun {
+  key: string;
+  at: number;
+}
+
+/**
+ * A button's `status` output is reused while the PR it would read is unchanged, up to this age. Each `status` command
+ * may call GitHub itself, and the panel refreshes every minute.
+ */
+export const BUTTON_MAX_AGE_MS = 5 * 60_000;
+
+/** The fingerprint of what a repo's buttons see: the claim and the PR view the panel read for it. */
+export const buttonRunKey = (claim: { branch?: string; pr?: number }, view: PrView | undefined): string =>
+  createHash("sha1")
+    .update(JSON.stringify([claim.branch ?? null, claim.pr ?? null, view ?? null]))
+    .digest("hex");
+
+/** Whether a repo's buttons can keep their last output: same fingerprint, run less than `BUTTON_MAX_AGE_MS` ago. */
+export const reuseButtons = (last: ButtonRun | undefined, key: string, now: number): boolean => last !== undefined && last.key === key && now - last.at < BUTTON_MAX_AGE_MS;
+
+/** Where `refreshTop` writes the claimed PR's view for `repo`'s buttons (`OVERBRIDGE_PR_JSON`). */
+export const prViewFile = (ws: string, repo: string) => join(metaDir(), "pr-view", ws, `${repo}.json`);
+
+/** Write the view the buttons read, or remove a stale one when there is none. A failed write only costs the buttons the file. */
+function writePrViewFile(ws: string, repo: string, view: PrView | undefined) {
+  const file = prViewFile(ws, repo);
+
+  try {
+    if (!view) {
+      rmSync(file, { force: true });
+
+      return;
+    }
+
+    mkdirSync(dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(view) + "\n");
+    renameSync(tmp, file);
+  } catch {
+    // the button falls back to asking GitHub itself
+  }
 }
 
 /** A configured button's state from its last `status` run. */
@@ -177,16 +224,36 @@ export function parseButtonStatus(out: string): ButtonState {
   return line ? { text: line } : {};
 }
 
-/** The env a configured button's commands run with. `item` is the work item id of the claimed branch, "" when none. */
-export function buttonEnv(ws: string, repo: string, claim: { branch?: string; pr?: number }, item = "") {
-  return {
+/**
+ * The env a configured button's commands run with. `item` is the work item id of the claimed branch, "" when none.
+ * `prJson` is the file holding the claimed PR's view (`OVERBRIDGE_PR_JSON`); left out when there is none.
+ */
+export function buttonEnv(ws: string, repo: string, claim: { branch?: string; pr?: number }, item = "", prJson?: string) {
+  const env = {
     OVERBRIDGE_NAME: ws,
     OVERBRIDGE_REPO: repo,
     OVERBRIDGE_BRANCH: claim.branch ?? "",
     OVERBRIDGE_PR: claim.pr === undefined ? "" : String(claim.pr),
     OVERBRIDGE_ITEM: item,
   };
+
+  if (!prJson) {
+    return env;
+  }
+
+  return { ...env, OVERBRIDGE_PR_JSON: prJson };
 }
+
+/** The `OVERBRIDGE_PR_JSON` path for a claim, when it has a PR and its view file exists. */
+const prJsonFor = (ws: string, repo: string, claim: { pr?: number }): string | undefined => {
+  if (claim.pr === undefined) {
+    return undefined;
+  }
+
+  const file = prViewFile(ws, repo);
+
+  return existsSync(file) ? file : undefined;
+};
 
 /** Fill `{ws}`, `{repo}`, `{branch}`, `{pr}` and `{item}` in a button's URL, each URL-encoded. */
 export function buttonUrl(template: string, env: Record<string, string>): string {
@@ -269,6 +336,7 @@ export function topCacheFault(raw: JsonValue | undefined): string | undefined {
     optional("merged", isJsonObject(raw.merged)) ??
     optional("branches", isJsonObject(raw.branches)) ??
     optional("buttons", isJsonObject(raw.buttons)) ??
+    optional("buttonRuns", isJsonObject(raw.buttonRuns)) ??
     wrong("links", Array.isArray(raw.links)) ??
     wrong("at", isJsonNumber(raw.at))
   );
@@ -347,6 +415,8 @@ export interface RefreshDeps {
   paused?: string;
   /** Told the stderr of every failed command that `exec` ran by default, so a caller can see a rate limit that the `undefined` result hides. */
   onFailure?: (cmd: string[], stderr: string) => void;
+  /** The clock for the button reuse age; `Date.now` by default. */
+  now?: () => number;
 }
 
 /**
@@ -381,6 +451,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   let itemTitle: string | undefined;
   let itemLink: TopLink | undefined;
   const buttonStates: Record<string, ButtonState> = {};
+  const buttonRuns: Record<string, ButtonRun> = {};
+  const now = (deps.now ?? Date.now)();
 
   for (const [repo, claim] of claims) {
     const dir = worktreePath(ws, repo);
@@ -411,14 +483,6 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       }
     }
 
-    for (const spec of config.buttons) {
-      if (!spec.status) continue;
-      const env = Object.entries(buttonEnv(ws, repo, claim, itemIdOf(pm, dir, claim.branch, provider))).map(([k, v]) => `${k}=${v}`);
-      const out = exec(["env", ...env, "sh", "-c", spec.status], dir);
-
-      if (out !== undefined) buttonStates[`${repo}/${spec.id}`] = parseButtonStatus(out);
-    }
-
     const batched = deps.prefetched?.[repo];
 
     const viewOf = (n: number): PrView | undefined => {
@@ -431,11 +495,12 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     };
 
     // while gh is paused the PR facts are the last ones read (below), so no PR is looked at
+    const view = claim.pr !== undefined && !deps.paused ? viewOf(claim.pr) : undefined;
+
     if (claim.pr !== undefined && !deps.paused) {
       const claimedPr = claim.pr;
 
       if (batched && "prs" in batched && batched.error) problems.push(`${repo}: ${batched.error}`);
-      const view = viewOf(claimedPr);
 
       if (view?.url) {
         const layers = stackOf(safeStacks(repo), claim.branch)?.layers ?? [];
@@ -485,6 +550,45 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
         mergedHeads[repo] = view.headRefOid;
       }
     }
+
+    if (config.buttons.length === 0) {
+      continue;
+    }
+
+    if (!deps.paused) {
+      writePrViewFile(ws, repo, view);
+    }
+
+    const key = buttonRunKey(claim, view);
+    const last = old.buttonRuns?.[repo];
+
+    // a paused gh would refuse the status commands' own calls, so they keep what they last printed
+    if (deps.paused || reuseButtons(last, key, now)) {
+      config.buttons.forEach((spec) => {
+        const kept = old.buttons?.[`${repo}/${spec.id}`];
+
+        if (kept) {
+          buttonStates[`${repo}/${spec.id}`] = kept;
+        }
+      });
+
+      if (last) {
+        buttonRuns[repo] = last;
+      }
+
+      continue;
+    }
+
+    const env = Object.entries(buttonEnv(ws, repo, claim, itemIdOf(pm, dir, claim.branch, provider), prJsonFor(ws, repo, claim))).map(([k, v]) => `${k}=${v}`);
+
+    config.buttons.forEach((spec) => {
+      const out = spec.status === undefined ? undefined : exec(["env", ...env, "sh", "-c", spec.status], dir);
+
+      if (out !== undefined) {
+        buttonStates[`${repo}/${spec.id}`] = parseButtonStatus(out);
+      }
+    });
+    buttonRuns[repo] = { key, at: now };
   }
 
   const headlineNow = headline ?? old.headline;
@@ -525,6 +629,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   }
 
   if (Object.keys(buttonStates).length) cache.buttons = buttonStates;
+
+  if (Object.keys(buttonRuns).length) cache.buttonRuns = buttonRuns;
 
   if (deps.paused || problems.length) cache.message = [...(deps.paused ? [deps.paused] : []), ...problems].join("; ");
 
@@ -646,7 +752,7 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
 
         // a button with a status command waits for it to print something
         if (spec.status && !state) continue;
-        const button: CustomButton = { repo, spec, dir: repoDir, env: buttonEnv(ws, repo, claimed[repo] ?? {}, itemIdOf(config.projectManagement, repoDir, claimed[repo]?.branch)) };
+        const button: CustomButton = { repo, spec, dir: repoDir, env: buttonEnv(ws, repo, claimed[repo] ?? {}, itemIdOf(config.projectManagement, repoDir, claimed[repo]?.branch), prJsonFor(ws, repo, claimed[repo] ?? {})) };
 
         if (state) button.state = state;
         custom.push(button);

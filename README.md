@@ -514,11 +514,16 @@ defaults:
 - **`status`**: a shell command run in the worktree each time the panel refreshes (every minute, or `r`). It prints
   the text shown after the label, or a JSON object `{ "text": "…", "color": "green" }`. The colours are `red`,
   `green`, `yellow`, `blue`, `purple`, `cyan`, and `grey`. A button with a `status` stays hidden until its command
-  prints something, so a command that fails or prints nothing hides it.
+  prints something, so a command that fails or prints nothing hides it. The panel keeps a repo's last `status`
+  output while the claimed PR looks the same as on the last run (same branch, PR number, and PR view, checks and
+  reviews included) and that run is under 5 minutes old. While a GitHub rate limit pauses `gh`, no `status` runs.
 - **`side`**: `right` (the default) with the launchers, or `left` with the links.
 
 The commands get `OVERBRIDGE_NAME`, `OVERBRIDGE_REPO`, `OVERBRIDGE_BRANCH`, `OVERBRIDGE_PR`, and `OVERBRIDGE_ITEM`
-(the work item id in the branch name, such as `ENG-1234`, empty when there is none). This button copies a release
+(the work item id in the branch name, such as `ENG-1234`, empty when there is none). When the claim has a PR,
+`OVERBRIDGE_PR_JSON` names a file holding the PR as the panel last read it, in the shape of `gh pr view --json
+url,title,isDraft,updatedAt,state,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments`.
+A `status` command that reads it doesn't need to call GitHub itself. This button copies a release
 note for every repo the `megaport` org owns:
 
 ```yaml

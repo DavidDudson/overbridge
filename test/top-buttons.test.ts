@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerBuiltins } from "../src/pm";
@@ -8,11 +8,13 @@ import { withState } from "../src/state";
 import {
   type ActDeps,
   activate,
+  BUTTON_MAX_AGE_MS,
   buttonEnv,
   buttons,
   buttonUrl,
   type CustomButton,
   parseButtonStatus,
+  prViewFile,
   refreshTop,
   snapshotTop,
   type TopSnapshot,
@@ -156,5 +158,113 @@ describe("refresh and snapshot", () => {
       ["checks", "green"],
       ["docs", undefined],
     ]);
+  });
+
+  describe("reuse", () => {
+    const T0 = 1_700_000_000_000;
+
+    /** A fake `exec` that answers `gh pr view` with `view()` and counts the status commands it ran. */
+    const fakeExec = (view: () => object | undefined = () => undefined) => {
+      const ran: string[][] = [];
+
+      const exec = (cmd: string[]) => {
+        if (cmd[0] === "gh" && cmd[1] === "pr") {
+          const v = view();
+
+          return v ? JSON.stringify(v) : undefined;
+        }
+
+        if (cmd[0] !== "env") {
+          return undefined;
+        }
+
+        ran.push(cmd);
+
+        return cmd.at(-1) === "my-status" ? `run ${ran.length}` : undefined;
+      };
+
+      return { ran, exec };
+    };
+
+    const refreshAt = (at: number, exec: (cmd: string[]) => string | undefined) => refreshTop("w1", { provider: () => fakeProvider(), exec, now: () => at });
+
+    const refreshPausedAt = (at: number, exec: (cmd: string[]) => string | undefined) =>
+      refreshTop("w1", { provider: () => fakeProvider(), exec, now: () => at, paused: "GitHub rate limit reached" });
+
+    test("an unchanged PR view keeps the last output and runs nothing", () => {
+      const { ran, exec } = fakeExec(() => ({ url: "https://github.com/o/r/pull/3", state: "OPEN" }));
+      refreshAt(T0, exec);
+      const cache = refreshAt(T0 + BUTTON_MAX_AGE_MS - 1, exec);
+      expect(ran.length).toBe(2);
+      expect(cache.buttons).toEqual({ "app/checks": { text: "run 1" } });
+      expect(cache.buttonRuns?.app?.at).toBe(T0);
+    });
+
+    test("a changed PR view runs the status commands again", () => {
+      let state = "OPEN";
+      const { ran, exec } = fakeExec(() => ({ url: "https://github.com/o/r/pull/3", state }));
+      refreshAt(T0, exec);
+      state = "MERGED";
+      const cache = refreshAt(T0 + 1, exec);
+      expect(ran.length).toBe(4);
+      expect(cache.buttons).toEqual({ "app/checks": { text: "run 3" } });
+    });
+
+    test("output older than the maximum age runs again", () => {
+      const { ran, exec } = fakeExec();
+      refreshAt(T0, exec);
+      const cache = refreshAt(T0 + BUTTON_MAX_AGE_MS, exec);
+      expect(ran.length).toBe(4);
+      expect(cache.buttonRuns?.app?.at).toBe(T0 + BUTTON_MAX_AGE_MS);
+    });
+
+    test("a moved claim runs again", () => {
+      const { ran, exec } = fakeExec();
+      refreshAt(T0, exec);
+      withState((s) => {
+        s.workspaces.w1!.repos.app = { branch: "feat/12-x", pr: 4 };
+      });
+      refreshAt(T0 + 1, exec);
+      expect(ran.length).toBe(4);
+    });
+
+    test("a paused gh runs no status command and keeps the last output", () => {
+      const { ran, exec } = fakeExec();
+      refreshAt(T0, exec);
+      const cache = refreshPausedAt(T0 + BUTTON_MAX_AGE_MS * 2, exec);
+      expect(ran.length).toBe(2);
+      expect(cache.buttons).toEqual({ "app/checks": { text: "run 1" } });
+    });
+  });
+
+  test("status commands get the PR view the panel read as OVERBRIDGE_PR_JSON", async () => {
+    const view = { url: "https://github.com/o/r/pull/3", state: "OPEN", headRefOid: "abc" };
+    const envs: string[][] = [];
+
+    const exec = (cmd: string[]) => {
+      if (cmd[0] === "gh" && cmd[1] === "pr") {
+        return JSON.stringify(view);
+      }
+
+      if (cmd[0] === "env") {
+        envs.push(cmd);
+      }
+
+      return undefined;
+    };
+
+    refreshTop("w1", { provider: () => fakeProvider(), exec });
+    const file = prViewFile("w1", "app");
+    expect(envs[0]).toContain(`OVERBRIDGE_PR_JSON=${file}`);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toMatchObject(view);
+    expect((await snapshotTop("w1", {})).custom?.find((c) => c.spec.id === "docs")?.env.OVERBRIDGE_PR_JSON).toBe(file);
+
+    withState((s) => {
+      s.workspaces.w1!.repos.app = { branch: "feat/12-x" };
+    });
+    envs.length = 0;
+    refreshTop("w1", { provider: () => fakeProvider(), exec });
+    expect(envs[0]?.some((e) => e.startsWith("OVERBRIDGE_PR_JSON="))).toBe(false);
+    expect(existsSync(file)).toBe(false);
   });
 });
