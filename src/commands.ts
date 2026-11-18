@@ -20,7 +20,9 @@ import { type ClaimContext, workspaceClass } from "./workspace-class";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
 import { chain, cover, displayStacks, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
-import { type Claim, claimOwner, type ReboundFrom, getWorkspace, isIceboxed, readState, withState } from "./state";
+import { agentOf, type Claim, claimOwner, type ReboundFrom, getWorkspace, isIceboxed, readState, withState, type WorkspaceState } from "./state";
+import { AgentKind } from "./agent-kind";
+import { agyArgs, agyTrust, agyUntrust } from "./agy";
 import { errorMessage, exec, fail, isRecord, log, must, naturalSort, run, shellQuote } from "./util";
 
 /** What a workspace really holds in `repo`: its claim, its worktree head, and the stacks of either. */
@@ -67,15 +69,15 @@ export function sync() {
   }
 }
 
-export function newWorkspace(name: string | undefined, repos: string[], mux?: Mux) {
-  if (!name) fail("usage: overbridge new <name> [-r repo]... (name it for its work item, e.g. ENG-123 or gh-app-12)");
-  createWorkspace(name, repos);
+export function newWorkspace(name: string | undefined, repos: string[], mux?: Mux, agent?: AgentKind) {
+  if (!name) fail("usage: overbridge new <name> [-r repo]... [--agent claude|agy] (name it for its work item, e.g. ENG-123 or gh-app-12)");
+  createWorkspace(name, repos, agent);
   requireTab(name, undefined, TabFocus.Background, mux);
   console.log(name);
 }
 
-/** Create workspace `name` holding a worktree of each of `repos`. */
-export function createWorkspace(name: string, repos: string[]) {
+/** Create workspace `name` holding a worktree of each of `repos`, running `agent` (else the root config's default). */
+export function createWorkspace(name: string, repos: string[], agent: AgentKind = loadRootLayers().agent) {
   const state = readState();
 
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}'`);
@@ -85,8 +87,13 @@ export function createWorkspace(name: string, repos: string[]) {
   for (const r of repos) getRepo(r);
   mkdirSync(wsDir(name), { recursive: true });
   trustFolder(wsDir(name));
+
+  if (agent === AgentKind.Agy) agyTrust(wsDir(name));
   withState((s) => {
-    s.workspaces[name] = { created: new Date().toISOString(), repos: {} };
+    const record: WorkspaceState = { created: new Date().toISOString(), repos: {} };
+
+    if (agent !== AgentKind.Claude) record.agent = agent;
+    s.workspaces[name] = record;
   });
   scaffold(name);
 
@@ -180,6 +187,7 @@ export function removeWorkspace(ws: string, force: boolean) {
 /** Delete `ws`'s folder and its per-workspace files outside it: top cache, PR views, agent state, phase, sidebar pane, tab layout. */
 function removeFolder(ws: string) {
   untrustFolder(wsDir(ws));
+  agyUntrust(wsDir(ws));
   rmSync(wsDir(ws), { recursive: true, force: true });
   clearSubagents(metaDir(), ws);
   [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("agent", `${ws}.turn.json`), join("context", `${ws}.json`), join("phase", `${ws}.json`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`), join("pr-view", ws)].forEach((f) =>
@@ -346,6 +354,7 @@ export function recordPr(repo: string | undefined, wsOpt?: string) {
 
 type StatusRow = {
   ws: string;
+  agent: AgentKind;
   repo: string;
   branch: string;
   pr: number | undefined;
@@ -364,9 +373,10 @@ export function status(all: boolean, json: boolean) {
   const rows = names.flatMap((ws): StatusRow[] => {
     const repos = Object.entries(getWorkspace(s, ws).repos);
     const iceboxed = isIceboxed(getWorkspace(s, ws));
+    const agent = agentOf(getWorkspace(s, ws));
 
     if (!repos.length)
-      return [{ ws, repo: "", branch: "", pr: undefined, head: "", dirty: false, iceboxed, stack: undefined, reboundFrom: undefined }];
+      return [{ ws, agent, repo: "", branch: "", pr: undefined, head: "", dirty: false, iceboxed, stack: undefined, reboundFrom: undefined }];
 
     return repos.map(([repo, c]) => {
       const wt = worktreePath(ws, repo);
@@ -374,7 +384,7 @@ export function status(all: boolean, json: boolean) {
       const stacks = displayStacks(repo);
       const stack = stackOf(stacks, head) ?? stackOf(stacks, c.branch);
 
-      return { ws, repo, branch: c.branch ?? "", pr: c.pr, head, dirty: git.isDirty(wt), iceboxed, stack, reboundFrom: c.reboundFrom };
+      return { ws, agent, repo, branch: c.branch ?? "", pr: c.pr, head, dirty: git.isDirty(wt), iceboxed, stack, reboundFrom: c.reboundFrom };
     });
   });
 
@@ -397,7 +407,7 @@ export function status(all: boolean, json: boolean) {
       r.pr ? `#${r.pr}` : "",
       r.head === r.branch ? "" : r.head,
       stackCell(r),
-      [r.iceboxed ? "iceboxed" : "", r.dirty ? "dirty" : "", r.reboundFrom ? `from ${r.reboundFrom.branch}${r.reboundFrom.pr ? ` #${r.reboundFrom.pr}` : ""}` : ""].filter(Boolean).join(" "),
+      [r.agent === AgentKind.Claude ? "" : r.agent, r.iceboxed ? "iceboxed" : "", r.dirty ? "dirty" : "", r.reboundFrom ? `from ${r.reboundFrom.branch}${r.reboundFrom.pr ? ` #${r.reboundFrom.pr}` : ""}` : ""].filter(Boolean).join(" "),
     ]),
   );
 }
@@ -487,16 +497,21 @@ export const workspaceClaudeArgs = (ws: string, settings: string, extra: readonl
  * `--settings`, because Claude reads `.claude/settings.json` only from its own folder (CLAUDE.md it finds upward).
  */
 export function claude(ws: string, extra: string[]) {
-  const repos = Object.keys(getWorkspace(readState(), ws).repos);
+  const w = getWorkspace(readState(), ws);
+  const repos = Object.keys(w.repos);
+  const agy = agentOf(w) === AgentKind.Agy;
   scaffold(ws);
   const cwd = agentDirOf(ws);
   trustFolder(wsDir(ws));
+
+  if (agy) agyTrust(wsDir(ws));
 
   if (cwd !== wsDir(ws)) trustFolder(cwd);
   const [only] = repos;
   const spec = repos.length === 1 && only ? loadRepoConfig(worktreePath(ws, only), only).shell : undefined;
   const settings = cwd === wsDir(ws) ? scaffoldPlugins() : workspaceSettingsPath(ws);
-  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, workspaceClaudeArgs(ws, settings, extra), cwd);
+  const argv = agy ? agyArgs(extra) : workspaceClaudeArgs(ws, settings, extra);
+  const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, argv, cwd);
   mkdirSync(dirname(agentShellFile(ws)), { recursive: true });
 
   if (spec && only) writeFileSync(agentShellFile(ws), only);

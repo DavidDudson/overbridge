@@ -69,9 +69,9 @@ describe("overlay", () => {
 
 describe("loadRootLayers", () => {
   test("a missing or empty file has no layers", () => {
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude" });
     writeRoot("");
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude" });
   });
 
   test("reads defaults and per-repo layers", () => {
@@ -85,7 +85,15 @@ describe("loadRootLayers", () => {
       guard: { readPaths: [], deny: [] },
       githubOrgs: [],
       checkClasses: DEFAULT_CLASSES,
+      agent: "claude",
     });
+  });
+
+  test("agent sets the default agent, and an unknown one is rejected", () => {
+    writeRoot("agent: agy\n");
+    expect(loadRootLayers().agent).toBe("agy");
+    writeRoot("agent: codex\n");
+    expect(() => loadRootLayers()).toThrow('agent: unknown agent "codex"; use one of claude, agy');
   });
 
   test("priority-classes replaces the built-in classes, and resolveConfig checks names against it", () => {

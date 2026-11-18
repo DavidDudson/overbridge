@@ -209,6 +209,8 @@ describe("orchestrator: bash", () => {
     "overbridge item view 90",
     "overbridge config get commands.test",
     "overbridge start app 12",
+    "overbridge start app 12 --agent agy",
+    'overbridge send gh-app-12 "/pickup #3"',
     "overbridge start app 12 --prompt 'file a ticket for X; then stop'",
     'overbridge start app --task file-x --prompt "file a ticket for X > Y"',
     "overbridge rm old-ws",

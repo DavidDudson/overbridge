@@ -4,12 +4,16 @@
  * routes branch changes through `overbridge checkout` so claims stay authoritative.
  * An orchestration tab's Claude gets the stricter `checkOrchestrator` (guard-orchestrator.ts) instead.
  *
- * Exit 2 blocks the tool call and shows stderr to Claude.
+ * Exit 2 blocks the tool call and shows stderr to Claude. Under agy (`guard --agy`) the payload is translated
+ * from agy's shape first (agy-hook.ts) and the answer is agy's JSON decision on stdout.
  */
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { agyToolDecision, fromAgy } from "./agy-hook";
+import { HookSource, recordHook } from "./agent-hook";
+import { AgentKind } from "./agent-kind";
 import { checkOrchestrator } from "./guard-orchestrator";
-import { type JsonObject, stringField } from "./json";
+import { isJsonString, type JsonObject, stringField } from "./json";
 import { currentWorkspace, isInside, ORCHESTRATION_ENV, realPath, root } from "./paths";
 import { type GuardConfig, loadRootLayers } from "./project-config";
 
@@ -54,7 +58,7 @@ const BASH_RULES: [RegExp, string][] = [
     "only `gh stack init/add/up/down/top/bottom/push/submit/rebase/sync/view` are allowed here; ask the user to run other stack commands",
   ],
   [new RegExp(GIT + String.raw`worktree\b`), "worktrees are managed by overbridge; ask the user"],
-  [new RegExp(CMD + String.raw`(?:overbridge|ws)\s+(?:new|rm|up|claude|init|layout|spinup|config\s+set)\b`),"workspace admin commands are for the user, not a workspace Claude"],
+  [new RegExp(CMD + String.raw`(?:overbridge|ws)\s+(?:new|rm|up|claude|send|init|layout|spinup|config\s+set)\b`),"workspace admin commands are for the user, not a workspace Claude"],
 ];
 
 // Absolute, home-relative or parent-relative path tokens in a shell command.
@@ -78,11 +82,16 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
     isInside(abs, rootPath) && !isInside(abs, wsPath) && !readable.some((dir) => isInside(abs, dir));
 
   if (WRITE_TOOLS.has(tool) || READ_TOOLS.has(tool)) {
-    const paths = PATH_KEYS.flatMap((k) => {
-      const value = stringField(ti, k);
+    const listed = Array.isArray(ti.paths) ? ti.paths.filter(isJsonString) : [];
 
-      return value ? [value] : [];
-    });
+    const paths = [
+      ...PATH_KEYS.flatMap((k) => {
+        const value = stringField(ti, k);
+
+        return value ? [value] : [];
+      }),
+      ...listed,
+    ];
 
     const pattern = stringField(ti, "pattern");
 
@@ -95,6 +104,8 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
         if (!isInside(abs, wsPath)) return `${tool} on ${abs} is outside workspace ${ctx.ws} (${wsPath})`;
 
         if (isInside(abs, join(wsPath, ".claude"))) return "workspace .claude config is managed by overbridge";
+
+        if (isInside(abs, join(wsPath, ".agents"))) return "workspace .agents config is managed by overbridge";
       } else if (foreign(abs)) {
         return `${abs} is outside workspace ${ctx.ws}; only ${wsPath} is accessible`;
       }
@@ -121,20 +132,34 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
   }
 }
 
-export async function guardMain(): Promise<number> {
+export async function guardMain(agent: AgentKind = AgentKind.Claude): Promise<number> {
   try {
-    const input: HookInput = JSON.parse(await Bun.stdin.text());
+    const raw = JSON.parse(await Bun.stdin.text());
+    const input: HookInput = agent === AgentKind.Agy ? fromAgy(raw) : raw;
     const reason = guardReason(input, process.env);
+    const message = reason && `overbridge guard: ${reason}`;
 
-    if (!reason) return 0;
-    console.error(`overbridge guard: ${reason}`);
+    // agy takes one decision per hook entry, so its PreToolUse runs only the guard, which records the call too
+    if (agent === AgentKind.Agy) await recordHook(input, HookSource.Agy);
 
-    return 2;
+    return answer(agent, message);
   } catch (e) {
-    console.error(`overbridge guard: internal error, blocking to be safe: ${e}`);
-
-    return 2;
+    return answer(agent, `overbridge guard: internal error, blocking to be safe: ${e}`);
   }
+}
+
+/** Block with `message`, or allow when there is none: exit 2 and stderr for Claude; for agy, its JSON decision on stdout and exit 0, since agy reads a hook's answer only from its JSON. */
+function answer(agent: AgentKind, message: string | undefined): number {
+  if (agent === AgentKind.Agy) {
+    console.log(JSON.stringify(agyToolDecision(message)));
+
+    return 0;
+  }
+
+  if (!message) return 0;
+  console.error(message);
+
+  return 2;
 }
 
 /**

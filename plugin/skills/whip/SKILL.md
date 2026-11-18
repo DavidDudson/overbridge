@@ -29,9 +29,12 @@ try to work around the guard.
 
 ```sh
 overbridge sync                      # fetch every bare repo, so origin/<default> is current
-overbridge status --all --json       # ws, repo, branch (claim), pr, head, dirty, stack
+overbridge status --all --json       # ws, agent, repo, branch (claim), pr, head, dirty, stack
 overbridge repo ls                   # repo name → URL; take OWNER/REPO from the URL
 ```
+
+A workspace whose `agent` is `agy` runs Antigravity CLI and has no session in `ListAgents`: skip the
+matching below for it and send in step 4 with `overbridge send <ws> "<message>"` instead.
 
 Then call `ListAgents`. A workspace's session is named for the workspace (its launcher passes
 `--name <ws>`). Match each workspace to its rows by that name. A session started before that carries an
@@ -113,7 +116,7 @@ Note `busy` in the table.
 ## 4. Send
 
 With `--dry-run`, go to step 5. Otherwise one `SendMessage` per outstanding workspace, to the matched
-session row's name. The message is a plain continue. It names what is outstanding and nothing else:
+session row's name; an agy workspace gets the same text through `overbridge send <ws> "<message>"`. The message is a plain continue. It names what is outstanding and nothing else:
 
 ```
 Continue. Outstanding in <ws>:

@@ -113,6 +113,14 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   `src/history-report.ts` formats it (`overbridge history`) and `src/perf-run.ts` is the `@perf` tab (`p` in the sidebar; `v` cycles dashboard/sessions/commands, `g` toggles workspace/repo in sessions) over the pure renderers in `src/perf-views.ts`. Claude Bash calls store `label` (`bashLabel`: program plus task/subcommand, no other words) and Skill calls the skill name; `perf.json` without a `dashboard` per window is stale and recomputed.
   `src/perf-cache.ts` computes every window x grouping into `<meta>/perf.json` (0600): the server writes it from a worker (`POST /refresh/perf`), the tab reads it while young and computes itself otherwise.
   Like the hook, `history.ts` imports node builtins, `paths.ts` and `json.ts` only.
+- Agents: `src/agent-kind.ts` (`claude` | `agy`). A workspace's agent is chosen once, at creation (`overbridge start --agent`,
+  else the root `config.yml`'s `agent`), and kept in `WorkspaceState.agent` (unset = Claude; read through `agentOf`).
+  `src/agy.ts` holds what an agy workspace gets instead of Claude's settings: it starts in the workspace folder
+  (`agentDir`), where `scaffold` writes `AGENTS.md`, `.agents/hooks.json` and `.agents/skills.json`, and its folder goes in agy's
+  `trustedWorkspaces` (`agyTrust`, `OVERBRIDGE_AGY_SETTINGS` in tests). `src/agy-hook.ts` translates agy hook payloads to Claude's shape
+  (`fromAgy`) for `guard --agy` (one decision per agy entry, so it records the call too through `recordHook`) and `hook --agy`;
+  the hook imports it, so it imports only `json.ts`. `src/send.ts` (`overbridge send`) types into an agent pane (`Mux.sendText`),
+  which is how the orchestrator reaches agy, since agy has no `SendMessage`.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors. The root `config.yml`'s `guard` block (`GuardConfig`) adds
   `read-paths` (reads only) and `deny` rules; it is never read from a repo file, so a branch can't loosen the guard.

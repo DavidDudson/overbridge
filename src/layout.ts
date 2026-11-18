@@ -5,7 +5,8 @@ import { SIDEBAR_WIDTH, sidebarWidth } from "./config";
 import type { MuxKind } from "./mux";
 import { ORCHESTRATION_TABS, type OrchestrationTab } from "./orchestration";
 import { sessionName, worktreePath, wsDir } from "./paths";
-import { readState } from "./state";
+import { agentOf, readState } from "./state";
+import { AgentKind } from "./agent-kind";
 import { layoutScript, tmuxConf } from "./tmux-layout";
 
 export { SIDEBAR_WIDTH };
@@ -192,8 +193,11 @@ const hasTranscript = (dir: string, home: string) => {
  * repo's worktree. Several: the first claimed, which is the repo `overbridge start` was given. None: the workspace
  * root. A workspace whose only transcripts are in its root keeps starting there, so `--continue` still resumes it.
  */
-export function agentDir(ws: string, repos: readonly string[], home = homedir()): string {
+export function agentDir(ws: string, repos: readonly string[], home = homedir(), agent: AgentKind = AgentKind.Claude): string {
   const [first] = repos;
+
+  // agy reads AGENTS.md and .agents/ only from its start folder up to the repo root, so it starts above the repos
+  if (agent === AgentKind.Agy) return wsDir(ws);
 
   if (!first) return wsDir(ws);
   const repo = worktreePath(ws, first);
@@ -202,15 +206,20 @@ export function agentDir(ws: string, repos: readonly string[], home = homedir())
 }
 
 /** `agentDir` for a workspace in the state file; the root for one that is not in it. */
-export const agentDirOf = (ws: string, home = homedir()) => agentDir(ws, Object.keys(readState().workspaces[ws]?.repos ?? {}), home);
+export const agentDirOf = (ws: string, home = homedir()) => {
+  const w = readState().workspaces[ws];
+
+  return agentDir(ws, Object.keys(w?.repos ?? {}), home, agentOf(w));
+};
 
 /**
  * Workspaces and orchestration tabs with a Claude transcript to resume. Reads the disk, so callers pass the
  * result to `layoutKdl`.
  */
-export function resumable(workspaces: string[], home = homedir(), agentDirs: Readonly<Record<string, string>> = {}): Set<string> {
+export function resumable(workspaces: string[], home = homedir(), agentDirs: Readonly<Record<string, string>> = {}, agy: ReadonlySet<string> = new Set()): Set<string> {
   return new Set([
-    ...workspaces.filter((ws) => hasTranscript(agentDirs[ws] ?? wsDir(ws), home)),
+    // agy keeps its conversations in its own store, and its --continue starts afresh when there is none
+    ...workspaces.filter((ws) => agy.has(ws) || hasTranscript(agentDirs[ws] ?? wsDir(ws), home)),
     ...ORCHESTRATION_TABS.filter((t) => !t.pane && hasTranscript(t.dir(), home)).map((t) => t.tab),
   ]);
 }
@@ -225,7 +234,9 @@ export type LayoutChoice = { source: "user"; path: string } | { source: "generat
 export function chooseLayout(workspaces: string[], self: string[], kind: MuxKind = "zellij", session = sessionName(), userPath = userLayoutPath()): LayoutChoice {
   if (kind === "zellij" && existsSync(userPath)) return { source: "user", path: userPath };
   const agentDirs = Object.fromEntries(workspaces.map((ws) => [ws, agentDirOf(ws)]));
-  const opts = { resume: resumable(workspaces, homedir(), agentDirs), sidebarWidth: sidebarWidth(), agentDirs };
+  const state = readState();
+  const agy = new Set(workspaces.filter((ws) => agentOf(state.workspaces[ws]) === AgentKind.Agy));
+  const opts = { resume: resumable(workspaces, homedir(), agentDirs, agy), sidebarWidth: sidebarWidth(), agentDirs };
 
   return kind === "tmux"
     ? { source: "generated", text: layoutScript(session, layoutSpecs(workspaces, self, opts)), conf: tmuxConf(self) }

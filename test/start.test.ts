@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AgentKind } from "../src/agent-kind";
 import { checkout, createWorkspace, newWorkspace, repoAdd } from "../src/commands";
 import { metaDir } from "../src/paths";
 import { localStacks } from "../src/stack";
@@ -578,5 +579,41 @@ describe("start inside a task workspace", () => {
     } finally {
       process.env.ZELLIJ = "";
     }
+  });
+});
+
+describe("start --agent", () => {
+  const agyItems = () =>
+    fakeProvider([
+      { id: "80", title: "Try agy", url: "" },
+      { id: "81", title: "Default agy", url: "" },
+      { id: "82", title: "Stay claude", url: "" },
+    ]);
+
+  const rootConfig = () => join(tmp, "workspaces", "config.yml");
+  const agyTrusted = (): string[] => JSON.parse(readFileSync(process.env.OVERBRIDGE_AGY_SETTINGS!, "utf8")).trustedWorkspaces;
+
+  afterEach(() => rmSync(rootConfig(), { force: true }));
+
+  test("--agent agy stores the agent and writes the agy files in the workspace folder", () => {
+    start("app", "80", undefined, { provider: agyItems(), plugins: noProblems, agent: AgentKind.Agy });
+    const dir = join(tmp, "workspaces", "gh-app-80");
+
+    expect(readState().workspaces["gh-app-80"]?.agent).toBe(AgentKind.Agy);
+    expect(readFileSync(join(dir, "AGENTS.md"), "utf8")).toBe(readFileSync(join(dir, "CLAUDE.md"), "utf8"));
+    const hooks = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf8"));
+    expect(Object.keys(hooks.overbridge)).toEqual(["PreToolUse", "PostToolUse", "SessionStart", "PreInvocation", "Stop"]);
+    expect(existsSync(join(dir, ".agents", "skills.json"))).toBe(true);
+    expect(agyTrusted()).toContain(realpathSync(dir));
+  });
+
+  test("the root config's agent is the default, and a Claude workspace records none", () => {
+    writeFileSync(rootConfig(), "agent: agy\n");
+    start("app", "81", undefined, { provider: agyItems(), plugins: noProblems });
+    expect(readState().workspaces["gh-app-81"]?.agent).toBe(AgentKind.Agy);
+
+    start("app", "82", undefined, { provider: agyItems(), plugins: noProblems, agent: AgentKind.Claude });
+    expect(readState().workspaces["gh-app-82"]?.agent).toBeUndefined();
+    expect(existsSync(join(tmp, "workspaces", "gh-app-82", "AGENTS.md"))).toBe(false);
   });
 });

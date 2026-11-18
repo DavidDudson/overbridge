@@ -30,6 +30,9 @@ Each row has `ws`, `repo`, `branch`, `session` (the Claude session name, equal t
 `behind` (how far main has moved), `subjects` (newest first), `lastCommit`, `pr` (when recorded) and `dirty`.
 Iceboxed workspaces, detached HEADs and branches with nothing ahead are not in it.
 
+An agy workspace (`agent: "agy"` in `overbridge status --all --json`) has no session in `ListAgents`: ask it in
+step 3 with `overbridge send <ws> "<message>"`. You hear no reply, so mark it "asked (agy)" in the table.
+
 Then `ListAgents`. Match each row's `session` to a row by exact name. A session started before sessions were
 named may carry an auto name; if none matches, skip the workspace with "no session" and say
 `overbridge tab <ws>` reopens it.

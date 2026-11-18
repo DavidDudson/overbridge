@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writ
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type AgentState, agentStatePath, TOOL_NAME, CONTINUING_END_REASONS, clearSubagent, clearSubagents, markSubagent, readAgentState, recordTurn } from "./agent-state";
+import { agyContinue, fromAgy } from "./agy-hook";
 import { backgroundShells } from "./bg-tasks";
 import { isJsonObject, numberField, parseJson } from "./json";
 import { claudeRecord, type HookPayload, type HistoryStore, historyStore } from "./history";
@@ -217,16 +218,40 @@ export function recordHistory(ws: string, input: HookPayload, store: HistoryStor
   }
 }
 
-/** Entry point for `overbridge hook`: the hook payload is JSON on stdin. Always exits 0. */
-export async function hookMain(): Promise<number> {
+/** Hook payload source: Claude Code, or agy (`overbridge hook --agy`), whose payload is translated to Claude's shape. */
+export const HookSource = { Claude: "claude", Agy: "agy" } as const;
+
+export type HookSource = (typeof HookSource)[keyof typeof HookSource];
+
+/** Entry point for `overbridge hook`: the hook payload is JSON on stdin. Always exits 0. agy reads a JSON answer from every hook, so it always gets one. */
+export async function hookMain(source: HookSource = HookSource.Claude): Promise<number> {
+  let reply: object | undefined;
+
+  try {
+    const raw = JSON.parse(await Bun.stdin.text());
+    reply = await recordHook(source === HookSource.Agy ? fromAgy(raw) : raw, source);
+  } catch {
+    // a status hook must never get in the way of the agent
+  }
+
+  if (reply || source === HookSource.Agy) console.log(JSON.stringify(reply ?? {}));
+
+  return 0;
+}
+
+/**
+ * Record one hook payload (in Claude's shape: agy's goes through `fromAgy` first) for the sidebar, the turn
+ * receipt and history. Returns the answer to print, if any: a Stop it blocks, in `source`'s format. The agy guard
+ * calls this for PreToolUse too, since one agy hook entry must give the single decision.
+ */
+export async function recordHook(input: HookInput, source: HookSource): Promise<object | undefined> {
   try {
     silenceLegacyWarnings();
     const workspace = envVar("NAME");
     // an orchestration tab has no top panel, so it records state but never refreshes a top cache
     const ws = workspace || process.env[ORCHESTRATION_ENV];
 
-    if (!ws) return 0;
-    const input: HookInput = JSON.parse(await Bun.stdin.text());
+    if (!ws) return undefined;
     const meta = join(root(), ".overbridge");
     const event = input.hook_event_name ?? "";
 
@@ -235,9 +260,8 @@ export async function hookMain(): Promise<number> {
     else if (event === "Stop" && !input.stop_hook_active && takeCompactRestart(meta, ws)) {
       // stopped right after an auto-compact: block the stop so the agent carries on
       recordState(meta, ws, "busy");
-      console.log(JSON.stringify({ decision: "block", reason: COMPACT_RESTART_REASON }));
 
-      return 0;
+      return source === HookSource.Agy ? agyContinue(COMPACT_RESTART_REASON) : { decision: "block", reason: COMPACT_RESTART_REASON };
     }
 
     // after the compact restart above: a Stop the hook blocks does not end the turn
@@ -273,5 +297,5 @@ export async function hookMain(): Promise<number> {
     // a status hook must never get in the way of the agent
   }
 
-  return 0;
+  return undefined;
 }

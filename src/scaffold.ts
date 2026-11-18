@@ -4,7 +4,9 @@ import { agentDirOf } from "./layout";
 import { ghReposCache, metaDir, ORCHESTRATION_ENV, orchestrationPlansDir, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { pluginSettings } from "./plugins";
 import { loadRepoConfig, rootMcpServers } from "./project-config";
-import { getWorkspace, readState } from "./state";
+import { agentOf, getWorkspace, readState } from "./state";
+import { AgentKind } from "./agent-kind";
+import { scaffoldAgy } from "./agy";
 import { errorMessage, log, shellQuote } from "./util";
 
 /** Where plan-mode plans are written, relative to the workspace folder. */
@@ -42,7 +44,10 @@ export function scaffold(ws: string) {
   // plans stay in the workspace folder, not that repo's worktree
   mkdirSync(dirname(workspaceSettingsPath(ws)), { recursive: true });
   writeFileSync(workspaceSettingsPath(ws), JSON.stringify(workspaceSettings(ws, join(dir, PLANS_DIR), mcp), null, 2) + "\n");
-  writeFileSync(join(dir, "CLAUDE.md"), claudeMd(ws, dir, devShellSection(ws)));
+  const brief = claudeMd(ws, dir, devShellSection(ws));
+  writeFileSync(join(dir, "CLAUDE.md"), brief);
+
+  if (agentOf(readState().workspaces[ws]) === AgentKind.Agy) scaffoldAgy(ws, brief);
 }
 
 /** The copy of workspace `ws`'s settings kept in the meta dir, for a Claude whose cwd is a repo folder. */
@@ -162,12 +167,18 @@ a PR), start a workspace for it first, passing their request on, then stop:
   \`head\`) is the PR's head branch (\`gh pr view <pr> --json headRefName\`). If one exists, do not start a
   duplicate: find that workspace's Claude with \`ListAgents\` (its session is named after the workspace, with
   an optional short suffix such as \`ws5-37\`) and send it \`/pickup #<pr> <anything else they asked>\` with
-  \`SendMessage\`, passing \`notify_when_idle: true\` so you hear when it finishes. Tell the user which
+  \`SendMessage\`, passing \`notify_when_idle: true\` so you hear when it finishes. An agy workspace gets the same
+  message through \`overbridge send\` (below). Tell the user which
   workspace took it. Only when no workspace claims the branch, find the PR's item with
   \`overbridge item from-branch <its head branch>\` and run
   \`overbridge start <repo> <that id> --prompt "/pickup #<pr> <anything else they asked>"\`. A PR with no item
   uses \`--task pr-<number>\` instead of an id.
 - With no item yet: \`overbridge start <repo> --task <short-slug> --prompt "<the request, in the user's words>"\`
+
+Each workspace runs one agent: Claude Code (\`claude\`) or Antigravity CLI (\`agy\`). A new workspace gets the
+root config.yml's \`agent\` (\`claude\` when unset). When the user asks for agy, AGY or
+Antigravity, add \`--agent agy\` to \`overbridge start\`; when they ask for Claude, add \`--agent claude\`. A
+workspace keeps its agent, so \`--agent\` does nothing for one that already exists.
 
 The new workspace opens in its own tab and its Claude does the work. Tell the user which workspace and tab
 opened. If \`overbridge start\` refuses, say why and stop. A refusal that names another workspace means that
@@ -176,7 +187,13 @@ workspace already holds the branch: message its Claude as above instead of retry
 Every workspace's Claude session is named after its workspace (\`m4-conditions\`, not \`pioneer-40\`).
 \`ListAgents\` lists it by that name, and \`SendMessage\` to the workspace name reaches it. A session started
 before this may still carry an auto name: match it through \`overbridge status --all\`, or ask the user to
-restart that tab. To find branches still worth finishing, use the \`revisit\` skill: it reads
+restart that tab.
+
+An agy workspace has no session for \`ListAgents\` or \`SendMessage\`. \`overbridge status --all\` marks it \`agy\` in
+its last column (\`"agent": "agy"\` with \`--json\`). Reach it with \`overbridge send <workspace> "<message>"\`, which
+types the message into its agent pane and submits it. You do not hear when it finishes: check
+\`overbridge status --all\` or its sidebar card later. Use \`overbridge send\` only for agy workspaces; a Claude
+workspace takes \`SendMessage\`. To find branches still worth finishing, use the \`revisit\` skill: it reads
 \`overbridge ahead --json\` and asks each workspace's Claude whether its commits are still relevant.
 
 You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge worklist show\` (the ranked list the @work tab keeps; ask the user what to start next from it), \`overbridge item view\`, \`overbridge history\` (where each workspace's time went), read-only
