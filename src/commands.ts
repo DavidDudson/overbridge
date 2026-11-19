@@ -188,8 +188,10 @@ export function removeWorkspace(ws: string, force: boolean) {
 function removeFolder(ws: string) {
   untrustFolder(wsDir(ws));
 
-  // agy's settings file is optional; a fault in it must not stop the removal
-  if (agentOf(readState().workspaces[ws]) === AgentKind.Agy) {
+  const w = readState().workspaces[ws];
+
+  // an orphan has no state to say which agent it ran; agy's settings file is optional and a fault in it must not stop the removal
+  if (!w || agentOf(w) === AgentKind.Agy) {
     try {
       agyUntrust(wsDir(ws));
     } catch (e) {

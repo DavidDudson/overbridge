@@ -74,14 +74,17 @@ const unreadable = (name: string, reason: string) => ({ tool_name: UNREADABLE_TO
  * overbridge expects it is unreadable (denied). An unknown tool has every path it names checked as a write; one
  * that names no path the scan can find is allowed, so its arguments are only as safe as that scan.
  */
-export function claudeTool(name: string, args: JsonObject): Required<Pick<ClaudeHookInput, "tool_name" | "tool_input">> {
+export function claudeTool(name: string, args: JsonObject): Required<Pick<ClaudeHookInput, "tool_name" | "tool_input">> & Pick<ClaudeHookInput, "cwd"> {
   if (name === SHELL_TOOL) {
     const command = str(args, "CommandLine");
 
     if (!command) return unreadable(name, `agy's ${name} call has no CommandLine, so overbridge cannot check it`);
     const cwd = str(args, "Cwd");
 
-    return { tool_name: "Bash", tool_input: { command: cwd ? `cd ${JSON.stringify(cwd)} && ${command}` : command } };
+    if (!cwd) return { tool_name: "Bash", tool_input: { command } };
+
+    // the guard resolves the command's relative paths from `cwd`, and checks the folder itself through the `cd`
+    return { tool_name: "Bash", tool_input: { command: `cd ${JSON.stringify(cwd)} && ${command}` }, cwd };
   }
 
   const known = WRITE_TOOLS.get(name) ?? READ_TOOLS.get(name);
@@ -115,6 +118,9 @@ function claudeEvent(event: string, raw: JsonObject): string | undefined {
   }
 }
 
+/** `dir` as an absolute path, a relative one taken from the hook's `cwd`. */
+const underCwd = (base: string | undefined, dir: string) => (dir.startsWith("/") || dir.startsWith("~") || !base ? dir : `${base}/${dir}`);
+
 /** An agy hook payload in Claude's shape; an event overbridge does not track has no `hook_event_name`. */
 export function fromAgy(raw: JsonValue): ClaudeHookInput {
   if (!isJsonObject(raw)) return {};
@@ -134,7 +140,8 @@ export function fromAgy(raw: JsonValue): ClaudeHookInput {
   const name = str(call, "name");
 
   if (call && name) {
-    Object.assign(out, claudeTool(name, isJsonObject(call.args) ? call.args : {}));
+    const translated = claudeTool(name, isJsonObject(call.args) ? call.args : {});
+    Object.assign(out, translated, translated.cwd ? { cwd: underCwd(cwd, translated.cwd) } : {});
     const id = str(call, "id");
 
     if (id) out.tool_use_id = id;

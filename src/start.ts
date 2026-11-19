@@ -82,7 +82,6 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
   const name = provider.workspaceName(id, repo);
 
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}' for ${id}`);
-  requirePlugins(deps.plugins, agentFor(name, deps.agent));
   const branch = provider.branchName({ id, title });
   const prompts: NewTab = { prompt, defaultPrompt: `/start-item ${id}`, agent: deps.agent };
 
@@ -95,6 +94,9 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
   }
 
   const holder = workspaceOf(state, repo, branch, provider);
+
+  // checked once the target is known: a re-bind opens no tab, and a holder keeps its own agent
+  requirePlugins(deps.plugins, agentFor(holder ?? name, deps.agent));
 
   if (holder) {
     log(`${id} is in ${holder}`);

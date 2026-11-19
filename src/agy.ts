@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { isJsonObject, isJsonString, parseJson, type JsonObject } from "./json";
 import { isInside, packageRoot, realPath, root, selfCommand, wsDir } from "./paths";
-import { REQUIRED_SKILLS, skillDirs, type PluginProblems } from "./plugins";
+import { REQUIRED_SKILLS, requiredSkillProblems, skillDirs, type PluginProblems } from "./plugins";
 import { fail, log, run, shellQuote } from "./util";
 
 export const AGY = "agy";
@@ -76,8 +76,8 @@ export function agySkills(pkg = packageRoot(), required: readonly string[] = REQ
   return { entries: [...own, ...deps] };
 }
 
-/** Problems that leave a new agy workspace without its agent or the overbridge skills, each with its fix. */
-export function agyPluginProblems(pkg = packageRoot(), onPath = () => run(["which", AGY]).ok): PluginProblems {
+/** Problems that leave a new agy workspace without its agent, the overbridge skills or the skills they require, each with its fix. */
+export function agyPluginProblems(pkg = packageRoot(), onPath = () => run(["which", AGY]).ok, skills = () => requiredSkillProblems()): PluginProblems {
   const errors = [
     ...(onPath() ? [] : [`${AGY} is not on PATH. Install the Antigravity CLI, or start the workspace with --agent claude.`]),
     ...PLUGIN_FOLDERS.flatMap((p) => {
@@ -85,6 +85,7 @@ export function agyPluginProblems(pkg = packageRoot(), onPath = () => run(["whic
 
       return existsSync(dir) ? [] : [`skills folder ${dir} is missing. Reinstall overbridge.`];
     }),
+    ...skills(),
   ];
 
   return { errors, warnings: [] };

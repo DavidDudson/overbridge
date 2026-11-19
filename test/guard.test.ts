@@ -184,6 +184,7 @@ describe("agy calls", () => {
     expect(check(agy("replace_file_content", { TargetFile: "/w/ws1/.agents/hooks.json" }), ctx)).toContain(".agents config is managed by overbridge");
     expect(check(agy("view_file", { AbsolutePath: "/w/ws2/x.ts" }), ctx)).toContain("outside workspace ws1");
     expect(check(agy("run_command", { CommandLine: "ls", Cwd: "/w/ws2" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_command", { CommandLine: "cat ../../ws2/secret", Cwd: "/w/ws1/app" }), ctx)).toContain("outside workspace ws1");
   });
 
   test("an unknown tool's paths are checked as writes, and an unreadable call is denied", () => {

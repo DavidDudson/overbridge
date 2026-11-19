@@ -88,6 +88,11 @@ describe("agySkills", () => {
     expect(errors[0]).toContain("agy is not on PATH");
     expect(errors.some((e) => e.includes("plugin-review/skills is missing"))).toBe(true);
   });
+
+  test("agyPluginProblems names a missing required skill", () => {
+    const { errors } = agyPluginProblems(join(tmp, "nowhere"), () => true, () => ["the 'gh-stack' skill is not installed"]);
+    expect(errors).toContain("the 'gh-stack' skill is not installed");
+  });
 });
 
 describe("fromAgy", () => {
@@ -102,11 +107,15 @@ describe("fromAgy", () => {
     ).toEqual({
       hook_event_name: "PreToolUse",
       session_id: "c1",
-      cwd: "/w/ws1",
+      cwd: "/w/ws1/app",
       tool_name: "Bash",
       tool_use_id: "t1",
       tool_input: { command: 'cd "/w/ws1/app" && bun test' },
     });
+  });
+
+  test("a relative Cwd is taken from the hook's cwd", () => {
+    expect(fromAgy({ hookEventName: "PreToolUse", cwd: "/w/ws1", toolCall: { name: "run_command", args: { CommandLine: "ls", Cwd: "app" } } }).cwd).toBe("/w/ws1/app");
   });
 
   test("maps events: a failed tool, the first model call of a turn, a continued stop", () => {
