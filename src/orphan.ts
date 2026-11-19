@@ -7,12 +7,13 @@ import { join } from "node:path";
 import { loadRepos } from "./config";
 import { isOrchestrationTab } from "./orchestration";
 import { barePath, isInside, NAME_RE, root, wsDir } from "./paths";
+import { AGY_BRIEF, AGY_DIR } from "./agy";
 import { PLANS_DIR } from "./scaffold";
 import type { State } from "./state";
 import { naturalSort, run } from "./util";
 
 /** What overbridge and the OS put in a workspace folder beside the worktrees. */
-const GENERATED: readonly string[] = [".claude", "CLAUDE.md", PLANS_DIR, ".DS_Store"];
+const GENERATED: readonly string[] = [".claude", "CLAUDE.md", AGY_DIR, AGY_BRIEF, PLANS_DIR, ".DS_Store"];
 
 export interface OrphanWorktree {
   repo: string;
@@ -61,14 +62,14 @@ const isDir = (path: string): boolean => {
 
 /**
  * Whether `name` is a folder under the root that state does not list and that was a workspace: it holds a
- * registered worktree or the generated `.claude` folder. Any other folder under the root is not overbridge's.
+ * registered worktree or a generated `.claude` or `.agents` folder. Any other folder under the root is not overbridge's.
  */
 export function isOrphan(name: string, state: State): boolean {
   if (!NAME_RE.test(name) || isOrchestrationTab(name) || state.workspaces[name] || !isDir(wsDir(name))) {
     return false;
   }
 
-  return isDir(join(wsDir(name), ".claude")) || worktreesIn(name).length > 0;
+  return isDir(join(wsDir(name), ".claude")) || isDir(join(wsDir(name), AGY_DIR)) || worktreesIn(name).length > 0;
 }
 
 /** Every orphan under the root. */

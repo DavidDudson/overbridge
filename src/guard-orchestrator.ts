@@ -133,6 +133,7 @@ const OVERBRIDGE_ALLOWED = new Map<string, readonly string[]>(
     rm: [],
     icebox: [],
     thaw: [],
+    send: [],
     cleanup: [],
     release: [],
     up: [],

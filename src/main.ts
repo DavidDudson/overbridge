@@ -3,6 +3,8 @@ import * as cmd from "./commands";
 import { REQUIRED_SKILLS, requiredSkillProblems } from "./plugins";
 import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
+import { send } from "./send";
+import { AGENT_KINDS, AgentKind, isAgentKind } from "./agent-kind";
 import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
 import { agentRefusal, configSet } from "./config-set";
@@ -28,7 +30,14 @@ import { externalCommand, externalEnv, externalHelp } from "./external";
 import { errorMessage, exec, log, OverbridgeError } from "./util";
 
 const START_USAGE =
-  "usage: overbridge start <repo> <id> [--prompt text] [--here] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] | overbridge start <repo> --task <slug> --prompt <text>";
+  "usage: overbridge start <repo> <id> [--prompt text] [--here] [--agent claude|agy] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] [--agent claude|agy] | overbridge start <repo> --task <slug> --prompt <text> [--agent claude|agy]";
+
+/** `--agent` as an agent kind, or undefined when it was not given (the root config's `agent` applies). */
+export function agentFlag(v: string | undefined): AgentKind | undefined {
+  if (v === undefined || isAgentKind(v)) return v;
+
+  throw new OverbridgeError(`--agent: unknown agent ${JSON.stringify(v)}; use one of ${AGENT_KINDS.join(", ")}`);
+}
 
 const HELP = `overbridge (alias: ws) — multi-repo workspaces with bound Claude sessions in zellij
 
@@ -90,8 +99,14 @@ Workspaces
                                         items in dependency order, bottom first: one workspace (<slug>, else
                                         the first item's name plus -stack) holding a gh stack with one layer
                                         (branch + claim) per item, on layer 1, in a new tab running /start-item
-  overbridge new <name> [-r repo]...            create a workspace and open its tab
+  overbridge start ... --agent claude|agy       the new workspace's agent: Claude Code or Antigravity CLI;
+                                        default: the root config.yml's agent, else claude. A workspace keeps
+                                        its agent; --agent never changes an existing one
+  overbridge new <name> [-r repo]... [--agent claude|agy]
+                                        create a workspace and open its tab
   overbridge tab <name> [--prompt text]         open a workspace's tab when it has none, else focus it
+  overbridge send <name> <text>                 type <text> into a workspace's agent pane and submit it
+                                        (how the orchestrator messages an agy workspace)
   overbridge add <repo> [--ws name]             add a repo worktree to a workspace
   overbridge shell <repo> [--ws name] -- <cmd>  run a command in the repo's dev shell (its shell key in
                                         overbridge.yml); as it is when the repo has none
@@ -379,8 +394,8 @@ async function main(argv: string[]): Promise<number> {
       cmd.sync();
       break;
     case "new": {
-      const { values, positionals } = opts(rest, { repo: { type: "string", short: "r", multiple: true } });
-      cmd.newWorkspace(positionals[0], values.repo ?? []);
+      const { values, positionals } = opts(rest, { repo: { type: "string", short: "r", multiple: true }, agent: { type: "string" } });
+      cmd.newWorkspace(positionals[0], values.repo ?? [], undefined, agentFlag(values.agent));
       break;
     }
 
@@ -501,6 +516,15 @@ async function main(argv: string[]): Promise<number> {
       break;
     }
 
+    case "send": {
+      const [name, ...words] = rest;
+      const text = (words[0] === "--" ? words.slice(1) : words).join(" ");
+
+      if (!name || !text) throw new OverbridgeError("usage: overbridge send <workspace> <text>");
+      console.log(send(name, text));
+      break;
+    }
+
     case "thaw": {
       const { values, positionals } = opts(rest, { prompt: { type: "string" } });
 
@@ -516,11 +540,14 @@ async function main(argv: string[]): Promise<number> {
         stack: { type: "boolean" },
         name: { type: "string" },
         here: { type: "boolean" },
+        agent: { type: "string" },
       });
+
+      const agent = agentFlag(values.agent);
 
       if (values.stack) {
         if (values.task !== undefined || values.here || positionals.length < 3) throw new OverbridgeError(START_USAGE);
-        startStack(positionals[0]!, positionals.slice(1), { name: values.name, prompt: values.prompt });
+        startStack(positionals[0]!, positionals.slice(1), { name: values.name, prompt: values.prompt, agent });
         break;
       }
 
@@ -531,12 +558,12 @@ async function main(argv: string[]): Promise<number> {
           throw new OverbridgeError("usage: overbridge start <repo> --task <slug> --prompt <text>");
         }
 
-        startTask(positionals[0]!, values.task, values.prompt);
+        startTask(positionals[0]!, values.task, values.prompt, { agent });
         break;
       }
 
       if (positionals.length !== 2) throw new OverbridgeError(START_USAGE);
-      start(positionals[0]!, positionals[1]!, values.prompt, { here: values.here });
+      start(positionals[0]!, positionals[1]!, values.prompt, { here: values.here, agent });
       break;
     }
 
@@ -588,7 +615,7 @@ async function main(argv: string[]): Promise<number> {
     case "guard":
       silenceLegacyWarnings();
 
-      return guardMain();
+      return guardMain(rest[0] === "--agy" ? AgentKind.Agy : AgentKind.Claude);
     case undefined:
     case "help":
     case "-h":

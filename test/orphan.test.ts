@@ -23,6 +23,7 @@ const env = () => ({
   GIT_COMMITTER_NAME: "t",
   GIT_COMMITTER_EMAIL: "t@t",
   GIT_CONFIG_GLOBAL: "/dev/null",
+  OVERBRIDGE_AGY_SETTINGS: join(tmp, "agy-settings.json"),
 });
 
 function ob(args: string[]) {
@@ -44,8 +45,8 @@ function sh(cmd: string[], cwd: string) {
 const statePath = () => join(root, ".overbridge", "state.json");
 
 /** A workspace that state has forgotten: its folder and registered worktree stay behind. */
-function orphan(name: string): string {
-  expect(ob(["new", name, "-r", "app"]).code).toBe(0);
+function orphan(name: string, ...flags: string[]): string {
+  expect(ob(["new", name, "-r", "app", ...flags]).code).toBe(0);
   const parsed = parseJson(readFileSync(statePath(), "utf8"));
   const state = isJsonObject(parsed) ? parsed : {};
   const { [name]: _dropped, ...workspaces } = objectField(state, "workspaces") ?? {};
@@ -117,6 +118,16 @@ describe("orphan folders", () => {
     expect(refused.code).toBe(1);
     expect(refused.err).toContain("notes.md");
     expect(ob(["rm", "notes", "--force"]).code).toBe(0);
+  });
+
+  test("an agy orphan's generated files are not stray, and removing it drops agy's trust", () => {
+    const dir = orphan("agy-gone", "--agent", "agy");
+    const trusted = (): string[] => JSON.parse(readFileSync(join(tmp, "agy-settings.json"), "utf8")).trustedWorkspaces;
+    expect(existsSync(join(dir, "AGENTS.md"))).toBe(true);
+    expect(trusted()).toContain(dir);
+    expect(finding("agy-gone")).toMatchObject({ verdict: CleanupVerdict.Remove, blockers: [] });
+    expect(ob(["rm", "agy-gone"]).code).toBe(0);
+    expect(trusted()).not.toContain(dir);
   });
 
   test("a folder under the root that was never a workspace is not an orphan", () => {

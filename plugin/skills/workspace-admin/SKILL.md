@@ -36,6 +36,11 @@ overbridge start <repo> --task <slug> --prompt <text>  # no item yet (a ticket t
                                           # re-binds it to the item (claim moves, task branch deleted)
 overbridge start <repo> <id> --here               # re-bind the current workspace from any claim, when nothing
                                           # is uncommitted or unpushed
+overbridge start ... --agent claude|agy           # the new workspace's agent: Claude Code or Antigravity CLI
+                                          # (default: the root config.yml's agent, else claude); a
+                                          # workspace keeps its agent
+overbridge send <name> <text>                     # type a message into a workspace's agent pane and submit it
+                                          # (the orchestrator's way to reach an agy workspace)
 overbridge new <name> -r <repo> [-r <repo>...]    # by hand; name it for its work item; opens its tab
 overbridge tab <name> [--prompt text]             # reopen a workspace's closed tab (focuses it when open)
 overbridge add <repo> --ws <name>                 # add another repo to an existing workspace
