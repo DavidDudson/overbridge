@@ -4,6 +4,7 @@ import { stopChecksFor } from "./check-queue";
 import { getRepo } from "./config";
 import * as git from "./git";
 import { HandoffReason, writeHandoff } from "./handoff";
+import type { Mux } from "./mux";
 import { landingTab } from "./next";
 import { isOrchestrationTab } from "./orchestration";
 import { worktreePath } from "./paths";
@@ -20,7 +21,7 @@ import { errorMessage, fail, log, run } from "./util";
 export const THAW_PROMPT = "/read-handoff";
 
 /** `thaw`'s first message: read the handoff, then carry out `prompt` in place of the handoff's Next line when one is given. */
-export const thawPrompt = (prompt?: string): string => (prompt ? `${THAW_PROMPT} --then ${prompt}` : THAW_PROMPT);
+export const thawFirstMessage = (prompt?: string): string => (prompt ? `${THAW_PROMPT} --then ${prompt}` : THAW_PROMPT);
 
 export interface IceboxDeps extends Pick<RemovalDeps, "mux"> {
   stopApps: (ws: string) => Promise<void>;
@@ -289,10 +290,11 @@ export interface ThawDeps {
   open: (ws: string, prompt: string) => void;
 }
 
-const defaultThawDeps = (): ThawDeps => ({ open: (ws, prompt) => requireTab(ws, prompt, TabFocus.Foreground, undefined, true) });
+/** Opens the thawed tab in front, continuing the agent's conversation. */
+export const thawDeps = (mux?: Mux): ThawDeps => ({ open: (ws, prompt) => requireTab(ws, prompt, TabFocus.Foreground, mux, true) });
 
 /** Refuses with the reason, staying iceboxed, when a dropped worktree's folder is taken or its branch cannot be checked out. */
-export function thaw(ws: string, opts: ThawOptions = {}, deps: ThawDeps = defaultThawDeps()): void {
+export function thaw(ws: string, opts: ThawOptions = {}, deps: ThawDeps = thawDeps()): void {
   const iceboxed = getWorkspace(readState(), ws).iceboxed;
 
   if (!iceboxed) {
@@ -323,6 +325,6 @@ export function thaw(ws: string, opts: ThawOptions = {}, deps: ThawDeps = defaul
     }
   }
 
-  deps.open(ws, thawPrompt(opts.prompt));
+  deps.open(ws, thawFirstMessage(opts.prompt));
   log(`${ws} thawed`);
 }

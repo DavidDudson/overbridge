@@ -9,7 +9,7 @@ A handoff is a markdown file the previous session wrote before it was cleared: w
 
 ## Step 1: Find the handoff directory
 
-Accept an optional argument: `--list`, or `--then <request>`. `overbridge thaw --prompt` passes `--then` when someone asked the thawed workspace for something.
+Accept an optional argument: `--list`, or `--then <request>`. `overbridge thaw --prompt` passes `--then` when someone asked the thawed workspace for something. Check for `--then` first: everything after it is the request, word for word, even when it contains `--list`.
 
 The directory is `$OVERBRIDGE_ROOT/<workspace>/.overbridge/handoffs/`. The workspace is `overbridge whoami` (it follows `$OVERBRIDGE_NAME`, then cwd). It sits beside the repo worktrees, outside every repo, so nothing in it can be committed.
 
@@ -26,6 +26,8 @@ Take the first. With `--list`, show the five newest instead (name, modified time
 If there is none, say so and stop. Don't rebuild the context from git history unprompted. Offer `pickup` or `overbridge status` instead.
 
 If the newest file is more than a working day old, or already has a `.picked-up` marker, say so and ask before continuing from it.
+
+With `--then`, never stop or ask here: the request is the newer instruction and nobody may be watching. An old or picked-up handoff is mentioned and read anyway. With no handoff, say so and go straight to the request.
 
 ## Step 3: Read it and check for drift
 
@@ -54,7 +56,7 @@ This stops `--list` from offering the same handoff as unread.
 
 Give the user a short summary: item, branch, what is done, and the `Next:` line.
 
-With `--then <request>`, carry out the request (a slash command such as `/pickup #123` is a skill to invoke) in place of the `Next:` action, and say that the `Next:` line was set aside. Do it even when Step 2 found the handoff old or already picked up: the request is the newer instruction. Stop for drift in Step 3 as usual.
+With `--then <request>`, carry out the request (a slash command such as `/pickup #123` is a skill to invoke) in place of the `Next:` action, and say that the `Next:` line was set aside.
 
 Without `--then`, do the `Next:` action:
 

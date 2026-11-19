@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { queueDir, stopChecksFor, ticketName, type Ticket } from "../src/check-queue";
 import { handoffStamp, HandoffReason, renderHandoff } from "../src/handoff";
 import { zellijMux } from "../src/mux";
-import { icebox, type IceboxDeps, prunable, THAW_PROMPT, thaw, thawPrompt } from "../src/icebox";
+import { icebox, type IceboxDeps, prunable, THAW_PROMPT, thaw, thawFirstMessage } from "../src/icebox";
 import { entries, icedRows } from "../src/sidebar";
 import { isJsonObject, parseJson } from "../src/json";
 import { isIceboxed, readState, withState } from "../src/state";
@@ -167,9 +167,9 @@ describe("icebox and thaw", () => {
     expect(isIceboxed(readState().workspaces.calm)).toBe(false);
   });
 
-  test("thawPrompt is the bare handoff prompt without a request", () => {
-    expect(thawPrompt()).toBe(THAW_PROMPT);
-    expect(thawPrompt("")).toBe(THAW_PROMPT);
+  test("thawFirstMessage is the bare handoff prompt without a request", () => {
+    expect(thawFirstMessage()).toBe(THAW_PROMPT);
+    expect(thawFirstMessage("")).toBe(THAW_PROMPT);
   });
 
   test("a thawed tab continues the conversation and reads the handoff", () => {
@@ -341,7 +341,7 @@ describe("asking for an iceboxed workspace's tab", () => {
     expect(isIceboxed(readState().workspaces.calm)).toBe(false);
     const newTab = calls.find((c) => c[2] === "new-tab") ?? [];
     const layout = readFileSync(newTab[newTab.indexOf("--layout") + 1] ?? "", "utf8");
-    expect(layout).toContain(thawPrompt("/pickup #3653"));
+    expect(layout).toContain(thawFirstMessage("/pickup #3653"));
     expect(layout).not.toContain("/start-item 1");
   });
 });

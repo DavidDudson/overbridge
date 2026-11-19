@@ -1,7 +1,7 @@
 import { checkout, createWorkspace, holdings, removeWorkspace } from "./commands";
 import { getRepo, type RepoSpec } from "./config";
 import * as git from "./git";
-import { thaw } from "./icebox";
+import { thaw, thawDeps } from "./icebox";
 import { barePath, currentWorkspace, NAME_RE, worktreePath } from "./paths";
 import { type PluginProblems, pluginProblems, requiredSkillProblems } from "./plugins";
 import { providerFor } from "./pm";
@@ -37,7 +37,7 @@ type TabPrompt = { prompt?: string; defaultPrompt?: string };
 export function showTab(ws: string, prompts: TabPrompt = {}, mux: Mux = defaultMux()) {
   if (isIceboxed(readState().workspaces[ws])) {
     // an iceboxed workspace has no tab and its agent has a handoff to read, so asking for it thaws it
-    thaw(ws, { prompt: prompts.prompt }, { open: (name, prompt) => requireTab(name, prompt, TabFocus.Foreground, mux, true) });
+    thaw(ws, { prompt: prompts.prompt }, thawDeps(mux));
 
     return;
   }
