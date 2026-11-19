@@ -5,6 +5,7 @@ import { metaDir, selfCommand } from "./paths";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { type MentionCache, mentionClaimPath, readMentions, readStore, readStoreForWrite, type Silenceable, silencedNow, type SilenceState, toggled, watchedUrls, writeMentions, writeStore } from "./silence";
 import { errorMessage, run, spawnCwd, type RunResult } from "./util";
+import { githubLogin } from "./gh-login";
 
 /** The silence store's I/O against the list caches: the scan that `overbridge silence refresh` runs, and the pane toggle. */
 
@@ -25,15 +26,37 @@ export function listedUrls(): Set<string> | undefined {
 
 type Runner = (cmd: string[]) => RunResult;
 
-/** Scan every watched URL for a mention and write `mentions.json`. A failed scan keeps the last mentions and records why. */
+/** A scan of an unchanged set still runs this often: an item a tab lists with no update time (a work-list issue) changes unseen. */
+export const MENTION_MAX_AGE_MS = 10 * 60_000;
+
+/** The watched URLs with each one's last update as the tabs list it: a new comment changes the update time. */
+export const mentionSignature = (urls: readonly string[], rows: readonly Silenceable[]): string => {
+  const updated = new Map(rows.map((r) => [r.url, r.updatedAt ?? ""]));
+
+  return urls.map((u) => `${u} ${updated.get(u) ?? ""}`).join("\n");
+};
+
+/**
+ * Scan every watched URL for a mention and write `mentions.json`. Skipped, keeping the last scan, while no watched item
+ * changed and that scan is young and good. A failed scan keeps the last mentions and records why.
+ */
 export function refreshMentions(now = Date.now(), runner: Runner = run): MentionCache {
-  const urls = watchedUrls(listedRows(), readStore());
+  const rows = listedRows();
+  const urls = watchedUrls(rows, readStore());
+  const signature = mentionSignature(urls, rows);
+  const old = readMentions();
+
+  if (old.error === undefined && old.signature === signature && now - old.at < MENTION_MAX_AGE_MS) {
+    return old;
+  }
+
   let cache: MentionCache;
 
   try {
-    cache = { at: now, mentions: urls.length ? keepNewest(readMentions().mentions, scanMentions(urls, githubLogin(runner), runner), urls) : new Map() };
+    cache = { at: now, mentions: urls.length ? keepNewest(old.mentions, scanMentions(urls, githubLogin(runner), runner), urls) : new Map(), signature };
   } catch (e) {
-    cache = { ...readMentions(), at: now, error: errorMessage(e) };
+    const { signature: _stale, ...kept } = old;
+    cache = { ...kept, at: now, error: errorMessage(e) };
   }
 
   writeMentions(cache);
@@ -54,14 +77,6 @@ export function keepNewest(previous: ReadonlyMap<string, string>, found: Readonl
       return newest === undefined ? [] : [[url, newest] as const];
     }),
   );
-}
-
-function githubLogin(runner: Runner): string {
-  const who = runner(["gh", "api", "user", "--jq", ".login"]);
-
-  if (!who.ok) throw new Error(`gh api user failed: ${(who.stderr || who.stdout).trim().split("\n")[0]}`);
-
-  return who.stdout.trim();
 }
 
 /** Flip `item`'s silence and save it; returns the state it now has. */

@@ -74,7 +74,9 @@ export interface PrView extends ReviewerView {
   headRefOid?: string;
   mergeable?: string;
   mergeStateStatus?: string;
-  statusCheckRollup?: { status?: string; conclusion?: string; state?: string }[];
+  /** The labels' names, for button `status` commands that read the view (`prViewFile`). */
+  labels?: { name: string }[];
+  author?: { login: string };
 }
 
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]);
@@ -435,7 +437,7 @@ function writeTopCache(ws: string, cache: TopCache) {
   writeFileAtomic(cacheFile(ws), JSON.stringify(cache, null, 2) + "\n");
 }
 
-const prViewCommand = (n: number) => ["gh", "pr", "view", String(n), "--json", "url,title,isDraft,updatedAt,state,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments"];
+const prViewCommand = (n: number) => ["gh", "pr", "view", String(n), "--json", "url,title,isDraft,updatedAt,state,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,reviewRequests,latestReviews,comments,labels,author"];
 
 function parsePrView(out: string | undefined): PrView | undefined {
   try {

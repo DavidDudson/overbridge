@@ -151,6 +151,7 @@ Inside a workspace (shell pane or its Claude):
 overbridge checkout app feat/login        # adds repo if missing, claims + switches
 overbridge checkout infra '#42'           # pick up a PR
 overbridge pr                              # record PRs for claimed branches
+overbridge pr-checks                       # the PR's checks from the server's shared read, as gh pr checks --json
 overbridge status --all                    # claims, PRs, stacks; `from <branch>` marks a workspace re-bound from another claim
 overbridge release app
 overbridge shell app -- just test         # run a command in the repo's dev shell

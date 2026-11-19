@@ -1,14 +1,11 @@
-import { loadRootLayers } from "./project-config";
 import { selfCommand } from "./paths";
-import { type PrListCache, type PrListKind, readPrList, writePrList } from "./prlist-data";
-import { errorMessage, run, spawnCwd, type RunResult } from "./util";
+import { type PrListKind, readPrList } from "./prlist-data";
+import { spawnCwd } from "./util";
 import { age, CHROME, type PrRow } from "./pr-rows";
-import { filterOrgs, mergeRows, reviewCommand, rowsFromReviews } from "./review-batch";
 import { spinner } from "./anim";
-import { carrySeenAt } from "./silence";
+import { serverRefreshPrList } from "./server-client";
 import { mentionScanError, silencedSet, spawnMentionRefresh, toggleMessage } from "./silence-refresh";
 import { prsView } from "./prs-view";
-import { readMyPrs } from "./prs-refresh";
 import { DEFAULT_REVIEWS_SORT, reviewsView } from "./reviews-view";
 import { sortPrRows } from "./pr-sort";
 import { nextSort, type SortMode } from "./sort-mode";
@@ -17,6 +14,8 @@ import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN } from "./term";
 export { age, type PrRow };
 
 export * from "./prlist-data";
+
+export { readPrs, readReviews, refreshPrList } from "./prlist-refresh";
 
 export const PRLIST_REFRESH_MS = 60_000;
 
@@ -60,64 +59,18 @@ export function rowsFromSearch(json: string): PrRow[] {
   }));
 }
 
-type Runner = (cmd: string[]) => RunResult;
-
-const firstLine = (r: RunResult) => (r.stderr || r.stdout).trim().split("\n")[0];
-
-/** The reviews asked of me: one GraphQL search per owner, so each row carries its request, bots, CI and merge state. */
-export function readReviews(orgs: readonly string[], runner: Runner = run): PrRow[] {
-  const who = runner(["gh", "api", "user", "--jq", ".login"]);
-
-  if (!who.ok) throw new Error(`gh api user failed: ${firstLine(who)}`);
-  const me = who.stdout.trim();
-
-  const lists = (orgs.length ? orgs : [undefined]).map((org) => {
-    const r = runner(reviewCommand(me, org));
-
-    if (!r.ok) throw new Error(`gh api graphql failed: ${firstLine(r)}`);
-
-    return rowsFromReviews(r.stdout, me);
-  });
-
-  return filterOrgs(mergeRows(lists), orgs);
-}
-
-/** Read one list. Throws with `gh`'s message when the search fails. */
-export function readPrs(kind: PrListKind, orgs: readonly string[], runner: Runner = run): PrRow[] {
-  if (kind === "reviews") return readReviews(orgs, runner);
-
-  if (kind === "prs") return readMyPrs(orgs, runner);
-
-  const r = runner(searchCommand(kind, orgs));
-
-  if (!r.ok) throw new Error(`gh search prs failed: ${(r.stderr || r.stdout).trim().split("\n")[0]}`);
-
-  return rowsFromSearch(r.stdout);
-}
-
-/** `overbridge prs refresh` / `reviews refresh`: read the list into its cache. A failed read keeps the old rows. */
-export function refreshPrList(kind: PrListKind, now = Date.now(), runner: Runner = run): PrListCache {
-  const orgs = loadRootLayers().githubOrgs;
-  let cache: PrListCache;
-
-  try {
-    cache = { at: now, rows: carrySeenAt(readPrs(kind, orgs, runner), readPrList(kind).rows, new Date(now).toISOString()) };
-  } catch (e) {
-    cache = { ...readPrList(kind), at: now, error: errorMessage(e) };
-  }
-
-  writePrList(kind, cache);
-
-  return cache;
-}
-
 /** Runs `overbridge <kind> refresh` in a child, so the pane keeps drawing while `gh` runs. */
-export async function refreshPrListInChild(kind: PrListKind): Promise<{ ok: boolean; error: string }> {
-  const child = Bun.spawn({ cmd: [...selfCommand(), kind, "refresh"], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "pipe" });
+export async function refreshPrListInChild(kind: PrListKind, o: { force?: boolean } = {}): Promise<{ ok: boolean; error: string }> {
+  const child = Bun.spawn({ cmd: [...selfCommand(), kind, "refresh", ...(o.force ? ["--force"] : [])], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "pipe" });
   const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
   const first = stderr.split("\n").find((l) => l.trim())?.trim();
 
   return code === 0 ? { ok: true, error: "" } : { ok: false, error: first ?? `${kind} refresh exited with code ${code}` };
+}
+
+/** Refresh through the server when one answers, so the rate-limit pause applies; else in a child. */
+export async function refreshPrListAny(kind: PrListKind, o: { force?: boolean } = {}, server = serverRefreshPrList, child = refreshPrListInChild): Promise<{ ok: boolean; error: string }> {
+  return (await server(kind, o)) ?? (await child(kind, o));
 }
 
 /** The view of each list: how its rows are ordered for the cursor and drawn. */
@@ -163,13 +116,13 @@ export async function prListPane(kind: PrListKind) {
     if (moved >= 0) selected = moved;
   };
 
-  const refresh = () => {
+  const refresh = (force = false) => {
     if (busy) return;
     busy = true;
     startedAt = Date.now();
     message = "refreshing…";
     draw();
-    void refreshPrListInChild(kind).then((result) => {
+    void refreshPrListAny(kind, { force }).then((result) => {
       installCache(readPrList(kind));
       message = result.ok ? (cache.error ? `error: ${cache.error}` : mentionScanError()) : `error: ${result.error}`;
       busy = false;
@@ -202,7 +155,7 @@ export async function prListPane(kind: PrListKind) {
         selected = Math.max(0, rowsOf().findIndex((r) => r.url === url));
       } else if (input.key === "x" && chosen) {
         message = toggleMessage(chosen, `${chosen.repo}#${chosen.number}`);
-      } else if (input.key === "r") refresh();
+      } else if (input.key === "r") refresh(true);
       else if (input.key === "o" && rowsOf()[selected]) {
         Bun.spawn({ cmd: ["gh", "pr", "view", "--web", rowsOf()[selected]!.url], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
       }

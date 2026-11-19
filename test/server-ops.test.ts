@@ -86,12 +86,13 @@ describe("rate limit gate", () => {
     expect(gate.message()).toBeUndefined();
   });
 
+  // the PR's CI is running, so the batcher keeps its short TTL (`ttlFor`)
   test("simulated rate-limit reply: the batcher stops calling gh until the reset and serves its last reply", async () => {
     let t = 0;
     let calls = 0;
     let limited = false;
     const gate = new RateGate({ now: () => t });
-    const pr = { number: 1, url: "u", title: "t", isDraft: false, updatedAt: "2026-01-01T00:00:00Z", state: "OPEN", headRefOid: "a", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", statusCheckRollup: { contexts: { nodes: [] } }, reviewRequests: { nodes: [] }, latestReviews: { nodes: [] }, comments: { nodes: [] }, reviewThreads: { nodes: [] } };
+    const pr = { number: 1, url: "u", title: "t", isDraft: false, updatedAt: "2026-01-01T00:00:00Z", state: "OPEN", headRefOid: "a", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [{ __typename: "CheckRun", name: "ci", status: "IN_PROGRESS" }] } } } }] }, reviewRequests: { nodes: [] }, latestReviews: { nodes: [] }, comments: { nodes: [] }, reviewThreads: { nodes: [] } };
     const reply = JSON.stringify({ data: { rateLimit: { cost: 1 }, repository: { p1: pr } } });
 
     const batcher = new PrBatcher({

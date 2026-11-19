@@ -28,6 +28,8 @@ export interface MentionCache {
   /** Item URL to the ISO time of the newest comment that mentions the user. */
   mentions: Map<string, string>;
   error?: string;
+  /** The watched URLs and their last updates the scan ran for (`mentionSignature`): a scan for the same set is skipped while young. */
+  signature?: string;
 }
 
 /** What silence reads from a row of any tab. */
@@ -37,6 +39,8 @@ export interface Silenceable {
   group?: "direct" | "team";
   /** Reviews tab: when the row first appeared, which is when a team row's silence starts. */
   seenAt?: string;
+  /** When GitHub last saw a change to the item (a new comment among them), when the tab knows it. */
+  updatedAt?: string;
 }
 
 export const silencePath = () => join(metaDir(), "silenced.json");
@@ -79,6 +83,9 @@ export function parseMentions(raw: JsonValue): MentionCache {
   const error = stringField(root, "error");
 
   if (error !== undefined) cache.error = error;
+  const signature = stringField(root, "signature");
+
+  if (signature !== undefined) cache.signature = signature;
 
   return cache;
 }
@@ -142,6 +149,8 @@ export function writeMentions(cache: MentionCache) {
   const body: JsonObject = { at: cache.at, mentions };
 
   if (cache.error !== undefined) body.error = cache.error;
+
+  if (cache.signature !== undefined) body.signature = cache.signature;
   writeJson(mentionsPath(), body);
 }
 

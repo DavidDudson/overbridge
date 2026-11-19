@@ -30,13 +30,17 @@ const PR_FIELDS = `
     } }
   } } } }`;
 
-export const REVIEW_QUERY = `query($q: String!) { search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest {${PR_FIELDS} } } } }`;
+/** The most review requests one search returns. */
+export const REVIEW_PAGE = 50;
+
+/** The search for up to `page` PRs: GitHub charges about a point per PR asked for (its review threads), so callers size it to the list. */
+export const reviewQuery = (page: number = REVIEW_PAGE) => `query($q: String!) { search(query: $q, type: ISSUE, first: ${page}) { nodes { ... on PullRequest {${PR_FIELDS} } } } }`;
 
 /** The search string: open PRs I am asked to review, in `org` when given. */
 export const searchString = (login: string, org?: string): string => `is:pr is:open archived:false review-requested:${login}${org ? ` org:${org}` : ""} sort:updated-desc`;
 
-/** The `gh api graphql` command for one search. */
-export const reviewCommand = (login: string, org?: string): string[] => ["gh", "api", "graphql", "-f", `query=${REVIEW_QUERY}`, "-f", `q=${searchString(login, org)}`];
+/** The `gh api graphql` command for one search of up to `page` PRs. */
+export const reviewCommand = (login: string, org?: string, page: number = REVIEW_PAGE): string[] => ["gh", "api", "graphql", "-f", `query=${reviewQuery(page)}`, "-f", `q=${searchString(login, org)}`];
 
 interface Reviewer {
   __typename?: string;
@@ -130,7 +134,7 @@ const isNode = (n: Partial<Node>): n is Node => isNumber(n.number) && !!n.reposi
 
 /** Rows from one `gh api graphql` response; a PR found by two searches is kept once by `mergeRows`. */
 export function rowsFromReviews(json: string, me: string): PrRow[] {
-  // SAFETY: the shape `REVIEW_QUERY` asks for; each node is checked for its number and repository before it is read
+  // SAFETY: the shape `reviewQuery` asks for; each node is checked for its number and repository before it is read
   const nodes: Partial<Node>[] = JSON.parse(json)?.data?.search?.nodes ?? [];
 
   const rows: PrRow[] = [];

@@ -73,3 +73,6 @@ export function ghAccountStamp(): string {
     return "none";
   }
 }
+
+/** Who `gh` is signed in as: `read`'s answer, kept per signed-in account for `USER_TTL_MS`. */
+export const cachedGhLogin = (read: () => string | undefined, now = Date.now()): string | undefined => cachedValue(`gh:user:${ghAccountStamp()}`, USER_TTL_MS, read, now);

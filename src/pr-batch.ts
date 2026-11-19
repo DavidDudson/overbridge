@@ -1,6 +1,6 @@
 import { Cache, errorText } from "./server-cache";
 import { isJsonObject, type JsonObject, type JsonValue, numberField, objectField, parseJson, stringField } from "./json";
-import { countUnresolved, type ReviewerView } from "./reviewers";
+import { countUnresolved, reviewerStatuses, type ReviewerView } from "./reviewers";
 import type { PrView } from "./top";
 
 /**
@@ -13,9 +13,13 @@ import type { PrView } from "./top";
 export const PRS_PER_QUERY = 20;
 export const BATCH_WINDOW_MS = 250;
 export const PR_TTL_MS = 60_000;
+
+/** How long a repo's reply is served when every PR in it is settled (`isSettled`) and each caller's local HEAD matches its PR. */
+export const PR_SETTLED_TTL_MS = 3 * 60_000;
 export const PR_STALE_MS = 10 * 60_000;
 
-export const PR_FRAGMENT = `fragment F on PullRequest{url title isDraft updatedAt state headRefOid mergeable mergeStateStatus
+export const PR_FRAGMENT = `fragment F on PullRequest{url title isDraft updatedAt state headRefOid mergeable mergeStateStatus author{login}
+labels(first:20){nodes{name}}
 reviewRequests(first:20){pageInfo{hasNextPage} nodes{requestedReviewer{__typename ...on User{login} ...on Bot{login} ...on Team{name}}}}
 latestReviews(first:20){pageInfo{hasNextPage} nodes{author{login} state submittedAt url}}
 comments(last:100){pageInfo{hasPreviousPage} nodes{author{login} body createdAt url}}
@@ -132,8 +136,21 @@ export function mapPr(node: JsonObject): PrView {
     latestReviews: nodes(node.latestReviews).map(review),
     comments: nodes(node.comments).map(comment),
     unresolved: countUnresolved(nodes(node.reviewThreads).map(thread)),
+    labels: nodes(node.labels).flatMap((l) => {
+      const name = stringField(l, "name");
+
+      return name === undefined ? [] : [{ name }];
+    }),
+    ...author(node),
   };
 }
+
+/** The PR's author as `gh pr view --json author` gives it, or nothing for a deleted user. */
+const author = (node: JsonObject): Pick<PrView, "author"> => {
+  const name = login(node);
+
+  return name === undefined ? {} : { author: { login: name } };
+};
 
 /**
  * A connection the query cut short: past 100 review threads or check contexts or comments, or 20 reviews or review
@@ -145,6 +162,35 @@ const truncated = (node: JsonObject): boolean =>
   cutShort(node.comments, "hasPreviousPage") ||
   cutShort(node.latestReviews, "hasNextPage") ||
   cutShort(node.reviewRequests, "hasNextPage");
+
+/** A check still running: a check run not yet completed, or a commit status still pending or expected. */
+const pendingCheck = (c: NonNullable<ReviewerView["statusCheckRollup"]>[number]): boolean =>
+  c.status !== undefined ? c.status !== "COMPLETED" : c.state === "PENDING" || c.state === "EXPECTED";
+
+/**
+ * Whether a PR is waiting on nothing the panel shows changing soon: closed or merged, or open with every check done, its
+ * mergeability known and no bot review running. A PR GitHub no longer returns is settled; one the reply cut short is not.
+ */
+export function isSettled(view: PrView | null | undefined): boolean {
+  if (view === null) return true;
+
+  if (view === undefined) return false;
+
+  if (view.state !== "OPEN") return true;
+
+  if (view.mergeable === "UNKNOWN" || (view.statusCheckRollup ?? []).some(pendingCheck)) return false;
+
+  return !reviewerStatuses(view, view.url ?? "").some((r) => r.state === "reviewing");
+}
+
+/** The TTL for a repo's reply: longer once every PR in it is settled and no caller's local HEAD is ahead of its PR's head. */
+export function ttlFor(held: Record<number, PrView | null | undefined> | undefined, heads: Readonly<Record<number, string>> = {}): number {
+  if (held === undefined) return PR_TTL_MS;
+  const views = Object.values(held);
+  const headsMatch = Object.entries(heads).every(([n, sha]) => held[Number(n)]?.headRefOid === sha);
+
+  return views.length > 0 && views.every(isSettled) && headsMatch ? PR_SETTLED_TTL_MS : PR_TTL_MS;
+}
 
 export interface BatchReply {
   /** Each requested PR; null when GitHub has no such PR or the user cannot see it, undefined when the reply cut its threads or checks short (read it directly). */
@@ -243,7 +289,7 @@ export interface PrBatcherOptions {
 /**
  * Coalesces PR reads. Every refresh that asks for a PR of `owner/name` within one window shares a single fetch, which
  * reads that repo's claimed PRs together (paged by `perQuery`); each PR is then served from the repo's cache entry for
- * `PR_TTL_MS`. Keys are `gh:prs:<owner/name>`; the per-PR keys of the design are the entry's fields.
+ * `PR_TTL_MS`, or `PR_SETTLED_TTL_MS` once nothing in it is moving (`ttlFor`). Keys are `gh:prs:<owner/name>`; the per-PR keys of the design are the entry's fields.
  */
 export class PrBatcher {
   private readonly cache: Cache<Record<number, PrView | null | undefined>>;
@@ -278,7 +324,7 @@ export class PrBatcher {
    * The views of `numbers` in `repo`. A PR GitHub does not return is `null`. Rejects when the call failed and no
    * earlier reply exists; with one, serves it (stale) and reports the failure in `error`.
    */
-  async get(repo: string, numbers: number[], o: { force?: boolean } = {}): Promise<{ prs: Record<number, PrView | null | undefined>; error?: string }> {
+  async get(repo: string, numbers: number[], o: { force?: boolean; heads?: Readonly<Record<number, string>> } = {}): Promise<{ prs: Record<number, PrView | null | undefined>; error?: string }> {
     const want = this.wanted.get(repo) ?? new Set<number>();
     this.wanted.set(repo, want);
 
@@ -295,7 +341,7 @@ export class PrBatcher {
       return { prs: held, error: paused };
     }
 
-    const opts = { ttlMs: PR_TTL_MS, staleMs: PR_STALE_MS, force: o.force === true };
+    const opts = { ttlMs: ttlFor(this.cache.peek(key), o.heads), staleMs: PR_STALE_MS, force: o.force === true };
     let got = await this.cache.get(key, () => this.fetch(repo), opts);
 
     // a PR opened since the reply was read is not in it: read again once

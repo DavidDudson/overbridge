@@ -86,6 +86,14 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   The sidebar starts the sweep; `claimSweep` (`src/sweep-trigger.ts`) lets one sidebar run it per `MERGE_SWEEP_MS`.
   Every removal is visible: `beginRemoval` stores its `CleanupCause` in `removing`, `finishRemoval` appends the outcome to
   `State.cleanups` (`src/cleanup-log.ts`), and the sidebar shows a countdown to the next sweep, the removals in flight and those finished since the last sweep (`cleanupRows`).
+- GitHub rate limit: every steady `gh` read is sized for 20+ sessions on one 5,000-point GraphQL budget.
+  The `@prs`/`@reviews` lists (`src/prlist-refresh.ts`) run a one-point probe first (`src/prlist-probe.ts`) and read in full,
+  sized to the probe's count, only when it changed or the rows are `FULL_MAX_AGE_MS` old; the panes refresh through the
+  server (`POST /refresh/prlist/<kind>`, worker `src/server-prlist-worker.ts`) so the rate-limit pause applies, with a child as
+  the fallback. The batcher keeps a repo's reply for `PR_SETTLED_TTL_MS` once every PR in it `isSettled` and each caller's
+  local HEAD is its PR's head (`ttlFor`, heads from `prefetchFor`). `overbridge pr-checks` (`src/pr-checks.ts`, `GET /pr-checks`)
+  serves an agent's CI poll from the batch; the skills poll with it, not `gh pr checks`. The mention scan skips a set of
+  watched items whose update times have not changed (`mentionSignature`). Who `gh` is signed in as comes from `src/gh-login.ts`.
 - Silenced items: `src/silence.ts` is the pure rule (`isSilenced` decides from the user's toggle, a team review's `seenAt`, and the newest mention) plus the `silenced.json`/`mentions.json` I/O.
   Only `toggleSilence` in `src/silence-refresh.ts` writes `silenced.json` (a pane's `x` or `overbridge silence toggle`), reading it with `readStoreForWrite` so a file it cannot parse is never overwritten.
   Only `refreshMentions` there writes `mentions.json` (`overbridge silence refresh`, and the claim `spawnMentionRefresh` takes first); `src/mention-scan.ts` builds the GraphQL query and parses the reply.

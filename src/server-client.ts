@@ -1,4 +1,5 @@
 import { isJsonObject, parseJson, stringField } from "./json";
+import type { PrListKind } from "./prlist-data";
 import { call, startServer } from "./server-net";
 
 /**
@@ -74,6 +75,32 @@ export async function serverRefreshWorklist(o: { force?: boolean; sock?: string;
     const body = parseJson(r.body);
 
     return { ok: r.status === 200, error: (isJsonObject(body) ? stringField(body, "error") : undefined) ?? "" };
+  } catch {
+    return undefined;
+  }
+}
+
+/** A PR list read (a probe, then maybe the full search) is a few `gh` calls of 30 s at most each. */
+const PRLIST_TIMEOUT_MS = 3 * 60_000;
+
+/**
+ * Refresh a PR list (`prs`, `reviews`) through the server and wait for it; it writes the same `prlist-<kind>.json`. Resolves
+ * `undefined` when the server cannot be used, so the pane runs `overbridge <kind> refresh` in a child instead.
+ */
+export async function serverRefreshPrList(kind: PrListKind, o: { force?: boolean; sock?: string; start?: boolean } = {}): Promise<{ ok: boolean; error: string } | undefined> {
+  const r = await call("POST", `/refresh/prlist/${kind}${o.force ? "?force=1" : ""}`, { timeoutMs: PRLIST_TIMEOUT_MS, sock: o.sock });
+
+  if (!r && o.start !== false) startServer();
+
+  if (!r || (r.status !== 200 && r.status !== 502)) return undefined;
+
+  try {
+    const body = parseJson(r.body);
+
+    const error = (isJsonObject(body) ? stringField(body, "error") : undefined) ?? "";
+
+    // a stale list served over a failed read (a rate-limit pause) is not ok: the pane shows why
+    return { ok: r.status === 200 && error === "", error };
   } catch {
     return undefined;
   }
