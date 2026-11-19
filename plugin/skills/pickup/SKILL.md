@@ -55,6 +55,9 @@ overbridge status                      # confirm the claim and the head
 ```
 
 If the claim is refused because another workspace holds the branch, stop and tell the user which one.
+When `overbridge status --all` marks that workspace `iceboxed`, it has no Claude session to hand the PR to.
+Say so, and give the command that thaws it with this request, for the user or the orchestrator to run
+(a workspace cannot thaw another): `overbridge thaw <workspace> --prompt "/pickup #<n>"`.
 A stacked PR pulls its whole stack. Say so, and treat the rest of this skill as running on the layer
 you were asked for.
 

@@ -58,6 +58,13 @@ describe("orchestration tab scaffolding", () => {
     expect(brief.indexOf("SendMessage")).toBeLessThan(brief.indexOf("overbridge item from-branch"));
   });
 
+  test("its brief thaws an iceboxed workspace that claims the PR's branch instead of starting another", () => {
+    const brief = orchestratorPrompt();
+    expect(brief).toContain('overbridge thaw <workspace> --prompt "/pickup #<pr>');
+    expect(brief).toContain("never start a second workspace for a branch an iceboxed one claims");
+    expect(brief.indexOf("overbridge thaw <workspace>")).toBeLessThan(brief.indexOf("overbridge item from-branch"));
+  });
+
   test("claude starts with the settings and the brief appended to the system prompt", () => {
     const args = orchestrationArgs("/s.json", ["--resume"]);
     expect(args).toEqual(["claude", "--settings", "/s.json", "--append-system-prompt", orchestratorPrompt(), "--resume"]);

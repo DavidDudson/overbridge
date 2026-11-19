@@ -9,7 +9,7 @@ A handoff is a markdown file the previous session wrote before it was cleared: w
 
 ## Step 1: Find the handoff directory
 
-Accept an optional argument: `--list`.
+Accept an optional argument: `--list`, or `--then <request>`. `overbridge thaw --prompt` passes `--then` when someone asked the thawed workspace for something.
 
 The directory is `$OVERBRIDGE_ROOT/<workspace>/.overbridge/handoffs/`. The workspace is `overbridge whoami` (it follows `$OVERBRIDGE_NAME`, then cwd). It sits beside the repo worktrees, outside every repo, so nothing in it can be committed.
 
@@ -52,7 +52,11 @@ This stops `--list` from offering the same handoff as unread.
 
 ## Step 5: Summarise and continue
 
-Give the user a short summary: item, branch, what is done, and the `Next:` line. Then do the `Next:` action:
+Give the user a short summary: item, branch, what is done, and the `Next:` line.
+
+With `--then <request>`, carry out the request (a slash command such as `/pickup #123` is a skill to invoke) in place of the `Next:` action, and say that the `Next:` line was set aside. Do it even when Step 2 found the handoff old or already picked up: the request is the newer instruction. Stop for drift in Step 3 as usual.
+
+Without `--then`, do the `Next:` action:
 
 - A skill (`mob-review`, `ship-pr`, `resolve-feedback`, …) → invoke it.
 - A command or a numbered next step → do it.

@@ -110,8 +110,9 @@ Workspaces
                                         its tab; keeps claims; refuses with unsaved work. --prune deletes the
                                         repo's icebox.prune paths (never tracked files); --drop-worktree removes
                                         the worktrees, keeping the branches. Nothing is reclaimed without a flag
-  overbridge thaw <name>                        reopen an iceboxed workspace's tab, its agent resuming and
-                                        reading the handoff; recreates dropped worktrees on their branches
+  overbridge thaw <name> [--prompt text]        reopen an iceboxed workspace's tab, its agent resuming,
+                                        reading the handoff, then doing --prompt (else the handoff's Next);
+                                        recreates dropped worktrees on their branches
   overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty and iceboxed state
   overbridge ahead [--json]                     workspaces whose branch holds commits main lacks (count, how far main
                                         moved, subjects, the Claude session name to message); the revisit skill reads it
@@ -501,10 +502,10 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case "thaw": {
-      const { positionals } = opts(rest, {});
+      const { values, positionals } = opts(rest, { prompt: { type: "string" } });
 
-      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge thaw <name>");
-      thaw(cmd.requireWs(positionals[0]!));
+      if (positionals.length !== 1) throw new OverbridgeError("usage: overbridge thaw <name> [--prompt text]");
+      thaw(cmd.requireWs(positionals[0]!), { prompt: values.prompt });
       break;
     }
 

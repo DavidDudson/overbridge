@@ -98,7 +98,10 @@ iceboxed. Claims and worktrees stay, so nothing else can take its branch or PR. 
 `❄ <name> iceboxed` row, `status` marks it `iceboxed`, and `up`/`layout` leave it out. `f` in a workspace's sidebar
 iceboxes that workspace; a refusal (unsaved work) shows in the sidebar footer. The `@frozen` orchestration tab
 (`overbridge frozen`) lists every iceboxed workspace with its age and claims; `t` there thaws the selected one.
-`overbridge thaw <name>` reopens the tab, the agent continuing its conversation and reading the handoff. If every PR of an iceboxed
+`overbridge thaw <name>` reopens the tab, the agent continuing its conversation and reading the handoff. `--prompt <text>`
+gives it a request to carry out after the handoff, in place of the handoff's Next line. The orchestrator thaws this way
+when asked to pick up a PR whose branch an iceboxed workspace claims, and `overbridge start` or `overbridge tab` passes
+its `--prompt` on the same way when the workspace it reaches is iceboxed. If every PR of an iceboxed
 workspace merges, the merged-PR check removes it like any other. With `icebox.idle-days` set, the sidebar suggests
 iceboxing a workspace whose claimed PRs are all drafts and untouched that long: its card reads
 `draft PRs idle <n>d · icebox?` unless the agent is waiting on you. It only suggests; run `overbridge icebox <name>` to act.

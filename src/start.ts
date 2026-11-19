@@ -32,12 +32,12 @@ type TabPrompt = { prompt?: string; defaultPrompt?: string };
 
 /**
  * Bring `ws`'s tab to the front, since you asked for it, opening one with `prompt` (else `defaultPrompt`) when
- * it has none (an iceboxed workspace is thawed instead). An open tab already has its agent, so only an explicit `prompt` is reported as not sent.
+ * it has none (an iceboxed workspace is thawed instead, its agent reading the handoff and then `prompt`). An open tab already has its agent, so only an explicit `prompt` is reported as not sent.
  */
 export function showTab(ws: string, prompts: TabPrompt = {}, mux: Mux = defaultMux()) {
   if (isIceboxed(readState().workspaces[ws])) {
     // an iceboxed workspace has no tab and its agent has a handoff to read, so asking for it thaws it
-    thaw(ws, { open: (name, prompt) => requireTab(name, prompt, TabFocus.Foreground, mux, true) });
+    thaw(ws, { prompt: prompts.prompt }, { open: (name, prompt) => requireTab(name, prompt, TabFocus.Foreground, mux, true) });
 
     return;
   }

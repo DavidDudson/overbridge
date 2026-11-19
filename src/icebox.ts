@@ -19,6 +19,9 @@ import { errorMessage, fail, log, run } from "./util";
 /** The first message of a thawed agent: its resumed conversation reads the handoff `icebox` wrote. */
 export const THAW_PROMPT = "/read-handoff";
 
+/** `thaw`'s first message: read the handoff, then carry out `prompt` in place of the handoff's Next line when one is given. */
+export const thawPrompt = (prompt?: string): string => (prompt ? `${THAW_PROMPT} --then ${prompt}` : THAW_PROMPT);
+
 export interface IceboxDeps extends Pick<RemovalDeps, "mux"> {
   stopApps: (ws: string) => Promise<void>;
   stopChecks: (ws: string) => number;
@@ -277,6 +280,11 @@ export function restoreWorktrees(ws: string, dropped: DroppedRepo[]): void {
   }
 }
 
+export interface ThawOptions {
+  /** A request for the thawed agent to carry out once it has read the handoff. */
+  prompt?: string;
+}
+
 export interface ThawDeps {
   open: (ws: string, prompt: string) => void;
 }
@@ -284,7 +292,7 @@ export interface ThawDeps {
 const defaultThawDeps = (): ThawDeps => ({ open: (ws, prompt) => requireTab(ws, prompt, TabFocus.Foreground, undefined, true) });
 
 /** Refuses with the reason, staying iceboxed, when a dropped worktree's folder is taken or its branch cannot be checked out. */
-export function thaw(ws: string, deps: ThawDeps = defaultThawDeps()): void {
+export function thaw(ws: string, opts: ThawOptions = {}, deps: ThawDeps = defaultThawDeps()): void {
   const iceboxed = getWorkspace(readState(), ws).iceboxed;
 
   if (!iceboxed) {
@@ -315,6 +323,6 @@ export function thaw(ws: string, deps: ThawDeps = defaultThawDeps()): void {
     }
   }
 
-  deps.open(ws, THAW_PROMPT);
+  deps.open(ws, thawPrompt(opts.prompt));
   log(`${ws} thawed`);
 }

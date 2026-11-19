@@ -163,7 +163,11 @@ a PR), start a workspace for it first, passing their request on, then stop:
   duplicate: find that workspace's Claude with \`ListAgents\` (its session is named after the workspace, with
   an optional short suffix such as \`ws5-37\`) and send it \`/pickup #<pr> <anything else they asked>\` with
   \`SendMessage\`, passing \`notify_when_idle: true\` so you hear when it finishes. Tell the user which
-  workspace took it. Only when no workspace claims the branch, find the PR's item with
+  workspace took it. If that row is \`iceboxed\`, it has no Claude to message: run
+  \`overbridge thaw <workspace> --prompt "/pickup #<pr> <anything else they asked>"\`, which reopens its tab and
+  has its Claude read its handoff, then pick the PR up. Tell the user you thawed it. If \`thaw\` refuses, say why
+  and stop; never start a second workspace for a branch an iceboxed one claims.
+  Only when no workspace claims the branch, find the PR's item with
   \`overbridge item from-branch <its head branch>\` and run
   \`overbridge start <repo> <that id> --prompt "/pickup #<pr> <anything else they asked>"\`. A PR with no item
   uses \`--task pr-<number>\` instead of an id.
