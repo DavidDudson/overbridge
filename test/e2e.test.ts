@@ -588,6 +588,7 @@ describe("thaw --prompt", () => {
     mkdirSync(bin, { recursive: true });
     // a stand-in zellij: every action succeeds, and each --layout file it is given is appended to $LAYOUTS
     writeFileSync(join(bin, "zellij"), '#!/bin/sh\nprev=""\nfor a; do [ "$prev" = "--layout" ] && cat "$a" >> "$LAYOUTS"; prev=$a; done\nexit 0\n', { mode: 0o755 });
+
     const inZellij = (args: string[]) =>
       Bun.spawnSync({
         cmd: [process.execPath, CLI, ...args],
