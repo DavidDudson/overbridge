@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claimRefresh, EVENT_STATE, recordState, REFRESH_AFTER_MS } from "../src/agent-hook";
+import type { JsonObject } from "../src/json";
+import { claimRefresh, COMPACT_RESTART_REASON, EVENT_STATE, markCompact, recordState, REFRESH_AFTER_MS } from "../src/agent-hook";
 import { AGENT_STATES, agentStatePath, turnPath, EndReason, endedForGood, readAgentState, sessionEndedForGood, STALE_MS } from "../src/agent-state";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
@@ -165,6 +166,28 @@ describe("overbridge hook", () => {
     const r = hook(JSON.stringify({ hook_event_name: "UserPromptSubmit" }), "w1");
     expect(r).toEqual({ code: 0, out: "", err: "" });
     expect(stateOf("w1").state).toBe("busy");
+  });
+
+  const agyHook = (payload: JsonObject) => {
+    const p = Bun.spawnSync({
+      cmd: [process.execPath, CLI, "hook", "--agy"],
+      env: { ...process.env, OVERBRIDGE_ROOT: tmp, OVERBRIDGE_NAME: "w1", OVERBRIDGE_SELF: "true" },
+      stdin: Buffer.from(JSON.stringify(payload)),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    return { code: p.exitCode, out: JSON.parse(p.stdout.toString()) };
+  };
+
+  test("under agy, always answers with JSON and records the translated event", () => {
+    expect(agyHook({ hookEventName: "PreInvocation", invocationNum: 1 })).toEqual({ code: 0, out: {} });
+    expect(stateOf("w1").state).toBe("busy");
+  });
+
+  test("under agy, a stop right after an auto-compact answers continue, not block", () => {
+    markCompact(meta, "w1");
+    expect(agyHook({ hookEventName: "Stop" }).out).toEqual({ decision: "continue", reason: COMPACT_RESTART_REASON });
   });
 
   test("an unbound session writes nothing", () => {

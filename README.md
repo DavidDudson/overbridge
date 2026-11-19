@@ -259,7 +259,7 @@ An agy workspace gets the same rules as a Claude one, through the files agy read
 | Plugins from the installed overbridge | `.agents/skills.json` pointing at the installed `plugin/skills` and `plugin-review/skills`, plus the folder holding `gh-stack` |
 | Folder trust in `~/.claude.json` | The workspace folder in `trustedWorkspaces` of `~/.gemini/antigravity-cli/settings.json` |
 | `--continue`, first prompt after `--` | `--continue`, first prompt as `-i <prompt>` |
-| `SendMessage` from the orchestrator | `overbridge send <ws> "<text>"`, which types the message into the agent pane |
+| `SendMessage` from the orchestrator | `overbridge send <ws> '<text>'`, which types the message into the agent pane |
 
 agy starts in the workspace folder, not the first repo, because it reads `AGENTS.md` and `.agents/` only from its
 start folder up to the repo root. The workspace folder holds no repo, so none of these files lands in a worktree.

@@ -1,16 +1,15 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentKind, parseAgentKind } from "../src/agent-kind";
+import { AgentKind } from "../src/agent-kind";
 import { agyArgs, agyHooks, agyPluginProblems, agySettingsPath, agySkills, agyTrust, agyUntrust } from "../src/agy";
-import { agyContinue, agyToolDecision, claudeTool, fromAgy } from "../src/agy-hook";
-import { check } from "../src/guard";
+import { agyContinue, agyToolDecision, claudeTool, fromAgy, UNREADABLE_TOOL } from "../src/agy-hook";
 import { agentDir } from "../src/layout";
-import { zellijMux } from "../src/mux";
+import { agentFlag } from "../src/main";
 import { root, wsDir } from "../src/paths";
-import { send } from "../src/send";
-import { agentOf, withState, workspaceFault } from "../src/state";
+import { pluginCheckFor } from "../src/start";
+import { agentOf, workspaceFault } from "../src/state";
 
 const saved = { ...process.env };
 const tmp = mkdtempSync(join(tmpdir(), "overbridge-agy-"));
@@ -26,15 +25,21 @@ afterAll(() => {
 });
 
 describe("agent kind", () => {
-  test("parses the two agents and names the choices otherwise", () => {
-    expect(parseAgentKind("agy", "--agent")).toBe(AgentKind.Agy);
-    expect(() => parseAgentKind("codex", "--agent")).toThrow('--agent: unknown agent "codex"; use one of claude, agy');
+  test("--agent takes the two agents and names the choices otherwise", () => {
+    expect(agentFlag("agy")).toBe(AgentKind.Agy);
+    expect(agentFlag(undefined)).toBeUndefined();
+    expect(() => agentFlag("codex")).toThrow('--agent: unknown agent "codex"; use one of claude, agy');
   });
 
   test("a workspace record without an agent runs Claude, and a bad one is a fault", () => {
     expect(agentOf({ created: "", repos: {} })).toBe(AgentKind.Claude);
     expect(workspaceFault({ created: "", repos: {}, agent: "codex" })).toBe('state record has agent as "codex"');
     expect(workspaceFault({ created: "", repos: {}, agent: AgentKind.Agy })).toBeUndefined();
+  });
+
+  test("each agent gets its own skills check", () => {
+    expect(pluginCheckFor(AgentKind.Agy)).toBe(agyPluginProblems);
+    expect(pluginCheckFor(AgentKind.Claude)).not.toBe(agyPluginProblems);
   });
 });
 
@@ -92,7 +97,7 @@ describe("fromAgy", () => {
         hookEventName: "PreToolUse",
         conversationId: "c1",
         cwd: "/w/ws1",
-        toolCall: { id: "t1", name: "run_command", args: { CommandLine: "git switch main", Cwd: "/w/ws1/app" } },
+        toolCall: { id: "t1", name: "run_command", args: { CommandLine: "bun test", Cwd: "/w/ws1/app" } },
       }),
     ).toEqual({
       hook_event_name: "PreToolUse",
@@ -100,7 +105,7 @@ describe("fromAgy", () => {
       cwd: "/w/ws1",
       tool_name: "Bash",
       tool_use_id: "t1",
-      tool_input: { command: 'cd "/w/ws1/app" && git switch main' },
+      tool_input: { command: 'cd "/w/ws1/app" && bun test' },
     });
   });
 
@@ -108,39 +113,40 @@ describe("fromAgy", () => {
     expect(fromAgy({ hookEventName: "PostToolUse", error: "exit status 1" }).hook_event_name).toBe("PostToolUseFailure");
     expect(fromAgy({ hookEventName: "PreInvocation", invocationNum: 1 }).hook_event_name).toBe("UserPromptSubmit");
     expect(fromAgy({ hookEventName: "PreInvocation", invocationNum: 4 }).hook_event_name).toBeUndefined();
+    expect(fromAgy({ hookEventName: "PreInvocation" }).hook_event_name).toBeUndefined();
     expect(fromAgy({ hookEventName: "Stop", continuationActive: true })).toEqual({ hook_event_name: "Stop", stop_hook_active: true });
     expect(fromAgy("nonsense")).toEqual({});
   });
 
-  test("claudeTool checks the paths of file tools, and of a tool it does not know, as reads", () => {
-    expect(claudeTool("write_to_file", { TargetFile: "/w/ws1/a.ts", CodeContent: "x" })).toEqual({ tool_name: "Write", tool_input: { paths: ["/w/ws1/a.ts"] } });
-    expect(claudeTool("view_file", { AbsolutePath: "/w/ws2/b.ts" })).toEqual({ tool_name: "Read", tool_input: { paths: ["/w/ws2/b.ts"] } });
-    expect(claudeTool("new_tool", { SomeDirectory: "/w/ws2" })).toEqual({ tool_name: "Read", tool_input: { paths: ["/w/ws2"], agy_tool: "new_tool" } });
-    expect(claudeTool("search_web", { query: "x" })).toEqual({ tool_name: "search_web", tool_input: { query: "x" } });
-  });
-
-  test("answers in agy's shape", () => {
-    expect(agyToolDecision(undefined)).toEqual({ decision: "allow" });
+  test("answers in agy's shape, giving no decision when nothing blocks", () => {
+    expect(agyToolDecision(undefined)).toEqual({});
     expect(agyToolDecision("no")).toEqual({ decision: "deny", reason: "no" });
     expect(agyContinue("go on")).toEqual({ decision: "continue", reason: "go on" });
   });
 });
 
-describe("guard on agy calls", () => {
-  const ctx = { root: "/w", ws: "ws1", home: "/home/u" };
-  const agy = (name: string, args: Record<string, string>) => fromAgy({ hookEventName: "PreToolUse", cwd: "/w/ws1", toolCall: { name, args } });
-
-  test("blocks branch switches, writes outside the workspace and to .agents, and foreign reads", () => {
-    expect(check(agy("run_command", { CommandLine: "git switch main" }), ctx)).toContain("overbridge checkout");
-    expect(check(agy("write_to_file", { TargetFile: "/w/ws2/x.ts" }), ctx)).toContain("outside workspace ws1");
-    expect(check(agy("replace_file_content", { TargetFile: "/w/ws1/.agents/hooks.json" }), ctx)).toContain(".agents config is managed by overbridge");
-    expect(check(agy("view_file", { AbsolutePath: "/w/ws2/x.ts" }), ctx)).toContain("outside workspace ws1");
-    expect(check(agy("run_command", { CommandLine: "ls", Cwd: "/w/ws2" }), ctx)).toContain("outside workspace ws1");
+describe("claudeTool", () => {
+  test("maps known file tools by their path keys, in any case and through arrays", () => {
+    expect(claudeTool("write_to_file", { TargetFile: "/w/ws1/a.ts", CodeContent: "/* not a path */" })).toEqual({ tool_name: "Write", tool_input: { paths: ["/w/ws1/a.ts"] } });
+    expect(claudeTool("multi_replace_file_content", { target_files: ["/w/ws1/a.ts", "/w/ws2/b.ts"] })).toEqual({
+      tool_name: "MultiEdit",
+      tool_input: { paths: ["/w/ws1/a.ts", "/w/ws2/b.ts"] },
+    });
+    expect(claudeTool("view_file", { AbsolutePath: "/w/ws2/b.ts" })).toEqual({ tool_name: "Read", tool_input: { paths: ["/w/ws2/b.ts"] } });
   });
 
-  test("allows work inside the workspace", () => {
-    expect(check(agy("write_to_file", { TargetFile: "/w/ws1/app/x.ts" }), ctx)).toBeUndefined();
-    expect(check(agy("run_command", { CommandLine: "bun test", Cwd: "/w/ws1/app" }), ctx)).toBeUndefined();
+  test("fails closed: a file tool with no path and a shell call with no command are unreadable", () => {
+    expect(claudeTool("write_to_file", { Target: "/w/ws2/x" }).tool_name).toBe(UNREADABLE_TOOL);
+    expect(claudeTool("run_command", { Command: "rm -rf /" }).tool_name).toBe(UNREADABLE_TOOL);
+  });
+
+  test("checks every path an unknown tool names as a write, found by key or by value", () => {
+    expect(claudeTool("delete_file", { TargetFile: "~/.zshrc" })).toEqual({ tool_name: "Write", tool_input: { paths: ["~/.zshrc"], agy_tool: "delete_file" } });
+    expect(claudeTool("some_tool", { nested: { list: ["/w/ws2/x"] }, note: "two\n/lines" })).toEqual({
+      tool_name: "Write",
+      tool_input: { paths: ["/w/ws2/x"], agy_tool: "some_tool" },
+    });
+    expect(claudeTool("search_web", { query: "/etc/passwd" })).toEqual({ tool_name: "search_web", tool_input: { query: "/etc/passwd" } });
   });
 });
 
@@ -158,41 +164,5 @@ describe("agy trust", () => {
 
   test("refuses a folder outside the root", () => {
     expect(() => agyTrust(tmp)).toThrow("refusing to change agy trust");
-  });
-});
-
-describe("send", () => {
-  const panes = [{ id: "7", title: "w1 · claude", tab: "w1", exited: false }];
-
-  const fake = () => {
-    const sent: [string, string][] = [];
-
-    return { sent, mux: { ...zellijMux(() => ({ ok: false, stdout: "" })), listPanes: () => panes, sendText: (id: string, text: string) => sent.push([id, text]) > 0 } };
-  };
-
-  test("types the message into the workspace's agent pane", () => {
-    withState((s) => {
-      s.workspaces.w1 = { created: "", repos: {}, agent: AgentKind.Agy };
-      s.workspaces.cold = { created: "", repos: {}, iceboxed: { since: "" } };
-    });
-    const f = fake();
-    expect(send("w1", "/pickup #3", f.mux)).toBe("sent to w1 (agy)");
-    expect(f.sent).toEqual([["7", "/pickup #3"]]);
-    expect(() => send("cold", "hi", f.mux)).toThrow("iceboxed");
-    expect(() => send("nope", "hi", f.mux)).toThrow("no workspace 'nope'");
-  });
-
-  test("zellij pastes the text and then presses Enter in that pane", () => {
-    const calls: string[][] = [];
-    const sleep = mock(() => {});
-    const { sendPause } = require("../src/mux");
-    sendPause.sleep = sleep;
-    const mux = zellijMux((cmd) => (calls.push(cmd), { ok: true, stdout: "" }));
-    expect(mux.sendText("7", "hello")).toBe(true);
-    expect(calls.map((c) => c.slice(2))).toEqual([
-      ["paste", "--pane-id", "terminal_7", "hello"],
-      ["send-keys", "--pane-id", "terminal_7", "Enter"],
-    ]);
-    expect(sleep).toHaveBeenCalled();
   });
 });

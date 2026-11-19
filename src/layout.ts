@@ -216,10 +216,10 @@ export const agentDirOf = (ws: string, home = homedir()) => {
  * Workspaces and orchestration tabs with a Claude transcript to resume. Reads the disk, so callers pass the
  * result to `layoutKdl`.
  */
-export function resumable(workspaces: string[], home = homedir(), agentDirs: Readonly<Record<string, string>> = {}, agy: ReadonlySet<string> = new Set()): Set<string> {
+export function resumable(workspaces: string[], home = homedir(), agentDirs: Readonly<Record<string, string>> = {}, agyWorkspaces: ReadonlySet<string> = new Set()): Set<string> {
   return new Set([
     // agy keeps its conversations in its own store, and its --continue starts afresh when there is none
-    ...workspaces.filter((ws) => agy.has(ws) || hasTranscript(agentDirs[ws] ?? wsDir(ws), home)),
+    ...workspaces.filter((ws) => agyWorkspaces.has(ws) || hasTranscript(agentDirs[ws] ?? wsDir(ws), home)),
     ...ORCHESTRATION_TABS.filter((t) => !t.pane && hasTranscript(t.dir(), home)).map((t) => t.tab),
   ]);
 }
@@ -235,8 +235,8 @@ export function chooseLayout(workspaces: string[], self: string[], kind: MuxKind
   if (kind === "zellij" && existsSync(userPath)) return { source: "user", path: userPath };
   const agentDirs = Object.fromEntries(workspaces.map((ws) => [ws, agentDirOf(ws)]));
   const state = readState();
-  const agy = new Set(workspaces.filter((ws) => agentOf(state.workspaces[ws]) === AgentKind.Agy));
-  const opts = { resume: resumable(workspaces, homedir(), agentDirs, agy), sidebarWidth: sidebarWidth(), agentDirs };
+  const agyWorkspaces = new Set(workspaces.filter((ws) => agentOf(state.workspaces[ws]) === AgentKind.Agy));
+  const opts = { resume: resumable(workspaces, homedir(), agentDirs, agyWorkspaces), sidebarWidth: sidebarWidth(), agentDirs };
 
   return kind === "tmux"
     ? { source: "generated", text: layoutScript(session, layoutSpecs(workspaces, self, opts)), conf: tmuxConf(self) }

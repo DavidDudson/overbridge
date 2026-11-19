@@ -3,10 +3,10 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentKind } from "../src/agent-kind";
-import { checkout, createWorkspace, newWorkspace, repoAdd } from "../src/commands";
+import { checkout, createWorkspace, newWorkspace, removeWorkspace, repoAdd } from "../src/commands";
 import { metaDir } from "../src/paths";
 import { localStacks } from "../src/stack";
-import { showTab, start, startStack, startTask } from "../src/start";
+import { agentFor, showTab, start, startStack, startTask } from "../src/start";
 import { readState, withState } from "../src/state";
 import { zellijMux } from "../src/mux";
 import { openTab, requireTab, TabFocus, tabRetry } from "../src/tab";
@@ -91,7 +91,8 @@ describe("start", () => {
   test("a missing plugin bundle stops the start before any workspace exists", () => {
     const plugins = () => ({ errors: ["marketplace.json is missing"], warnings: [] });
     expect(() => start("app", "12", undefined, { provider: provider(), plugins })).toThrow("marketplace.json is missing");
-    expect(() => start("app", "13", undefined, { provider: provider(), plugins })).toThrow("/start-item would be unknown");
+    const thirteen = fakeProvider([{ id: "13", title: "Add light mode", url: "" }]);
+    expect(() => start("app", "13", undefined, { provider: thirteen, plugins })).toThrow("/start-item would be unknown");
     expect(readState().workspaces["gh-app-13"]).toBeUndefined();
   });
 
@@ -600,7 +601,9 @@ describe("start --agent", () => {
     const dir = join(tmp, "workspaces", "gh-app-80");
 
     expect(readState().workspaces["gh-app-80"]?.agent).toBe(AgentKind.Agy);
-    expect(readFileSync(join(dir, "AGENTS.md"), "utf8")).toBe(readFileSync(join(dir, "CLAUDE.md"), "utf8"));
+    const agents = readFileSync(join(dir, "AGENTS.md"), "utf8");
+    expect(agents.startsWith(readFileSync(join(dir, "CLAUDE.md"), "utf8"))).toBe(true);
+    expect(agents).toContain("## Working directory");
     const hooks = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf8"));
     expect(Object.keys(hooks.overbridge)).toEqual(["PreToolUse", "PostToolUse", "SessionStart", "PreInvocation", "Stop"]);
     expect(existsSync(join(dir, ".agents", "skills.json"))).toBe(true);
@@ -615,5 +618,27 @@ describe("start --agent", () => {
     start("app", "82", undefined, { provider: agyItems(), plugins: noProblems, agent: AgentKind.Claude });
     expect(readState().workspaces["gh-app-82"]?.agent).toBeUndefined();
     expect(existsSync(join(tmp, "workspaces", "gh-app-82", "AGENTS.md"))).toBe(false);
+  });
+
+  test("an existing workspace keeps its agent whatever --agent or the root config says", () => {
+    expect(agentFor("gh-app-80", AgentKind.Claude)).toBe(AgentKind.Agy);
+    expect(agentFor("gh-app-82", AgentKind.Agy)).toBe(AgentKind.Claude);
+    expect(agentFor("not-yet", AgentKind.Agy)).toBe(AgentKind.Agy);
+  });
+
+  test("removing an agy workspace drops its trust, and a Claude removal leaves agy's settings alone", () => {
+    const dir = realpathSync(join(tmp, "workspaces", "gh-app-80"));
+    removeWorkspace("gh-app-80", true);
+    expect(agyTrusted()).not.toContain(dir);
+
+    const before = readFileSync(process.env.OVERBRIDGE_AGY_SETTINGS!, "utf8");
+    removeWorkspace("gh-app-82", true);
+    expect(readFileSync(process.env.OVERBRIDGE_AGY_SETTINGS!, "utf8")).toBe(before);
+  });
+
+  test("a broken agy settings file does not stop an agy workspace's removal", () => {
+    writeFileSync(process.env.OVERBRIDGE_AGY_SETTINGS!, "{");
+    removeWorkspace("gh-app-81", true);
+    expect(readState().workspaces["gh-app-81"]).toBeUndefined();
   });
 });

@@ -6,8 +6,8 @@ export {};
 const argv = Bun.argv.slice(2);
 
 if (argv[0] === "hook") {
-  const { hookMain, HookSource } = await import("./agent-hook");
-  process.exit(await hookMain(argv[1] === "--agy" ? HookSource.Agy : HookSource.Claude));
+  const [{ hookMain }, { AgentKind }] = await Promise.all([import("./agent-hook"), import("./agent-kind")]);
+  process.exit(await hookMain(argv[1] === "--agy" ? AgentKind.Agy : AgentKind.Claude));
 }
 
 const { run } = await import("./main");

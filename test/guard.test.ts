@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { AgentKind } from "../src/agent-kind";
+import { fromAgy } from "../src/agy-hook";
 import { check, type HookInput } from "../src/guard";
 import type { JsonObject } from "../src/json";
 
@@ -65,6 +67,8 @@ describe("bash", () => {
     "gh pr checkout 12",
     "git worktree add ../x",
     "overbridge rm ws2",
+    'overbridge send ws2 "/pickup #3"',
+    "cd app && ws send ws2 hi",
     "overbridge up --fresh",
     "overbridge spinup -p 2",
     "overbridge config set guard.deny '[]'",
@@ -168,5 +172,45 @@ describe("root config additions", () => {
     expect(check(bash("git push --force-with-lease origin x"), withExtra)).toBeUndefined();
     expect(check(bash("git switch main"), withExtra)).toContain("overbridge checkout");
     expect(check(bash("git push --force origin x"), ctx)).toBeUndefined();
+  });
+});
+
+describe("agy calls", () => {
+  const agy = (name: string, args: JsonObject) => fromAgy({ hookEventName: "PreToolUse", cwd: "/w/ws1", toolCall: { name, args } });
+
+  test("blocks a branch change, writes outside the workspace or to .agents, and foreign reads", () => {
+    expect(check(agy("run_command", { CommandLine: "gh pr checkout 3" }), ctx)).toContain("overbridge checkout");
+    expect(check(agy("write_to_file", { TargetFile: "/w/ws2/x.ts" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("replace_file_content", { TargetFile: "/w/ws1/.agents/hooks.json" }), ctx)).toContain(".agents config is managed by overbridge");
+    expect(check(agy("view_file", { AbsolutePath: "/w/ws2/x.ts" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_command", { CommandLine: "ls", Cwd: "/w/ws2" }), ctx)).toContain("outside workspace ws1");
+  });
+
+  test("an unknown tool's paths are checked as writes, and an unreadable call is denied", () => {
+    expect(check(agy("delete_file", { TargetFile: "/home/u/.zshrc" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("delete_file", { TargetFile: "/w/ws1/.agents/hooks.json" }), ctx)).toContain(".agents config is managed by overbridge");
+    expect(check(agy("write_to_file", { Target: "/w/ws2/x" }), ctx)).toContain("names no path");
+  });
+
+  test.each(["../ws2/x", "~/.zshrc", "/w/ws2/x", "a/../../ws2/x", "file:///w/ws2/x"])("an unknown tool naming %s under any key is checked as a write", (note) => {
+    expect(check(agy("some_tool", { note }), ctx)).toContain("outside workspace ws1");
+  });
+
+  test("an unknown tool's in-workspace relative path and a value that is not a path pass", () => {
+    expect(check(agy("some_tool", { note: "./x/../y" }), ctx)).toBeUndefined();
+    expect(check(agy("some_tool", { note: "..foo" }), ctx)).toBeUndefined();
+  });
+
+  test("shell edits to .agents are blocked in an agy workspace only", () => {
+    const agyCtx = { ...ctx, agent: AgentKind.Agy };
+    expect(check(agy("run_command", { CommandLine: "echo '{}' > .agents/hooks.json" }), agyCtx)).toContain(".agents config is managed by overbridge");
+    expect(check(agy("run_command", { CommandLine: "cd .agents && rm skills.json" }), agyCtx)).toContain(".agents config is managed by overbridge");
+    expect(check(bash(String.raw`rg -n '\.agents|hooks\.json' src`), ctx)).toBeUndefined();
+  });
+
+  test("allows work inside the workspace", () => {
+    expect(check(agy("write_to_file", { TargetFile: "/w/ws1/app/x.ts", CodeContent: "/** doc */" }), ctx)).toBeUndefined();
+    expect(check(agy("run_command", { CommandLine: "bun test", Cwd: "/w/ws1/app" }), ctx)).toBeUndefined();
+    expect(check(agy("search_web", { query: "bun test" }), ctx)).toBeUndefined();
   });
 });

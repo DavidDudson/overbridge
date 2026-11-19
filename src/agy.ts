@@ -1,9 +1,4 @@
-/**
- * What a workspace running Antigravity CLI (`agy`) gets in place of Claude's settings: agy starts in the
- * workspace folder, which holds no repo, so the files there apply to that one workspace and never land in a
- * worktree. `AGENTS.md` carries the workspace brief, `.agents/hooks.json` the guard and the agent-state hook,
- * and `.agents/skills.json` points at the overbridge skills in the installed package.
- */
+/** What an agy workspace gets in place of Claude's settings. agy starts in the workspace folder, which holds no repo, so these files never land in a worktree. */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -26,10 +21,7 @@ const HOOK_NAME = "overbridge";
 /** Plugin folders in the package, each with a `skills/` folder. */
 const PLUGIN_FOLDERS = ["plugin", "plugin-review"];
 
-/**
- * agy's argv from the arguments overbridge passes a workspace agent: `--continue` resumes, and a prompt after
- * `--` becomes `-i <prompt>`, which agy sends as the first message and stays interactive.
- */
+/** agy's argv from a workspace agent's arguments: a prompt after `--` becomes `-i <prompt>`, agy's interactive first message. */
 export function agyArgs(extra: readonly string[]): string[] {
   const cut = extra.indexOf("--");
   const flags = cut < 0 ? extra : extra.slice(0, cut);
@@ -45,10 +37,7 @@ const handler = (ws: string, sub: string[]) => ({
   timeout: 30,
 });
 
-/**
- * Workspace `ws`'s `hooks.json`: the guard on every tool call (it also records the call, since agy takes one
- * decision per entry), and the agent-state hook on the other events agy has.
- */
+/** Workspace `ws`'s `hooks.json`. PreToolUse runs only the guard, which records the call too, since agy takes one decision per entry. */
 export function agyHooks(ws: string) {
   const record = handler(ws, ["hook", "--agy"]);
 
@@ -108,13 +97,22 @@ function writeAtomic(file: string, text: string) {
   renameSync(tmp, file);
 }
 
+/** What an agy workspace's brief adds: agy starts above the repos, so repo commands need the repo's folder. */
+export const agyBriefNote = (ws: string) => `
+## Working directory
+
+You start in the workspace folder (\`${wsDir(ws)}\`), which holds no repo. Run every repo command, including
+\`overbridge config\`, \`item\`, \`ext\`, \`check\` and \`pr\`, from that repo's folder (\`${wsDir(ws)}/<repo>\`): pass it as the
+command's working directory, since overbridge finds the repo's \`overbridge.yml\` from there.
+`;
+
 /** (Re)write the agy files for workspace `ws`, with `brief` as its AGENTS.md. Idempotent. */
 export function scaffoldAgy(ws: string, brief: string) {
   const dir = join(wsDir(ws), AGY_DIR);
   mkdirSync(dir, { recursive: true });
   writeAtomic(join(dir, "hooks.json"), `${JSON.stringify(agyHooks(ws), null, 2)}\n`);
   writeAtomic(join(dir, "skills.json"), `${JSON.stringify(agySkills(), null, 2)}\n`);
-  writeAtomic(join(wsDir(ws), AGY_BRIEF), brief);
+  writeAtomic(join(wsDir(ws), AGY_BRIEF), `${brief}${agyBriefNote(ws)}`);
 }
 
 /** agy's user settings, where it lists the folders the user trusts (`trustedWorkspaces`). */
@@ -126,7 +124,9 @@ const TRUST_KEY = "trustedWorkspaces";
 function ownedFolder(dir: string): string {
   const path = realPath(dir);
 
-  if (path === realPath(root()) || !isInside(path, root())) {
+  const top = realPath(root());
+
+  if (path === top || !isInside(path, top)) {
     fail(`refusing to change agy trust for ${path}: it is not a workspace folder under ${root()}`);
   }
 

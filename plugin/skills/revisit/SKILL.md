@@ -24,6 +24,7 @@ substitution and file redirects: one command per step, never try to work around 
 ```sh
 overbridge sync               # fetch every bare repo so origin/<default> is current
 overbridge ahead --json       # live workspaces whose HEAD holds commits origin/<default> lacks
+overbridge status --all --json # each workspace's agent: "agy" ones have no ListAgents session
 ```
 
 Each row has `ws`, `repo`, `branch`, `session` (the Claude session name, equal to the workspace name), `ahead`,
@@ -31,7 +32,7 @@ Each row has `ws`, `repo`, `branch`, `session` (the Claude session name, equal t
 Iceboxed workspaces, detached HEADs and branches with nothing ahead are not in it.
 
 An agy workspace (`agent: "agy"` in `overbridge status --all --json`) has no session in `ListAgents`: ask it in
-step 3 with `overbridge send <ws> "<message>"`. You hear no reply, so mark it "asked (agy)" in the table.
+step 3 with `overbridge send <ws> '<message>'` (single quotes: the orchestrator guard refuses a backtick inside double quotes; write a `'` in the message as `'\''`). You hear no reply, so mark it "asked (agy)" in the table.
 
 Then `ListAgents`. Match each row's `session` to a row by exact name. A session started before sessions were
 named may carry an auto name; if none matches, skip the workspace with "no session" and say
@@ -45,7 +46,7 @@ One `gh pr list -R OWNER/REPO --state merged --limit 100 --json number,headRefNa
 | condition | reason |
 | --- | --- |
 | its branch is in the merged list | merged, the sweep removes it |
-| no matching session | no session |
+| no matching session (Claude workspaces only; an agy workspace is asked in step 3) | no session |
 | `behind` is 0 and the branch has an open PR | up to date with main, still in review |
 
 Everything else is asked: a branch with no PR, or one that main has moved past (`behind > 0`).
@@ -53,7 +54,8 @@ Everything else is asked: a branch with no PR, or one that main has moved past (
 ## 3. Ask
 
 With `--dry-run`, go to step 4. Otherwise one `SendMessage` per workspace, to its `session`, with
-`notify_when_idle: true`. A `busy` session queues the message until its turn ends.
+`notify_when_idle: true`. A `busy` session queues the message until its turn ends. An agy workspace gets the
+same text through `overbridge send <ws> '<message>'`, with no `notify_when_idle`; mark it `asked (agy)`.
 
 ```
 Revisit <branch> in <ws>. It is <ahead> commit(s) ahead of <default> and <behind> behind.
@@ -81,7 +83,7 @@ One table, in `overbridge ahead` order:
 | ws7 | fix/y | 2/4 | – | skipped | no session (overbridge tab ws7) |
 ```
 
-`action` is `asked`, `skipped` or `dry-run`. When sessions report back (the `notify_when_idle` reply), add a
+`action` is `asked`, `asked (agy)`, `skipped` or `dry-run`. When sessions report back (the `notify_when_idle` reply), add a
 line each: `relevant, continuing` or `obsolete: <their reason>`. List the obsolete ones last and offer to
 remove them with the `cleanup` skill. Never remove one yourself.
 

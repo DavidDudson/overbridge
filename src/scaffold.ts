@@ -190,7 +190,7 @@ before this may still carry an auto name: match it through \`overbridge status -
 restart that tab.
 
 An agy workspace has no session for \`ListAgents\` or \`SendMessage\`. \`overbridge status --all\` marks it \`agy\` in
-its last column (\`"agent": "agy"\` with \`--json\`). Reach it with \`overbridge send <workspace> "<message>"\`, which
+its last column (\`"agent": "agy"\` with \`--json\`). Reach it with \`overbridge send <workspace> '<message>'\` (single quotes: a backtick inside double quotes is refused), which
 types the message into its agent pane and submits it. You do not hear when it finishes: check
 \`overbridge status --all\` or its sidebar card later. Use \`overbridge send\` only for agy workspaces; a Claude
 workspace takes \`SendMessage\`. To find branches still worth finishing, use the \`revisit\` skill: it reads
@@ -198,7 +198,7 @@ workspace takes \`SendMessage\`. To find branches still worth finishing, use the
 
 You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge worklist show\` (the ranked list the @work tab keeps; ask the user what to start next from it), \`overbridge item view\`, \`overbridge history\` (where each workspace's time went), read-only
 \`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`icebox\`, \`thaw\`, \`release\`, \`up\`, \`repo add\`). You may also message
-workspace Claudes with \`ListAgents\` and \`SendMessage\`, for example to tell every tab to resume its work; the
+workspace Claudes with \`ListAgents\` and \`SendMessage\`, and agy workspaces with \`overbridge send\`, for example to tell every tab to resume its work; the
 \`whip\` skill does that for every workspace whose work is still outstanding. The \`cleanup\` skill finds finished
 and orphaned workspaces with \`overbridge cleanup --json\` and removes the safe ones once the user confirms.`;
 

@@ -187,7 +187,16 @@ export function removeWorkspace(ws: string, force: boolean) {
 /** Delete `ws`'s folder and its per-workspace files outside it: top cache, PR views, agent state, phase, sidebar pane, tab layout. */
 function removeFolder(ws: string) {
   untrustFolder(wsDir(ws));
-  agyUntrust(wsDir(ws));
+
+  // agy's settings file is optional; a fault in it must not stop the removal
+  if (agentOf(readState().workspaces[ws]) === AgentKind.Agy) {
+    try {
+      agyUntrust(wsDir(ws));
+    } catch (e) {
+      log(`warning: could not drop ${wsDir(ws)} from agy's trusted folders: ${errorMessage(e)}`);
+    }
+  }
+
   rmSync(wsDir(ws), { recursive: true, force: true });
   clearSubagents(metaDir(), ws);
   [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("agent", `${ws}.turn.json`), join("context", `${ws}.json`), join("phase", `${ws}.json`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`), join("pr-view", ws)].forEach((f) =>
@@ -499,18 +508,17 @@ export const workspaceClaudeArgs = (ws: string, settings: string, extra: readonl
 export function claude(ws: string, extra: string[]) {
   const w = getWorkspace(readState(), ws);
   const repos = Object.keys(w.repos);
-  const agy = agentOf(w) === AgentKind.Agy;
+  const isAgy = agentOf(w) === AgentKind.Agy;
   scaffold(ws);
   const cwd = agentDirOf(ws);
   trustFolder(wsDir(ws));
 
-  if (agy) agyTrust(wsDir(ws));
+  if (isAgy) agyTrust(wsDir(ws));
 
   if (cwd !== wsDir(ws)) trustFolder(cwd);
   const [only] = repos;
   const spec = repos.length === 1 && only ? loadRepoConfig(worktreePath(ws, only), only).shell : undefined;
-  const settings = cwd === wsDir(ws) ? scaffoldPlugins() : workspaceSettingsPath(ws);
-  const argv = agy ? agyArgs(extra) : workspaceClaudeArgs(ws, settings, extra);
+  const argv = isAgy ? agyArgs(extra) : workspaceClaudeArgs(ws, cwd === wsDir(ws) ? scaffoldPlugins() : workspaceSettingsPath(ws), extra);
   const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, argv, cwd);
   mkdirSync(dirname(agentShellFile(ws)), { recursive: true });
 

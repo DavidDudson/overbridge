@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AGENT_KINDS, AgentKind, isAgentKind } from "./agent-kind";
+import { AGENT_KINDS, AgentKind } from "./agent-kind";
 import { DEFAULT_CLASSES, type PriorityClass, type PriorityRule } from "./check-priority";
 import { repoOf, root, worktreePath } from "./paths";
 import { loadRepos } from "./config";
@@ -956,12 +956,7 @@ export function rootLayersFrom(raw: Json | undefined, file: string): RootLayers 
   layers.skillExtensions = p.stringList(raw, "skill-extensions", "") ?? [];
   layers.githubOrgs = p.stringList(raw, "github-orgs", "") ?? [];
   const classes = parseClasses(p, raw);
-  const agent = p.string(raw, "agent", "", false);
-
-  if (agent !== undefined) {
-    if (isAgentKind(agent)) layers.agent = agent;
-    else p.add("agent", `unknown agent ${JSON.stringify(agent)}; use one of ${AGENT_KINDS.join(", ")}`);
-  }
+  layers.agent = p.oneOf(p.string(raw, "agent", "", false), AGENT_KINDS, "agent") ?? AgentKind.Claude;
 
   if (classes?.length) layers.checkClasses = classes;
 

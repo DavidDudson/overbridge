@@ -75,7 +75,6 @@ type StartDeps = { provider?: Provider; mux?: Mux; plugins?: () => PluginProblem
  * clean, on a fresh branch from the default branch.
  */
 export function start(repo: string, id: string, prompt?: string, deps: StartDeps = {}) {
-  requirePlugins(deps.plugins, deps.agent);
   const spec = getRepo(repo);
   git.fetch(spec);
   const provider = deps.provider ?? providerForRepo(spec);
@@ -83,6 +82,7 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
   const name = provider.workspaceName(id, repo);
 
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}' for ${id}`);
+  requirePlugins(deps.plugins, agentFor(name, deps.agent));
   const branch = provider.branchName({ id, title });
   const prompts: NewTab = { prompt, defaultPrompt: `/start-item ${id}`, agent: deps.agent };
 
@@ -174,7 +174,7 @@ export function startTask(repo: string, slug: string, prompt: string, deps: { mu
   if (!NAME_RE.test(slug)) fail(`invalid task name '${slug}': use letters, digits, '.', '_' and '-'`);
 
   if (!prompt.trim()) fail("a task needs --prompt: say what the workspace's Claude should do");
-  requirePlugins(deps.plugins, deps.agent);
+  requirePlugins(deps.plugins, agentFor(slug, deps.agent));
   const spec = getRepo(repo);
   git.fetch(spec);
   openWorkspace(slug, repo, `${TASK_BRANCH_PREFIX}${slug}`, { prompt, agent: deps.agent }, deps.mux);
@@ -212,7 +212,6 @@ export function startStack(
   if (dup) fail(`${dup} is listed twice in --stack`);
 
   if (!(deps.ghStack ?? hasGhStack)()) fail("gh-stack is not installed: run `gh extension install github/gh-stack`");
-  requirePlugins(deps.plugins, opts.agent);
   const spec = getRepo(repo);
   git.fetch(spec);
   const provider = deps.provider ?? providerForRepo(spec);
@@ -232,6 +231,7 @@ export function startStack(
   const name = opts.name ?? `${provider.workspaceName(ids[0]!, repo)}${STACK_SUFFIX}`;
 
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}'`);
+  requirePlugins(deps.plugins, agentFor(name, opts.agent));
 
   if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, { agent: opts.agent }, deps.mux);
 
@@ -275,12 +275,22 @@ function undoStack(repo: string, wt: string, made: string[]) {
   for (const b of made) run(["git", "-C", barePath(repo), "branch", "-D", b]);
 }
 
+/** The agent workspace `name` runs: its own when it exists (a workspace keeps its agent), else `explicit`, else the root config's default. */
+export function agentFor(name: string, explicit: AgentKind | undefined): AgentKind {
+  const existing = readState().workspaces[name];
+
+  return existing ? agentOf(existing) : (explicit ?? loadRootLayers().agent);
+}
+
+/** The check that `agent` can load the overbridge skills. */
+export const pluginCheckFor = (agent: AgentKind): (() => PluginProblems) => (agent === AgentKind.Agy ? agyPluginProblems : pluginAndSkillProblems);
+
 /** Stop before any workspace exists when its agent could not load the overbridge skills; print the warnings. */
-function requirePlugins(check?: () => PluginProblems, agent: AgentKind = loadRootLayers().agent) {
-  const { errors, warnings } = (check ?? (agent === AgentKind.Agy ? agyPluginProblems : pluginAndSkillProblems))();
+function requirePlugins(check: (() => PluginProblems) | undefined, agent: AgentKind) {
+  const { errors, warnings } = (check ?? pluginCheckFor(agent))();
 
   if (errors.length) {
-    fail(`the new tab's Claude would not have the overbridge skills, so a command such as /start-item would be unknown:\n${errors.join("\n")}`);
+    fail(`the new tab's ${agent} would not have the overbridge skills, so a command such as /start-item would be unknown:\n${errors.join("\n")}`);
   }
 
   warnings.forEach((w) => log(w));

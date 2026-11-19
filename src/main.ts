@@ -4,7 +4,7 @@ import { REQUIRED_SKILLS, requiredSkillProblems } from "./plugins";
 import { appCommand } from "./app-command";
 import { guardMain } from "./guard";
 import { send } from "./send";
-import { AgentKind, parseAgentKind } from "./agent-kind";
+import { AGENT_KINDS, AgentKind, isAgentKind } from "./agent-kind";
 import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
 import { agentRefusal, configSet } from "./config-set";
@@ -33,7 +33,11 @@ const START_USAGE =
   "usage: overbridge start <repo> <id> [--prompt text] [--here] [--agent claude|agy] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] [--agent claude|agy] | overbridge start <repo> --task <slug> --prompt <text> [--agent claude|agy]";
 
 /** `--agent` as an agent kind, or undefined when it was not given (the root config's `agent` applies). */
-const agentFlag = (v: string | undefined) => (v === undefined ? undefined : parseAgentKind(v, "--agent"));
+export function agentFlag(v: string | undefined): AgentKind | undefined {
+  if (v === undefined || isAgentKind(v)) return v;
+
+  throw new OverbridgeError(`--agent: unknown agent ${JSON.stringify(v)}; use one of ${AGENT_KINDS.join(", ")}`);
+}
 
 const HELP = `overbridge (alias: ws) — multi-repo workspaces with bound Claude sessions in zellij
 

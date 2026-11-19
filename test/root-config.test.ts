@@ -93,7 +93,7 @@ describe("loadRootLayers", () => {
     writeRoot("agent: agy\n");
     expect(loadRootLayers().agent).toBe("agy");
     writeRoot("agent: codex\n");
-    expect(() => loadRootLayers()).toThrow('agent: unknown agent "codex"; use one of claude, agy');
+    expect(() => loadRootLayers()).toThrow('agent: expected one of claude, agy (got "codex")');
   });
 
   test("priority-classes replaces the built-in classes, and resolveConfig checks names against it", () => {
@@ -461,6 +461,25 @@ describe("guard hook", () => {
     writeRoot("guard:\n  deny:\n    - pattern: '\\bnpm publish\\b'\n      reason: no publishing from a workspace\n");
     expect(guard(call("npm publish"))).toEqual({ code: 2, err: "overbridge guard: no publishing from a workspace\n" });
     expect(guard(call("npm test")).code).toBe(0);
+  });
+
+  const agyGuard = (CommandLine: string) => {
+    const p = Bun.spawnSync({
+      cmd: [process.execPath, CLI, "guard", "--agy"],
+      stdin: new TextEncoder().encode(JSON.stringify({ hookEventName: "PreToolUse", cwd: worktree("ws1", "app"), toolCall: { id: "t1", name: "run_command", args: { CommandLine } } })),
+      env: { ...process.env, OVERBRIDGE_ROOT: tmp, OVERBRIDGE_NAME: "" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    return { code: p.exitCode, out: JSON.parse(p.stdout.toString()) };
+  };
+
+  test("under agy, answers with JSON on stdout and exit 0: deny, no decision, and deny on an internal error", () => {
+    expect(agyGuard("git switch main")).toEqual({ code: 0, out: { decision: "deny", reason: expect.stringContaining("overbridge checkout") } });
+    expect(agyGuard("bun test")).toEqual({ code: 0, out: {} });
+    writeRoot("guard: [x]\n");
+    expect(agyGuard("bun test").out).toEqual({ decision: "deny", reason: expect.stringContaining("internal error, blocking to be safe") });
   });
 
   test("a root config that can't be read blocks everything", () => {

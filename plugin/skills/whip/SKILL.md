@@ -34,7 +34,7 @@ overbridge repo ls                   # repo name → URL; take OWNER/REPO from t
 ```
 
 A workspace whose `agent` is `agy` runs Antigravity CLI and has no session in `ListAgents`: skip the
-matching below for it and send in step 4 with `overbridge send <ws> "<message>"` instead.
+matching below for it and send in step 4 with `overbridge send <ws> '<message>'` (single quotes: the orchestrator guard refuses a backtick inside double quotes; write a `'` in the message as `'\''`) instead.
 
 Then call `ListAgents`. A workspace's session is named for the workspace (its launcher passes
 `--name <ws>`). Match each workspace to its rows by that name. A session started before that carries an
@@ -92,7 +92,7 @@ The first match wins, checked in this order:
 | claim is the default branch and the worktree is clean | on main, no changes |
 | the claimed branch's PR is merged and the worktree is clean, nothing unpushed | merged |
 | every open PR is not a draft, `mergeable` is `MERGEABLE`, CI green, no `CHANGES_REQUESTED`, no feedback newer than the head commit, worktree clean, nothing unpushed | mergeable, awaiting merge |
-| no session row matched in `ListAgents` | no session (say `overbridge tab <ws>` reopens it) |
+| no session row matched in `ListAgents` (Claude workspaces only: an agy workspace has none and is sent to in step 4) | no session (say `overbridge tab <ws>` reopens it) |
 
 **Send (outstanding):** any of these, listed in the message in this order.
 
@@ -116,7 +116,7 @@ Note `busy` in the table.
 ## 4. Send
 
 With `--dry-run`, go to step 5. Otherwise one `SendMessage` per outstanding workspace, to the matched
-session row's name; an agy workspace gets the same text through `overbridge send <ws> "<message>"`. The message is a plain continue. It names what is outstanding and nothing else:
+session row's name; an agy workspace gets the same text through `overbridge send <ws> '<message>'` (single quotes: the orchestrator guard refuses a backtick inside double quotes; write a `'` in the message as `'\''`). The message is a plain continue. It names what is outstanding and nothing else:
 
 ```
 Continue. Outstanding in <ws>:
@@ -137,7 +137,7 @@ user, not the whip. Don't restate the handoff or guess at the fix.
 Print one table, every workspace in `overbridge status --all` order:
 
 ```
-| ws | session | sent | reason |
+| ws | session (`agy` for an agy workspace) | sent | reason |
 | --- | --- | --- | --- |
 | gh-app-12 | gh-app-12-3f (busy) | sent | PR #12 "Add thing" draft; dirty app |
 | ws5 | ws5-e3 | skipped | mergeable, awaiting merge |
