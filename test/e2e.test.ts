@@ -593,7 +593,7 @@ describe("thaw --prompt", () => {
       Bun.spawnSync({
         cmd: [process.execPath, CLI, ...args],
         cwd: tmp,
-        env: { ...env(), PATH: `${bin}:${process.env.PATH}`, ZELLIJ: "0", ZELLIJ_SESSION_NAME: "t", LAYOUTS: layouts },
+        env: { ...env(), PATH: `${bin}:${process.env.PATH}`, TMUX: "", ZELLIJ: "0", ZELLIJ_SESSION_NAME: "t", LAYOUTS: layouts },
         stdout: "pipe",
         stderr: "pipe",
       });

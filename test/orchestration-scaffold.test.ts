@@ -60,7 +60,7 @@ describe("orchestration tab scaffolding", () => {
 
   test("its brief thaws an iceboxed workspace that claims the PR's branch instead of starting another", () => {
     const brief = orchestratorPrompt();
-    expect(brief).toContain('overbridge thaw <workspace> --prompt "/pickup #<pr>');
+    expect(brief).toContain('overbridge thaw <workspace> --prompt "/pickup <pr-url>');
     expect(brief).toContain("never start a second workspace for a branch an iceboxed one claims");
     expect(brief.indexOf("overbridge thaw <workspace>")).toBeLessThan(brief.indexOf("overbridge item from-branch"));
   });

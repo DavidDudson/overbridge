@@ -228,7 +228,7 @@ export function startStack(
 
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}'`);
 
-  if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, {}, deps.mux);
+  if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, { prompt: opts.prompt }, deps.mux);
 
   // layers must be new: a branch already on origin belongs to checking out its existing PR or stack
   const remote = branches.find((b) => hasRef(repo, `refs/remotes/origin/${b}`));
