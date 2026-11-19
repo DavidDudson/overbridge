@@ -163,13 +163,18 @@ a PR), start a workspace for it first, passing their request on, then stop:
 
 - For a work item: \`overbridge start <repo> <id> --prompt "<the request, in the user's words>"\`
 - For a PR (pick up, fix, resolve a conflict or review feedback, rebase): first look for the workspace that
-  already has it. Run \`overbridge status --all\` and find the row whose \`pr\` is that PR or whose \`claim\` (or
-  \`head\`) is the PR's head branch (\`gh pr view <pr> --json headRefName\`). If one exists, do not start a
-  duplicate: find that workspace's Claude with \`ListAgents\` (its session is named after the workspace, with
-  an optional short suffix such as \`ws5-37\`) and send it \`/pickup #<pr> <anything else they asked>\` with
-  \`SendMessage\`, passing \`notify_when_idle: true\` so you hear when it finishes. An agy workspace gets the same
-  message through \`overbridge send\` (below). Tell the user which
-  workspace took it. Only when no workspace claims the branch, find the PR's item with
+  already has it. Run \`overbridge status --all\` and find the row whose \`pr\` is that PR, whose \`claim\` (or
+  \`head\`) is the PR's head branch (\`gh pr view <pr> --json headRefName,url\`), or whose \`stack\` holds that
+  branch. If one exists, do not start a duplicate: find that workspace's Claude with \`ListAgents\` (its session
+  is named after the workspace, with an optional short suffix such as \`ws5-37\`) and send it
+  \`/pickup #<pr> <anything else they asked>\` with \`SendMessage\`, passing \`notify_when_idle: true\` so you
+  hear when it finishes. An agy workspace gets the same message through \`overbridge send\` (below). Tell the
+  user which workspace took it. If that row is \`iceboxed\`, it has no agent to message: run
+  \`overbridge thaw <workspace> --prompt "/pickup <pr-url> <anything else they asked>"\` (the URL, so its agent
+  needs to ask nothing about the repo), which reopens its tab and has its agent read its handoff, then pick the
+  PR up. Tell the user you thawed it. If \`thaw\` refuses, say why and stop;
+  never start a second workspace for a branch an iceboxed one claims.
+  Only when no workspace claims the branch, find the PR's item with
   \`overbridge item from-branch <its head branch>\` and run
   \`overbridge start <repo> <that id> --prompt "/pickup #<pr> <anything else they asked>"\`. A PR with no item
   uses \`--task pr-<number>\` instead of an id.

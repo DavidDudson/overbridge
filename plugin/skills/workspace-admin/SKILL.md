@@ -50,7 +50,7 @@ overbridge cleanup [--json] [--no-fetch]          # report which workspaces and 
                                           # rebind, ask, keep); removes nothing. The cleanup skill acts on it
 overbridge icebox <name> [--prune] [--drop-worktree]  # pause: stop apps and checks, write a handoff, close the tab; claims stay; refuses with unsaved work
                                                   # --prune deletes the repo's icebox.prune paths (untracked only); --drop-worktree removes worktrees, keeps branches
-overbridge thaw <name>                            # reopen an iceboxed workspace; its agent resumes and reads the handoff; recreates dropped worktrees
+overbridge thaw <name> [--prompt text]            # reopen an iceboxed workspace; its agent resumes, reads the handoff, then does --prompt (else the handoff's Next); recreates dropped worktrees
 overbridge checks                                 # the @checks tab's pane: the check queue; K/J move a waiting check, t/b to top/bottom
 overbridge frozen                                 # the @frozen tab's pane: lists iceboxed workspaces, t thaws one (f in a sidebar iceboxes its workspace)
 overbridge explore [sync <repo>|shell <repo>]     # the @explore tab's pane: pick a repo, run its apps and editor on a default-branch checkout; sync fast-forwards it when clean

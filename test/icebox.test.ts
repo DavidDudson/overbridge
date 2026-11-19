@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { queueDir, stopChecksFor, ticketName, type Ticket } from "../src/check-queue";
 import { handoffStamp, HandoffReason, renderHandoff } from "../src/handoff";
 import { zellijMux } from "../src/mux";
-import { icebox, type IceboxDeps, prunable, THAW_PROMPT, thaw } from "../src/icebox";
+import { icebox, type IceboxDeps, prunable, THAW_PROMPT, thaw, thawFirstMessage } from "../src/icebox";
 import { entries, icedRows } from "../src/sidebar";
 import { isJsonObject, parseJson } from "../src/json";
 import { isIceboxed, readState, withState } from "../src/state";
@@ -151,10 +151,25 @@ describe("icebox and thaw", () => {
 
   test("thaw clears the mark and opens the tab with the handoff prompt", () => {
     const opened: [string, string][] = [];
-    thaw("calm", { open: (ws, prompt) => void opened.push([ws, prompt]) });
+    thaw("calm", {}, { open: (ws, prompt) => void opened.push([ws, prompt]) });
     expect(isIceboxed(readState().workspaces.calm)).toBe(false);
     expect(opened).toEqual([["calm", THAW_PROMPT]]);
-    expect(() => thaw("calm", { open: () => {} })).toThrow("not iceboxed");
+    expect(() => thaw("calm", {}, { open: () => {} })).toThrow("not iceboxed");
+  });
+
+  test("thaw with a prompt asks the agent to read the handoff, then carry out the prompt", () => {
+    withState((st) => {
+      st.workspaces.calm!.iceboxed = { since: new Date().toISOString() };
+    });
+    const opened: [string, string][] = [];
+    thaw("calm", { prompt: "/pickup #3653" }, { open: (ws, prompt) => void opened.push([ws, prompt]) });
+    expect(opened).toEqual([["calm", "/read-handoff --then /pickup #3653"]]);
+    expect(isIceboxed(readState().workspaces.calm)).toBe(false);
+  });
+
+  test("thawFirstMessage is the bare handoff prompt without a request", () => {
+    expect(thawFirstMessage()).toBe(THAW_PROMPT);
+    expect(thawFirstMessage("")).toBe(THAW_PROMPT);
   });
 
   test("a thawed tab continues the conversation and reads the handoff", () => {
@@ -215,7 +230,7 @@ describe("opt-in reclaim", () => {
     expect(w.repos.app?.branch).toBe("feat/drop");
     expect(icedRows(readState(), 40).join("\n")).toContain("drop iceboxed · dropped");
     const opened: string[] = [];
-    thaw("drop", { open: (ws) => void opened.push(ws) });
+    thaw("drop", {}, { open: (ws) => void opened.push(ws) });
     expect(sh(["git", "branch", "--show-current"], wt)).toBe("feat/drop");
     expect(readFileSync(join(wt, "keep", "tracked.txt"), "utf8")).toBe("t");
     expect(isIceboxed(readState().workspaces.drop)).toBe(false);
@@ -281,11 +296,11 @@ describe("opt-in reclaim", () => {
     const bare = join(root, ".bare", "lib.git");
     const holder = join(tmp, "holder");
     sh(["git", "-C", bare, "worktree", "add", "--quiet", holder, "feat/duo-b"], tmp);
-    expect(() => thaw("duo", { open: () => {} })).toThrow("cannot thaw");
+    expect(() => thaw("duo", {}, { open: () => {} })).toThrow("cannot thaw");
     expect(existsSync(join(root, "duo", "app"))).toBe(false);
     expect(isIceboxed(readState().workspaces.duo)).toBe(true);
     sh(["git", "-C", bare, "worktree", "remove", "--force", holder], tmp);
-    thaw("duo", { open: () => {} });
+    thaw("duo", {}, { open: () => {} });
     expect(sh(["git", "branch", "--show-current"], join(root, "duo", "app"))).toBe("feat/duo-a");
     expect(sh(["git", "branch", "--show-current"], join(root, "duo", "lib"))).toBe("feat/duo-b");
   });
@@ -303,7 +318,7 @@ describe("opt-in reclaim", () => {
     rmSync(join(wt, "node_modules"), { recursive: true });
     await icebox("taken", { dropWorktree: true }, fakeDeps("").deps);
     mkdirSync(wt, { recursive: true });
-    expect(() => thaw("taken", { open: () => {} })).toThrow("already exists");
+    expect(() => thaw("taken", {}, { open: () => {} })).toThrow("already exists");
     expect(isIceboxed(readState().workspaces.taken)).toBe(true);
   });
 });
@@ -315,6 +330,19 @@ describe("asking for an iceboxed workspace's tab", () => {
     });
     showTab("calm");
     expect(isIceboxed(readState().workspaces.calm)).toBe(false);
+  });
+
+  test("passes the caller's prompt on to the thawed agent", () => {
+    withState((st) => {
+      st.workspaces.calm!.iceboxed = { since: new Date().toISOString() };
+    });
+    const { deps, calls } = fakeDeps("");
+    showTab("calm", { prompt: "/pickup #3653", defaultPrompt: "/start-item 1" }, deps.mux);
+    expect(isIceboxed(readState().workspaces.calm)).toBe(false);
+    const newTab = calls.find((c) => c[2] === "new-tab") ?? [];
+    const layout = readFileSync(newTab[newTab.indexOf("--layout") + 1] ?? "", "utf8");
+    expect(layout).toContain(thawFirstMessage("/pickup #3653"));
+    expect(layout).not.toContain("/start-item 1");
   });
 });
 

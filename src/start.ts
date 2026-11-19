@@ -2,7 +2,7 @@ import { AgentKind } from "./agent-kind";
 import { checkout, createWorkspace, holdings, removeWorkspace } from "./commands";
 import { getRepo, type RepoSpec } from "./config";
 import * as git from "./git";
-import { thaw } from "./icebox";
+import { thaw, thawDeps } from "./icebox";
 import { barePath, currentWorkspace, NAME_RE, worktreePath } from "./paths";
 import { agyPluginProblems } from "./agy";
 import { type PluginProblems, pluginProblems, requiredSkillProblems } from "./plugins";
@@ -37,12 +37,12 @@ type NewTab = TabPrompt & { agent?: AgentKind };
 
 /**
  * Bring `ws`'s tab to the front, since you asked for it, opening one with `prompt` (else `defaultPrompt`) when
- * it has none (an iceboxed workspace is thawed instead). An open tab already has its agent, so only an explicit `prompt` is reported as not sent.
+ * it has none (an iceboxed workspace is thawed instead, its agent reading the handoff and then `prompt`). An open tab already has its agent, so only an explicit `prompt` is reported as not sent.
  */
 export function showTab(ws: string, prompts: TabPrompt = {}, mux: Mux = defaultMux()) {
   if (isIceboxed(readState().workspaces[ws])) {
     // an iceboxed workspace has no tab and its agent has a handoff to read, so asking for it thaws it
-    thaw(ws, { open: (name, prompt) => requireTab(name, prompt, TabFocus.Foreground, mux, true) });
+    thaw(ws, { prompt: prompts.prompt }, thawDeps(mux));
 
     return;
   }
@@ -235,7 +235,7 @@ export function startStack(
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}'`);
   requirePlugins(deps.plugins, agentFor(name, opts.agent));
 
-  if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, { agent: opts.agent }, deps.mux);
+  if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, { prompt: opts.prompt, agent: opts.agent }, deps.mux);
 
   // layers must be new: a branch already on origin belongs to checking out its existing PR or stack
   const remote = branches.find((b) => hasRef(repo, `refs/remotes/origin/${b}`));

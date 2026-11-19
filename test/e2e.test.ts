@@ -579,3 +579,29 @@ describe("config set", () => {
     }
   });
 });
+
+describe("thaw --prompt", () => {
+  test("opens the thawed tab with the handoff read first, then the request", () => {
+    expect(ws(["new", "frz", "-r", "app"]).code).toBe(0);
+    const bin = join(tmp, "thaw-bin");
+    const layouts = join(tmp, "thaw-layouts");
+    mkdirSync(bin, { recursive: true });
+    // a stand-in zellij: every action succeeds, and each --layout file it is given is appended to $LAYOUTS
+    writeFileSync(join(bin, "zellij"), '#!/bin/sh\nprev=""\nfor a; do [ "$prev" = "--layout" ] && cat "$a" >> "$LAYOUTS"; prev=$a; done\nexit 0\n', { mode: 0o755 });
+
+    const inZellij = (args: string[]) =>
+      Bun.spawnSync({
+        cmd: [process.execPath, CLI, ...args],
+        cwd: tmp,
+        env: { ...env(), PATH: `${bin}:${process.env.PATH}`, TMUX: "", ZELLIJ: "0", ZELLIJ_SESSION_NAME: "t", LAYOUTS: layouts },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+
+    const iced = inZellij(["icebox", "frz"]);
+    expect(iced.exitCode, iced.stderr.toString()).toBe(0);
+    const thawed = inZellij(["thaw", "frz", "--prompt", "/pickup #7"]);
+    expect(thawed.exitCode).toBe(0);
+    expect(readFileSync(layouts, "utf8")).toContain("/read-handoff --then /pickup #7");
+  });
+});
