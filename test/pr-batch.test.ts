@@ -3,11 +3,11 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JsonObject, JsonValue } from "../src/json";
-import { buildBatchQuery, type GhRun, mapPr, parseBatch, PrBatcher } from "../src/pr-batch";
+import { buildBatchQuery, type GhRun, isSettled, mapPr, parseBatch, PR_SETTLED_TTL_MS, PR_TTL_MS, PrBatcher, ttlFor } from "../src/pr-batch";
 import { ownerRepo } from "../src/repo-slug";
 import { withState } from "../src/state";
 import { cachedClaimedPrs, claimedPrs, prefetchFor } from "../src/server-prs";
-import { refreshTop } from "../src/top";
+import { type PrView, refreshTop } from "../src/top";
 import { fakeProvider } from "./helpers/fake-provider";
 
 const URL = "https://github.com/o/r/pull/3";
@@ -89,11 +89,12 @@ describe("PR batch mapping", () => {
     expect(() => parseBatch("oops", [3])).toThrow("not JSON");
   });
 
-  test("a PR whose comments, reviews or review requests the query cut short is read directly", () => {
+  test("a PR whose comments, reviews, review requests or labels the query cut short is read directly", () => {
     const cut = (extra: JsonObject) => parseBatch(JSON.stringify({ data: { repository: { p3: { ...node, ...extra } } } }), [3]).prs[3];
     expect(cut({ comments: { ...node.comments, pageInfo: { hasPreviousPage: true } } })).toBeUndefined();
     expect(cut({ latestReviews: { ...node.latestReviews, pageInfo: { hasNextPage: true } } })).toBeUndefined();
     expect(cut({ reviewRequests: { ...node.reviewRequests, pageInfo: { hasNextPage: true } } })).toBeUndefined();
+    expect(cut({ labels: { nodes: [], pageInfo: { hasNextPage: true } } })).toBeUndefined();
     expect(cut({})).toBeTruthy();
   });
 
@@ -292,10 +293,12 @@ describe("prefetchFor and claimedPrs", () => {
 
   test("prefetchFor leaves a non-GitHub repo out, passes force, and turns a failure into that repo's error", async () => {
     const seen: { repo: string; numbers: number[]; force?: boolean }[] = [];
+    const heads: Readonly<Record<number, string>>[] = [];
 
     class Recording extends PrBatcher {
-      override async get(repo: string, numbers: number[], o: { force?: boolean } = {}) {
-        seen.push({ repo, numbers, force: o.force });
+      override async get(repo: string, numbers: number[], o: { force?: boolean; heads?: Readonly<Record<number, string>> } = {}) {
+        if (o.force) seen.push({ repo, numbers, force: o.force });
+        heads.push(o.heads ?? {});
 
         return { prs: { 8: null } };
       }
@@ -307,10 +310,64 @@ describe("prefetchFor and claimedPrs", () => {
       }
     }
 
-    const ok = await prefetchFor("w1", new Recording(), { force: true });
+    const ok = await prefetchFor("w1", new Recording(), { force: true, head: async () => undefined });
     expect(Object.keys(ok)).toEqual(["gh"]);
     expect(seen).toEqual([{ repo: "o/r", numbers: [8, 7, 9], force: true }]);
+    await prefetchFor("w1", new Recording(), { head: async () => "sha" });
+    expect(heads.at(-1)).toEqual({ 8: "sha" });
     const bad = await prefetchFor("w1", new Failing());
     expect(bad).toEqual({ gh: { error: "down" } });
+  });
+});
+
+describe("settled TTL", () => {
+  const open = (over: Partial<PrView> = {}): PrView => ({ url: "https://github.com/o/r/pull/1", state: "OPEN", mergeable: "MERGEABLE", headRefOid: "abc", statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS" }], ...over });
+
+  test("a PR waiting on nothing is settled; running checks, unknown mergeability or a bot review in flight are not", () => {
+    expect(isSettled(null)).toBe(true);
+    expect(isSettled(undefined)).toBe(false);
+    expect(isSettled(open({ state: "MERGED", statusCheckRollup: [{ status: "IN_PROGRESS" }] }))).toBe(true);
+    expect(isSettled(open())).toBe(true);
+    expect(isSettled(open({ statusCheckRollup: [{ status: "QUEUED" }] }))).toBe(false);
+    expect(isSettled(open({ statusCheckRollup: [{ state: "PENDING" }] }))).toBe(false);
+    expect(isSettled(open({ statusCheckRollup: [{ state: "SUCCESS" }] }))).toBe(true);
+    expect(isSettled(open({ mergeable: "UNKNOWN" }))).toBe(false);
+    expect(isSettled(open({ reviewRequests: [{ login: "Copilot" }] }))).toBe(false);
+    expect(isSettled(open({ statusCheckRollup: [] }))).toBe(false);
+  });
+
+  test("the long TTL needs every PR settled and every caller's HEAD on its PR's head", () => {
+    expect(ttlFor(undefined)).toBe(PR_TTL_MS);
+    expect(ttlFor({})).toBe(PR_TTL_MS);
+    expect(ttlFor({ 1: open(), 2: null })).toBe(PR_SETTLED_TTL_MS);
+    expect(ttlFor({ 1: open(), 2: open({ statusCheckRollup: [{ status: "IN_PROGRESS" }] }) })).toBe(PR_TTL_MS);
+    expect(ttlFor({ 1: open() }, { 1: "abc" })).toBe(PR_SETTLED_TTL_MS);
+    expect(ttlFor({ 1: open() }, { 1: "new" })).toBe(PR_TTL_MS);
+  });
+
+  test("the batch view carries labels and the author, and no author for a deleted user", () => {
+    const node = { url: "u", labels: { nodes: [{ name: "p1" }, {}] }, author: { login: "me" } };
+    expect(mapPr(node)).toMatchObject({ author: { login: "me" }, labels: [{ name: "p1" }] });
+    expect(mapPr({ ...node, author: null }).author).toBeUndefined();
+  });
+
+  test("a settled reply is served past the short TTL", async () => {
+    let t = 0;
+    let calls = 0;
+    const node = { url: "https://github.com/o/r/pull/1", state: "OPEN", mergeable: "MERGEABLE", headRefOid: "abc", commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [{ __typename: "CheckRun", name: "b", status: "COMPLETED", conclusion: "SUCCESS" }] } } } }] } };
+
+    const run: GhRun = async () => {
+      calls++;
+
+      return { stdout: JSON.stringify({ data: { repository: { p1: node } } }), stderr: "", code: 0 };
+    };
+
+    const b = new PrBatcher({ run, sleep: async () => undefined, now: () => t });
+    await b.get("o/r", [1], { heads: { 1: "abc" } });
+    t = PR_TTL_MS + 1;
+    await b.get("o/r", [1], { heads: { 1: "abc" } });
+    expect(calls).toBe(1);
+    await b.get("o/r", [1], { heads: { 1: "pushed" } });
+    expect(calls).toBe(2);
   });
 });

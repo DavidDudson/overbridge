@@ -13,6 +13,10 @@ export interface PrListCache {
   rows: PrRow[];
   /** Why the last read failed, if it did. */
   error?: string;
+  /** The probe the rows were read after: a refresh whose probe matches it keeps the rows. */
+  signature?: string;
+  /** When the rows were last read in full. */
+  fullAt?: number;
 }
 
 export const prListPath = (kind: PrListKind) => join(metaDir(), `prlist-${kind}.json`);

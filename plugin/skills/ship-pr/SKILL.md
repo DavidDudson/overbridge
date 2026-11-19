@@ -167,12 +167,13 @@ The PR isn't done until CI passes. The push already happened, so CI is running.
 1. **Watch the checks, but not the human-approval gates.** A check that waits for a person (a policy or approval bot, a visual-review check) stays `pending` until someone acts, so `gh pr checks --watch` would hang. Identify such checks once, by name, tell the user which you are treating as gates, and poll a filtered view:
    ```sh
    GATES='policy-bot'     # regex of gate names for this repo, case-insensitive; extend it as you learn them
-   gh pr checks <pr> --json name,bucket \
+   overbridge pr-checks <repo> --pr <pr> \
      | jq --arg g "$GATES" '[.[] | select((.name | ascii_downcase | test($g)) | not)]
            | {unfinished: (map(select(.bucket=="pending")) | map(.name)),
               failed:     (map(select(.bucket=="fail"))    | map(.name))}'
    ```
-   (`bucket` is one of pass, fail, pending, skipping, cancel.) Re-poll every ~30s until `unfinished` is empty, then **return**: a still-pending gate does not block moving on. Hand the user the link of a pending gate (`gh pr checks <pr> --json name,link`) and say it needs their approval, not a rerun.
+   `overbridge pr-checks` prints what `gh pr checks --json name,state,bucket,link` prints. For the PR this workspace claims, while its branch is checked out, it reads the overbridge server's shared PR read, so polling costs no GitHub call of its own, and it adds a pending row until GitHub has your local HEAD. Any other PR, or HEAD on another stack layer, is read from GitHub directly. The claim moves between stack layers only when `overbridge pr <repo>` runs, so run it after `gh stack up` or `down`. `<repo>` is the repo name `overbridge status` shows; always pass `--pr`. Use `gh pr checks` only when `overbridge pr-checks` fails.
+   (`bucket` is one of pass, fail, pending, skipping, cancel.) Re-poll every ~30s until `unfinished` is empty, then **return**: a still-pending gate does not block moving on. Hand the user the link of a pending gate (the `link` field of its row) and say it needs their approval, not a rerun.
 2. **If a check fails**, read why: `gh run view <run-id> --log-failed`.
 3. **Classify each failure:**
    - **Caused by this branch** (merge conflict, type error, test failure from your change): fix it. For a branch behind its base, use the `merge-main` skill on a normal PR. On a stack use `gh stack sync`, never a plain rebase of one mid-stack branch. Commit, push, re-watch.
@@ -208,7 +209,7 @@ Then record in the report: Copilot and CodeRabbit reviews requested (or why not)
    ```sh
    gh api "repos/$owner/$repo/pulls/$pr/reviews" \
      --jq '.[] | select(.user.login | test("copilot|coderabbit"; "i")) | {who: .user.login, state, at: .submitted_at}'
-   gh pr checks "$pr" --json name,bucket --jq '.[] | select(.name | test("coderabbit"; "i"))'
+   overbridge pr-checks <repo> --pr "$pr" | jq '.[] | select(.name | test("coderabbit"; "i"))'
    ```
    A reviewer is done when it has a review newer than the last push, or (CodeRabbit) its `CodeRabbit` check has finished. Skip a reviewer when the request above found it is not enabled, unavailable or out of quota, or when nothing appears after a reasonable wait: say so and move on.
 2. Invoke the `resolve-feedback` skill on the PR. It treats Copilot and CodeRabbit the same way. On a stack it must keep the chain intact: `gh stack sync`, or a manual rebase onto `origin/$BASE_BRANCH`, never the default branch.

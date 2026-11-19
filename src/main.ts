@@ -142,6 +142,8 @@ Branches & PRs (workspace inferred from $OVERBRIDGE_NAME or cwd)
                                         a stacked PR pulls its whole stack via gh stack
   overbridge release [repo]                     drop claim, detach worktree in place
   overbridge pr [repo]                          record the open PR; claim follows HEAD within a stack
+  overbridge pr-checks [repo] [--pr n]          the PR's checks as gh pr checks --json name,state,bucket,link,
+                                        from the server's shared PR read (falls back to gh with no server)
 
 Session (zellij by default; OVERBRIDGE_MUX=tmux for tmux)
   overbridge spinup                             rebuild the session (creates an empty 'scratch' workspace if none)
@@ -349,11 +351,11 @@ async function main(argv: string[]): Promise<number> {
     case "reviews": {
       const kind: PrListKind = sub;
 
-      if (rest[0] === "refresh") {
-        const cache = refreshPrList(kind);
+      if (rest[0] === "refresh" && (rest.length === 1 || (rest.length === 2 && rest[1] === "--force"))) {
+        const cache = refreshPrList(kind, Date.now(), undefined, { force: rest[1] === "--force" });
         log(`${kind}: ${cache.rows.length} open PR(s)${cache.error ? `; ${cache.error}` : ""}`);
       } else if (rest[0] !== undefined) {
-        throw new OverbridgeError(`usage: overbridge ${kind} [refresh]`);
+        throw new OverbridgeError(`usage: overbridge ${kind} [refresh [--force]]`);
       } else {
         await prListPane(kind);
       }
@@ -479,6 +481,14 @@ async function main(argv: string[]): Promise<number> {
       const { values, positionals } = opts(rest, ws);
       cmd.recordPr(positionals[0], values.ws);
       break;
+    }
+
+    case "pr-checks": {
+      const { values, positionals } = opts(rest, { ...ws, pr: { type: "string" as const } });
+      const target = cmd.prChecksTarget(positionals[0], values.pr, values.ws);
+      const { prChecks, defaultPrChecksDeps } = await import("./pr-checks-run");
+
+      return prChecks(target, defaultPrChecksDeps());
     }
 
     case "up": {

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cacheStale } from "../src/agent-hook";
-import { createHandler, type HandlerDeps, sweepTick, type SweepTickDeps, workerFileGone } from "../src/server";
+import { type BatchedPrView, createHandler, type HandlerDeps, sweepTick, type SweepTickDeps, workerFileGone } from "../src/server";
 import { staleCandidates } from "../src/merge-sweep";
 import { serverRefresh, serverRefreshAll } from "../src/server-client";
 import type { ServerStatus } from "../src/server-cmd";
@@ -533,5 +533,75 @@ describe("real server", () => {
     expect(await s.exited).toBe(0);
     expect(existsSync(socketPath())).toBe(false);
     expect(await serverRefresh("w1", { start: false })).toBeUndefined();
+  });
+});
+
+describe("PR list and PR checks routes", () => {
+  test("callers of one list inside the TTL share a read; force reads again; the other list reads apart", async () => {
+    const reads: string[] = [];
+    let t = 0;
+
+    const { deps } = handlerDeps({
+      refreshPrList: async (kind, force) => {
+        reads.push(`${kind}${force ? "!" : ""}`);
+
+        return t;
+      },
+      now: () => t,
+    });
+
+    const h = createHandler(deps);
+    const [a, b] = await Promise.all([post(h, "/refresh/prlist/prs"), post(h, "/refresh/prlist/prs")]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    await post(h, "/refresh/prlist/reviews");
+    t += 1_000;
+    expect(await post(h, "/refresh/prlist/prs?force=1").then((r) => r.json())).toMatchObject({ served: "fresh" });
+    expect(reads).toEqual(["prs", "reviews", "prs!"]);
+    expect((await post(h, "/refresh/prlist/other")).status).toBe(404);
+  });
+
+  test("a list read that fails with nothing held is a 502 with the reason", async () => {
+    const { deps } = handlerDeps({
+      refreshPrList: async () => {
+        throw new Error("GitHub rate limit reached");
+      },
+    });
+
+    const r = await post(createHandler(deps), "/refresh/prlist/reviews");
+    expect(r.status).toBe(502);
+    expect(await r.json()).toEqual({ error: "GitHub rate limit reached" });
+  });
+
+  test("pr-checks serves the batch's view, null for a gone PR, nothing for one cut short", async () => {
+    const served = (pr: number): BatchedPrView => {
+      if (pr === 1) return { view: { url: "u", state: "OPEN" } };
+
+      if (pr === 2) return { view: null };
+
+      if (pr === 3) return { view: undefined, error: "stale" };
+      throw new Error("down");
+    };
+
+    const heads: (string | undefined)[] = [];
+
+    const { deps } = handlerDeps({
+      prView: async (_repo, pr, head) => {
+        heads.push(head);
+
+        return served(pr);
+      },
+    });
+
+    const h = createHandler(deps);
+    const get = (q: string) => h.handle(new Request(`http://x/pr-checks?${q}`));
+    expect(await get("repo=o/r&pr=1").then((r) => r.json())).toEqual({ view: { url: "u", state: "OPEN" } });
+    expect(await get("repo=o/r&pr=2").then((r) => r.json())).toEqual({ view: null });
+    expect(await get("repo=o/r&pr=3").then((r) => r.json())).toEqual({ error: "stale" });
+    expect((await get("repo=o/r&pr=4")).status).toBe(502);
+    expect((await get("repo=o&pr=1")).status).toBe(400);
+    expect((await get("repo=o/r&pr=x")).status).toBe(400);
+    expect((await get("repo=o/r&pr=1&head=nope")).status).toBe(400);
+    await get(`repo=o/r&pr=1&head=${"a".repeat(40)}`);
+    expect(heads.at(-1)).toBe("a".repeat(40));
   });
 });

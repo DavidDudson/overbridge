@@ -22,7 +22,7 @@ export interface ReviewerView {
   reviewRequests?: { login?: string; name?: string }[];
   latestReviews?: { author?: { login?: string }; state?: string; submittedAt?: string; url?: string }[];
   comments?: { author?: { login?: string }; body?: string; createdAt?: string; url?: string }[];
-  statusCheckRollup?: { name?: string; context?: string; status?: string; conclusion?: string; state?: string; detailsUrl?: string; targetUrl?: string }[];
+  statusCheckRollup?: { name?: string; context?: string; status?: string; conclusion?: string; state?: string; detailsUrl?: string; targetUrl?: string; startedAt?: string }[];
   /** Unresolved review threads each reviewer opened, from `threadsCommand`. */
   unresolved?: Partial<Record<"Copilot" | "CodeRabbit", number>>;
 }

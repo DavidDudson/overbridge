@@ -2,6 +2,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, 
 import { basename, dirname, join, resolve } from "node:path";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
+import type { PrChecksTarget } from "./pr-checks";
+import { slugOfDir } from "./repo-slug";
 import { checkClassNames, configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, type ProjectConfig, rootConfigPath } from "./project-config";
 import { aheadRows } from "./ahead";
 import { clearPhase, parseLayer, PHASES, writePhase } from "./task-status";
@@ -329,6 +331,38 @@ export function release(repo: string | undefined, wsOpt?: string) {
       log(`released ${ws}/${r}`);
     }
   });
+}
+
+/**
+ * What `overbridge pr-checks` reads: `repo`'s claimed PR in the workspace (the only claimed repo when none is named), or
+ * `prOpt`. The local HEAD is compared only when the PR is the claim's own.
+ */
+export function prChecksTarget(repo: string | undefined, prOpt: string | undefined, wsOpt?: string): PrChecksTarget {
+  const ws = requireWs(wsOpt);
+  const claims = Object.entries(getWorkspace(readState(), ws).repos);
+  const candidates = prOpt === undefined ? claims.filter(([, c]) => c.pr !== undefined) : claims;
+  const named = repo === undefined ? candidates : claims.filter(([r]) => r === repo);
+
+  if (named.length !== 1) {
+    fail(repo === undefined ? `${ws} has ${named.length} candidate repos; name one: overbridge pr-checks <repo>` : `${repo} is not in ${ws}`);
+  }
+
+  const [name, claim] = named[0]!;
+  const pr = prOpt === undefined ? claim.pr : Number(prOpt);
+
+  if (pr === undefined || !Number.isInteger(pr) || pr <= 0) {
+    fail(prOpt === undefined ? `${ws}/${name} has no PR recorded; run overbridge pr ${name}, or pass --pr <number>` : `--pr takes a PR number, not '${prOpt}'`);
+  }
+
+  const dir = worktreePath(ws, name);
+  const slug = slugOfDir(dir) ?? fail(`${name}'s origin is not a GitHub repo`);
+  const target: PrChecksTarget = { slug, pr, dir };
+  // on a stack HEAD can sit on another layer until `overbridge pr` moves the claim, so HEAD counts only on the claimed branch
+  const head = pr === claim.pr && claim.branch !== undefined && git.currentBranch(dir) === claim.branch ? git.headSha(dir) : undefined;
+
+  if (head) target.head = head;
+
+  return target;
 }
 
 export function recordPr(repo: string | undefined, wsOpt?: string) {

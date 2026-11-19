@@ -11,10 +11,11 @@ import { startWatchdog } from "./server-watchdog";
 import { createSweeper } from "./server-sweep";
 import { readState } from "./state";
 import { claimSweep } from "./sweep-trigger";
-import { type PrefetchedPrs, readTopCache, type TopCache } from "./top";
+import { type PrefetchedPrs, type PrView, readTopCache, type TopCache } from "./top";
 import { PrBatcher } from "./pr-batch";
 import { createWorklistRefresher } from "./server-worklist";
 import { finishWorklist } from "./worklist-data";
+import type { PrListCache, PrListKind } from "./prlist-data";
 import { cachedClaimedPrs, prefetchFor } from "./server-prs";
 import { log } from "./util";
 import { overbridgeBuildTime, overbridgeVersion, parseBuildTime, shouldReplace } from "./version";
@@ -35,12 +36,22 @@ export const TOP_STALE_MS = 10 * 60_000;
 export const PERF_TTL_MS = 5_000;
 export const PERF_STALE_MS = 60_000;
 
+/** Long enough to share one read between callers that ask together, short of the panes' 60 s refresh. */
+export const PRLIST_TTL_MS = 30_000;
+export const PRLIST_STALE_MS = 30 * 60_000;
+
 /** How often the server checks whether the sweep is due. */
 export const SWEEP_TICK_MS = 5_000;
 export const IDLE_EXIT_MS = 10 * 60_000;
 
 /** Refreshes running at once: each runs `gh` calls of its own. */
 export const MAX_REFRESHES = 4;
+
+/** One PR from the shared batch: null when GitHub has no such PR, undefined when the batch cut it short; `error` when it is stale. */
+export interface BatchedPrView {
+  view: PrView | null | undefined;
+  error?: string;
+}
 
 export interface HandlerDeps {
   refreshTop: (ws: string, o?: { force?: boolean }) => Promise<TopCache>;
@@ -49,6 +60,10 @@ export interface HandlerDeps {
   /** Refresh the work list (`worklist.json`); resolves with when. Absent: the route answers 404 and the pane runs a child. */
   refreshWorklist?: (force: boolean) => Promise<number>;
   worklistStats?: () => object;
+  /** Refresh a PR list (`prlist-<kind>.json`); resolves with when it was read. Absent: the route answers 404 and the pane runs a child. */
+  refreshPrList?: (kind: PrListKind, force: boolean) => Promise<number>;
+  /** One PR's view from the shared batch, for `overbridge pr-checks`; null when GitHub has no such PR. Absent: `GET /pr-checks` answers 404. */
+  prView?: (repo: string, pr: number, head?: string) => Promise<BatchedPrView>;
   workspaceExists: (ws: string) => boolean;
   /** When `ws`'s top cache file was last written (ms since epoch), 0 when it has none. */
   cacheFileAt: (ws: string) => number;
@@ -110,6 +125,7 @@ export function createHandler(deps: HandlerDeps) {
   const report = deps.log ?? (() => undefined);
   const cache = new Cache<TopCache>({ maxInFlight: MAX_REFRESHES, now, onError: (key, e) => report(`${key}: ${e.message}`) });
   const perf = new Cache<number>({ maxInFlight: 1, now, onError: (key, e) => report(`${key}: ${e.message}`) });
+  const lists = new Cache<number>({ maxInFlight: 2, now, onError: (key, e) => report(`${key}: ${e.message}`) });
   const events = createEvents();
   /** Ends each open event stream; a stream the client drops removes itself. */
   const streams = new Set<() => void>();
@@ -274,6 +290,47 @@ export function createHandler(deps: HandlerDeps) {
       }
     }
 
+    if (req.method === "GET" && url.pathname === "/pr-checks" && deps.prView) {
+      const repo = url.searchParams.get("repo") ?? "";
+      const pr = Number(url.searchParams.get("pr"));
+      const head = url.searchParams.get("head") ?? undefined;
+
+      if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isInteger(pr) || pr <= 0 || (head !== undefined && !/^[0-9a-f]{40}$/.test(head))) {
+        return json(400, { error: "pass repo=<owner/name>, pr=<number> and optionally head=<commit sha>" });
+      }
+
+      try {
+        const { view, error } = await deps.prView(repo, pr, head);
+        // no `view` is a PR the batch cut short (too many checks or threads): the client reads it from GitHub itself
+        const body = view === undefined ? {} : { view };
+
+        return json(200, error ? { ...body, error } : body);
+      } catch (e) {
+        return json(502, { error: errorText(e) });
+      }
+    }
+
+    const list = /^\/refresh\/prlist\/(prs|reviews)$/.exec(url.pathname);
+
+    if (req.method === "POST" && list && deps.refreshPrList) {
+      const kind = list[1] === "prs" ? "prs" : "reviews";
+      const refreshList = deps.refreshPrList;
+      const force = url.searchParams.get("force") === "1";
+
+      try {
+        const { served, error } = await lists.get(`prlist:${kind}`, async () => {
+          const at = await refreshList(kind, force);
+          events.publish(`prlist:${kind}`);
+
+          return at;
+        }, { ttlMs: PRLIST_TTL_MS, staleMs: PRLIST_STALE_MS, force });
+
+        return json(200, servedBody(served, error));
+      } catch (e) {
+        return json(502, { error: errorText(e) });
+      }
+    }
+
     const top = /^\/refresh\/top\/([^/]+)$/.exec(url.pathname);
 
     if (req.method === "POST" && top) {
@@ -324,7 +381,7 @@ export function createHandler(deps: HandlerDeps) {
     },
     /** End every event stream, so a client reconnects to whichever server runs next. */
     closeStreams: () => [...streams].forEach((close) => close()),
-    busy: () => cache.busy || perf.busy || (deps.prBusy?.() ?? false) || (deps.worklistBusy?.() ?? false) || (deps.sweepBusy?.() ?? false),
+    busy: () => cache.busy || perf.busy || lists.busy || (deps.prBusy?.() ?? false) || (deps.worklistBusy?.() ?? false) || (deps.sweepBusy?.() ?? false),
   };
 }
 
@@ -408,6 +465,9 @@ const refreshJob = (ws: string, prefetched: PrefetchedPrs, o: RefreshOptions): R
 };
 
 const REFRESH_WORKER = "./server-worker.ts";
+
+/** A probe and up to one full search per owner, 30 s at most each. */
+const PRLIST_WORKER_TIMEOUT_MS = 150_000;
 const WORKER_GONE_MESSAGE = "server code was removed by an upgrade; exiting so the next client starts the installed version";
 
 /** Whether the refresh worker's file is gone: pnpm deletes the old package folder on upgrade while its server still runs. */
@@ -553,6 +613,21 @@ export async function serve(): Promise<void> {
       return r.value;
     },
     worklistStats: () => worklist.stats(),
+    refreshPrList: async (kind, force) => {
+      // as the top refresh: a forced read goes past a pause once, and every failure that reads as a rate limit feeds the gate
+      const forced = force && gate.allowForced();
+      const paused = gate.message();
+
+      if (paused && !forced) throw new Error(paused);
+      const read = await workerCall<PrListCache, { kind: PrListKind; force: boolean }>("./server-prlist-worker.ts", { kind, force: forced }, PRLIST_WORKER_TIMEOUT_MS);
+
+      if (read.error) {
+        gate.observe(read.error);
+        throw new Error(read.error);
+      }
+
+      return read.at;
+    },
     worklistBusy: () => worklist.busy,
     rateStats: () => gate.stats(),
     refreshTop: async (ws, o) => {
@@ -571,6 +646,11 @@ export async function serve(): Promise<void> {
       return refreshInWorker(ws, prefetched, job);
     },
     prBatch: () => batcher.stats(),
+    prView: async (repo, pr, head) => {
+      const { prs, error } = await batcher.get(repo, [pr], { heads: head ? { [pr]: head } : {} });
+
+      return error ? { view: prs[pr], error } : { view: prs[pr] };
+    },
     prBusy: () => batcher.busy,
     refreshPerf: refreshPerfInWorker,
     workspaceExists: (ws) => ws in readState().workspaces,

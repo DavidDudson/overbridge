@@ -100,3 +100,9 @@ describe("my PRs read, edge cases", () => {
     expect(row!.title).toBe("evil]0;xtitle");
   });
 });
+
+describe("sized reads", () => {
+  test("the full read asks for the page it is given", () => {
+    expect(graphqlCommand([], 7).join(" ")).toContain("first:7");
+  });
+});

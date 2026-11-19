@@ -124,8 +124,13 @@ Push, then read CI from GitHub rather than running the build locally. Do not use
 instead and treat the build as settled once every other check has finished:
 
 ```sh
-gh pr checks <n> --json name,bucket --jq '{unfinished: [.[]|select(.bucket=="pending")|.name], failed: [.[]|select(.bucket=="fail")|.name]}'
+overbridge pr-checks <repo> --pr <n> | jq '{unfinished: [.[]|select(.bucket=="pending")|.name], failed: [.[]|select(.bucket=="fail")|.name]}'
 ```
+
+`overbridge pr-checks` reads the claimed PR's checks from the overbridge server's shared PR read, so polling costs no
+GitHub call of its own, and it shows a pending row until GitHub has your local HEAD. Any other PR, or HEAD on another stack
+layer, is read from GitHub directly. `<repo>` is the name `overbridge status` shows. Use `gh pr checks <n> --json name,bucket`
+only when it fails.
 
 Repoll about every 30 seconds. A pending check that needs a person's approval does not block: tell the
 user it is waiting on them. For a failure, read it with `gh run view <run-id> --log-failed`. Fix what

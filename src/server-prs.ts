@@ -1,4 +1,5 @@
 import { getRepo } from "./config";
+import { worktreePath } from "./paths";
 import { ownerRepo } from "./repo-slug";
 import type { PrBatcher } from "./pr-batch";
 import { displayStacks, type Stack, stackOf } from "./stack";
@@ -76,13 +77,26 @@ export function cachedClaimedPrs(ttlMs: number, now: () => number = Date.now): (
   };
 }
 
+/** The commit checked out in `dir`, or undefined when git cannot tell. */
+export async function localHead(dir: string): Promise<string | undefined> {
+  try {
+    const p = Bun.spawn(["git", "-C", dir, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+    const out = (await new Response(p.stdout).text()).trim();
+
+    return (await p.exited) === 0 && out ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * The PR views `ws` needs, from the batcher: one `gh` call per repo however many workspaces ask. A repo whose remote is
  * not GitHub is left out, so `refreshTop` reads it as it does today; a failed call is carried as that repo's error.
  */
-export async function prefetchFor(ws: string, batcher: PrBatcher, o: { force?: boolean } = {}): Promise<PrefetchedPrs> {
+export async function prefetchFor(ws: string, batcher: PrBatcher, o: { force?: boolean; head?: (dir: string) => Promise<string | undefined> } = {}): Promise<PrefetchedPrs> {
   const out: PrefetchedPrs = {};
   const claims = Object.entries(getWorkspace(readState(), ws).repos);
+  const head = o.head ?? localHead;
   await Promise.all(
     claims.map(async ([repo, c]) => {
       const full = repoOf(repo);
@@ -90,7 +104,10 @@ export async function prefetchFor(ws: string, batcher: PrBatcher, o: { force?: b
       if (!full || c.pr === undefined) return;
 
       try {
-        const { prs, error } = await batcher.get(full, claimPrs(repo, c.branch, c.pr), o);
+        // a local HEAD that is not the PR's head (a push GitHub has not been read since) keeps the repo on the short TTL
+        const sha = await head(worktreePath(ws, repo));
+        const heads = sha === undefined ? {} : { [c.pr]: sha };
+        const { prs, error } = await batcher.get(full, claimPrs(repo, c.branch, c.pr), { force: o.force === true, heads });
         out[repo] = error ? { prs, error } : { prs };
       } catch (e) {
         out[repo] = { error: errorText(e) };

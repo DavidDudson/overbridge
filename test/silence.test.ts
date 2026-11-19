@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { carrySeenAt, isSilenced, parseMentions, parseStore, readMentions, readStore, type SilenceStore, silencedSince, toggled, watchedUrls } from "../src/silence";
 import { isGithubItem, mentionCommand, mentionQuery, mentionsUser, newestMention, parseMentionReply, scanMentions, URLS_PER_QUERY } from "../src/mention-scan";
-import { keepNewest, listedRows, listedUrls, MENTION_REFRESH_MS, mentionScanError, refreshMentions, spawnMentionRefresh, toggleMessage, toggleSilence } from "../src/silence-refresh";
+import { keepNewest, listedRows, listedUrls, MENTION_MAX_AGE_MS, MENTION_REFRESH_MS, mentionScanError, mentionSignature, refreshMentions, spawnMentionRefresh, toggleMessage, toggleSilence } from "../src/silence-refresh";
 import { prBadgeFromCache, prListBadge, workBadgeFromCache } from "../src/my-badges";
 import { readPrList, refreshPrList, renderPrList } from "../src/prlist-run";
 import { renderWorklist } from "../src/worklist-run";
@@ -316,6 +316,27 @@ describe("on disk", () => {
     expect(listedUrls()).toEqual(new Set([URL_A, URL_B]));
     toggleSilence({ url: "https://github.com/o/r/issues/77" }, new Date(T1));
     expect([...readStore().keys()]).toEqual(["https://github.com/o/r/issues/77"]);
+  });
+
+  test("a scan of the same items is skipped while it is young; an update or age scans again", () => {
+    let scans = 0;
+
+    const runner = (cmd: string[]): RunResult => {
+      if (!cmd.includes("user")) scans++;
+
+      return cmd.includes("user") ? ok("me\n") : ok(JSON.stringify({ data: { m0: null } }));
+    };
+
+    refreshMentions(1_000, runner);
+    expect(scans).toBe(1);
+    expect(refreshMentions(2_000, runner).at).toBe(1_000);
+    expect(scans).toBe(1);
+    writeFileSync(join(tmp, ".overbridge", "prlist-reviews.json"), JSON.stringify({ at: 1, rows: [pr({ group: "team", seenAt: T0, updatedAt: T2 })] }));
+    refreshMentions(3_000, runner);
+    expect(scans).toBe(2);
+    refreshMentions(3_000 + MENTION_MAX_AGE_MS, runner);
+    expect(scans).toBe(3);
+    expect(mentionSignature([URL_A], [pr({ updatedAt: T2 })])).toBe(`${URL_A} ${T2}`);
   });
 
   test("a failed scan keeps the last mentions and records why", () => {
