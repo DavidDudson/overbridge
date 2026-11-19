@@ -89,11 +89,12 @@ describe("PR batch mapping", () => {
     expect(() => parseBatch("oops", [3])).toThrow("not JSON");
   });
 
-  test("a PR whose comments, reviews or review requests the query cut short is read directly", () => {
+  test("a PR whose comments, reviews, review requests or labels the query cut short is read directly", () => {
     const cut = (extra: JsonObject) => parseBatch(JSON.stringify({ data: { repository: { p3: { ...node, ...extra } } } }), [3]).prs[3];
     expect(cut({ comments: { ...node.comments, pageInfo: { hasPreviousPage: true } } })).toBeUndefined();
     expect(cut({ latestReviews: { ...node.latestReviews, pageInfo: { hasNextPage: true } } })).toBeUndefined();
     expect(cut({ reviewRequests: { ...node.reviewRequests, pageInfo: { hasNextPage: true } } })).toBeUndefined();
+    expect(cut({ labels: { nodes: [], pageInfo: { hasNextPage: true } } })).toBeUndefined();
     expect(cut({})).toBeTruthy();
   });
 

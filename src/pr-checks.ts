@@ -43,6 +43,9 @@ const rowOf = (c: Context): CheckRow => {
   return { name: c.name ?? c.context ?? "", state, bucket: bucketOf(state), link: c.detailsUrl ?? c.targetUrl ?? "" };
 };
 
+// A queued run has no startedAt yet, yet it is newer than every run that has one
+const startOf = (c: Context): string => c.startedAt ?? (c.status !== undefined && c.status !== "COMPLETED" ? "~" : "");
+
 /** One row per check name, the newest run kept, as `gh pr checks` does: a re-run leaves the failed run in the rollup too. */
 export const newestPerName = (contexts: readonly Context[]): Context[] =>
   [
@@ -51,7 +54,7 @@ export const newestPerName = (contexts: readonly Context[]): Context[] =>
         const name = c.name ?? c.context ?? "";
         const kept = byName.get(name);
 
-        return kept && (kept.startedAt ?? "") > (c.startedAt ?? "") ? byName : new Map(byName).set(name, c);
+        return kept && startOf(kept) > startOf(c) ? byName : new Map(byName).set(name, c);
       }, new Map<string, Context>())
       .values(),
   ];

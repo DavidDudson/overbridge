@@ -19,7 +19,7 @@ export const PR_SETTLED_TTL_MS = 3 * 60_000;
 export const PR_STALE_MS = 10 * 60_000;
 
 export const PR_FRAGMENT = `fragment F on PullRequest{url title isDraft updatedAt state headRefOid mergeable mergeStateStatus author{login}
-labels(first:20){nodes{name}}
+labels(first:20){nodes{name} pageInfo{hasNextPage}}
 reviewRequests(first:20){pageInfo{hasNextPage} nodes{requestedReviewer{__typename ...on User{login} ...on Bot{login} ...on Team{name}}}}
 latestReviews(first:20){pageInfo{hasNextPage} nodes{author{login} state submittedAt url}}
 comments(last:100){pageInfo{hasPreviousPage} nodes{author{login} body createdAt url}}
@@ -161,7 +161,8 @@ const truncated = (node: JsonObject): boolean =>
   cutShort(rollup(node), "hasNextPage") ||
   cutShort(node.comments, "hasPreviousPage") ||
   cutShort(node.latestReviews, "hasNextPage") ||
-  cutShort(node.reviewRequests, "hasNextPage");
+  cutShort(node.reviewRequests, "hasNextPage") ||
+  cutShort(node.labels, "hasNextPage");
 
 /** A check still running: a check run not yet completed, or a commit status still pending or expected. */
 const pendingCheck = (c: NonNullable<ReviewerView["statusCheckRollup"]>[number]): boolean =>

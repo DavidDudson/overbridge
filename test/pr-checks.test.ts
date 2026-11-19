@@ -66,6 +66,14 @@ describe("checksReport", () => {
     expect(checksReport(rerun, HEAD).rows.map((r) => r.state)).toEqual(["SUCCESS"]);
   });
 
+  test.each([["queued last"], ["queued first"]])("a queued re-run beats an older finished run, %s", (order) => {
+    const done = { name: "build", status: "COMPLETED", conclusion: "SUCCESS", startedAt: "2026-01-01T00:00:00Z" };
+    const queued = { name: "build", status: "QUEUED" };
+    const rollup = order === "queued last" ? [done, queued] : [queued, done];
+
+    expect(checksReport(view({ statusCheckRollup: rollup }), HEAD).rows.map((r) => r.bucket)).toEqual([CheckBucket.Pending]);
+  });
+
   test("rows read like gh pr checks: a run's conclusion once done, else its status; a status's state", () => {
     expect(checksReport(view(), HEAD)).toEqual({
       rows: [
