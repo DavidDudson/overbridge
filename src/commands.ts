@@ -321,10 +321,11 @@ export function release(repo: string | undefined, wsOpt?: string) {
 export function prChecksTarget(repo: string | undefined, prOpt: string | undefined, wsOpt?: string): PrChecksTarget {
   const ws = requireWs(wsOpt);
   const claims = Object.entries(getWorkspace(readState(), ws).repos);
-  const named = repo === undefined ? claims.filter(([, c]) => c.pr !== undefined) : claims.filter(([r]) => r === repo);
+  const candidates = prOpt === undefined ? claims.filter(([, c]) => c.pr !== undefined) : claims;
+  const named = repo === undefined ? candidates : claims.filter(([r]) => r === repo);
 
   if (named.length !== 1) {
-    fail(repo === undefined ? `${ws} has ${named.length} repos with a PR; name one: overbridge pr-checks <repo>` : `${repo} is not in ${ws}`);
+    fail(repo === undefined ? `${ws} has ${named.length} candidate repos; name one: overbridge pr-checks <repo>` : `${repo} is not in ${ws}`);
   }
 
   const [name, claim] = named[0]!;
@@ -337,7 +338,8 @@ export function prChecksTarget(repo: string | undefined, prOpt: string | undefin
   const dir = worktreePath(ws, name);
   const slug = slugOfDir(dir) ?? fail(`${name}'s origin is not a GitHub repo`);
   const target: PrChecksTarget = { slug, pr, dir };
-  const head = pr === claim.pr ? git.headSha(dir) : undefined;
+  // on a stack HEAD can sit on another layer until `overbridge pr` moves the claim, so HEAD counts only on the claimed branch
+  const head = pr === claim.pr && claim.branch !== undefined && git.currentBranch(dir) === claim.branch ? git.headSha(dir) : undefined;
 
   if (head) target.head = head;
 

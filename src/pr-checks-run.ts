@@ -10,8 +10,8 @@ const GH_FIELDS = "name,state,bucket,link";
 /** The real server, `gh` and stdio. */
 export function defaultPrChecksDeps(): PrChecksDeps {
   return {
-    served: async (repo, pr) => {
-      const r = await call("GET", `/pr-checks?repo=${encodeURIComponent(repo)}&pr=${pr}`, { timeoutMs: 60_000 });
+    served: async (repo, pr, head) => {
+      const r = await call("GET", `/pr-checks?repo=${encodeURIComponent(repo)}&pr=${pr}${head ? `&head=${head}` : ""}`, { timeoutMs: 60_000 });
 
       if (!r) {
         startServer();

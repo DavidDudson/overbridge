@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { bucketOf, CheckBucket, checksReport, parseServedView, prChecks, type PrChecksDeps, type PrChecksTarget } from "../src/pr-checks";
+import { bucketOf, CheckBucket, checksReport, parseServedView, prChecks, type PrChecksDeps, type PrChecksTarget, type ServedReply } from "../src/pr-checks";
 import type { PrView } from "../src/top";
 
 const HEAD = "a".repeat(40);
 const OLD = "b".repeat(40);
-const URL = "https://github.com/o/r/pull/7";
+const PR_URL = "https://github.com/o/r/pull/7";
 
 const view = (over: Partial<PrView> = {}): PrView => ({
-  url: URL,
+  url: PR_URL,
   state: "OPEN",
   headRefOid: HEAD,
   statusCheckRollup: [
@@ -20,7 +20,7 @@ const view = (over: Partial<PrView> = {}): PrView => ({
 
 const target: PrChecksTarget = { slug: "o/r", pr: 7, dir: "/wt", head: HEAD };
 
-function fakeDeps(served: Awaited<ReturnType<PrChecksDeps["served"]>>) {
+function fakeDeps(served: ServedReply) {
   const out: string[] = [];
   const err: string[] = [];
   const gh: number[] = [];
@@ -56,6 +56,16 @@ describe("buckets", () => {
 });
 
 describe("checksReport", () => {
+  test("a re-run check shows only its newest run", () => {
+    const rerun = view({ statusCheckRollup: [
+      { name: "build", status: "COMPLETED", conclusion: "FAILURE", startedAt: "2026-01-01T00:00:00Z" },
+      { name: "build", status: "COMPLETED", conclusion: "SUCCESS", startedAt: "2026-01-01T01:00:00Z" },
+      { name: "build", status: "COMPLETED", conclusion: "FAILURE", startedAt: "2026-01-01T00:30:00Z" },
+    ] });
+
+    expect(checksReport(rerun, HEAD).rows.map((r) => r.state)).toEqual(["SUCCESS"]);
+  });
+
   test("rows read like gh pr checks: a run's conclusion once done, else its status; a status's state", () => {
     expect(checksReport(view(), HEAD)).toEqual({
       rows: [
@@ -69,13 +79,20 @@ describe("checksReport", () => {
 
   test("an old head adds a pending row, so a poll after a push waits for the new commit", () => {
     const { rows, notes } = checksReport(view({ headRefOid: OLD, statusCheckRollup: [] }), HEAD);
-    expect(rows).toEqual([{ name: expect.stringContaining("bbbbbbb is not local HEAD aaaaaaa"), state: "PENDING", bucket: CheckBucket.Pending, link: URL }]);
+    expect(rows).toEqual([{ name: expect.stringContaining("bbbbbbb is not local HEAD aaaaaaa"), state: "PENDING", bucket: CheckBucket.Pending, link: PR_URL }]);
     expect(notes).toHaveLength(1);
     expect(checksReport(view({ headRefOid: OLD }), undefined).notes).toEqual([]);
   });
 });
 
 describe("prChecks", () => {
+  test("a PR this worktree does not hold is read from GitHub, never from the batch", async () => {
+    const { deps, gh } = fakeDeps({ status: 200, body: JSON.stringify({ view: view() }) });
+    const { head: _head, ...other } = target;
+    expect(await prChecks(other, deps)).toBe(8);
+    expect(gh).toEqual([7]);
+  });
+
   test("no server runs gh pr checks as before", async () => {
     const { deps, gh } = fakeDeps(undefined);
     expect(await prChecks(target, deps)).toBe(8);
@@ -109,7 +126,7 @@ describe("prChecks", () => {
 
     const garbled = fakeDeps({ status: 200, body: "nope" });
     expect(await prChecks(target, garbled.deps)).toBe(1);
-    expect(garbled.err[0]).toContain("server answered 200");
+    expect(garbled.err[0]).toContain("server answered 200 with a body that is not JSON");
 
     const gone = fakeDeps({ status: 200, body: JSON.stringify({ view: null }) });
     expect(await prChecks(target, gone.deps)).toBe(1);

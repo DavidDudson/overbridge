@@ -582,7 +582,16 @@ describe("PR list and PR checks routes", () => {
       throw new Error("down");
     };
 
-    const { deps } = handlerDeps({ prView: async (_repo, pr) => served(pr) });
+    const heads: (string | undefined)[] = [];
+
+    const { deps } = handlerDeps({
+      prView: async (_repo, pr, head) => {
+        heads.push(head);
+
+        return served(pr);
+      },
+    });
+
     const h = createHandler(deps);
     const get = (q: string) => h.handle(new Request(`http://x/pr-checks?${q}`));
     expect(await get("repo=o/r&pr=1").then((r) => r.json())).toEqual({ view: { url: "u", state: "OPEN" } });
@@ -591,5 +600,8 @@ describe("PR list and PR checks routes", () => {
     expect((await get("repo=o/r&pr=4")).status).toBe(502);
     expect((await get("repo=o&pr=1")).status).toBe(400);
     expect((await get("repo=o/r&pr=x")).status).toBe(400);
+    expect((await get("repo=o/r&pr=1&head=nope")).status).toBe(400);
+    await get(`repo=o/r&pr=1&head=${"a".repeat(40)}`);
+    expect(heads.at(-1)).toBe("a".repeat(40));
   });
 });

@@ -63,7 +63,7 @@ export interface HandlerDeps {
   /** Refresh a PR list (`prlist-<kind>.json`); resolves with when it was read. Absent: the route answers 404 and the pane runs a child. */
   refreshPrList?: (kind: PrListKind, force: boolean) => Promise<number>;
   /** One PR's view from the shared batch, for `overbridge pr-checks`; null when GitHub has no such PR. Absent: `GET /pr-checks` answers 404. */
-  prView?: (repo: string, pr: number) => Promise<BatchedPrView>;
+  prView?: (repo: string, pr: number, head?: string) => Promise<BatchedPrView>;
   workspaceExists: (ws: string) => boolean;
   /** When `ws`'s top cache file was last written (ms since epoch), 0 when it has none. */
   cacheFileAt: (ws: string) => number;
@@ -293,11 +293,14 @@ export function createHandler(deps: HandlerDeps) {
     if (req.method === "GET" && url.pathname === "/pr-checks" && deps.prView) {
       const repo = url.searchParams.get("repo") ?? "";
       const pr = Number(url.searchParams.get("pr"));
+      const head = url.searchParams.get("head") ?? undefined;
 
-      if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isInteger(pr) || pr <= 0) return json(400, { error: "pass repo=<owner/name> and pr=<number>" });
+      if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isInteger(pr) || pr <= 0 || (head !== undefined && !/^[0-9a-f]{40}$/.test(head))) {
+        return json(400, { error: "pass repo=<owner/name>, pr=<number> and optionally head=<commit sha>" });
+      }
 
       try {
-        const { view, error } = await deps.prView(repo, pr);
+        const { view, error } = await deps.prView(repo, pr, head);
         // no `view` is a PR the batch cut short (too many checks or threads): the client reads it from GitHub itself
         const body = view === undefined ? {} : { view };
 
@@ -312,14 +315,15 @@ export function createHandler(deps: HandlerDeps) {
     if (req.method === "POST" && list && deps.refreshPrList) {
       const kind = list[1] === "prs" ? "prs" : "reviews";
       const refreshList = deps.refreshPrList;
+      const force = url.searchParams.get("force") === "1";
 
       try {
         const { served, error } = await lists.get(`prlist:${kind}`, async () => {
-          const at = await refreshList(kind, url.searchParams.get("force") === "1");
+          const at = await refreshList(kind, force);
           events.publish(`prlist:${kind}`);
 
           return at;
-        }, { ttlMs: PRLIST_TTL_MS, staleMs: PRLIST_STALE_MS, force: url.searchParams.get("force") === "1" });
+        }, { ttlMs: PRLIST_TTL_MS, staleMs: PRLIST_STALE_MS, force });
 
         return json(200, servedBody(served, error));
       } catch (e) {
@@ -642,8 +646,8 @@ export async function serve(): Promise<void> {
       return refreshInWorker(ws, prefetched, job);
     },
     prBatch: () => batcher.stats(),
-    prView: async (repo, pr) => {
-      const { prs, error } = await batcher.get(repo, [pr]);
+    prView: async (repo, pr, head) => {
+      const { prs, error } = await batcher.get(repo, [pr], { heads: head ? { [pr]: head } : {} });
 
       return error ? { view: prs[pr], error } : { view: prs[pr] };
     },

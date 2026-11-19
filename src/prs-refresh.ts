@@ -1,6 +1,6 @@
 import { isJsonObject, type JsonObject, type JsonValue, numberField, objectField, parseJson, stringField } from "./json";
 import { mapPr, PR_FRAGMENT } from "./pr-batch";
-import { MAX_PAGE } from "./prlist-probe";
+import { MAX_PAGE_SIZE } from "./prlist-probe";
 import { ciFromRollup } from "./pr-look";
 import type { PrRow } from "./pr-rows";
 import { reviewerStatuses } from "./reviewers";
@@ -9,14 +9,14 @@ import type { RunResult } from "./util";
 
 // Reuses the batch fragment, so a PR reads the same here as in a workspace card.
 
-/** The search for up to `page` PRs: GitHub charges about a point per PR asked for, so callers size it to the list. */
-const query = (page: number) => `query($q:String!){search(query:$q,type:ISSUE,first:${page}){nodes{...on PullRequest{...F number author{login} reviewDecision repository{nameWithOwner} commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}} ${PR_FRAGMENT}`;
+/** The search for up to `pageSize` PRs: GitHub charges about a point per PR asked for, so callers size it to the list. */
+const query = (pageSize: number) => `query($q:String!){search(query:$q,type:ISSUE,first:${pageSize}){nodes{...on PullRequest{...F number author{login} reviewDecision repository{nameWithOwner} commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}} ${PR_FRAGMENT}`;
 
 /** The search string: your open PRs, narrowed to `orgs` when any are set. */
 export const searchQuery = (orgs: readonly string[]): string => ["is:pr", "is:open", "author:@me", ...orgs.map((o) => `user:${o}`), "sort:updated-desc"].join(" ");
 
-/** The `gh api graphql` command for the list, asking for up to `page` PRs. */
-export const graphqlCommand = (orgs: readonly string[], page = MAX_PAGE): string[] => ["gh", "api", "graphql", "-f", `query=${query(page)}`, "-f", `q=${searchQuery(orgs)}`];
+/** The `gh api graphql` command for the list, asking for up to `pageSize` PRs. */
+export const graphqlCommand = (orgs: readonly string[], pageSize = MAX_PAGE_SIZE): string[] => ["gh", "api", "graphql", "-f", `query=${query(pageSize)}`, "-f", `q=${searchQuery(orgs)}`];
 
 /** GitHub's own rollup state for the PR's last commit, so it matches the Reviews tab and counts every check. */
 function rollupState(node: JsonObject): string | undefined {
@@ -83,9 +83,9 @@ export function rowsFromGraphql(out: string): PrRow[] {
   return nodes.filter((n): n is JsonObject => isJsonObject(n)).flatMap(rowOf);
 }
 
-/** Read up to `page` PRs of the list. Throws with `gh`'s message when the call fails with no data. */
-export function readMyPrs(orgs: readonly string[], runner: (cmd: string[]) => RunResult, page = MAX_PAGE): PrRow[] {
-  const r = runner(graphqlCommand(orgs, page));
+/** Read up to `pageSize` PRs of the list. Throws with `gh`'s message when the call fails with no data. */
+export function readMyPrs(orgs: readonly string[], runner: (cmd: string[]) => RunResult, pageSize = MAX_PAGE_SIZE): PrRow[] {
+  const r = runner(graphqlCommand(orgs, pageSize));
 
   // `gh api graphql` exits 1 when any node errors yet still prints the data, so the body decides
   try {

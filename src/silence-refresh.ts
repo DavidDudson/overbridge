@@ -46,7 +46,10 @@ export function refreshMentions(now = Date.now(), runner: Runner = run): Mention
   const signature = mentionSignature(urls, rows);
   const old = readMentions();
 
-  if (old.error === undefined && old.signature === signature && now - old.at < MENTION_MAX_AGE_MS) {
+  // an item no tab lists (a silenced PR that left the list) has no update time to watch, so its set is scanned every time
+  const unseen = urls.some((u) => !rows.some((r) => r.url === u && r.updatedAt));
+
+  if (!unseen && old.error === undefined && old.signature === signature && now - old.at < MENTION_MAX_AGE_MS) {
     return old;
   }
 

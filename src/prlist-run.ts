@@ -116,8 +116,16 @@ export async function prListPane(kind: PrListKind) {
     if (moved >= 0) selected = moved;
   };
 
+  let forceNext = false;
+
   const refresh = (force = false) => {
-    if (busy) return;
+    if (busy) {
+      // the read running may keep the old rows; the user's `r` must still get a full read once it ends
+      forceNext ||= force;
+
+      return;
+    }
+
     busy = true;
     startedAt = Date.now();
     message = "refreshing…";
@@ -128,6 +136,11 @@ export async function prListPane(kind: PrListKind) {
       busy = false;
       message ||= spawnMentionRefresh();
       draw();
+
+      if (forceNext) {
+        forceNext = false;
+        refresh(true);
+      }
     });
   };
 

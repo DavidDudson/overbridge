@@ -1,19 +1,15 @@
 import { isJsonObject, type JsonObject, type JsonValue, objectField, parseJson, stringField } from "./json";
 import type { RunResult } from "./util";
 
-/**
- * The cheap read in front of a PR list's full one. GitHub charges the full read about a point per PR (each PR's review
- * threads times their first comment), while this one asks for each PR's URL, last update and CI rollup state for one
- * point. The full read then runs only when this changes or the list is old, sized to the PRs this found.
- */
+/** A cheap read of each listed PR's URL, update time and CI state: a refresh skips the costly full read while it is unchanged. */
 
 /** The most PRs one search returns: GraphQL's page limit. */
-export const MAX_PAGE = 100;
+export const MAX_PAGE_SIZE = 100;
 
 /** Extra PRs a full read asks for over the probe's count, for a PR opened between the two calls. */
 export const PAGE_HEADROOM = 5;
 
-export const PROBE_QUERY = `query($q:String!){search(query:$q,type:ISSUE,first:${MAX_PAGE}){nodes{...on PullRequest{url updatedAt commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}}`;
+export const PROBE_QUERY = `query($q:String!){search(query:$q,type:ISSUE,first:${MAX_PAGE_SIZE}){nodes{...on PullRequest{url updatedAt commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}}`;
 
 export interface Probe {
   /** Changes when a PR joins or leaves the list, is updated, or its CI rollup state moves. */
@@ -26,7 +22,7 @@ export interface Probe {
 export const probeCommand = (q: string): string[] => ["gh", "api", "graphql", "-f", `query=${PROBE_QUERY}`, "-f", `q=${q}`];
 
 /** The page size for a full read of a list the probe counted `count` PRs in. */
-export const pageFor = (count: number): number => Math.min(MAX_PAGE, Math.max(1, count + PAGE_HEADROOM));
+export const pageSizeFor = (count: number): number => Math.min(MAX_PAGE_SIZE, Math.max(1, count + PAGE_HEADROOM));
 
 const rollupOf = (node: JsonObject): string => {
   const commits = objectField(node, "commits");

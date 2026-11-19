@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { combinedSignature, MAX_PAGE, PAGE_HEADROOM, pageFor, parseProbe, probeCommand, readProbe } from "../src/prlist-probe";
+import { combinedSignature, MAX_PAGE_SIZE, PAGE_HEADROOM, pageSizeFor, parseProbe, probeCommand, readProbe } from "../src/prlist-probe";
 import { FULL_MAX_AGE_MS, keepRows, refreshPrList } from "../src/prlist-refresh";
 import { readPrList } from "../src/prlist-data";
 import type { RunResult } from "../src/util";
@@ -21,7 +21,7 @@ const reply = (nodes: unknown[]) => JSON.stringify({ data: { search: { nodes } }
 describe("probe", () => {
   test("the probe asks for 100 PRs with no review threads or comments", () => {
     const cmd = probeCommand("is:pr author:@me").join(" ");
-    expect(cmd).toContain(`first:${MAX_PAGE}`);
+    expect(cmd).toContain(`first:${MAX_PAGE_SIZE}`);
     expect(cmd).not.toContain("reviewThreads");
     expect(cmd).not.toContain("comments");
     expect(cmd).toContain("q=is:pr author:@me");
@@ -54,9 +54,9 @@ describe("probe", () => {
   });
 
   test("the full read asks for the probe's count plus headroom, at least one and at most a page", () => {
-    expect(pageFor(0)).toBe(PAGE_HEADROOM);
-    expect(pageFor(22)).toBe(22 + PAGE_HEADROOM);
-    expect(pageFor(500)).toBe(MAX_PAGE);
+    expect(pageSizeFor(0)).toBe(PAGE_HEADROOM);
+    expect(pageSizeFor(22)).toBe(22 + PAGE_HEADROOM);
+    expect(pageSizeFor(500)).toBe(MAX_PAGE_SIZE);
     expect(combinedSignature([{ signature: "a", count: 1 }, { signature: "b", count: 1 }])).not.toBe(combinedSignature([{ signature: "ab", count: 1 }]));
   });
 });

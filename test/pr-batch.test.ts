@@ -332,6 +332,7 @@ describe("settled TTL", () => {
     expect(isSettled(open({ statusCheckRollup: [{ state: "SUCCESS" }] }))).toBe(true);
     expect(isSettled(open({ mergeable: "UNKNOWN" }))).toBe(false);
     expect(isSettled(open({ reviewRequests: [{ login: "Copilot" }] }))).toBe(false);
+    expect(isSettled(open({ statusCheckRollup: [] }))).toBe(false);
   });
 
   test("the long TTL needs every PR settled and every caller's HEAD on its PR's head", () => {
@@ -341,6 +342,12 @@ describe("settled TTL", () => {
     expect(ttlFor({ 1: open(), 2: open({ statusCheckRollup: [{ status: "IN_PROGRESS" }] }) })).toBe(PR_TTL_MS);
     expect(ttlFor({ 1: open() }, { 1: "abc" })).toBe(PR_SETTLED_TTL_MS);
     expect(ttlFor({ 1: open() }, { 1: "new" })).toBe(PR_TTL_MS);
+  });
+
+  test("the batch view carries labels and the author, and no author for a deleted user", () => {
+    const node = { url: "u", labels: { nodes: [{ name: "p1" }, {}] }, author: { login: "me" } };
+    expect(mapPr(node)).toMatchObject({ author: { login: "me" }, labels: [{ name: "p1" }] });
+    expect(mapPr({ ...node, author: null }).author).toBeUndefined();
   });
 
   test("a settled reply is served past the short TTL", async () => {

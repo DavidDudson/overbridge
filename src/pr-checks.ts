@@ -43,6 +43,19 @@ const rowOf = (c: Context): CheckRow => {
   return { name: c.name ?? c.context ?? "", state, bucket: bucketOf(state), link: c.detailsUrl ?? c.targetUrl ?? "" };
 };
 
+/** One row per check name, the newest run kept, as `gh pr checks` does: a re-run leaves the failed run in the rollup too. */
+export const newestPerName = (contexts: readonly Context[]): Context[] =>
+  [
+    ...contexts
+      .reduce((byName, c) => {
+        const name = c.name ?? c.context ?? "";
+        const kept = byName.get(name);
+
+        return kept && (kept.startedAt ?? "") > (c.startedAt ?? "") ? byName : new Map(byName).set(name, c);
+      }, new Map<string, Context>())
+      .values(),
+  ];
+
 export interface ChecksReport {
   rows: CheckRow[];
   /** Why the rows may be out of date, for stderr. */
@@ -55,7 +68,7 @@ export interface ChecksReport {
  * commit's checks as this one's.
  */
 export function checksReport(view: PrView, localHead?: string): ChecksReport {
-  const rows = (view.statusCheckRollup ?? []).map(rowOf);
+  const rows = newestPerName(view.statusCheckRollup ?? []).map(rowOf);
   const notes: string[] = [];
 
   if (localHead !== undefined && view.headRefOid !== undefined && view.headRefOid !== localHead) {
@@ -97,10 +110,13 @@ export function parseServedView(body: string): ServedView | undefined {
   }
 }
 
+/** The server's answer to `GET /pr-checks`, or undefined when no server could answer. */
+export type ServedReply = { status: number; body: string } | undefined;
+
 /** What `prChecks` reads and calls, injected so tests need no server, git or `gh`. */
 export interface PrChecksDeps {
-  /** The server's reply for `repo` (`owner/name`) PR `pr`, or undefined when no server answers. */
-  served: (repo: string, pr: number) => Promise<{ status: number; body: string } | undefined>;
+  /** The server's reply for `repo` (`owner/name`) PR `pr`; `head` is the caller's local HEAD, which keeps the batch on its short TTL until GitHub has it. */
+  served: (repo: string, pr: number, head?: string) => Promise<ServedReply>;
   /** Run `gh pr checks` in `dir` the usual way: the fallback with no server. Resolves its exit code. */
   ghChecks: (pr: number, dir: string) => number;
   out: (text: string) => void;
@@ -118,9 +134,10 @@ export interface PrChecksTarget {
 
 /** Print `target`'s checks; resolves the exit code: 0 with rows, 1 when there are none or the read failed. */
 export async function prChecks(target: PrChecksTarget, deps: PrChecksDeps): Promise<number> {
-  const r = await deps.served(target.slug, target.pr);
+  // a PR this worktree does not hold has no local HEAD to tell a stale read from a fresh one, so GitHub is read directly
+  if (target.head === undefined) return deps.ghChecks(target.pr, target.dir);
+  const r = await deps.served(target.slug, target.pr, target.head);
 
-  // no server: GitHub directly, as before
   if (r === undefined) return deps.ghChecks(target.pr, target.dir);
   const reply = parseServedView(r.body);
 
@@ -128,7 +145,7 @@ export async function prChecks(target: PrChecksTarget, deps: PrChecksDeps): Prom
   if (r.status === 200 && reply !== undefined && reply.view === undefined && reply.error === undefined) return deps.ghChecks(target.pr, target.dir);
 
   if (r.status !== 200 || reply === undefined || reply.view === undefined) {
-    deps.err(`overbridge pr-checks: reading ${target.slug}#${target.pr} failed: ${reply?.error ?? `server answered ${r.status}`}`);
+    deps.err(`overbridge pr-checks: reading ${target.slug}#${target.pr} failed: ${reply === undefined ? `server answered ${r.status} with a body that is not JSON` : (reply.error ?? `server answered ${r.status}`)}`);
 
     return 1;
   }

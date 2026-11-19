@@ -1,9 +1,9 @@
 import { loadRootLayers } from "./project-config";
 import { type PrListCache, type PrListKind, readPrList, writePrList } from "./prlist-data";
-import { combinedSignature, MAX_PAGE, pageFor, type Probe, readProbe } from "./prlist-probe";
+import { combinedSignature, MAX_PAGE_SIZE, pageSizeFor, type Probe, readProbe } from "./prlist-probe";
 import type { PrRow } from "./pr-rows";
 import { readMyPrs, searchQuery } from "./prs-refresh";
-import { filterOrgs, mergeRows, REVIEW_PAGE, reviewCommand, rowsFromReviews, searchString } from "./review-batch";
+import { filterOrgs, mergeRows, REVIEW_PAGE_SIZE, reviewCommand, rowsFromReviews, searchString } from "./review-batch";
 import { carrySeenAt } from "./silence";
 import { errorMessage, run, type RunResult } from "./util";
 import { githubLogin } from "./gh-login";
@@ -20,12 +20,12 @@ const firstLine = (r: RunResult) => (r.stderr || r.stdout).trim().split("\n")[0]
 /** The owners the reviews tab searches one at a time; no orgs means one search over every owner. */
 const reviewOrgs = (orgs: readonly string[]): (string | undefined)[] => (orgs.length ? [...orgs] : [undefined]);
 
-/** The reviews asked of me: one GraphQL search per owner, so each row carries its request, bots, CI and merge state. `pages` sizes each search, in `orgs` order. */
-export function readReviews(orgs: readonly string[], runner: Runner = run, pages: readonly number[] = [], login?: string): PrRow[] {
+/** The reviews asked of me: one GraphQL search per owner, so each row carries its request, bots, CI and merge state. `pageSizes` sizes each search, in `orgs` order. */
+export function readReviews(orgs: readonly string[], runner: Runner = run, pageSizes: readonly number[] = [], login?: string): PrRow[] {
   const me = login ?? githubLogin(runner);
 
   const lists = reviewOrgs(orgs).map((org, i) => {
-    const r = runner(reviewCommand(me, org, pages[i] ?? REVIEW_PAGE));
+    const r = runner(reviewCommand(me, org, pageSizes[i] ?? REVIEW_PAGE_SIZE));
 
     if (!r.ok) {
       throw new Error(`gh api graphql failed: ${firstLine(r)}`);
@@ -37,9 +37,9 @@ export function readReviews(orgs: readonly string[], runner: Runner = run, pages
   return filterOrgs(mergeRows(lists), orgs);
 }
 
-/** Read one list in full. `pages` sizes each search. Throws with `gh`'s message when a search fails. */
-export function readPrs(kind: PrListKind, orgs: readonly string[], runner: Runner = run, pages: readonly number[] = [], login?: string): PrRow[] {
-  return kind === "reviews" ? readReviews(orgs, runner, pages, login) : readMyPrs(orgs, runner, pages[0] ?? MAX_PAGE);
+/** Read one list in full. `pageSizes` sizes each search. Throws with `gh`'s message when a search fails. */
+export function readPrs(kind: PrListKind, orgs: readonly string[], runner: Runner = run, pageSizes: readonly number[] = [], login?: string): PrRow[] {
+  return kind === "reviews" ? readReviews(orgs, runner, pageSizes, login) : readMyPrs(orgs, runner, pageSizes[0] ?? MAX_PAGE_SIZE);
 }
 
 /** Probe each search the full read of `kind` runs, in the same order. */
@@ -72,8 +72,8 @@ export function refreshPrList(kind: PrListKind, now = Date.now(), runner: Runner
     if (!o.force && keepRows(old, signature, now)) {
       cache = { ...old, at: now };
     } else {
-      const pages = probes.map((p) => Math.min(kind === "reviews" ? REVIEW_PAGE : MAX_PAGE, pageFor(p.count)));
-      const rows = carrySeenAt(readPrs(kind, orgs, runner, pages, login), old.rows, new Date(now).toISOString());
+      const pageSizes = probes.map((p) => Math.min(kind === "reviews" ? REVIEW_PAGE_SIZE : MAX_PAGE_SIZE, pageSizeFor(p.count)));
+      const rows = carrySeenAt(readPrs(kind, orgs, runner, pageSizes, login), old.rows, new Date(now).toISOString());
       cache = { at: now, rows, signature, fullAt: now };
     }
   } catch (e) {

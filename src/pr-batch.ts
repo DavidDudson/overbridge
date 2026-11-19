@@ -24,7 +24,7 @@ reviewRequests(first:20){pageInfo{hasNextPage} nodes{requestedReviewer{__typenam
 latestReviews(first:20){pageInfo{hasNextPage} nodes{author{login} state submittedAt url}}
 comments(last:100){pageInfo{hasPreviousPage} nodes{author{login} body createdAt url}}
 reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved comments(first:1){nodes{author{login}}}}}
-commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}`;
+commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion detailsUrl startedAt} ...on StatusContext{context state targetUrl}}}}}}}}`;
 
 /** The aliased query for `numbers` (`p<n>: pullRequest(number:<n>)`), with the call's cost in `rateLimit`. */
 export function buildBatchQuery(numbers: number[]): string {
@@ -44,7 +44,7 @@ type Check = NonNullable<ReviewerView["statusCheckRollup"]>[number];
 
 type ThreadNodes = Parameters<typeof countUnresolved>[0];
 
-const CHECK_KEYS = ["name", "context", "status", "conclusion", "state", "detailsUrl", "targetUrl"] as const;
+const CHECK_KEYS = ["name", "context", "status", "conclusion", "state", "detailsUrl", "targetUrl", "startedAt"] as const;
 
 const check = (node: JsonObject): Check => {
   const out: Check = {};
@@ -168,7 +168,7 @@ const pendingCheck = (c: NonNullable<ReviewerView["statusCheckRollup"]>[number])
   c.status !== undefined ? c.status !== "COMPLETED" : c.state === "PENDING" || c.state === "EXPECTED";
 
 /**
- * Whether a PR is waiting on nothing the panel shows changing soon: closed or merged, or open with every check done, its
+ * Whether a PR is waiting on nothing the panel shows changing soon: closed or merged, or open with checks that are all done, its
  * mergeability known and no bot review running. A PR GitHub no longer returns is settled; one the reply cut short is not.
  */
 export function isSettled(view: PrView | null | undefined): boolean {
@@ -178,7 +178,10 @@ export function isSettled(view: PrView | null | undefined): boolean {
 
   if (view.state !== "OPEN") return true;
 
-  if (view.mergeable === "UNKNOWN" || (view.statusCheckRollup ?? []).some(pendingCheck)) return false;
+  // no checks yet is how a fresh push looks before CI registers its runs
+  const checks = view.statusCheckRollup ?? [];
+
+  if (view.mergeable === "UNKNOWN" || checks.length === 0 || checks.some(pendingCheck)) return false;
 
   return !reviewerStatuses(view, view.url ?? "").some((r) => r.state === "reviewing");
 }
@@ -289,7 +292,8 @@ export interface PrBatcherOptions {
 /**
  * Coalesces PR reads. Every refresh that asks for a PR of `owner/name` within one window shares a single fetch, which
  * reads that repo's claimed PRs together (paged by `perQuery`); each PR is then served from the repo's cache entry for
- * `PR_TTL_MS`, or `PR_SETTLED_TTL_MS` once nothing in it is moving (`ttlFor`). Keys are `gh:prs:<owner/name>`; the per-PR keys of the design are the entry's fields.
+ * `PR_TTL_MS`, or `PR_SETTLED_TTL_MS` once nothing in it is moving. Keys are `gh:prs:<owner/name>`; each entry holds
+ * that repo's PRs by number.
  */
 export class PrBatcher {
   private readonly cache: Cache<Record<number, PrView | null | undefined>>;

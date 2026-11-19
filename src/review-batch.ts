@@ -31,16 +31,16 @@ const PR_FIELDS = `
   } } } }`;
 
 /** The most review requests one search returns. */
-export const REVIEW_PAGE = 50;
+export const REVIEW_PAGE_SIZE = 50;
 
-/** The search for up to `page` PRs: GitHub charges about a point per PR asked for (its review threads), so callers size it to the list. */
-export const reviewQuery = (page: number = REVIEW_PAGE) => `query($q: String!) { search(query: $q, type: ISSUE, first: ${page}) { nodes { ... on PullRequest {${PR_FIELDS} } } } }`;
+/** The search for up to `pageSize` PRs: GitHub charges about a point per PR asked for (its review threads), so callers size it to the list. */
+export const reviewQuery = (pageSize: number = REVIEW_PAGE_SIZE) => `query($q: String!) { search(query: $q, type: ISSUE, first: ${pageSize}) { nodes { ... on PullRequest {${PR_FIELDS} } } } }`;
 
 /** The search string: open PRs I am asked to review, in `org` when given. */
 export const searchString = (login: string, org?: string): string => `is:pr is:open archived:false review-requested:${login}${org ? ` org:${org}` : ""} sort:updated-desc`;
 
-/** The `gh api graphql` command for one search of up to `page` PRs. */
-export const reviewCommand = (login: string, org?: string, page: number = REVIEW_PAGE): string[] => ["gh", "api", "graphql", "-f", `query=${reviewQuery(page)}`, "-f", `q=${searchString(login, org)}`];
+/** The `gh api graphql` command for one search of up to `pageSize` PRs. */
+export const reviewCommand = (login: string, org?: string, pageSize: number = REVIEW_PAGE_SIZE): string[] => ["gh", "api", "graphql", "-f", `query=${reviewQuery(pageSize)}`, "-f", `q=${searchString(login, org)}`];
 
 interface Reviewer {
   __typename?: string;
