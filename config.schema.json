@@ -6,6 +6,10 @@
   "additionalProperties": false,
   "properties": {
     "version": { "const": 1 },
+    "agent": {
+      "description": "The coding agent a new workspace runs: claude (Claude Code, the default) or agy (Antigravity CLI). `overbridge start --agent` overrides it for one workspace, which keeps its agent from then on.",
+      "enum": ["claude", "agy"]
+    },
     "defaults": {
       "description": "Applied under every repo's overbridge.yml.",
       "type": "object",

@@ -69,6 +69,8 @@ export interface Mux {
   listPanes(): MuxPane[];
   focusPane(id: string): boolean;
   closePane(id: string): boolean;
+  /** Type `text` into pane `id` as one paste, then press Enter, as if the user had sent it. */
+  sendText(id: string, text: string): boolean;
   newPane(req: NewPane): boolean;
   /** Whether the named session is running. */
   sessionExists(name: string): boolean;
@@ -86,6 +88,15 @@ export const safeExec: MuxExec = (cmd) => {
   } catch {
     return { ok: false, stdout: "" };
   }
+};
+
+/** Pause between a paste and its Enter, so the agent's TUI has taken the paste in before it is submitted. */
+export const sendPause = { ms: 150, sleep: (ms: number) => Bun.sleepSync(ms) };
+
+const settle = () => {
+  sendPause.sleep(sendPause.ms);
+
+  return true;
 };
 
 const lines = (text: string) => text.split("\n").map((s) => s.trim()).filter(Boolean);
@@ -191,6 +202,7 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
     // focusing a pane that already has focus exits 2, which callers treat as success
     focusPane: (id) => act("focus-pane-id", target(id)).ok,
     closePane: (id) => act("close-pane", "--pane-id", target(id)).ok,
+    sendText: (id, text) => act("paste", "--pane-id", target(id), "--", text).ok && settle() && act("send-keys", "--pane-id", target(id), "Enter").ok,
     newPane(req) {
       act("focus-pane-id", target(req.anchor));
       const args = ["new-pane", "--direction", req.direction, "--name", req.title, "--cwd", req.cwd];
@@ -303,6 +315,7 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
     },
     focusPane: (id) => tmux("select-window", "-t", id).ok && tmux("select-pane", "-t", id).ok,
     closePane: (id) => tmux("kill-pane", "-t", id).ok,
+    sendText: (id, text) => tmux("send-keys", "-t", id, "-l", "--", text).ok && settle() && tmux("send-keys", "-t", id, "Enter").ok,
     newPane(req) {
       const args = ["split-window", "-P", "-F", "#{pane_id}", "-t", req.anchor, req.direction === "right" ? "-h" : "-v", "-c", req.cwd];
 

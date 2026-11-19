@@ -241,6 +241,34 @@ skill-extensions:
 `overbridge ext list` shows every extension file it finds. A skill that runs `overbridge ext` for a phase with no
 file gets no output and carries on as written.
 
+## Agents: Claude Code or Antigravity
+
+Each workspace runs one agent: Claude Code (`claude`, the default) or Google's Antigravity CLI (`agy`). Set the
+default for new workspaces with `agent: agy` at the top of the root `config.yml`, and pick one for a single
+workspace with `overbridge start ... --agent agy` (or `--agent claude`; `overbridge new` takes it too). The choice
+is stored in the workspace's state when it is created, so changing the default never switches an existing
+workspace. `overbridge status --all` marks agy workspaces. The orchestrator knows the flag, so asking it to "start
+ENG-123 with agy" opens an agy workspace.
+
+An agy workspace gets the same rules as a Claude one, through the files agy reads:
+
+| Claude | agy |
+| --- | --- |
+| `CLAUDE.md` in the workspace | `AGENTS.md` in the workspace, with the same text |
+| `.claude/settings.json` hooks | `.agents/hooks.json` in the workspace: the guard on every tool call, the agent-state hook on `SessionStart`, `PreInvocation`, `PostToolUse` and `Stop` |
+| Plugins from the installed overbridge | `.agents/skills.json` pointing at the installed `plugin/skills` and `plugin-review/skills`, plus the folder holding `gh-stack` |
+| Folder trust in `~/.claude.json` | The workspace folder in `trustedWorkspaces` of `~/.gemini/antigravity-cli/settings.json` |
+| `--continue`, first prompt after `--` | `--continue`, first prompt as `-i <prompt>` |
+| `SendMessage` from the orchestrator | `overbridge send <ws> '<text>'`, which types the message into the agent pane |
+
+agy starts in the workspace folder, not the first repo, because it reads `AGENTS.md` and `.agents/` only from its
+start folder up to the repo root. The workspace folder holds no repo, so none of these files lands in a worktree.
+The guard translates agy's tools (`run_command`, `write_to_file`, `view_file` and the rest) to the Claude tools it
+checks, and treats any path argument of a tool it does not know as a read. It also blocks writes to `.agents`.
+
+Not there yet for agy: the context gauge and usage limits (both read Claude's statusline), and the orchestrator
+hearing when an agy workspace finishes.
+
 ## Install
 
 overbridge runs on [Bun](https://bun.sh) 1.3 or later and needs `git`, `gh`, and `zellij` (or `tmux`) on PATH.
@@ -472,6 +500,7 @@ want to commit an `overbridge.yml` to, and for settings that are yours rather th
 
 ```yaml
 version: 1
+agent: claude         # the agent a new workspace runs: claude or agy (see Agents)
 defaults:             # under every repo's overbridge.yml
   ide: zed
   project-management:

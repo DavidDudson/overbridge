@@ -1,5 +1,6 @@
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { AgentKind, isAgentKind } from "./agent-kind";
 import type { CleanupCause, CleanupRecord } from "./cleanup-log";
 import { metaDir } from "./paths";
 import { pidAlive } from "./proc";
@@ -42,6 +43,8 @@ export type WorkspaceState = {
   removalBlocked?: RemovalBlock;
   /** Set by `overbridge icebox`; cleared by `thaw`. The workspace has no tab while it is set. */
   iceboxed?: Iceboxed;
+  /** The agent the workspace runs; Claude when unset. Chosen when the workspace is created. */
+  agent?: AgentKind;
 };
 
 export type State = {
@@ -109,6 +112,8 @@ export function workspaceFault(w: Json | undefined): string | undefined {
   if (w.removalBlocked !== undefined && !Object.values<unknown>(RemovalBlock).includes(w.removalBlocked)) {
     return `state record has removalBlocked as ${JSON.stringify(w.removalBlocked)}`;
   }
+
+  if (w.agent !== undefined && !isAgentKind(w.agent)) return `state record has agent as ${JSON.stringify(w.agent)}`;
 
   return undefined;
 }
@@ -205,6 +210,9 @@ export function isRemoving(w: WorkspaceState, now = Date.now(), alive: (pid: num
 
 /** Whether `w` is paused by `overbridge icebox`. */
 export const isIceboxed = (w: WorkspaceState | undefined): boolean => w?.iceboxed !== undefined;
+
+/** The agent workspace `w` runs; Claude for a record with none. */
+export const agentOf = (w: WorkspaceState | undefined): AgentKind => w?.agent ?? AgentKind.Claude;
 
 export function getWorkspace(s: State, ws: string): WorkspaceState {
   return s.workspaces[ws] ?? fail(`no workspace '${ws}'`);

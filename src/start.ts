@@ -1,18 +1,20 @@
+import { AgentKind } from "./agent-kind";
 import { checkout, createWorkspace, holdings, removeWorkspace } from "./commands";
 import { getRepo, type RepoSpec } from "./config";
 import * as git from "./git";
 import { thaw } from "./icebox";
 import { barePath, currentWorkspace, NAME_RE, worktreePath } from "./paths";
+import { agyPluginProblems } from "./agy";
 import { type PluginProblems, pluginProblems, requiredSkillProblems } from "./plugins";
 import { providerFor } from "./pm";
 import type { Provider } from "./pm/provider";
-import { CONFIG_FILE, type ProjectConfig, parseYaml, ROOT_CONFIG_FILE, resolveConfig } from "./project-config";
+import { CONFIG_FILE, loadRootLayers, type ProjectConfig, parseYaml, ROOT_CONFIG_FILE, resolveConfig } from "./project-config";
 import { scaffold } from "./scaffold";
 import { switchTab } from "./sidebar";
 import { defaultMux, type Mux } from "./mux";
 import { requireTab, TabFocus } from "./tab";
 import { cover, hasGhStack, localStacks } from "./stack";
-import { type Claim, claimOwner, isIceboxed, isRemoving, isTaskClaim, readState, type ReboundFrom, type State, TASK_BRANCH_PREFIX } from "./state";
+import { agentOf, type Claim, claimOwner, isIceboxed, isRemoving, isTaskClaim, readState, type ReboundFrom, type State, TASK_BRANCH_PREFIX } from "./state";
 import { fail, log, must, run } from "./util";
 import { committedConfig } from "./committed-config";
 
@@ -29,6 +31,9 @@ function providerForRepo(spec: RepoSpec): Provider {
 
 /** The prompt a caller passed, and the one a newly opened tab falls back to without it. */
 type TabPrompt = { prompt?: string; defaultPrompt?: string };
+
+/** A new workspace's tab prompts, and the agent it runs when `--agent` named one. */
+type NewTab = TabPrompt & { agent?: AgentKind };
 
 /**
  * Bring `ws`'s tab to the front, since you asked for it, opening one with `prompt` (else `defaultPrompt`) when
@@ -55,8 +60,8 @@ export function showTab(ws: string, prompts: TabPrompt = {}, mux: Mux = defaultM
   requireTab(ws, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Foreground, mux);
 }
 
-/** What `start` may inject: the provider, the multiplexer, the plugin check, and `--here`. */
-type StartDeps = { provider?: Provider; mux?: Mux; plugins?: () => PluginProblems; here?: boolean };
+/** What `start` may inject: the provider, the multiplexer, the plugin check, `--here` and `--agent`. */
+type StartDeps = { provider?: Provider; mux?: Mux; plugins?: () => PluginProblems; here?: boolean; agent?: AgentKind };
 
 /**
  * `overbridge start <repo> <id>`: the work item gets its own workspace, named by its provider
@@ -70,7 +75,6 @@ type StartDeps = { provider?: Provider; mux?: Mux; plugins?: () => PluginProblem
  * clean, on a fresh branch from the default branch.
  */
 export function start(repo: string, id: string, prompt?: string, deps: StartDeps = {}) {
-  requirePlugins(deps.plugins);
   const spec = getRepo(repo);
   git.fetch(spec);
   const provider = deps.provider ?? providerForRepo(spec);
@@ -79,7 +83,7 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
 
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}' for ${id}`);
   const branch = provider.branchName({ id, title });
-  const prompts = { prompt, defaultPrompt: `/start-item ${id}` };
+  const prompts: NewTab = { prompt, defaultPrompt: `/start-item ${id}`, agent: deps.agent };
 
   const state = readState();
   const ws = currentWorkspace();
@@ -90,6 +94,9 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
   }
 
   const holder = workspaceOf(state, repo, branch, provider);
+
+  // checked once the target is known: a re-bind opens no tab, and a holder keeps its own agent
+  requirePlugins(deps.plugins, agentFor(holder ?? name, deps.agent));
 
   if (holder) {
     log(`${id} is in ${holder}`);
@@ -165,14 +172,14 @@ function workspaceOf(s: State, repo: string, branch: string, provider: Provider)
  * spike. The workspace is named `slug` and holds `repo` on a new claimed `task/<slug>` branch; its agent starts
  * with `prompt`, since there is no item to read.
  */
-export function startTask(repo: string, slug: string, prompt: string, deps: { mux?: Mux; plugins?: () => PluginProblems } = {}) {
+export function startTask(repo: string, slug: string, prompt: string, deps: { mux?: Mux; plugins?: () => PluginProblems; agent?: AgentKind } = {}) {
   if (!NAME_RE.test(slug)) fail(`invalid task name '${slug}': use letters, digits, '.', '_' and '-'`);
 
   if (!prompt.trim()) fail("a task needs --prompt: say what the workspace's Claude should do");
-  requirePlugins(deps.plugins);
+  requirePlugins(deps.plugins, agentFor(slug, deps.agent));
   const spec = getRepo(repo);
   git.fetch(spec);
-  openWorkspace(slug, repo, `${TASK_BRANCH_PREFIX}${slug}`, { prompt }, deps.mux);
+  openWorkspace(slug, repo, `${TASK_BRANCH_PREFIX}${slug}`, { prompt, agent: deps.agent }, deps.mux);
 }
 
 /** Plugin problems plus any required skill (gh-stack) the new tab's Claude would lack. */
@@ -198,7 +205,7 @@ const hasRef = (repo: string, ref: string) => run(["git", "-C", barePath(repo), 
 export function startStack(
   repo: string,
   ids: string[],
-  opts: { name?: string; prompt?: string } = {},
+  opts: { name?: string; prompt?: string; agent?: AgentKind } = {},
   deps: { provider?: Provider; mux?: Mux; plugins?: () => PluginProblems; ghStack?: () => boolean } = {},
 ) {
   if (ids.length < 2) fail("a stack needs at least two items; use `overbridge start <repo> <id>` for one");
@@ -207,7 +214,6 @@ export function startStack(
   if (dup) fail(`${dup} is listed twice in --stack`);
 
   if (!(deps.ghStack ?? hasGhStack)()) fail("gh-stack is not installed: run `gh extension install github/gh-stack`");
-  requirePlugins(deps.plugins);
   const spec = getRepo(repo);
   git.fetch(spec);
   const provider = deps.provider ?? providerForRepo(spec);
@@ -227,8 +233,9 @@ export function startStack(
   const name = opts.name ?? `${provider.workspaceName(ids[0]!, repo)}${STACK_SUFFIX}`;
 
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}'`);
+  requirePlugins(deps.plugins, agentFor(name, opts.agent));
 
-  if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, {}, deps.mux);
+  if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, { agent: opts.agent }, deps.mux);
 
   // layers must be new: a branch already on origin belongs to checking out its existing PR or stack
   const remote = branches.find((b) => hasRef(repo, `refs/remotes/origin/${b}`));
@@ -246,7 +253,7 @@ export function startStack(
     name,
     repo,
     branches[0]!,
-    { prompt: opts.prompt, defaultPrompt: `/start-item ${ids[0]}. ${brief}` },
+    { prompt: opts.prompt, defaultPrompt: `/start-item ${ids[0]}. ${brief}`, agent: opts.agent },
     deps.mux,
     (wt) => {
       try {
@@ -270,12 +277,22 @@ function undoStack(repo: string, wt: string, made: string[]) {
   for (const b of made) run(["git", "-C", barePath(repo), "branch", "-D", b]);
 }
 
-/** Stop before any workspace exists when its Claude could not load the overbridge skills; print the warnings. */
-function requirePlugins(check: () => PluginProblems = pluginAndSkillProblems) {
-  const { errors, warnings } = check();
+/** The agent workspace `name` runs: its own when it exists (a workspace keeps its agent), else `explicit`, else the root config's default. */
+export function agentFor(name: string, explicit: AgentKind | undefined): AgentKind {
+  const existing = readState().workspaces[name];
+
+  return existing ? agentOf(existing) : (explicit ?? loadRootLayers().agent);
+}
+
+/** The check that `agent` can load the overbridge skills. */
+export const pluginCheckFor = (agent: AgentKind): (() => PluginProblems) => (agent === AgentKind.Agy ? agyPluginProblems : pluginAndSkillProblems);
+
+/** Stop before any workspace exists when its agent could not load the overbridge skills; print the warnings. */
+function requirePlugins(check: (() => PluginProblems) | undefined, agent: AgentKind) {
+  const { errors, warnings } = (check ?? pluginCheckFor(agent))();
 
   if (errors.length) {
-    fail(`the new tab's Claude would not have the overbridge skills, so a command such as /start-item would be unknown:\n${errors.join("\n")}`);
+    fail(`the new tab's ${agent} would not have the overbridge skills, so a command such as /start-item would be unknown:\n${errors.join("\n")}`);
   }
 
   warnings.forEach((w) => log(w));
@@ -285,15 +302,19 @@ function requirePlugins(check: () => PluginProblems = pluginAndSkillProblems) {
  * Create workspace `name` holding `repo` on `branch` and open its tab in the background, or show its tab when it
  * already exists, since you asked for it.
  */
-function openWorkspace(name: string, repo: string, branch: string, prompts: TabPrompt, mux: Mux = defaultMux(), setup?: (wt: string) => void) {
-  if (readState().workspaces[name]) {
+function openWorkspace(name: string, repo: string, branch: string, prompts: NewTab, mux: Mux = defaultMux(), setup?: (wt: string) => void) {
+  const existing = readState().workspaces[name];
+
+  if (existing) {
     log(`${name} already exists`);
+
+    if (prompts.agent && prompts.agent !== agentOf(existing)) log(`${name} runs ${agentOf(existing)}; --agent ${prompts.agent} applies only to a new workspace`);
     showTab(name, prompts, mux);
 
     return console.log(name);
   }
 
-  createWorkspace(name, [repo]);
+  createWorkspace(name, [repo], prompts.agent);
 
   try {
     checkout([repo, branch], name);
