@@ -96,7 +96,7 @@ describe("agySkills", () => {
 });
 
 describe("fromAgy", () => {
-  test("translates a run_command call to Bash, folding its Cwd into the command", () => {
+  test("translates a run_command call to Bash, its Cwd as the cwd", () => {
     expect(
       fromAgy({
         hookEventName: "PreToolUse",
@@ -110,7 +110,7 @@ describe("fromAgy", () => {
       cwd: "/w/ws1/app",
       tool_name: "Bash",
       tool_use_id: "t1",
-      tool_input: { command: 'cd "/w/ws1/app" && bun test' },
+      tool_input: { command: "bun test" },
     });
   });
 

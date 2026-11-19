@@ -131,6 +131,8 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
     // the folder the command runs in, whole: the token scan below stops at a space in it
     if (foreign(expand(cwd))) return `${expand(cwd)} is outside workspace ${ctx.ws}; only ${wsPath} is accessible`;
 
+    if (ctx.agent === AgentKind.Agy && isInside(expand(cwd), join(wsPath, ".agents"))) return "workspace .agents config is managed by overbridge";
+
     for (const [re, reason] of BASH_RULES) if (re.test(cmd)) return reason;
 
     if (ctx.agent === AgentKind.Agy) for (const [re, reason] of AGY_BASH_RULES) if (re.test(cmd)) return reason;

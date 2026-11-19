@@ -187,6 +187,11 @@ describe("agy calls", () => {
     expect(check(agy("run_command", { CommandLine: "cat ../../ws2/secret", Cwd: "/w/ws1/app" }), ctx)).toContain("outside workspace ws1");
   });
 
+  test("an anchored deny rule matches the command as agy sent it, Cwd or not", () => {
+    const withDeny = { ...ctx, extra: { readPaths: [], deny: [{ pattern: /^npm\s+publish\b/, reason: "publish from CI" }] } };
+    expect(check(agy("run_command", { CommandLine: "npm publish", Cwd: "/w/ws1/app" }), withDeny)).toBe("publish from CI");
+  });
+
   test("a command's folder is checked whole, once, from the hook's cwd", () => {
     expect(check(agy("run_command", { CommandLine: "ls", Cwd: "../ws2" }), ctx)).toContain("outside workspace ws1");
     const spaced = { ...ctx, root: "/tmp/work spaces" };
@@ -217,6 +222,7 @@ describe("agy calls", () => {
     expect(check(agy("run_command", { CommandLine: "ls && mv ./.agents old-agents" }), agyCtx)).toContain(".agents config is managed by overbridge");
     expect(check(agy("run_command", { CommandLine: "echo x > .agents/other" }), agyCtx)).toContain(".agents config is managed by overbridge");
     expect(check(agy("run_command", { CommandLine: "ls .agents" }), agyCtx)).toBeUndefined();
+    expect(check(agy("run_command", { CommandLine: "rm hooks.json", Cwd: "/w/ws1/.agents" }), agyCtx)).toContain(".agents config is managed by overbridge");
     expect(check(bash(String.raw`rg -n '\.agents|hooks\.json' src`), ctx)).toBeUndefined();
   });
 

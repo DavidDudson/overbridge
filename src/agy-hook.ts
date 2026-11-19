@@ -84,12 +84,8 @@ export function claudeTool(name: string, args: JsonObject, base?: string): Requi
     if (!command) return unreadable(name, `agy's ${name} call has no CommandLine, so overbridge cannot check it`);
     const given = str(args, "Cwd");
 
-    if (!given) return { tool_name: "Bash", tool_input: { command } };
-
-    // resolved once, so the `cd` and the guard's relative paths both start from the folder agy runs in
-    const cwd = underCwd(base, given);
-
-    return { tool_name: "Bash", tool_input: { command: `cd ${JSON.stringify(cwd)} && ${command}` }, cwd };
+    // the command stays as agy sent it, so anchored `guard.deny` rules and history read it; the guard checks `cwd` itself
+    return given ? { tool_name: "Bash", tool_input: { command }, cwd: underCwd(base, given) } : { tool_name: "Bash", tool_input: { command } };
   }
 
   const known = WRITE_TOOLS.get(name) ?? READ_TOOLS.get(name);
