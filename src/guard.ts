@@ -39,6 +39,10 @@ const END =String.raw`(?![^;&|\n]*\s--(?:\s|$))`; // no ` -- ` (pathspec) later 
 /** Shell rules for agy workspaces only. Best effort: the guard's own config lives in `.agents/hooks.json`, which every launch rewrites. */
 const AGY_BASH_RULES: [RegExp, string][] = [
   [/\.agents\b[\s\S]*\b(?:hooks|skills)\.json\b|\b(?:hooks|skills)\.json\b[\s\S]*\.agents\b|\bcd\s+\S*\.agents\b/, "workspace .agents config is managed by overbridge"],
+  [
+    new RegExp(CMD + String.raw`(?:rm|rmdir|mv|cp|ln|chmod|chown|touch|truncate|tee|install|sed\s+-i|perl\s+-p?i)\b[^;&|\n]*(?:^|[\s/'"=])\.agents\b|>\s*['"]?\S*\.agents\b`),
+    "workspace .agents config is managed by overbridge",
+  ],
 ];
 
 const BASH_RULES: [RegExp, string][] = [
@@ -123,6 +127,9 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
 
   if (tool === "Bash") {
     const cmd = String(ti.command ?? "").replace(/\$\{?HOME\}?/g, ctx.home);
+
+    // the folder the command runs in, whole: the token scan below stops at a space in it
+    if (foreign(expand(cwd))) return `${expand(cwd)} is outside workspace ${ctx.ws}; only ${wsPath} is accessible`;
 
     for (const [re, reason] of BASH_RULES) if (re.test(cmd)) return reason;
 

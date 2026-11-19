@@ -187,6 +187,13 @@ describe("agy calls", () => {
     expect(check(agy("run_command", { CommandLine: "cat ../../ws2/secret", Cwd: "/w/ws1/app" }), ctx)).toContain("outside workspace ws1");
   });
 
+  test("a command's folder is checked whole, once, from the hook's cwd", () => {
+    expect(check(agy("run_command", { CommandLine: "ls", Cwd: "../ws2" }), ctx)).toContain("outside workspace ws1");
+    const spaced = { ...ctx, root: "/tmp/work spaces" };
+    const call = fromAgy({ hookEventName: "PreToolUse", cwd: "/tmp/work spaces/ws1", toolCall: { name: "run_command", args: { CommandLine: "ls", Cwd: "/tmp/work spaces/ws2" } } });
+    expect(check(call, spaced)).toContain("outside workspace ws1");
+  });
+
   test("an unknown tool's paths are checked as writes, and an unreadable call is denied", () => {
     expect(check(agy("delete_file", { TargetFile: "/home/u/.zshrc" }), ctx)).toContain("outside workspace ws1");
     expect(check(agy("delete_file", { TargetFile: "/w/ws1/.agents/hooks.json" }), ctx)).toContain(".agents config is managed by overbridge");
@@ -206,6 +213,10 @@ describe("agy calls", () => {
     const agyCtx = { ...ctx, agent: AgentKind.Agy };
     expect(check(agy("run_command", { CommandLine: "echo '{}' > .agents/hooks.json" }), agyCtx)).toContain(".agents config is managed by overbridge");
     expect(check(agy("run_command", { CommandLine: "cd .agents && rm skills.json" }), agyCtx)).toContain(".agents config is managed by overbridge");
+    expect(check(agy("run_command", { CommandLine: "rm -rf .agents" }), agyCtx)).toContain(".agents config is managed by overbridge");
+    expect(check(agy("run_command", { CommandLine: "ls && mv ./.agents old-agents" }), agyCtx)).toContain(".agents config is managed by overbridge");
+    expect(check(agy("run_command", { CommandLine: "echo x > .agents/other" }), agyCtx)).toContain(".agents config is managed by overbridge");
+    expect(check(agy("run_command", { CommandLine: "ls .agents" }), agyCtx)).toBeUndefined();
     expect(check(bash(String.raw`rg -n '\.agents|hooks\.json' src`), ctx)).toBeUndefined();
   });
 
