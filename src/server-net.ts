@@ -42,6 +42,17 @@ export const serverDisabled = (): boolean => !!process.env.OVERBRIDGE_NO_SERVER;
 const metaOf = () => join(root(), ".overbridge");
 export const pidFile = () => join(metaOf(), "server.pid");
 
+/** The pid the server's pid file holds, or undefined when it is missing or not a pid. */
+export function readServerPid(): number | undefined {
+  try {
+    const pid = Number(readFileSync(pidFile(), "utf8").trim());
+
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Written by `overbridge server stop`, so the watchdog does not bring back a server the user stopped. */
 export const stoppingFile = () => join(metaOf(), "server.stopping");
 

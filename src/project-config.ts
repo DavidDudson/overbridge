@@ -891,7 +891,7 @@ export const configPath = (repoDir: string) => join(repoDir, CONFIG_FILE);
 /** The root config, `<root>/config.yml`: settings that live outside the repos. */
 export const ROOT_CONFIG_FILE = "config.yml";
 export const rootConfigPath = () => join(root(), ROOT_CONFIG_FILE);
-const ROOT_KEYS = ["version", "defaults", "owners", "repos", "skill-extensions", "guard", "github-orgs", "priority-classes", "agent"];
+const ROOT_KEYS = ["version", "defaults", "owners", "repos", "skill-extensions", "guard", "github-orgs", "priority-classes", "agent", "cpu-priority"];
 const GUARD_KEYS = ["read-paths", "deny"];
 
 /**
@@ -924,6 +924,8 @@ export interface RootLayers {
   checkClasses: readonly PriorityClass[];
   /** The agent a new workspace runs unless `overbridge start --agent` names one. */
   agent: AgentKind;
+  /** Whether each workspace's processes get its class's CPU priority (`cpu-priority: false` turns it off). */
+  cpuPriority: boolean;
 }
 
 /** Read and check `<root>/config.yml`. A missing or empty file has no layers. */
@@ -933,7 +935,7 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
 
 /** Check parsed root config YAML (`file` names it in errors), validating every layer with `validateConfig`. */
 export function rootLayersFrom(raw: Json | undefined, file: string): RootLayers {
-  const layers: RootLayers = { file, owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: AgentKind.Claude };
+  const layers: RootLayers = { file, owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: AgentKind.Claude, cpuPriority: true };
 
   if (raw === null || raw === undefined) return layers;
 
@@ -973,6 +975,12 @@ export function rootLayersFrom(raw: Json | undefined, file: string): RootLayers 
   layers.githubOrgs = p.stringList(raw, "github-orgs", "") ?? [];
   const classes = parseClasses(p, raw);
   layers.agent = p.oneOf(p.string(raw, "agent", "", false), AGENT_KINDS, "agent") ?? AgentKind.Claude;
+
+  if (raw["cpu-priority"] !== undefined && !isBoolean(raw["cpu-priority"])) {
+    p.add("cpu-priority", "expected true or false");
+  }
+
+  layers.cpuPriority = raw["cpu-priority"] !== false;
 
   if (classes?.length) layers.checkClasses = classes;
 

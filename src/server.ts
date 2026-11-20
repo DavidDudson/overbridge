@@ -729,7 +729,12 @@ export async function serve(): Promise<void> {
     if (exiting || priorityPassRunning) return;
     priorityPassRunning = true;
     startPriorityPass()
-      .catch((e: Error) => log(`priority pass failed: ${e.message}`))
+      .then((code) => {
+        if (code !== 0) {
+          log(`priority pass exited ${code}; run \`overbridge priority apply\` to see why`);
+        }
+      })
+      .catch((e: Error) => log(`priority pass failed to start: ${e.message}`))
       .finally(() => {
         priorityPassRunning = false;
       });

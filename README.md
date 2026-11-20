@@ -456,9 +456,13 @@ their disk I/O. The built-in `low` class does this. A process belongs to a works
 that one of those starts belongs to the workspace too.
 
 Only root can lower a nice value. When a workspace's class goes up, its running processes keep the old nice, and the
-sidebar card says `priority raised · restart Claude to apply`. Darwin background is different. The pass takes it
+sidebar card says `priority raised · restart to apply`. Darwin background is different. The pass takes it
 off as soon as the class no longer sets it. `overbridge priority` shows the last pass, and
-`overbridge priority apply` runs one now.
+`overbridge priority apply` runs one now. Set `cpu-priority: false` in the root `config.yml` to stop the passes.
+Turning it off takes processes out of Darwin background, but a nice value already set stays until the process
+restarts.
+
+On Linux each thread has its own nice value, so the pass renices every thread of each process.
 
 ```yaml
 priority-classes:

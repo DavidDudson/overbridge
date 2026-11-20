@@ -182,7 +182,7 @@ export function parseEnvPsLine(line: string, name: string): EnvProc | undefined 
   return env === undefined ? proc : { ...proc, env };
 }
 
-/** `/proc/<pid>/stat` plus its `environ`: the nice value is field 19, which is the 17th after the state. */
+/** `/proc/<pid>/stat` plus its `environ`. The nice value is field 19 of `proc(5)`: index 16 once the text after `comm)` is split on spaces. */
 function readEnvProc(pid: number, name: string): EnvProc | undefined {
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -215,8 +215,8 @@ function readEnviron(pid: number, name: string): string | undefined {
   }
 }
 
-/** Every process with its nice value and environment variable `name` (readable for this user's processes only). */
-export function listEnvProcs(name: string): EnvProc[] {
+/** Every process with its nice value and environment variable `name` (readable for this user's processes only); undefined when `ps` fails. */
+export function listEnvProcs(name: string): EnvProc[] | undefined {
   if (hasProc) {
     return readdirSync("/proc")
       .filter((d) => /^\d+$/.test(d))
@@ -226,8 +226,24 @@ export function listEnvProcs(name: string): EnvProc[] {
   const r = spawnSync("ps", ["-AE", "-o", "pid=,ppid=,nice=,stat=,command="], { cwd: homedir(), encoding: "utf8", timeout: 10_000, maxBuffer: 256 * 1024 * 1024 });
 
   if (r.status !== 0 || !r.stdout) {
-    return [];
+    return undefined;
   }
 
   return r.stdout.split("\n").flatMap((l) => parseEnvPsLine(l, name) ?? []);
+}
+
+/**
+ * The thread ids of `pid`, for a renice that has to reach every thread: Linux keeps a nice per thread, so
+ * `renice -p <pid>` alone leaves the threads that already exist where they were. macOS sets it per process.
+ */
+export function threadIds(pid: number): number[] {
+  if (!hasProc) {
+    return [pid];
+  }
+
+  try {
+    return readdirSync(`/proc/${pid}/task`).flatMap((t) => (/^\d+$/.test(t) ? [Number(t)] : []));
+  } catch {
+    return [pid];
+  }
 }

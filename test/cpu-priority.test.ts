@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classTarget, classTargets, DEFAULT_CLASSES, defaultNice } from "../src/check-priority";
-import { BackgroundPolicy, backgroundPolicy, type PlanInput, planPriority, protectedPids, readPriorityReport, workspaceOf, writePriorityReport } from "../src/cpu-priority";
-import { type ApplyDeps, applyPriority, formatReport } from "../src/cpu-priority-run";
+import { BackgroundPolicy, backgroundPolicy, type PlanInput, planPriority, protectedPids, readPriorityReport, readPriorityReportCached, workspaceOf, writePriorityReport } from "../src/cpu-priority";
+import { type ApplyDeps, applyPriority, formatReport, liveClassesFrom } from "../src/cpu-priority-run";
+import type { WorkspaceState } from "../src/state";
 import type { EnvProc } from "../src/proc";
 
 const proc = (pid: number, ppid: number, extra: Partial<EnvProc> = {}): EnvProc => ({ pid, ppid, comm: "sh", state: "S", nice: 0, ...extra });
@@ -14,7 +15,7 @@ const LOW = classTarget(DEFAULT_CLASSES, "low");
 const HIGH = classTarget(DEFAULT_CLASSES, "high");
 const NICES = classTargets(DEFAULT_CLASSES).map((t) => t.nice);
 
-/** launchd, a zellij server with a sidebar and a Claude pane for `ws`, and an app it started detached. */
+/** A zellij server's panes and a workspace `ws`'s processes, as the comments on each line say. */
 const tree = (ws = "a"): EnvProc[] => [
   proc(1, 0, { comm: "launchd" }),
   proc(10, 1, { comm: "zellij" }),
@@ -28,7 +29,7 @@ const tree = (ws = "a"): EnvProc[] => [
 
 const input = (over: Partial<PlanInput> = {}): PlanInput => ({
   procs: tree(),
-  guarded: [],
+  extraProtected: [],
   targets: { a: NORMAL },
   classNices: NICES,
   previous: {},
@@ -61,7 +62,7 @@ describe("class targets", () => {
 });
 
 describe("protectedPids and workspaceOf", () => {
-  test("the multiplexer, its ancestors and the guarded pids are protected", () => {
+  test("the multiplexer, its ancestors and the extra protected pids are protected", () => {
     expect([...protectedPids(tree(), [20])].toSorted((x, y) => x - y)).toEqual([1, 10, 20]);
   });
 
@@ -131,6 +132,13 @@ describe("planPriority", () => {
     expect(plan.report.workspaces.a?.backgroundPids).toEqual([]);
   });
 
+  test("a workspace whose class is no longer known brings its live background processes back out", () => {
+    const previous = { a: { class: "low", nice: 9, background: true, procs: 2, stuck: 0, backgroundPids: [13, 14, 99] } };
+    const plan = planPriority(input({ targets: {}, previous }));
+    expect(plan.toForeground).toEqual([13, 14]);
+    expect(plan.renice).toEqual([]);
+  });
+
   test("off macOS nothing goes to background", () => {
     const plan = planPriority(input({ targets: { a: LOW }, policy: BackgroundPolicy.None }));
     expect(plan.toBackground).toEqual([]);
@@ -144,10 +152,12 @@ describe("applyPriority", () => {
     const written: unknown[] = [];
 
     const d: ApplyDeps = {
+      enabled: () => true,
       procs: () => tree(),
       classes: () => ({ a: "low" }),
       priorityClasses: () => DEFAULT_CLASSES,
-      guarded: () => [],
+      extraProtected: () => [],
+      threads: (pid) => [pid],
       previous: () => ({ at: 0, workspaces: {} }),
       run: (cmd) => void ran.push(cmd),
       write: (r) => void written.push(r),
@@ -169,10 +179,46 @@ describe("applyPriority", () => {
     expect(written).toHaveLength(1);
   });
 
-  test("the guarded server keeps its nice even with a workspace's value", () => {
-    const { d, ran } = deps({ classes: () => ({ a: "normal" }), guarded: () => [20] });
+  test("the protected server keeps its nice even with a workspace's value", () => {
+    const { d, ran } = deps({ classes: () => ({ a: "normal" }), extraProtected: () => [20] });
     applyPriority(d);
     expect(ran).toEqual([["renice", "5", "-p", "13", "14", "15"]]);
+  });
+
+  test("a renice reaches every thread of each process", () => {
+    const { d, ran } = deps({ classes: () => ({ a: "normal" }), threads: (pid) => (pid === 13 ? [13, 130, 131] : [pid]) });
+    applyPriority(d);
+    expect(ran[0]).toEqual(["renice", "5", "-p", "13", "130", "131", "14", "15", "20"]);
+  });
+
+  test("an unreadable process list changes nothing and keeps the last report", () => {
+    const { d, ran, written } = deps({ procs: () => undefined });
+    expect(applyPriority(d)).toBeUndefined();
+    expect(ran).toEqual([]);
+    expect(written).toEqual([]);
+  });
+
+  test("turned off, it brings back out of background only the recorded pids still in that workspace, and renices nothing", () => {
+    const previous = { at: 1, workspaces: { a: { class: "low", nice: 9, background: true, procs: 2, stuck: 0, backgroundPids: [13, 14, 11, 99] } } };
+    const { d, ran, written } = deps({ enabled: () => false, previous: () => previous });
+    applyPriority(d);
+    expect(ran).toEqual([13, 14].map((pid) => ["taskpolicy", "-B", "-p", String(pid)]));
+    expect(written).toEqual([{ at: 5, workspaces: {} }]);
+  });
+});
+
+describe("liveClassesFrom", () => {
+  test("keeps an active workspace with a known class; leaves out one with no class yet, an iceboxed one and one being removed", () => {
+    const active: WorkspaceState = { created: "", repos: {} };
+
+    const workspaces = {
+      known: active,
+      unknown: active,
+      iced: { ...active, iceboxed: { since: "" } },
+      leaving: { ...active, removing: { since: new Date().toISOString() } },
+    };
+
+    expect(liveClassesFrom(workspaces, (ws) => (ws === "unknown" ? undefined : "low"))).toEqual({ known: "low" });
   });
 });
 
@@ -193,8 +239,18 @@ describe("report file", () => {
     expect(readPriorityReport(file)).toEqual(report);
     writeFileSync(file, "{ nope");
     expect(readPriorityReport(file)).toEqual({ at: 0, workspaces: {} });
+    expect(readPriorityReportCached(file)).toEqual({ at: 0, workspaces: {} });
     writeFileSync(file, JSON.stringify({ at: 1, workspaces: { a: { class: "x" }, b: report.workspaces.a } }));
     expect(Object.keys(readPriorityReport(file).workspaces)).toEqual(["b"]);
+  });
+
+  test("the cached reader is empty with no file and follows each rewrite", () => {
+    const file = join(dir, "c.json");
+    expect(readPriorityReportCached(file)).toEqual({ at: 0, workspaces: {} });
+    writePriorityReport({ at: 1, workspaces: {} }, file);
+    expect(readPriorityReportCached(file).at).toBe(1);
+    writePriorityReport({ at: 2, workspaces: {} }, file);
+    expect(readPriorityReportCached(file).at).toBe(2);
   });
 
   test("formatReport shows stuck processes with what to do", () => {

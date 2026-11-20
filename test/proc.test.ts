@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { groupAlive, groupCpuSeconds, listEnvProcs, listProcs, parseCpuTime, parseEnvPsLine, parseGroupLine, parsePsLine, parseStat, pidAlive, readProc } from "../src/proc";
+import { getPriority } from "node:os";
+import { groupAlive, groupCpuSeconds, listEnvProcs, threadIds, listProcs, parseCpuTime, parseEnvPsLine, parseGroupLine, parsePsLine, parseStat, pidAlive, readProc } from "../src/proc";
 
 describe("parseStat (Linux /proc)", () => {
   test("reads state and parent, even when comm has spaces and parens", () => {
@@ -44,9 +45,13 @@ describe("parseEnvPsLine (macOS ps -E)", () => {
 
 describe("on this machine", () => {
   test("listEnvProcs finds this process with its environment and nice", () => {
-    const me = listEnvProcs("HOME").find((p) => p.pid === process.pid);
+    const me = listEnvProcs("HOME")?.find((p) => p.pid === process.pid);
     expect(me?.env).toBe(process.env.HOME);
-    expect(me?.nice).toBeNumber();
+    expect(me?.nice).toBe(getPriority(process.pid));
+  });
+
+  test("threadIds includes the process itself", () => {
+    expect(threadIds(process.pid)).toContain(process.pid);
   });
 
   test("finds this process, its parent and a live pid, and not a dead one", () => {

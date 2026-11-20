@@ -357,7 +357,7 @@ const BLOCK_TEXT: Record<RemovalBlock, StatusLine> = {
 };
 
 const UNSAVED_TEXT: StatusLine = { text: "ended · unsaved work", color: "red" };
-const PRIORITY_STUCK_TEXT: StatusLine = { text: "priority raised · restart Claude to apply", color: "yellow" };
+const PRIORITY_STUCK_TEXT: StatusLine = { text: "priority raised · restart to apply", color: "yellow" };
 const FAULT_COLOR: Color = "red";
 
 /** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, an icebox suggestion (unless the agent wants you), a raised class waiting on a restart (unless the agent is working or wants you), then `claude status - task status`. */
@@ -1100,7 +1100,13 @@ export async function sidebar(wsOpt?: string) {
     // a user layout decides its own tabs, so only the generated one gets its orchestration tabs back
     keepOrchestration: (order) => { if (!userLayout) ensureOrchestrationTabs(order); },
     // with the server down, the sidebar that takes the sweep also runs the CPU priority pass the server would
-    sweep: createSweepTrigger({ serverOwns: () => serverOwnsSweep(), claim: claimSweep, start: () => { startSweep(); void startPriorityPass(); }, now: Date.now }),
+    sweep: createSweepTrigger({ serverOwns: () => serverOwnsSweep(), claim: claimSweep, start: () => {
+        startSweep();
+        // a pass that fails to start is tried again on the next sweep; a pane has nowhere to log it
+        startPriorityPass().catch(() => undefined);
+      },
+      now: Date.now,
+    }),
     readState: tryReadState,
     entries: (order, state) => withReceipt(entries(order, state), self),
     reap: createReaper(),

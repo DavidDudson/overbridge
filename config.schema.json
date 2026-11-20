@@ -36,6 +36,10 @@
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
     },
+    "cpu-priority": {
+      "description": "Whether each workspace's processes get its priority class's nice value and, on macOS, Darwin background. false stops every pass and takes processes out of background; a nice already set stays until the process restarts. Default: true.",
+      "type": "boolean"
+    },
     "priority-classes": {
       "description": "The workspace priority classes, highest first: they order the check queue and set each workspace's CPU priority. Every repo shares one queue, so the list lives here only. Default: high (nice 1), normal (the default class, nice 5), low (nice 9, Darwin background).",
       "type": "array",
