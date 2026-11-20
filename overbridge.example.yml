@@ -69,10 +69,13 @@ check-queue:
   timeout-seconds: 180       # kill the run after this long; `--timeout-seconds n` overrides it for one run
   stall-seconds: 300         # kill the run once its processes have used no CPU for this long
   wait-seconds: 900          # give up (exit 75) when there is still no turn after this long
-  # Checks start by the workspace's class (the root config.yml's priority-classes; default high, normal, low).
+  # Checks start by the workspace's class (the root config.yml's priority-classes; default high, normal, low),
+  # and the @work list ranks items of the same priority by class.
   # priority: normal         # this repo's class when no rule matches
-  # priority-rules:          # first match wins; set branch, item (the work item id) or both, as regexes
+  # priority-rules:          # first match wins; set any of branch, item (the work item id), type, label, as regexes
   #   - { priority: high, item: "^HOTFIX-" }
+  #   - { priority: high, type: "^Story$" }
+  #   - { priority: low, label: "^tech-debt$" }
   #   - { priority: low, branch: "^chore/" }
 
 # What `overbridge icebox <ws> --prune` deletes: repo-relative paths git ignores and does not track.

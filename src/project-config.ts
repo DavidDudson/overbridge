@@ -205,7 +205,7 @@ export const defaultConfig = (): ProjectConfig => ({
 const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons", "mcp-servers"];
 const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds", "priority", "priority-rules"];
-const PRIORITY_RULE_KEYS = ["priority", "branch", "item"];
+const PRIORITY_RULE_KEYS = ["priority", "branch", "item", "type", "label"];
 const ICEBOX_KEYS = ["prune", "idle-days"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir", "ship-pr"];
 const BOARD_KEYS = ["columns"];
@@ -773,7 +773,7 @@ function parsePriorityRules(p: Problems, checkQueue: JsonObject): PriorityRule[]
   if (rules === undefined || rules === null) return undefined;
 
   if (!Array.isArray(rules)) {
-    p.add("check-queue.priority-rules", "expected a list of { priority, branch?, item? }");
+    p.add("check-queue.priority-rules", "expected a list of { priority, branch?, item?, type?, label? }");
 
     return undefined;
   }
@@ -782,7 +782,7 @@ function parsePriorityRules(p: Problems, checkQueue: JsonObject): PriorityRule[]
     const at = `check-queue.priority-rules[${i}]`;
 
     if (!isRecord(rule)) {
-      p.add(at, "expected a mapping with priority and branch or item");
+      p.add(at, "expected a mapping with priority and one of branch, item, type, label");
 
       return [];
     }
@@ -791,8 +791,12 @@ function parsePriorityRules(p: Problems, checkQueue: JsonObject): PriorityRule[]
     const priority = p.string(rule, "priority", at, true);
     const branch = pattern(p, rule, "branch", at);
     const item = pattern(p, rule, "item", at);
+    const type = pattern(p, rule, "type", at);
+    const label = pattern(p, rule, "label", at);
 
-    if (rule.branch === undefined && rule.item === undefined) p.add(at, "needs branch or item: a rule with neither matches every claim (use check-queue.priority for that)");
+    if ([rule.branch, rule.item, rule.type, rule.label].every((v) => v === undefined)) {
+      p.add(at, "needs branch, item, type or label: a rule with none matches every claim (use check-queue.priority for that)");
+    }
 
     if (!priority) return [];
     const parsed: PriorityRule = { priority };
@@ -800,6 +804,14 @@ function parsePriorityRules(p: Problems, checkQueue: JsonObject): PriorityRule[]
     if (branch !== undefined) parsed.branch = branch;
 
     if (item !== undefined) parsed.item = item;
+
+    if (type !== undefined) {
+      parsed.type = type;
+    }
+
+    if (label !== undefined) {
+      parsed.label = label;
+    }
 
     return [parsed];
   });

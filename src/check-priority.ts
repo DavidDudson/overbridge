@@ -35,23 +35,34 @@ export function classInfo(classes: readonly PriorityClass[], name: string): Clas
   return { name: cls?.name ?? name, rank, icon: cls?.icon ?? "" };
 }
 
-/** A config rule: the class for a claim whose branch and item id match every pattern the rule sets. */
+/** A config rule: the class for a claim or work item whose facts match every pattern the rule sets. */
 export interface PriorityRule {
   priority: string;
   branch?: string;
   item?: string;
+  /** The work item's type, such as Jira's `Story`. */
+  type?: string;
+  /** Matches when any one of the item's labels does. */
+  label?: string;
 }
 
+/** What the rules can see of a claim or a work item; an unknown fact never matches a pattern. */
 export interface ClaimFacts {
   branch?: string | undefined;
   item?: string | undefined;
+  type?: string | undefined;
+  labels?: readonly string[] | undefined;
 }
 
 const matches = (pattern: string | undefined, value: string | undefined) => pattern === undefined || (value !== undefined && new RegExp(pattern).test(value));
 
-/** The class name of a claim: the first matching rule, else `fallback`. */
-export const priorityOf = (rules: readonly PriorityRule[], fallback: string, facts: ClaimFacts): string =>
-  rules.find((r) => matches(r.branch, facts.branch) && matches(r.item, facts.item))?.priority ?? fallback;
+const matchesAny = (pattern: string | undefined, values: readonly string[] | undefined) => pattern === undefined || (values ?? []).some((v) => new RegExp(pattern).test(v));
+
+const ruleMatches = (r: PriorityRule, facts: ClaimFacts) =>
+  matches(r.branch, facts.branch) && matches(r.item, facts.item) && matches(r.type, facts.type) && matchesAny(r.label, facts.labels);
+
+/** The class name of a claim or work item: the first matching rule, else `fallback`. */
+export const priorityOf = (rules: readonly PriorityRule[], fallback: string, facts: ClaimFacts): string => rules.find((r) => ruleMatches(r, facts))?.priority ?? fallback;
 
 /** The class that starts first among `classes`, or undefined for none. */
 export const highest = (classes: readonly ClassInfo[]): ClassInfo | undefined => classes.toSorted((a, b) => a.rank - b.rank)[0];

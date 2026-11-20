@@ -24,7 +24,7 @@ import { showTab, start, startStack, startTask } from "./start";
 import { perfPane } from "./perf-run";
 import { topPanel, topRefresh } from "./top-run";
 import { prListPane, refreshPrList, type PrListKind } from "./prlist-run";
-import { readWorklist, refreshWorklist, showWorklist, worklistPane } from "./worklist-run";
+import { loadClassOf, readWorklist, refreshWorklist, showWorklist, worklistPane } from "./worklist-run";
 import { currentWorkspace, silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
 import { errorMessage, exec, log, OverbridgeError } from "./util";
@@ -337,7 +337,7 @@ async function main(argv: string[]): Promise<number> {
         const cache = refreshWorklist();
         log(`worklist: ${cache.rows.length} open item(s)${cache.notes.length ? `; ${cache.notes.join("; ")}` : ""}`);
       } else if (sub === "show") {
-        console.log(showWorklist(readWorklist()).join("\n"));
+        console.log(showWorklist(readWorklist(), loadClassOf()).join("\n"));
       } else if (sub !== undefined) {
         throw new OverbridgeError("usage: overbridge worklist [refresh|show]");
       } else {

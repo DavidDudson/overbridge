@@ -36,4 +36,28 @@ describe("workspaceClass", () => {
   test("no claims, no class", () => {
     expect(workspaceClass([], make)).toBeUndefined();
   });
+
+  test("a type or label rule reads the claim's item facts by repo and item id", () => {
+    const rules = { priorityRules: [{ priority: "low", label: "^tech-debt$" }, { priority: "high", type: "^Story$" }] };
+    const story = { ...claim(rules, "feat/ENG-2-y"), repo: "web" };
+    const asked: string[] = [];
+
+    const factsOf = (repo: string, item: string) => {
+      asked.push(`${repo} ${item}`);
+
+      return item === "ENG-2" ? { type: "Story", labels: [] } : undefined;
+    };
+
+    expect(workspaceClass([story], make, factsOf)?.name).toBe("high");
+    expect(workspaceClass([{ ...claim(rules, "feat/ENG-3-z"), repo: "web" }], make, factsOf)?.name).toBe("normal");
+    expect(asked).toEqual(["web ENG-2", "web ENG-3"]);
+  });
+
+  test("rules without type or label never read item facts", () => {
+    const factsOf = () => {
+      throw new Error("read item facts");
+    };
+
+    expect(workspaceClass([{ ...claim({ priorityRules: [{ priority: "high", item: "^ENG-" }] }, "feat/ENG-2-y"), repo: "web" }], make, factsOf)?.name).toBe("high");
+  });
 });

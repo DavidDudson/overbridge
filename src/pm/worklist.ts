@@ -21,6 +21,8 @@ export interface WorkRow {
   parent?: string;
   /** 0 (most urgent) to 3, from a provider's own priority field. Unset falls back to the labels. */
   priority?: number;
+  /** The provider's item type, such as Jira's `Story` or `Bug`. Unset when the provider has none. */
+  type?: string;
   /** ISO timestamp from the provider. Compared as a string, never against now. */
   updatedAt: string;
 }
@@ -124,16 +126,26 @@ export function isReady(row: WorkRow, byKey: Map<string, WorkRow>): boolean {
   return row.blockedBy.every((b) => byKey.get(b)?.status === "done");
 }
 
+/** A row's class from the priority rules: its name and its place in `priority-classes` (0 first). */
+export interface RowClass {
+  name: string;
+  rank: number;
+}
+
+/** No classes: every row ties on rule 3. */
+const noClass = (): RowClass | undefined => undefined;
+
 /**
  * Rules, in order; the first that differs decides:
  *  1. ready before not ready
  *  2. priority field, else label (p0 before p3, none last)
- *  3. unblocks more open items (fan-out)
- *  4. parent already in progress
- *  5. least recently updated first
- *  6. `repo#id` ascending
+ *  3. priority class from `classOf` (the first class first, none last)
+ *  4. unblocks more open items (fan-out)
+ *  5. parent already in progress
+ *  6. least recently updated first
+ *  7. `repo#id` ascending
  */
-export function rank(rows: WorkRow[]): Ranked[] {
+export function rank(rows: WorkRow[], classOf: (row: WorkRow) => RowClass | undefined = noClass): Ranked[] {
   const open = rows.filter((r) => r.status !== "done");
   const byKey = new Map(rows.map((r) => [keyOf(r), r]));
   const stream = streams(rows);
@@ -145,23 +157,29 @@ export function rank(rows: WorkRow[]): Ranked[] {
     const key = keyOf(r);
     const ready = isReady(r, byKey);
     const prio = r.priority ?? priorityOf(r.labels);
+    const cls = classOf(r);
     const unblocks = fanOut.get(key) ?? 0;
     const inProgressParent = r.parent !== undefined && byKey.get(r.parent)?.status === "in-progress";
     const reasons: string[] = [ready ? "ready" : r.status === "in-progress" ? "in progress" : "waiting on blockers"];
 
     if (prio < 9) reasons.push(`priority p${prio}`);
 
+    if (cls) {
+      reasons.push(`class ${cls.name}`);
+    }
+
     if (unblocks > 0) reasons.push(`unblocks ${unblocks}`);
 
     if (inProgressParent) reasons.push("parent in progress");
 
-    return { r, key, ready, prio, unblocks, inProgressParent, reasons };
+    return { r, key, ready, prio, classRank: cls?.rank ?? Number.MAX_SAFE_INTEGER, unblocks, inProgressParent, reasons };
   });
 
   scored.sort(
     (a, b) =>
       Number(b.ready) - Number(a.ready) ||
       a.prio - b.prio ||
+      a.classRank - b.classRank ||
       b.unblocks - a.unblocks ||
       Number(b.inProgressParent) - Number(a.inProgressParent) ||
       (a.r.updatedAt < b.r.updatedAt ? -1 : a.r.updatedAt > b.r.updatedAt ? 1 : 0) ||

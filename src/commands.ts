@@ -663,7 +663,7 @@ function claimContexts(ws: string, repo: string, config: ProjectConfig): ClaimCo
     const dir = worktreePath(ws, name);
 
     try {
-      return [{ config: name === repo ? config : loadRepoConfig(dir, name), dir, branch: claim.branch }];
+      return [{ config: name === repo ? config : loadRepoConfig(dir, name), dir, branch: claim.branch, repo: name }];
     } catch (e) {
       log(`overbridge check: ${name}'s config did not load, so its class is left out of ${ws}'s: ${errorMessage(e)}`);
 

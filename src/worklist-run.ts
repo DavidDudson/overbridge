@@ -1,7 +1,7 @@
 import { subscribeEvents } from "./events-client";
 import { selfCommand } from "./paths";
 import { detailLines, filterRanked } from "./pm/worklist-filter";
-import { keyOf, rank, type Ranked, type WorkRow } from "./pm/worklist";
+import { keyOf, rank, type Ranked, type RowClass, type WorkRow } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
 import { serverRefreshWorklist } from "./server-client";
 import { readWorklist, WORKLIST_REFRESH_MS, type WorklistCache } from "./worklist-data";
@@ -13,14 +13,24 @@ import { spinner } from "./anim";
 import { silencedTitle } from "./silence";
 import { mentionScanError, silencedSet, spawnMentionRefresh, toggleMessage } from "./silence-refresh";
 import { statusGlyph, workAnimated } from "./worklist-look";
+import { loadQueues, rowClass } from "./worklist-class";
 import { bold, boxBottom, boxRow, boxTop, cell, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN, stripControl } from "./term";
 
 /** Rows the frame uses besides the item rows: top border, header, reasons, legend, bottom border. */
 const CHROME = 5;
 
+type ClassOf = (row: WorkRow) => RowClass | undefined;
+
+/** Each row's priority class from every registered repo's committed config. */
+export function loadClassOf(): ClassOf {
+  const queues = loadQueues();
+
+  return rowClass((repo) => queues.get(repo));
+}
+
 /** The list `overbridge worklist show` prints for a Claude: one ranked row per line, then the repos that could not be read. */
-export function showWorklist(cache: WorklistCache): string[] {
-  const rows = rank(cache.rows).map((r) => `${r.rank}\t${r.ready ? "ready" : r.status}\t${r.key}\t${r.title}\t${r.reasons.join(", ")}`);
+export function showWorklist(cache: WorklistCache, classOf?: ClassOf): string[] {
+  const rows = rank(cache.rows, classOf).map((r) => `${r.rank}\t${r.ready ? "ready" : r.status}\t${r.key}\t${r.title}\t${r.reasons.join(", ")}`);
 
   return [...(rows.length ? rows : ["nothing assigned to you"]), ...cache.notes.map((n) => `note: ${n}`)];
 }
@@ -117,7 +127,18 @@ export async function worklistPane() {
   let typing = false;
   /** The item whose detail view is open. */
   let detail: Ranked | undefined;
-  const everything = () => rank(cache.rows);
+  /** Read once per cache, since each read runs git in every registered repo. */
+  let classes: { at: number; classOf: ClassOf } | undefined;
+
+  const classOf = () => {
+    if (classes?.at !== cache.at) {
+      classes = { at: cache.at, classOf: loadClassOf() };
+    }
+
+    return classes.classOf;
+  };
+
+  const everything = () => rank(cache.rows, classOf());
   const ranked = () => filterRanked(everything(), filter);
 
   const draw = () => {

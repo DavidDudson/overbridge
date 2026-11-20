@@ -425,8 +425,10 @@ it has run, and who is waiting.
 **Priority.** Each workspace has a class, and checks start by class, then by queue time. The root `config.yml`
 lists the classes, highest first, under `priority-classes`; every repo shares one queue, so the list lives there
 only. With none set, the classes are `high`, `normal` (the default), and `low`. A claim's class comes from the first
-`check-queue.priority-rules` entry whose `branch` and `item` regexes both match the claimed branch and its work
-item id, else from `check-queue.priority`, else the default class. A workspace with several repos takes the highest
+`check-queue.priority-rules` entry whose regexes all match, else from `check-queue.priority`, else the default
+class. A rule can set `branch` (the claimed branch), `item` (its work item id), `type` (the item's type, such as
+Jira's `Story`) and `label` (any one of its labels). A claim reads its item's type and labels from the `@work`
+list's cache, so a `type` or `label` rule matches only an item that list has read. A workspace with several repos takes the highest
 class among them, and each check it queues records that class and its rank. For example:
 
 ```yaml
@@ -438,7 +440,9 @@ priority-classes:
 defaults:
   check-queue:
     priority-rules:
+      - { priority: feature, type: "^Story$" }
       - { priority: tip, item: "^TIP-" }
+      - { priority: tech-debt, label: "^tech-debt$" }
       - { priority: tech-debt, branch: "^chore/" }
 repos:
   overbridge:
@@ -446,6 +450,10 @@ repos:
 ```
 
 Each workspace card in the sidebar shows its class icon under the agent glyph.
+
+The `@work` list (and `overbridge worklist show`) uses the same classes as its second ranking layer: among ready
+items with the same Jira priority, a higher class comes first. An item takes the highest class any of its repos'
+rules give it. It has no branch until it starts, so `branch` rules never match it.
 
 While a check queued by an older overbridge is waiting or running, every process sorts by queue time alone, as the
 older one does, so the two never wait on each other. Classes and moves apply again once it has left the queue.
@@ -482,7 +490,7 @@ out, so move it up if it has to run.
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
 | `check-queue.wait-seconds` | `900` | give up (exit 75) when a run cannot start for this long, because of the queue ahead, `max-parallel`, or the load |
 | `check-queue.priority` | the default class | the class this repo's claims get when no rule matches: a name from the root `priority-classes` |
-| `check-queue.priority-rules` | none | list of `{ priority, branch?, item? }`; the first rule whose regexes match the claimed branch and its item id sets the class |
+| `check-queue.priority-rules` | none | list of `{ priority, branch?, item?, type?, label? }`; the first rule whose regexes all match the claim or work item sets the class, for the check queue and the `@work` list |
 | `icebox.idle-days` | none | suggest iceboxing a workspace whose claimed PRs are all drafts and idle this many days (last commit, PR update and agent activity, whichever is latest). The sidebar card shows `draft PRs idle <n>d · icebox?`; nothing is iceboxed automatically. Unset turns it off. Set it for every repo in the root `config.yml` under `defaults.icebox` |
 | `icebox.prune` | `[]` | repo-relative paths `overbridge icebox --prune` deletes, such as `node_modules` or `target`; only paths git ignores and does not track. No `..`, absolute paths, globs, `.git` or `.claude` |
 | `shell` | none | the repo's dev shell: a command prefix (`nix develop --command`, `direnv exec .`), or a mapping `enter` (the prefix), `env` (a command printing the env NUL-separated, as `env -0` does) and `key` (repo-relative files whose contents invalidate the cached env; needs `env`). See [Dev shells](#dev-shells) |

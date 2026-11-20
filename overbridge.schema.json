@@ -177,17 +177,19 @@
           "minLength": 1
         },
         "priority-rules": {
-          "description": "Rules tried in order; the first whose patterns all match a claim's branch and item id sets its class.",
+          "description": "Rules tried in order; the first whose patterns all match a claim or work item sets its class. The check queue and the @work list both use them.",
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
             "required": ["priority"],
-            "anyOf": [{ "required": ["branch"] }, { "required": ["item"] }],
+            "anyOf": [{ "required": ["branch"] }, { "required": ["item"] }, { "required": ["type"] }, { "required": ["label"] }],
             "properties": {
               "priority": { "description": "A class name from the root config.yml's priority-classes.", "type": "string", "minLength": 1 },
               "branch": { "description": "Regex the claimed branch must match.", "type": "string", "minLength": 1 },
-              "item": { "description": "Regex the work item id (from the branch) must match.", "type": "string", "minLength": 1 }
+              "item": { "description": "Regex the work item id (from the branch) must match.", "type": "string", "minLength": 1 },
+              "type": { "description": "Regex the work item's type must match, such as Jira's Story. Read from the @work list's cache for a claim.", "type": "string", "minLength": 1 },
+              "label": { "description": "Regex one of the work item's labels must match. Read from the @work list's cache for a claim.", "type": "string", "minLength": 1 }
             }
           }
         }

@@ -95,4 +95,23 @@ describe("worklist", () => {
       expect(JSON.stringify(rank(rows))).toBe(base);
     }
   });
+
+  test("a class breaks a tie within one priority, and never outranks priority", () => {
+    const classes = new Map([
+      ["Story", 0],
+      ["Task", 1],
+    ]);
+
+    const classOf = (r: WorkRow) => {
+      const at = r.type === undefined ? undefined : classes.get(r.type);
+
+      return at === undefined ? undefined : { name: r.type!, rank: at };
+    };
+
+    const rows = [row("1", { priority: 3, type: "Task" }), row("2", { priority: 3 }), row("3", { priority: 3, type: "Story" }), row("4", { priority: 2 })];
+    const ranked = rank(rows, classOf);
+    expect(ranked.map((r) => r.id)).toEqual(["4", "3", "1", "2"]);
+    expect(ranked.find((r) => r.id === "3")!.reasons).toEqual(["ready", "priority p3", "class Story"]);
+    expect(rank(rows).map((r) => r.id)).toEqual(["4", "1", "2", "3"]);
+  });
 });

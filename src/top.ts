@@ -577,7 +577,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     }
 
     const pm = config.projectManagement;
-    claimContexts.push({ config, dir, branch: claim.branch });
+    claimContexts.push({ config, dir, branch: claim.branch, repo });
 
     if (pm && claim.branch && !itemLink) {
       try {
