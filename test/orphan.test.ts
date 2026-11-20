@@ -120,6 +120,16 @@ describe("orphan folders", () => {
     expect(ob(["rm", "notes", "--force"]).code).toBe(0);
   });
 
+  test("plans folders in an orphan are generated, not stray", () => {
+    const dir = orphan("planned");
+    mkdirSync(join(dir, "plans"));
+    writeFileSync(join(dir, "plans", "old.md"), "plan");
+    mkdirSync(join(dir, ".overbridge-plans"));
+    writeFileSync(join(dir, ".overbridge-plans", "p.md"), "plan");
+    expect(finding("planned")).toMatchObject({ verdict: CleanupVerdict.Remove, strayFiles: [] });
+    expect(ob(["rm", "planned"]).code).toBe(0);
+  });
+
   test("an agy orphan's generated files are not stray, and removing it drops agy's trust", () => {
     const dir = orphan("agy-gone", "--agent", "agy");
     const trusted = (): string[] => JSON.parse(readFileSync(join(tmp, "agy-settings.json"), "utf8")).trustedWorkspaces;

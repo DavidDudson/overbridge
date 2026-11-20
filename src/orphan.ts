@@ -6,14 +6,16 @@ import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadRepos } from "./config";
 import { isOrchestrationTab } from "./orchestration";
-import { barePath, isInside, NAME_RE, root, wsDir } from "./paths";
+import { barePath, isInside, NAME_RE, PLANS_DIR, root, wsDir } from "./paths";
 import { AGY_BRIEF, AGY_DIR } from "./agy";
-import { PLANS_DIR } from "./scaffold";
 import type { State } from "./state";
 import { naturalSort, run } from "./util";
 
+/** A plans folder that a workspace folder may hold beside `PLANS_DIR`. */
+const OLD_PLANS_DIR = "plans";
+
 /** What overbridge and the OS put in a workspace folder beside the worktrees. */
-const GENERATED: readonly string[] = [".claude", "CLAUDE.md", AGY_DIR, AGY_BRIEF, PLANS_DIR, ".DS_Store"];
+const GENERATED: readonly string[] = [".claude", "CLAUDE.md", AGY_DIR, AGY_BRIEF, PLANS_DIR, OLD_PLANS_DIR, ".DS_Store"];
 
 export interface OrphanWorktree {
   repo: string;

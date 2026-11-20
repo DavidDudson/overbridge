@@ -105,4 +105,13 @@ describe("the card", () => {
   test("a card that wants you shows that first", () => {
     expect(text(card({ state: "waiting", idleHint: "draft PRs idle 10d · icebox?" }))).toContain("needs input");
   });
+
+  test.each([
+    { extra: { priorityStuck: true }, shows: true },
+    { extra: { priorityStuck: true, state: "busy" as const }, shows: false },
+    { extra: { priorityStuck: true, state: "waiting" as const }, shows: false },
+    { extra: { priorityStuck: true, idleHint: "draft PRs idle 10d · icebox?" }, shows: false },
+  ])("a raised class asks for a restart only on a quiet card with no icebox hint: %o", ({ extra, shows }) => {
+    expect(text(card(extra)).includes("restart to apply")).toBe(shows);
+  });
 });

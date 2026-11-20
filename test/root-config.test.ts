@@ -69,9 +69,9 @@ describe("overlay", () => {
 
 describe("loadRootLayers", () => {
   test("a missing or empty file has no layers", () => {
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude" });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude", cpuPriority: true });
     writeRoot("");
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude" });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude", cpuPriority: true });
   });
 
   test("reads defaults and per-repo layers", () => {
@@ -86,6 +86,7 @@ describe("loadRootLayers", () => {
       githubOrgs: [],
       checkClasses: DEFAULT_CLASSES,
       agent: "claude",
+      cpuPriority: true,
     });
   });
 
@@ -117,6 +118,33 @@ describe("loadRootLayers", () => {
     expect(thrown(() => loadRootLayers())).toContain("priority-classes: expected a non-empty list");
     writeRoot("priority-classes:\n  - { name: a, icon: x, default: 'yes' }\n");
     expect(thrown(() => loadRootLayers())).toContain("priority-classes[0].default: expected true or false");
+  });
+
+  test("cpu-priority is on unless set to false", () => {
+    writeRoot("version: 1\n");
+    expect(loadRootLayers().cpuPriority).toBe(true);
+    writeRoot("cpu-priority: false\n");
+    expect(loadRootLayers().cpuPriority).toBe(false);
+    writeRoot("cpu-priority: sometimes\n");
+    expect(thrown(() => loadRootLayers())).toContain("cpu-priority: expected true or false");
+  });
+
+  test("a class may set its nice (1 to 19) and Darwin background", () => {
+    writeRoot("priority-classes:\n  - { name: hot, icon: a, nice: 2 }\n  - { name: cold, icon: b, background: true }\n");
+    expect(loadRootLayers().checkClasses).toEqual([
+      { name: "hot", icon: "a", nice: 2 },
+      { name: "cold", icon: "b", background: true },
+    ]);
+    writeRoot("priority-classes:\n  - { name: hot, icon: a, nice: 19 }\n");
+    expect(loadRootLayers().checkClasses[0]?.nice).toBe(19);
+
+    for (const bad of ["0", "20", "1.5"]) {
+      writeRoot(`priority-classes:\n  - { name: hot, icon: a, nice: ${bad} }\n`);
+      expect(thrown(() => loadRootLayers())).toContain("priority-classes[0].nice: expected a whole number from 1 to 19");
+    }
+
+    writeRoot("priority-classes:\n  - { name: hot, icon: a, background: 1 }\n");
+    expect(thrown(() => loadRootLayers())).toContain("priority-classes[0].background: expected true or false");
   });
 
   test("priority-classes must be a non-empty list of distinct names with one default at most", () => {

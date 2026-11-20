@@ -1,16 +1,14 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { agentDirOf } from "./layout";
-import { ghReposCache, metaDir, ORCHESTRATION_ENV, orchestrationPlansDir, root, selfCommand, worktreePath, wsDir } from "./paths";
+import { excludeInRepo } from "./git";
+import { ghReposCache, metaDir, ORCHESTRATION_ENV, orchestrationPlansDir, PLANS_DIR, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { pluginSettings } from "./plugins";
 import { loadRepoConfig, rootMcpServers } from "./project-config";
 import { agentOf, getWorkspace, readState } from "./state";
 import { AgentKind } from "./agent-kind";
 import { scaffoldAgy } from "./agy";
 import { errorMessage, log, shellQuote } from "./util";
-
-/** Where plan-mode plans are written, relative to the workspace folder. */
-export const PLANS_DIR = "plans";
 
 /**
  * Commands the overbridge skills run that auto mode's classifier otherwise blocks as unrequested writes to a
@@ -39,11 +37,12 @@ export function scaffold(ws: string) {
   const dir = wsDir(ws);
   mkdirSync(join(dir, ".claude"), { recursive: true });
   const mcp = mcpServerSettings(ws);
-  writeFileSync(join(dir, ".claude", "settings.json"), JSON.stringify(workspaceSettings(ws, PLANS_DIR, mcp), null, 2) + "\n");
-  // a Claude started in a repo folder does not read the workspace's .claude, so it loads this copy with `--settings`;
-  // plans stay in the workspace folder, not that repo's worktree
+  const settings = JSON.stringify(workspaceSettings(ws, mcp), null, 2) + "\n";
+  writeFileSync(join(dir, ".claude", "settings.json"), settings);
+  // a Claude started in a repo folder does not read the workspace's .claude, so it loads this copy with `--settings`
   mkdirSync(dirname(workspaceSettingsPath(ws)), { recursive: true });
-  writeFileSync(workspaceSettingsPath(ws), JSON.stringify(workspaceSettings(ws, join(dir, PLANS_DIR), mcp), null, 2) + "\n");
+  writeFileSync(workspaceSettingsPath(ws), settings);
+  excludePlans(ws);
   const brief = claudeMd(ws, dir, devShellSection(ws));
   writeFileSync(join(dir, "CLAUDE.md"), brief);
 
@@ -53,16 +52,28 @@ export function scaffold(ws: string) {
 /** The copy of workspace `ws`'s settings kept in the meta dir, for a Claude whose cwd is a repo folder. */
 export const workspaceSettingsPath = (ws: string) => join(metaDir(), "workspaces", `${ws}.settings.json`);
 
-const workspaceSettings = (ws: string, plansDirectory: string, mcp: McpServerSettings) => ({
+const workspaceSettings = (ws: string, mcp: McpServerSettings) => ({
   env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
   ...pluginSettings(),
-  // plan-mode plans live in the workspace folder, not ~/.claude/plans
-  plansDirectory,
+  // relative, so plans land in the folder the agent starts in, which the guard lets it write
+  plansDirectory: PLANS_DIR,
   permissions: { allow: ALLOWED_COMMANDS },
   autoMode: { allow: ["$defaults", ...AUTO_MODE_ALLOW] },
   hooks: agentStateHooks(),
   ...mcp,
 });
+
+/** Keep plans out of `git status` in every repo the agent could start in. */
+function excludePlans(ws: string) {
+  Object.keys(getWorkspace(readState(), ws).repos).forEach((repo) => {
+    try {
+      excludeInRepo(worktreePath(ws, repo), `/${PLANS_DIR}/`);
+    } catch (e) {
+      // the generated files must never block a launch
+      log(`warning: ${errorMessage(e)}\n${repo}'s git status may list ${PLANS_DIR}`);
+    }
+  });
+}
 
 interface McpServerSettings {
   enabledMcpjsonServers?: string[];
