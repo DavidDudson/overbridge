@@ -42,7 +42,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   `priority-rules`; classes are the root-only `priority-classes`, `src/check-priority.ts`), recorded in the ticket when
   queued, then queue time, unless `order.state` (written only by the `@checks` tab, `src/checks.ts` pure rows/render +
   `src/checks-run.ts` pane) holds an override key. The tab kills a check with `stopTicket` (the owner kills the group, records the run as killed and keeps its ticket until the group is gone; `stopChecksFor` awaits that) and
-  its `v` view lists finished runs from history (`recentChecks`, `renderRecent`). A ticket with no `rank` is from an older build: `comparatorFor`
+  its `v` view lists finished runs from history (`recentChecks`, `renderRecent`). `src/check-estimate.ts` keeps the last run times per repo and command (`<meta>/check-estimates.json`, written as each run ends) and simulates the queue into ETAs (`queueEtas`) for the tab, the sidebar and the wait message. A ticket with no `rank` is from an older build: `comparatorFor`
   then sorts everyone by time, as that build does. The caps in `gateFor` count every running ticket, not only those
   ahead. `refreshTop` stores the workspace class in `TopCache.priority`/`priorityIcon` for the sidebar card.
 - CPU priority: `src/cpu-priority.ts` is the pure pass (`planPriority`): a process belongs to the workspace whose

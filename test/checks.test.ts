@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Move, type QueueOverrides } from "../src/check-priority";
 import { Outcome, outcomeOf, queueComparator, queueView, type Ticket, ticketName } from "../src/check-queue";
-import { type CheckRow, checkRows, formatDuration, movedOverrides, nextChecksMode, ChecksMode, recentChecks, recentTotals, renderChecks, renderRecent } from "../src/checks";
+import { type CheckRow, checkRows, formatDuration, movedOverrides, queueEstimates, nextChecksMode, ChecksMode, recentChecks, recentTotals, renderChecks, renderRecent } from "../src/checks";
+import { withRun } from "../src/check-estimate";
 import type { CheckRecord, HistoryRecord, HistoryStore } from "../src/history";
 
 // eslint-disable-next-line no-control-regex -- stripping colour codes is the point
@@ -164,5 +165,22 @@ describe("recent checks", () => {
   test("an empty window says so", () => {
     const lines = renderRecent([], { selected: 0, offset: 0, height: 6, width: 80, message: "", now: 0 }).map(strip);
     expect(lines[2]).toContain("no checks finished in this window");
+  });
+});
+
+describe("queue estimates", () => {
+  test("each row shows its usual run time and its start or time left, and the border when the queue clears", () => {
+    const NOW_MS = 100_000;
+    const store = withRun({}, "app", "just test", 60_000);
+    const live = { running: [ticket(1, NOW_MS - 50_000, { runPid: 11, runningSinceMs: NOW_MS - 20_000 })], waiting: [ticket(2, NOW_MS - 40_000), ticket(3, NOW_MS - 30_000, { command: "make lint" })] };
+    const estimates = queueEstimates(live, store, NOW_MS);
+    const lines = renderChecks(checkRows(live, {}), { selected: 9, offset: 0, height: 9, width: 140, message: "", now: NOW_MS }, estimates).map(strip);
+
+    expect(lines[1]).toMatch(/state\s+est\s+eta\s+command/);
+    expect(lines[2]).toMatch(/▶ 20s\s+~1m00s\s+done ~40s\s+just test/);
+    expect(lines[3]).toMatch(/⧗ 40s\s+~1m00s\s+start ~40s\s+just test/);
+    expect(lines[4]).toMatch(/⧗ 30s\s+\?\s+start ~1m40s\s+make lint/);
+    expect(lines.at(-1)).toContain("1 running · 2 waiting · clear ~2m40s");
+    expect(estimates.wsDoneMs.get("w3")).toBe(160_000);
   });
 });

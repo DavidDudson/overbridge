@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userLayoutPath } from "./layout";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { readPhase, taskStatus } from "./task-status";
 import { ATTENTION, type AgentState, glyphFor, readAgentDetail, UNKNOWN_GLYPH } from "./agent-state";
 import { iceboxHint } from "./icebox-suggest";
@@ -10,7 +10,9 @@ import { type CardView, cardPlan, contextLegend, detailRows, isExpanded, promptW
 import { recentToolCalls } from "./history-tail";
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
-import { readQueue, type Ticket } from "./check-queue";
+import { formatDuration, readEstimates } from "./check-estimate";
+import { queueDir, readQueue, type Ticket } from "./check-queue";
+import { queueEstimates } from "./checks";
 import { CleanupCause, type CleanupInFlight, cleanupRecords, cleanupRows } from "./cleanup-log";
 import { Motion, sidebarMotion } from "./config";
 import { animate } from "./sidebar-motion";
@@ -593,10 +595,25 @@ const elapsed = (sinceMs: number, now: number) => {
   return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${String(secs % 60).padStart(2, "0")}s`;
 };
 
+/** The live queue's rows, each workspace with when its checks should be done. */
+function checkQueueRows(inner: number): string[] {
+  const queue = readQueue();
+  const now = Date.now();
+
+  return queueRows(queue, inner, now, queueEstimates(queue, readEstimates(dirname(queueDir())), now).wsDoneMs);
+}
+
 /** The check queue under the divider: a row per running command, then how many wait; none when it is empty. */
-export function queueRows(queue: { running: Ticket[]; waiting: Ticket[] }, inner: number, now = Date.now()): string[] {
-  const running = queue.running.map((t) => colorize(fit(`▶ ${t.ws} ${elapsed(t.runningSinceMs ?? now, now)} ${t.command}`, inner), "blue"));
-  const waiting = queue.waiting.length ? [dim(fit(`⧗ ${queue.waiting.length} waiting: ${queue.waiting.map((t) => t.ws).join(" ")}`, inner))] : [];
+export function queueRows(queue: { running: Ticket[]; waiting: Ticket[] }, inner: number, now = Date.now(), wsDoneMs: ReadonlyMap<string, number> = new Map()): string[] {
+  const done = (ws: string) => {
+    const ms = wsDoneMs.get(ws);
+
+    return ms === undefined ? "" : ` ~${formatDuration(ms)}`;
+  };
+
+  const running = queue.running.map((t) => colorize(fit(`▶ ${t.ws} ${elapsed(t.runningSinceMs ?? now, now)}${done(t.ws)} ${t.command}`, inner), "blue"));
+  const waitingWs = [...new Set(queue.waiting.map((t) => t.ws))];
+  const waiting = queue.waiting.length ? [dim(fit(`⧗ ${queue.waiting.length} waiting: ${waitingWs.map((ws) => `${ws}${done(ws)}`).join(" ")}`, inner))] : [];
 
   return [...running, ...waiting];
 }
@@ -1110,7 +1127,7 @@ export async function sidebar(wsOpt?: string) {
     readState: tryReadState,
     entries: (order, state) => withReceipt(entries(order, state), self),
     reap: createReaper(),
-    status: (state, inner) => [...icedRows(state, inner), ...cleanupRows(inFlightCleanups(state), cleanupRecords(state.cleanups), inner, Date.now(), state.mergeSweepAt), ...queueRows(readQueue(), inner)],
+    status: (state, inner) => [...icedRows(state, inner), ...cleanupRows(inFlightCleanups(state), cleanupRecords(state.cleanups), inner, Date.now(), state.mergeSweepAt), ...checkQueueRows(inner)],
     limits: readLimits,
   };
 

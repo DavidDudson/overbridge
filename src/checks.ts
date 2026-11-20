@@ -1,5 +1,6 @@
 import { Outcome, outcomeOf, type QueueView, type Ticket, ticketKey, ticketName } from "./check-queue";
 import { type Move, movedIndex, type QueueOverrides, spreadKeys } from "./check-priority";
+import { type EstimateStore, type Eta, etaSlots, formatDuration, overallMs, queueEtas, workspaceDone } from "./check-estimate";
 import type { CheckRecord, HistoryStore } from "./history";
 import { bold, boxBottom, type Color, boxRow, boxTop, cell, colorize, dim, fit, inverse, stripControl, textWidth } from "./term";
 
@@ -64,18 +65,7 @@ const WS_COLUMNS = 24;
 const REPO_COLUMNS = 14;
 const STATE_COLUMNS = 9;
 
-/** A duration as `42s`, `3m05s` or `2h07m`. */
-export const formatDuration = (ms: number) => {
-  const secs = Math.max(0, Math.round(ms / 1000));
-
-  if (secs < 60) {
-    return `${secs}s`;
-  }
-
-  const mins = Math.floor(secs / 60);
-
-  return mins < 60 ? `${mins}m${String(secs % 60).padStart(2, "0")}s` : `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, "0")}m`;
-};
+export { formatDuration };
 
 export interface ChecksView {
   selected: number;
@@ -86,28 +76,70 @@ export interface ChecksView {
   now: number;
 }
 
+/** The queue view's estimates: each ticket's ETA by `ticketName`, and when each workspace's checks should be done. */
+export interface QueueEstimates {
+  etas: ReadonlyMap<string, Eta>;
+  wsDoneMs: ReadonlyMap<string, number>;
+}
+
+const NO_ESTIMATES: QueueEstimates = { etas: new Map(), wsDoneMs: new Map() };
+
+/** Estimates for a live queue from past run times; `maxParallel` caps the lanes when known. */
+export function queueEstimates(queue: QueueView, store: EstimateStore, now: number, maxParallel?: number): QueueEstimates {
+  const etas = queueEtas(queue, store, etaSlots(queue.running.length, maxParallel), now, ticketName, overallMs(store));
+
+  return { etas, wsDoneMs: workspaceDone(queue, etas, ticketName) };
+}
+
+const EST_COLUMNS = 7;
+const ETA_COLUMNS = 13;
+
+/** `~3m05s`, or `?` when nothing like the check has run before. */
+const estText = (eta: Eta | undefined) => (eta?.runMs === undefined ? "?" : `~${formatDuration(eta.runMs)}`);
+
+/** A running check's time left, or a waiting one's start. */
+const etaText = (r: CheckRow, eta: Eta | undefined) => {
+  if (!eta) {
+    return "";
+  }
+
+  if (r.running) {
+    return eta.doneMs > 0 ? `done ~${formatDuration(eta.doneMs)}` : "overdue";
+  }
+
+  return `start ~${formatDuration(eta.startMs)}`;
+};
+
 const iconCell = (icon: string | undefined) => {
   const clean = stripControl(icon ?? "");
 
   return textWidth(clean) <= ICON_COLUMNS ? cell(clean, ICON_COLUMNS) : fit(clean, ICON_COLUMNS);
 };
 
-const rowText = (r: CheckRow, now: number) => {
+const rowText = (r: CheckRow, now: number, estimates: QueueEstimates) => {
   const t = r.ticket;
   const state = r.running ? `▶ ${formatDuration(now - (t.runningSinceMs ?? now))}` : `⧗ ${formatDuration(now - t.queuedAtMs)}`;
+  const eta = estimates.etas.get(ticketName(t));
 
-  return `${iconCell(t.icon)} ${cell(t.ws.slice(0, WS_COLUMNS), WS_COLUMNS)} ${cell(t.repo.slice(0, REPO_COLUMNS), REPO_COLUMNS)} ${cell(state, STATE_COLUMNS)} ${stripControl(t.command)}`;
+  return `${iconCell(t.icon)} ${cell(t.ws.slice(0, WS_COLUMNS), WS_COLUMNS)} ${cell(t.repo.slice(0, REPO_COLUMNS), REPO_COLUMNS)} ${cell(state, STATE_COLUMNS)} ${cell(estText(eta), EST_COLUMNS)} ${cell(etaText(r, eta), ETA_COLUMNS)} ${stripControl(t.command)}`;
+};
+
+/** The bottom border's estimate: when the queue as a whole should be empty. */
+const queueDoneText = (estimates: QueueEstimates) => {
+  const doneMs = Math.max(0, ...estimates.wsDoneMs.values());
+
+  return doneMs > 0 ? ` · clear ~${formatDuration(doneMs)}` : "";
 };
 
 /** The @checks panel as screen rows. Pure, so it is snapshot-tested. */
-export function renderChecks(rows: readonly CheckRow[], { selected, offset, height, width, message, now }: ChecksView): string[] {
+export function renderChecks(rows: readonly CheckRow[], { selected, offset, height, width, message, now }: ChecksView, estimates: QueueEstimates = NO_ESTIMATES): string[] {
   const inner = width - 4;
   const body = Math.max(1, height - CHECKS_CHROME);
-  const head = `${cell("", ICON_COLUMNS)} ${cell("workspace", WS_COLUMNS)} ${cell("repo", REPO_COLUMNS)} ${cell("state", STATE_COLUMNS)} command`;
+  const head = `${cell("", ICON_COLUMNS)} ${cell("workspace", WS_COLUMNS)} ${cell("repo", REPO_COLUMNS)} ${cell("state", STATE_COLUMNS)} ${cell("est", EST_COLUMNS)} ${cell("eta", ETA_COLUMNS)} command`;
   const visible = rows.slice(offset, offset + body);
 
   const lines = visible.map((r, i) => {
-    const text = fit(rowText(r, now), inner);
+    const text = fit(rowText(r, now, estimates), inner);
 
     return boxRow(offset + i === selected ? inverse(text) : r.running ? colorize(text, "blue") : text);
   });
@@ -116,7 +148,7 @@ export function renderChecks(rows: readonly CheckRow[], { selected, offset, heig
   const footer = message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit(LEGEND, inner));
   const running = rows.filter((r) => r.running).length;
 
-  return [boxTop("Check queue", width), boxRow(dim(fit(head, inner))), ...lines, ...padding, boxRow(footer), boxBottom(width, `${running} running · ${rows.length - running} waiting`, "blue")];
+  return [boxTop("Check queue", width), boxRow(dim(fit(head, inner))), ...lines, ...padding, boxRow(footer), boxBottom(width, `${running} running · ${rows.length - running} waiting${queueDoneText(estimates)}`, "blue")];
 }
 
 /** Identifies a finished run across re-reads, so the cursor can stay on it. */

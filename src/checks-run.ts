@@ -1,6 +1,8 @@
+import { dirname } from "node:path";
 import { queueDir, readQueue, stopTicket, ticketName } from "./check-queue";
 import { Move, readOverrides, readOverridesForWrite, writeOverrides } from "./check-priority";
-import { CHECKS_CHROME, type CheckRow, checkRows, ChecksMode, movedOverrides, nextChecksMode, RECENT_WINDOW_MS, type RecentCheck, recentChecks, recentKey, renderChecks, renderRecent } from "./checks";
+import { CHECKS_CHROME, type CheckRow, checkRows, ChecksMode, queueEstimates, type QueueEstimates, movedOverrides, nextChecksMode, RECENT_WINDOW_MS, type RecentCheck, recentChecks, recentKey, renderChecks, renderRecent } from "./checks";
+import { readEstimates, seedEstimates } from "./check-estimate";
 import { historyStore } from "./history";
 import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN, stripControl } from "./term";
 import { errorMessage } from "./util";
@@ -10,6 +12,8 @@ const POLL_MS = 1_000;
 
 /** Reading every workspace's history is heavier than the queue, so the recent view refreshes less often. */
 const RECENT_POLL_MS = 5_000;
+
+const SEED_WINDOW_MS = 7 * 24 * 60 * 60_000;
 
 const MOVE_KEYS = new Map<string, Move>([
   ["K", Move.Up],
@@ -39,11 +43,24 @@ export async function checksPane() {
       }
     })();
 
-    return checkRows(readQueue(dir, overrides), overrides);
+    const queue = readQueue(dir, overrides);
+    estimates = queueEstimates(queue, readEstimates(dirname(dir)), Date.now());
+
+    return checkRows(queue, overrides);
   };
 
   const readRecent = (): RecentCheck[] => recentChecks(historyStore(), Date.now() - RECENT_WINDOW_MS);
 
+  // a store from before this build: build it from the last week of history once
+  seedEstimates(
+    dirname(dir),
+    recentChecks(historyStore(), Date.now() - SEED_WINDOW_MS, Number.POSITIVE_INFINITY)
+      .filter((r) => r.record.runMs > 0 && !r.record.killed)
+      .toReversed()
+      .map((r) => ({ repo: r.record.repo, command: r.record.full ?? r.record.command, runMs: r.record.runMs })),
+  );
+
+  let estimates: QueueEstimates = { etas: new Map(), wsDoneMs: new Map() };
   let rows = read();
   let recent: RecentCheck[] = [];
   let recentReadMs = 0;
@@ -72,7 +89,7 @@ export async function checksPane() {
     }
 
     const view = { selected, offset, height, width, message: message || fault, now: Date.now() };
-    painter.paint(frame(mode === ChecksMode.Queue ? renderChecks(rows, view) : renderRecent(recent, view), height, width));
+    painter.paint(frame(mode === ChecksMode.Queue ? renderChecks(rows, view, estimates) : renderRecent(recent, view), height, width));
   };
 
   /** Re-read the queue; the cursor stays on the same check while it is queued. */

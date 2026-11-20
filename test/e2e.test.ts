@@ -484,7 +484,9 @@ describe("check queue", () => {
     const second = spawnCheck(step("b"));
     expect(await first.exited).toBe(0);
     expect(await second.exited).toBe(0);
-    expect(await new Response(second.stderr).text()).toContain("waiting behind 1 in the queue (max-parallel 1)");
+    const waited = await new Response(second.stderr).text();
+    expect(waited).toContain("waiting behind 1 in the queue (max-parallel 1)");
+    expect(waited).toContain("estimated start in ~");
     expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "end a", "start b", "end b"]);
   }, CHECK_TEST_MS);
 

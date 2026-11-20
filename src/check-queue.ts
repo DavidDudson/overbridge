@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, constants, loadavg } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { defaultKey, type QueueOverrides, readOverrides } from "./check-priority";
 import { type CheckRecord, classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
+import { etaSlots, formatDuration, overallMs, queueEtas, readEstimates, recordRunTime } from "./check-estimate";
 import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidsAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
@@ -362,6 +363,21 @@ function appendCheck(me: Ticket, startedMs: number, endedMs: number | undefined,
 
 const label = (t: Ticket) => `${t.ws}/${t.repo}: ${t.command}`;
 
+/** `; estimated start in ~2m, run ~3m10s` from past run times, so the agent knows how long it waits. */
+function etaLine(me: Ticket, live: Ticket[], settings: CheckQueue, now: number, dir: string): string {
+  const store = readEstimates(dirname(dir));
+  const queue = queueView(live);
+  const eta = queueEtas(queue, store, etaSlots(queue.running.length, settings.maxParallel), now, ticketName, overallMs(store)).get(ticketName(me));
+
+  if (!eta) {
+    return "";
+  }
+
+  const run = eta.runMs === undefined ? "no past runs to estimate from" : `run ~${formatDuration(eta.runMs)}`;
+
+  return `; estimated start in ~${formatDuration(eta.startMs)}, ${run}`;
+}
+
 /** Wait until `me` may start (see `gateFor`); false when `deadlineMs` passes first. */
 async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadlineMs: number): Promise<boolean> {
   const cores = availableParallelism();
@@ -400,7 +416,8 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
     if (announced !== key) {
       announced = key;
       const cap = gate === Gate.Parallel ? ` (max-parallel ${settings.maxParallel})` : "";
-      log(gate === Gate.Load ? `overbridge check: ${overLoad}, waiting; ${runningNow}` : `overbridge check: waiting behind ${ahead.length} in the queue${cap}; ${runningNow}`);
+      const eta = etaLine(me, live, settings, now, dir);
+      log(gate === Gate.Load ? `overbridge check: ${overLoad}, waiting; ${runningNow}${eta}` : `overbridge check: waiting behind ${ahead.length} in the queue${cap}; ${runningNow}${eta}`);
     }
 
     await Bun.sleep(Math.min(TURN_POLL_MS, Math.max(0, deadlineMs - now)));
@@ -566,7 +583,12 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
       return await new Promise<never>(() => {});
     }
 
-    recordCheck(me, startedMs, Date.now(), code);
+    const endedMs = Date.now();
+    recordCheck(me, startedMs, endedMs, code);
+
+    if (code !== CheckExit.TimedOut && code !== CheckExit.Stalled) {
+      recordRunTime(dirname(dir), me.repo, me.command, endedMs - startedMs);
+    }
 
     return code;
   } finally {
