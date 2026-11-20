@@ -80,6 +80,36 @@ export const pidAlive = (pid: number): boolean => {
   return !!p && !p.state.startsWith("Z");
 };
 
+/** Whether `pid` exists at all, zombies included, without starting a process. */
+const signalable = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+
+    return true;
+  } catch (e) {
+    // EPERM: the process exists but belongs to another user
+    return e instanceof Error && "code" in e && e.code === "EPERM";
+  }
+};
+
+/**
+ * The live, non-zombie processes among `pids`, as `pidAlive` judges each, but with at most one `ps` on macOS:
+ * a poll that checks every ticket in a queue would otherwise start one `ps` per ticket.
+ */
+export function pidsAlive(pids: readonly number[]): Set<number> {
+  const existing = [...new Set(pids)].filter((pid) => pid > 0 && signalable(pid));
+
+  if (hasProc || existing.length === 0) {
+    return new Set(existing.filter(pidAlive));
+  }
+
+  return new Set(
+    ps(["-p", existing.join(",")])
+      .filter((p) => !p.state.startsWith("Z"))
+      .map((p) => p.pid),
+  );
+}
+
 /** One process of a group listing: its group, state letters and CPU seconds used so far. */
 export interface GroupProc {
   pgid: number;

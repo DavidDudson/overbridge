@@ -30,6 +30,7 @@ Each repo can carry an `overbridge.yml` (work-item provider, apps, check command
 Read it with `overbridge config show [dir]` or one value with `overbridge config get <key> [dir]`.
 A repo with a `shell` key has a dev shell: run its tools as `overbridge shell <repo> -- <cmd>` (it runs the command as it is when the repo has none).
 Run `commands.lint`, `typecheck`, `test`, and `build` as `overbridge check <repo> -- <cmd>`. It queues them across workspaces and runs several at once while the load allows, in the same dev shell. The `check-queue` key sets its load limit, `max-parallel`, and timeouts.
+Scope every run to what the branch changed: one file, one project, or the repo's affected-only mode (such as `nx affected -t <target> --base=origin/main` or `vitest run --changed origin/main`). Do not run every project (such as `nx run-many` with no `-p`) or turn off the build cache (such as `--skip-nx-cache`): CI runs the full suite.
 Apps it declares run with `overbridge app` (list), `overbridge app <id> start|stop|restart|status|log`.
 `overbridge item from-branch` names the work item the current branch belongs to.
 The top panel and sidebar show this state; do not edit `.overbridge/` under the workspaces root by hand.

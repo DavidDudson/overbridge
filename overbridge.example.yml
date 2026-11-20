@@ -37,7 +37,11 @@ apps:
     open: true                 # open the browser once ready; default: false
     # when: always                     # always | feature-branch; default: always
 
-# Shell commands the skills run to check a change. Each is optional.
+# Shell commands the skills run to check a change. Each is optional. Scope them to what the branch changed; CI runs
+# the full suite. An Nx monorepo, for example:
+#   typecheck: pnpm nx affected -t typecheck --base=origin/main --output-style=static
+#   lint: pnpm nx affected -t lint --base=origin/main --output-style=static
+#   test: pnpm nx affected -t test:unit --base=origin/main --output-style=static
 commands:
   lint: npm run lint
   typecheck: npm run typecheck
@@ -64,7 +68,7 @@ shell: direnv exec .
 # it) in queue order across all workspaces, several at once while the load allows, in the dev shell above. These
 # are the defaults; `max-parallel` has none.
 check-queue:
-  max-load-percent: 70       # start only while the 1-minute load average is under this share of the cores
+  max-load-percent: 70       # beside a running check, start another only while the 1-minute load average is under this share of the cores
   # max-parallel: 4          # at most this many runs at once; unset leaves the load as the only limit
   timeout-seconds: 180       # kill the run after this long; `--timeout-seconds n` overrides it for one run
   stall-seconds: 300         # kill the run once its processes have used no CPU for this long

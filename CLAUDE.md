@@ -35,13 +35,14 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   `src/card-look.ts` is the pure card look (elapsed-time tint, glyph pulse, title tone, PR state as `HealthInput`); it reuses `pr-look.ts`/`anim.ts`/`tab-badge.ts` from the PR tabs, so colours and icons mean the same everywhere.
 - `src/shell.ts` resolves a repo's dev shell (`shell` key): prefix or cached env (`$XDG_CACHE_HOME/overbridge/shell`); used by `overbridge shell`, `claude()` (one repo: agent starts inside it, marker `<meta>/agent/<ws>.shell`), the terminal pane and the generated CLAUDE.md. Keep it tool-agnostic.
 - `src/check-queue.ts` is `overbridge check`: tickets in `<meta>/check-queue/`, no lock. `gateFor` starts a ticket once every live
-  ticket ahead is running, fewer than `max-parallel` are, and the load allows (`unsettledLoad` counts runs the 1-minute
-  average does not show yet); then the command runs in its own process group, killed on `timeout-seconds` or a CPU stall
+  ticket ahead is running, fewer than `max-parallel` are, and either none is running or the load allows (`unsettledLoad` counts runs the 1-minute
+  average does not show yet); owners are looked up in one batch per poll (`splitLive`, `pidsAlive`), never one `ps` per ticket; then the command runs in its own process group, killed on `timeout-seconds` or a CPU stall
   (`groupCpuSeconds` in `src/proc.ts`). Its pure parts are unit-tested; `test/e2e.test.ts` drives the real queue.
   Tickets sort by `queueComparator`: the workspace's class rank (`src/workspace-class.ts` over `check-queue.priority` and
   `priority-rules`; classes are the root-only `priority-classes`, `src/check-priority.ts`), recorded in the ticket when
   queued, then queue time, unless `order.state` (written only by the `@checks` tab, `src/checks.ts` pure rows/render +
-  `src/checks-run.ts` pane) holds an override key. A ticket with no `rank` is from an older build: `comparatorFor`
+  `src/checks-run.ts` pane) holds an override key. The tab kills a check with `stopTicket` (the owner records it as killed) and
+  its `v` view lists finished runs from history (`recentChecks`, `renderRecent`). A ticket with no `rank` is from an older build: `comparatorFor`
   then sorts everyone by time, as that build does. The caps in `gateFor` count every running ticket, not only those
   ahead. `refreshTop` stores the workspace class in `TopCache.priority`/`priorityIcon` for the sidebar card.
 - `src/mux.ts` is the only code that runs `zellij` or `tmux`: the `Mux` interface (tabs, panes, sessions) with `zellijMux` and

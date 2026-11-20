@@ -51,8 +51,7 @@ Run `overbridge phase implement` (`overbridge phase implement --stack <n>/<m>` f
   overbridge config get commands.lint
   overbridge config get commands.format
   ```
-  Run a single file or project before the whole suite; run the whole suite once at the end
-  without asking.
+  Scope every run to what the branch changed: one file, one project, or the repo's affected-only mode (such as `nx affected -t <target> --base=origin/main` or `vitest run --changed origin/main`). Do not run every project (such as `nx run-many` with no `-p`) or turn off the build cache (such as `--skip-nx-cache`): CI runs the full suite.
   Run `test`, `typecheck` and `lint` through the check queue: `overbridge check <repo> -- <command>`. It runs one at a
   time across workspaces, in the repo's dev shell. Run `format` through `overbridge shell <repo> -- <command>`.
   Exit 124 means a check went over its time limit, 137 that it stopped using CPU, and 75 that it could not start in time: report

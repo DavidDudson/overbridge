@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { defaultKey, type QueueOverrides, readOverrides } from "./check-priority";
 import { classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
 import { metaDir } from "./paths";
-import { groupAlive, groupCpuSeconds, pidAlive } from "./proc";
+import { groupAlive, groupCpuSeconds, pidsAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
 import type { ShellInvocation } from "./shell";
 import { exec, isNumber, isRecord, type Json, log } from "./util";
@@ -59,6 +59,7 @@ interface RunWatch {
 /** The group leader of the command this process is running, so a signal can reach it. */
 interface HeldRun {
   runPid?: number;
+  startedMs?: number;
 }
 
 const TURN_POLL_MS = 1_000;
@@ -135,6 +136,13 @@ export function splitQueue(tickets: Ticket[], alive: (pid: number) => boolean): 
   return { live: tickets.filter((t) => alive(t.pid)), dead: tickets.filter((t) => !alive(t.pid)) };
 }
 
+/** `splitQueue` with every owner looked up in one batch (`pidsAlive`). */
+export function splitLive(tickets: Ticket[]): SplitQueue {
+  const alive = pidsAlive(tickets.map((t) => t.pid));
+
+  return splitQueue(tickets, (pid) => alive.has(pid));
+}
+
 /** Whether the 1-minute load leaves room to start: under `percent` of `cores`. */
 export const loadAllows = (load1: number, cores: number, percent: number) => load1 < (cores * percent) / 100;
 
@@ -194,6 +202,11 @@ export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machin
     return Gate.Parallel;
   }
 
+  // load from outside the queue (agents, panes, dev servers) can stay over the limit for hours; one run keeps it moving
+  if (running.length === 0) {
+    return Gate.Start;
+  }
+
   return loadAllows(machine.load1 + unsettledLoad(running, nowMs), machine.cores, settings.maxLoadPercent) ? Gate.Start : Gate.Load;
 }
 
@@ -209,7 +222,7 @@ export function queueView(tickets: Ticket[]): QueueView {
 
 /** The live queue as the sidebar and the @checks tab show it. */
 export function readQueue(dir = queueDir(), overrides: QueueOverrides = readOverrides(dir)): QueueView {
-  const { live } = splitQueue(readTickets(dir, overrides), pidAlive);
+  const { live } = splitLive(readTickets(dir, overrides));
 
   // sorted by the live tickets alone, as `gateFor` sorts, so a dead ticket left by an older build cannot change the order shown
   return queueView(live.toSorted(comparatorFor(live, overrides)));
@@ -252,25 +265,27 @@ function reap(ticket: Ticket, dir: string) {
 }
 
 /**
- * Stop every check `ws` has queued or running: TERM the command's group, TERM the owning `overbridge check`, and
- * drop the ticket so the queue moves on. Returns how many tickets it stopped.
+ * Stop one check, queued or running: TERM the command's group, TERM the owning `overbridge check` (which records the
+ * run as killed), and drop the ticket so the queue moves on.
  */
+export function stopTicket(t: Ticket, dir = queueDir()) {
+  if (t.runPid !== undefined && groupAlive(t.runPid)) {
+    signalGroup(t.runPid, "SIGTERM");
+  }
+
+  try {
+    process.kill(t.pid, "SIGTERM");
+  } catch {
+    // the owner is already gone
+  }
+
+  rmSync(join(dir, ticketName(t)), { force: true });
+}
+
+/** Stop every check `ws` has queued or running (see `stopTicket`). Returns how many tickets it stopped. */
 export function stopChecksFor(ws: string, dir = queueDir()): number {
   const mine = readTickets(dir).filter((t) => t.ws === ws);
-
-  for (const t of mine) {
-    if (t.runPid !== undefined && groupAlive(t.runPid)) {
-      signalGroup(t.runPid, "SIGTERM");
-    }
-
-    try {
-      process.kill(t.pid, "SIGTERM");
-    } catch {
-      // the owner is already gone
-    }
-
-    rmSync(join(dir, ticketName(t)), { force: true });
-  }
+  mine.forEach((t) => stopTicket(t, dir));
 
   return mine.length;
 }
@@ -305,7 +320,7 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
 
   for (;;) {
     const overrides = readOverrides(dir);
-    const { live, dead } = splitQueue(readTickets(dir, overrides), pidAlive);
+    const { live, dead } = splitLive(readTickets(dir, overrides));
     dead.forEach((t) => reap(t, dir));
     const now = Date.now();
     const ahead = aheadOf(me, live, comparatorFor(live, overrides));
@@ -428,6 +443,8 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
       signalGroup(held.runPid, "SIGTERM");
     }
 
+    const now = Date.now();
+    recordCheck(me, held.startedMs ?? now, held.startedMs === undefined ? undefined : now, signalExit(signal));
     leave();
     process.exit(signalExit(signal));
   };
@@ -449,6 +466,7 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
 
     const code = await runHeld(inv, me, file, settings, (pid) => {
       held.runPid = pid;
+      held.startedMs = startedMs;
     });
 
     recordCheck(me, startedMs, Date.now(), code);

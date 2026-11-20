@@ -14,6 +14,7 @@ import {
   queueView,
   readTickets,
   sampleIntervalMs,
+  splitLive,
   splitQueue,
   StopReason,
   type Ticket,
@@ -44,6 +45,14 @@ describe("queue order", () => {
     const { live, dead } = splitQueue(tickets, (pid) => pid !== 1);
     expect(live.map((t) => t.pid)).toEqual([2, 3]);
     expect(dead.map((t) => t.pid)).toEqual([1]);
+  });
+
+  test("splitLive looks every owner up at once: a live process stays, a finished one is dead", async () => {
+    const child = Bun.spawn({ cmd: ["true"] });
+    await child.exited;
+    const { live, dead } = splitLive([ticket(process.pid, 1), ticket(child.pid, 2), ticket(process.pid, 3)]);
+    expect(live.map((t) => t.queuedAtMs)).toEqual([1, 3]);
+    expect(dead.map((t) => t.pid)).toEqual([child.pid]);
   });
 });
 
@@ -109,9 +118,13 @@ describe("start gate", () => {
   const settled = (pid: number) => ticket(pid, pid, { runPid: pid * 10, runningSinceMs: 0 });
   const me = ticket(5, 5);
 
-  test("an empty queue starts while the load allows", () => {
+  test("with nothing running, the first in line starts whatever the load", () => {
     expect(gateFor(me, [me], settings, idle, NOW_MS)).toBe(Gate.Start);
-    expect(gateFor(me, [me], settings, { load1: 5.6, cores: 8 }, NOW_MS)).toBe(Gate.Load);
+    expect(gateFor(me, [me], settings, { load1: 50, cores: 8 }, NOW_MS)).toBe(Gate.Start);
+  });
+
+  test("beside a running check, the load gates the next one", () => {
+    expect(gateFor(me, [settled(1), me], settings, { load1: 5.6, cores: 8 }, NOW_MS)).toBe(Gate.Load);
   });
 
   test("starts beside running tickets, and ignores the tickets behind it", () => {

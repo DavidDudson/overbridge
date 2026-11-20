@@ -1,5 +1,6 @@
-import { type QueueView, type Ticket, ticketKey, ticketName } from "./check-queue";
+import { CheckExit, type QueueView, type Ticket, ticketKey, ticketName } from "./check-queue";
 import { type Move, movedIndex, type QueueOverrides, spreadKeys } from "./check-priority";
+import type { CheckRecord, HistoryStore } from "./history";
 import { bold, boxBottom, boxRow, boxTop, cell, colorize, dim, fit, inverse, stripControl, textWidth } from "./term";
 
 /** One check as the @checks tab lists it. */
@@ -43,8 +44,17 @@ export function movedOverrides(rows: readonly CheckRow[], selected: number, move
   return { ...Object.fromEntries(kept), ...Object.fromEntries(reordered.map((r, i) => [ticketName(r.ticket), keys[i] ?? r.key])) };
 }
 
+/** What the @checks tab shows: the live queue, or the runs that finished recently. */
+export const ChecksMode = { Queue: "queue", Recent: "recent" } as const;
+
+export type ChecksMode = (typeof ChecksMode)[keyof typeof ChecksMode];
+
+export const nextChecksMode = (mode: ChecksMode): ChecksMode => (mode === ChecksMode.Queue ? ChecksMode.Recent : ChecksMode.Queue);
+
 const EMPTY = "no checks queued; `overbridge check <repo> -- <cmd>` queues one";
-const LEGEND = "j/k select   K/J move   t top   b bottom   q quit";
+const LEGEND = "j/k select   K/J move   t top   b bottom   x kill   v recent   q quit";
+const RECENT_EMPTY = "no checks finished in this window";
+const RECENT_LEGEND = "j/k select   v queue   r reload   q quit";
 
 /** Rows the frame takes beyond the list: top border, header, footer, bottom border. */
 export const CHECKS_CHROME = 4;
@@ -54,10 +64,17 @@ const WS_COLUMNS = 24;
 const REPO_COLUMNS = 14;
 const STATE_COLUMNS = 9;
 
-const elapsed = (ms: number) => {
+/** A duration as `42s`, `3m05s` or `2h07m`. */
+export const elapsed = (ms: number) => {
   const secs = Math.max(0, Math.round(ms / 1000));
 
-  return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${String(secs % 60).padStart(2, "0")}s`;
+  if (secs < 60) {
+    return `${secs}s`;
+  }
+
+  const mins = Math.floor(secs / 60);
+
+  return mins < 60 ? `${mins}m${String(secs % 60).padStart(2, "0")}s` : `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, "0")}m`;
 };
 
 export interface ChecksView {
@@ -100,4 +117,119 @@ export function renderChecks(rows: readonly CheckRow[], { selected, offset, heig
   const running = rows.filter((r) => r.running).length;
 
   return [boxTop("Check queue", width), boxRow(dim(fit(head, inner))), ...lines, ...padding, boxRow(footer), boxBottom(width, `${running} running · ${rows.length - running} waiting`, "blue")];
+}
+
+/** One finished check run, with the workspace whose history holds it. */
+export interface RecentCheck {
+  ws: string;
+  record: CheckRecord;
+}
+
+/** How long the recent view looks back. */
+export const RECENT_WINDOW_MS = 24 * 60 * 60_000;
+
+/** At most this many runs, newest first. */
+export const RECENT_LIMIT = 500;
+
+/** Every check run in `store` that ended at or after `sinceMs`, newest first, at most `limit`. */
+export const recentChecks = (store: HistoryStore, sinceMs: number, limit = RECENT_LIMIT): RecentCheck[] =>
+  store
+    .workspaces()
+    .flatMap((ws) => store.read(ws, sinceMs).flatMap((record) => (record.kind === "check" ? [{ ws, record }] : [])))
+    .toSorted((a, b) => b.record.at - a.record.at)
+    .slice(0, limit);
+
+/** How a run ended, from its exit code. */
+export const Outcome = { Passed: "passed", Failed: "failed", TimedOut: "timed-out", Stalled: "stalled", GaveUp: "gave-up", Killed: "killed" } as const;
+
+export type Outcome = (typeof Outcome)[keyof typeof Outcome];
+
+/** SIGHUP, SIGINT and SIGTERM as exit codes: a run someone stopped. */
+const KILLED_EXITS: readonly number[] = [129, 130, 143];
+
+export function outcomeOf(exit: number): Outcome {
+  if (exit === 0) {
+    return Outcome.Passed;
+  }
+
+  if (exit === CheckExit.GaveUp) {
+    return Outcome.GaveUp;
+  }
+
+  if (exit === CheckExit.TimedOut) {
+    return Outcome.TimedOut;
+  }
+
+  if (exit === CheckExit.Stalled) {
+    return Outcome.Stalled;
+  }
+
+  return KILLED_EXITS.includes(exit) ? Outcome.Killed : Outcome.Failed;
+}
+
+const OUTCOME_TEXT: Record<Outcome, string> = {
+  [Outcome.Passed]: "✓ ok",
+  [Outcome.Failed]: "✗ exit",
+  [Outcome.TimedOut]: "⏱ timeout",
+  [Outcome.Stalled]: "⏸ stalled",
+  [Outcome.GaveUp]: "⧗ gave up",
+  [Outcome.Killed]: "■ killed",
+};
+
+const outcomeText = (exit: number) => {
+  const outcome = outcomeOf(exit);
+
+  return outcome === Outcome.Failed ? `${OUTCOME_TEXT[outcome]} ${exit}` : OUTCOME_TEXT[outcome];
+};
+
+const OUTCOME_COLOR: Record<Outcome, "green" | "red" | "yellow" | "grey"> = {
+  [Outcome.Passed]: "green",
+  [Outcome.Failed]: "red",
+  [Outcome.TimedOut]: "red",
+  [Outcome.Stalled]: "red",
+  [Outcome.GaveUp]: "yellow",
+  [Outcome.Killed]: "grey",
+};
+
+const AGO_COLUMNS = 8;
+const RESULT_COLUMNS = 11;
+const TIME_COLUMNS = 7;
+
+const recentText = ({ ws, record }: RecentCheck, now: number) =>
+  [
+    cell(`${elapsed(now - record.at)} ago`, AGO_COLUMNS),
+    cell(ws.slice(0, WS_COLUMNS), WS_COLUMNS),
+    cell(record.repo.slice(0, REPO_COLUMNS), REPO_COLUMNS),
+    cell(outcomeText(record.exit), RESULT_COLUMNS),
+    cell(elapsed(record.queuedMs), TIME_COLUMNS),
+    cell(record.runMs ? elapsed(record.runMs) : "-", TIME_COLUMNS),
+    stripControl(record.full ?? record.command),
+  ].join(" ");
+
+/** Totals for the recent view's bottom border: runs, failures, and the time spent running and waiting. */
+export function recentTotals(rows: readonly RecentCheck[]): string {
+  const failed = rows.filter((r) => outcomeOf(r.record.exit) !== Outcome.Passed).length;
+  const runMs = rows.reduce((sum, r) => sum + r.record.runMs, 0);
+  const queuedMs = rows.reduce((sum, r) => sum + r.record.queuedMs, 0);
+
+  return `${rows.length} runs · ${failed} not ok · ran ${elapsed(runMs)} · waited ${elapsed(queuedMs)}`;
+}
+
+/** The recent view of the @checks panel as screen rows: finished runs, newest first. Pure, so it is snapshot-tested. */
+export function renderRecent(rows: readonly RecentCheck[], { selected, offset, height, width, message, now }: ChecksView): string[] {
+  const inner = width - 4;
+  const body = Math.max(1, height - CHECKS_CHROME);
+  const head = [cell("ended", AGO_COLUMNS), cell("workspace", WS_COLUMNS), cell("repo", REPO_COLUMNS), cell("result", RESULT_COLUMNS), cell("wait", TIME_COLUMNS), cell("run", TIME_COLUMNS), "command"].join(" ");
+  const visible = rows.slice(offset, offset + body);
+
+  const lines = visible.map((r, i) => {
+    const text = fit(recentText(r, now), inner);
+
+    return boxRow(offset + i === selected ? inverse(text) : colorize(text, OUTCOME_COLOR[outcomeOf(r.record.exit)]));
+  });
+
+  const padding = Array.from({ length: body - visible.length }, (_, i) => boxRow(rows.length === 0 && i === 0 ? dim(fit(RECENT_EMPTY, inner)) : fit("", inner)));
+  const footer = message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit(RECENT_LEGEND, inner));
+
+  return [boxTop("Recent checks (24h)", width), boxRow(dim(fit(head, inner))), ...lines, ...padding, boxRow(footer), boxBottom(width, recentTotals(rows), "blue")];
 }
