@@ -11,7 +11,7 @@ import { AGY_BRIEF, AGY_DIR } from "./agy";
 import type { State } from "./state";
 import { naturalSort, run } from "./util";
 
-/** Plans folder that workspace folders made by older builds still hold. */
+/** A plans folder that a workspace folder may hold beside `PLANS_DIR`. */
 const OLD_PLANS_DIR = "plans";
 
 /** What overbridge and the OS put in a workspace folder beside the worktrees. */

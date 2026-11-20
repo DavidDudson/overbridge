@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import type { RepoSpec } from "./config";
 import { barePath } from "./paths";
 import { fail, log, must, run } from "./util";
@@ -53,19 +53,24 @@ export function removeWorktree(spec: RepoSpec, path: string, force: boolean) {
 
 /**
  * Add `pattern` to the info/exclude every worktree of `wt`'s repo shares. Idempotent; a no-op when `wt` is
- * not a git worktree.
+ * not the root of a git worktree.
  */
 export function excludeInRepo(wt: string, pattern: string) {
+  // without its own .git, git would walk up and edit an enclosing repo's exclude
+  if (!existsSync(join(wt, ".git"))) {
+    return;
+  }
+
   const r = run(["git", "-C", wt, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"]);
 
-  if (!existsSync(wt) || !r.ok) {
+  if (!r.ok) {
     return;
   }
 
   const file = r.stdout;
   const text = existsSync(file) ? readFileSync(file, "utf8") : "";
 
-  if (text.split("\n").includes(pattern)) {
+  if (text.split("\n").some((line) => line.trim() === pattern)) {
     return;
   }
 

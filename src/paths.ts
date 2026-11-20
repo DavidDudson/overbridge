@@ -59,10 +59,7 @@ export function metaDir(): string {
   return dir;
 }
 
-/**
- * Where a workspace agent's plan-mode plans go, relative to the folder it starts in. Claude ignores a
- * `plansDirectory` outside that folder, so in a repo worktree it lives there, hidden by the repo's info/exclude.
- */
+/** Where a workspace agent's plan-mode plans go, relative to its start folder: Claude ignores a `plansDirectory` outside it. */
 export const PLANS_DIR = ".overbridge-plans";
 
 /** Where an orchestration tab's plan-mode plans go: it has no workspace folder, so they live in the meta dir. */
