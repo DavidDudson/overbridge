@@ -456,6 +456,29 @@ The `@work` list (and `overbridge worklist show`) uses the same classes as its s
 items with the same Jira priority, a higher class comes first. An item takes the highest class any of its repos'
 rules give it. It has no branch until it starts, so `branch` rules never match it.
 
+**CPU priority.** The class also sets how much CPU a workspace gets. Every 20 seconds the server sets the nice value of
+each workspace's processes from its class. A class with `nice` set uses that value. Otherwise the first class gets 1,
+the second 5, the third 9, and so on up to 19. Zellij or tmux and the sidebars stay at 0, so they get the CPU before any workspace. On macOS a class with
+`background: true` also puts its processes in Darwin background, which runs them on the efficiency cores and slows
+their disk I/O. The built-in `low` class does this. A process belongs to a workspace when it started with
+`OVERBRIDGE_NAME` set to that workspace: its Claude, the shells and checks Claude starts, and its apps. Any process
+that one of those starts belongs to the workspace too.
+
+Only root can lower a nice value. When a workspace's class goes up, its running processes keep the old nice, and the
+sidebar card says `priority raised · restart to apply`. Darwin background is different. The pass takes it
+off as soon as the class no longer sets it. `overbridge priority` shows the last pass, and
+`overbridge priority apply` runs one now. Set `cpu-priority: false` in the root `config.yml` to stop the passes.
+Turning it off takes processes out of Darwin background, but a nice value already set stays until the process
+restarts.
+
+On Linux each thread has its own nice value, so the pass renices every thread of each process.
+
+```yaml
+priority-classes:
+  - { name: feature, icon: "🚀", nice: 1 }
+  - { name: tech-debt, icon: "🧹", nice: 10, background: true }
+```
+
 While a check queued by an older overbridge is waiting or running, every process sorts by queue time alone, as the
 older one does, so the two never wait on each other. Classes and moves apply again once it has left the queue.
 
@@ -922,7 +945,7 @@ name, `$OVERBRIDGE_SESSION` or `workspaces`.
 
 Each workspace's `.claude/settings.json` registers `overbridge hook` for `SessionStart`,
 `UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `PermissionRequest`, `SubagentStart`, `SubagentStop`, `PreCompact`, `Stop` and `SessionEnd`, next to the guard.
-It records `empty` (a session just started or cleared; Claude's later idle notification does not turn it into `waiting`, and the workspace becomes a Cleanup candidate if nothing is uncommitted or unpushed), `idle`, `busy`, `waiting` (a permission request or a `permission_prompt`/`elicitation_dialog` notification only: the idle reminder Claude sends a minute after a turn is ignored), `done` or `end` (with Claude's SessionEnd `reason`; `/clear` and `/resume` record nothing) in `<meta>/agent/<ws>.json`. On `Stop` it also records the pids of shells still running under the session (background tasks); `done` reads as `bg` while any is alive, or while a subagent is running (`SubagentStart`/`SubagentStop` keep a marker per subagent in `<meta>/agent/<ws>.sub/`; a running subagent also keeps a quiet `busy` from going stale). Plan-mode plans are written to `<ws>/plans/` (`plansDirectory` in the generated settings), not `~/.claude/plans`.
+It records `empty` (a session just started or cleared; Claude's later idle notification does not turn it into `waiting`, and the workspace becomes a Cleanup candidate if nothing is uncommitted or unpushed), `idle`, `busy`, `waiting` (a permission request or a `permission_prompt`/`elicitation_dialog` notification only: the idle reminder Claude sends a minute after a turn is ignored), `done` or `end` (with Claude's SessionEnd `reason`; `/clear` and `/resume` record nothing) in `<meta>/agent/<ws>.json`. On `Stop` it also records the pids of shells still running under the session (background tasks); `done` reads as `bg` while any is alive, or while a subagent is running (`SubagentStart`/`SubagentStop` keep a marker per subagent in `<meta>/agent/<ws>.sub/`; a running subagent also keeps a quiet `busy` from going stale). Plan-mode plans are written to `.overbridge-plans/` in the folder the agent starts in (`plansDirectory` in the generated settings), not `~/.claude/plans`. Claude ignores a `plansDirectory` outside that folder, so in a repo worktree the plans sit inside it, and the repo's shared `info/exclude` keeps them out of `git status`.
 The root tab's Claude records its state the same way, under its tab name (`<meta>/agent/@root.json`).
 The hook
 never blocks or fails the agent and loads none of the rest of the CLI. A `busy` state with no

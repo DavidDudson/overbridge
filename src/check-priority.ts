@@ -9,13 +9,43 @@ export interface PriorityClass {
   icon: string;
   /** The class a claim gets when no rule or repo setting names one; the first class when none is marked. */
   default?: boolean;
+  /** The nice value of the workspace's processes, 1 to 19; unset spreads the classes by rank (`defaultNice`). */
+  nice?: number;
+  /** On macOS, also run the workspace's processes in Darwin background: efficiency cores and throttled disk I/O. */
+  background?: boolean;
 }
 
 export const DEFAULT_CLASSES: readonly PriorityClass[] = [
   { name: "high", icon: "🔺" },
   { name: "normal", icon: "🔹", default: true },
-  { name: "low", icon: "🔻" },
+  { name: "low", icon: "🔻", background: true },
 ];
+
+/** The lowest nice a workspace gets: the multiplexer and the sidebars stay at 0, above every workspace. */
+export const MIN_WORKSPACE_NICE = 1;
+export const MAX_NICE = 19;
+const NICE_STEP = 4;
+
+/** The nice of the class at `rank` when it sets none: 1, 5, 9, ... up to 19. */
+export const defaultNice = (rank: number): number => Math.min(MAX_NICE, MIN_WORKSPACE_NICE + rank * NICE_STEP);
+
+/** What a class asks of the CPU scheduler. */
+export interface ClassTarget {
+  name: string;
+  nice: number;
+  background: boolean;
+}
+
+/** Every class's target, highest first. */
+export const classTargets = (classes: readonly PriorityClass[]): ClassTarget[] =>
+  classes.map((c, rank) => ({ name: c.name, nice: c.nice ?? defaultNice(rank), background: c.background === true }));
+
+/** The target of class `name`; an unknown name gets the default class's. */
+export function classTarget(classes: readonly PriorityClass[], name: string): ClassTarget {
+  const { rank } = classInfo(classes, name);
+
+  return classTargets(classes)[rank] ?? { name, nice: defaultNice(rank), background: false };
+}
 
 /** A claim's class as tickets and the sidebar carry it: `rank` 0 starts first. */
 export interface ClassInfo {

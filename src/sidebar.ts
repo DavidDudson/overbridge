@@ -29,6 +29,8 @@ import { subscribeEvents } from "./events-client";
 import { serverOwnsSweep } from "./server-client";
 import { childError, type Finished, type Spawner, spawnAsync } from "./child";
 import { claimSweep, createSweepTrigger, startSweep } from "./sweep-trigger";
+import { readPriorityReportCached } from "./cpu-priority";
+import { startPriorityPass } from "./cpu-priority-run";
 import { bold, boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, type Input, inverse, LEAVE_SCREEN, stripControl, textWidth } from "./term";
 import { beginRemoval } from "./remove";
 import { cardLabel, CLEANUP_ARM_MS, pressCleanup, readTopCache, readTopCacheChecked, sidebarLabel, type PrStatus, type TopCache } from "./top";
@@ -119,6 +121,8 @@ export interface Entry {
   badge?: TabBadge;
   /** A workspace's check queue class icon; it leads the status line, under the agent glyph. */
   priorityIcon?: string;
+  /** Its class rose, but processes started under the old class keep their nice until they restart. */
+  priorityStuck?: boolean;
 }
 
 export { cardLabel, sidebarLabel, stripConventional } from "./top";
@@ -213,6 +217,8 @@ function workspaceEntry(ws: string, w: WorkspaceState): Entry {
   if (idleHint) card.idleHint = idleHint;
 
   if (!fault && cache.priorityIcon) card.priorityIcon = cache.priorityIcon;
+
+  if (readPriorityReportCached().workspaces[ws]?.stuck) card.priorityStuck = true;
 
   return card;
 }
@@ -351,9 +357,10 @@ const BLOCK_TEXT: Record<RemovalBlock, StatusLine> = {
 };
 
 const UNSAVED_TEXT: StatusLine = { text: "ended · unsaved work", color: "red" };
+const PRIORITY_STUCK_TEXT: StatusLine = { text: "priority raised · restart to apply", color: "yellow" };
 const FAULT_COLOR: Color = "red";
 
-/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, an icebox suggestion (unless the agent wants you), then `claude status - task status`. */
+/** An entry's status line, by priority: unreadable, cleanup failed, kept by the sweep, unsaved work, an icebox suggestion (unless the agent wants you), a raised class waiting on a restart (unless the agent is working or wants you), then `claude status - task status`. */
 function statusFor(e: Entry): StatusLine | undefined {
   if (e.fault) return { text: `error: ${e.fault}`, color: FAULT_COLOR };
 
@@ -364,6 +371,8 @@ function statusFor(e: Entry): StatusLine | undefined {
   if (e.unsaved) return UNSAVED_TEXT;
 
   if (e.idleHint && !(e.state && ATTENTION.includes(e.state))) return { text: e.idleHint, color: "cyan" };
+
+  if (e.priorityStuck && !(e.state && (e.state === "busy" || ATTENTION.includes(e.state)))) return PRIORITY_STUCK_TEXT;
   // an orchestration tab has no task, so no suffix
   const claude = e.state ? stateText(e) : e.task ? NO_SESSION_TEXT : undefined;
 
@@ -1090,7 +1099,14 @@ export async function sidebar(wsOpt?: string) {
     tabOrder: () => readView().order,
     // a user layout decides its own tabs, so only the generated one gets its orchestration tabs back
     keepOrchestration: (order) => { if (!userLayout) ensureOrchestrationTabs(order); },
-    sweep: createSweepTrigger({ serverOwns: () => serverOwnsSweep(), claim: claimSweep, start: startSweep, now: Date.now }),
+    // with the server down, the sidebar that takes the sweep also runs the CPU priority pass the server would
+    sweep: createSweepTrigger({ serverOwns: () => serverOwnsSweep(), claim: claimSweep, start: () => {
+        startSweep();
+        // a pass that fails to start is tried again on the next sweep; a pane has nowhere to log it
+        startPriorityPass().catch(() => undefined);
+      },
+      now: Date.now,
+    }),
     readState: tryReadState,
     entries: (order, state) => withReceipt(entries(order, state), self),
     reap: createReaper(),

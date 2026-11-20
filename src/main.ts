@@ -133,6 +133,9 @@ Workspaces
                                         moved, subjects, the Claude session name to message); the revisit skill reads it
   overbridge phase <plan|implement|mob-review> [--stack n/m] | --clear
                                         record where this workspace's work is, for the sidebar's task status
+  overbridge priority [apply] [--json]          each workspace's CPU priority (class, nice, Darwin background,
+                                        processes still at an old nice); apply runs a pass now (the server
+                                        runs one every 20 s)
   overbridge whoami                             workspace for the current dir/session
   overbridge prereqs                            exit 1 unless the skills overbridge's skills depend on (gh-stack)
                                         are installed
@@ -361,6 +364,12 @@ async function main(argv: string[]): Promise<number> {
         await prListPane(kind);
       }
 
+      break;
+    }
+
+    case "priority": {
+      const { priorityCommand } = await import("./cpu-priority-run");
+      priorityCommand(rest);
       break;
     }
 
