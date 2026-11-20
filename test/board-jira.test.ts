@@ -12,6 +12,7 @@ const reply = JSON.stringify([
       summary: "two",
       status: { name: "Code Review" },
       priority: { name: "High" },
+      issueType: { name: "Story" },
       labels: ["frontend"],
       parent: { key: "ABC-1" },
       updated: "2026-01-02T00:00:00.000+1000",
@@ -41,11 +42,18 @@ describe("jira board", () => {
       blockedBy: ["ABC-5"],
       parent: "ABC-1",
       priority: 1,
+      type: "Story",
       updatedAt: "2026-01-02T00:00:00.000+1000",
     });
     expect(b).toMatchObject({ id: "ABC-3", status: "todo", labels: [], blockedBy: [] });
     expect(b!.parent).toBeUndefined();
     expect(b!.priority).toBeUndefined();
+    expect(b!.type).toBeUndefined();
+  });
+
+  test("reads the issue type under Jira REST's `issuetype` spelling too", () => {
+    const rest = JSON.stringify([{ key: "ABC-4", fields: { summary: "four", status: { name: "Open" }, issuetype: { name: "Bug" } } }]);
+    expect(rowsFromJiraRaw(rest, "ABC", ["web"])[0]!.type).toBe("Bug");
   });
 
   test("no site means no links, and an empty reply gives no rows", () => {

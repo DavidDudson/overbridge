@@ -31,6 +31,9 @@ interface RawIssue {
     summary?: string;
     status?: { name?: string };
     priority?: { name?: string } | null;
+    /** `jira --raw` spells it `issueType`; Jira's REST API spells it `issuetype`. */
+    issueType?: { name?: string } | null;
+    issuetype?: { name?: string } | null;
     labels?: string[] | null;
     parent?: { key?: string } | null;
     updated?: string;
@@ -63,6 +66,7 @@ export function rowsFromJiraRaw(reply: string, project: string, repos: string[],
   return issues.map((i): WorkRow => {
     const f = i.fields ?? {};
     const priority = priorityFromJira(f.priority?.name ?? undefined);
+    const type = (f.issueType ?? f.issuetype)?.name;
 
     const row: WorkRow = {
       repo: project,
@@ -79,6 +83,10 @@ export function rowsFromJiraRaw(reply: string, project: string, repos: string[],
     if (f.parent?.key) row.parent = f.parent.key;
 
     if (priority !== undefined) row.priority = priority;
+
+    if (type) {
+      row.type = type;
+    }
 
     return row;
   });

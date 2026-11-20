@@ -41,7 +41,7 @@
       "type": "boolean"
     },
     "priority-classes": {
-      "description": "The workspace priority classes, highest first: they order the check queue and set each workspace's CPU priority. Every repo shares one queue, so the list lives here only. Default: high (nice 1), normal (the default class, nice 5), low (nice 9, Darwin background).",
+      "description": "The workspace priority classes, highest first: they order the check queue, break ties within a Jira priority in the @work list, and set each workspace's CPU priority. Every repo shares them, so the list lives here only. Default: high (nice 1), normal (the default class, nice 5), low (nice 9, Darwin background).",
       "type": "array",
       "minItems": 1,
       "items": {

@@ -8,7 +8,7 @@ import { githubRows, parseProject, projectRows, slugFromUrl, type ProjectBoard, 
 import { jiraRows } from "./pm/board-jira";
 import { keyOf, type WorkRow, type WorkStatus } from "./pm/worklist";
 import type { ProjectManagement } from "./project-config";
-import { errorMessage } from "./util";
+import { errorMessage, isNumber, isRecord, isString, type Json } from "./util";
 
 /**
  * The work list's data: what a refresh reads and writes, with no pane code. The server and its workers import this, so
@@ -27,11 +27,41 @@ export interface WorklistCache {
 
 export const worklistPath = () => join(metaDir(), "worklist.json");
 
+const WORK_STATUSES = ["todo", "in-progress", "blocked", "done"] as const satisfies readonly WorkStatus[];
+
+const isStrings = (v: Json | undefined) => Array.isArray(v) && v.every(isString);
+
+const optional = (v: Json | undefined, check: (v: Json) => boolean) => v === undefined || check(v);
+
+/** A cached work row: every `WorkRow` field present has its type, so no reader of the cache can throw on it. */
+export const isWorkRow = (v: Json): v is Json & WorkRow =>
+  isRecord(v) &&
+  isString(v.repo) &&
+  isString(v.id) &&
+  isString(v.title) &&
+  isString(v.url) &&
+  isString(v.updatedAt) &&
+  WORK_STATUSES.some((s) => s === v.status) &&
+  isStrings(v.blockedBy) &&
+  isStrings(v.labels) &&
+  optional(v.repos, isStrings) &&
+  optional(v.parent, isString) &&
+  optional(v.type, isString) &&
+  optional(v.priority, isNumber);
+
+/** The cached list; an empty one when the file is missing, unreadable or not a cache, so no reader has to check its shape. */
 export function readWorklist(): WorklistCache {
+  const empty: WorklistCache = { at: 0, rows: [], notes: [] };
+
   try {
-    return JSON.parse(readFileSync(worklistPath(), "utf8"));
+    // SAFETY: JSON.parse returns plain JSON values, which is what `Json` describes
+    const parsed = JSON.parse(readFileSync(worklistPath(), "utf8")) as Json;
+
+    return isRecord(parsed) && Array.isArray(parsed.rows) && Array.isArray(parsed.notes)
+      ? { at: isNumber(parsed.at) ? parsed.at : 0, rows: parsed.rows.filter(isWorkRow), notes: parsed.notes.filter(isString) }
+      : empty;
   } catch {
-    return { at: 0, rows: [], notes: [] };
+    return empty;
   }
 }
 

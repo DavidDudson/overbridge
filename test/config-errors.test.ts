@@ -142,12 +142,20 @@ describe("check-queue", () => {
       'check-queue.priority: unknown class "urgent" (priority-classes in the root config.yml lists high, normal, low)',
       'check-queue.priority-rules[0].priority: unknown class "soon" (priority-classes in the root config.yml lists high, normal, low)',
     ]);
-    expect(problems("check-queue:\n  priority-rules: tip\n")).toEqual(["check-queue.priority-rules: expected a list of { priority, branch?, item? }"]);
+    expect(problems("check-queue:\n  priority-rules: tip\n")).toEqual(["check-queue.priority-rules: expected a list of { priority, branch?, item?, type?, label? }"]);
     expect(problems("check-queue:\n  priority-rules:\n    - { priority: high }\n")).toEqual([
-      "check-queue.priority-rules[0]: needs branch or item: a rule with neither matches every claim (use check-queue.priority for that)",
+      "check-queue.priority-rules[0]: needs branch, item, type or label: a rule with none matches every claim (use check-queue.priority for that)",
     ]);
     expect(problems("check-queue:\n  priority-rules:\n    - { priority: high, branch: '(' }\n")[0]).toStartWith("check-queue.priority-rules[0].branch: not a valid regex");
-    expect(problems("check-queue:\n  priority-rules:\n    - { priority: high, branch: x, label: y }\n")[0]).toStartWith("check-queue.priority-rules[0].label: unknown key");
+    expect(problems("check-queue:\n  priority-rules:\n    - { priority: high, branch: x, colour: y }\n")[0]).toStartWith("check-queue.priority-rules[0].colour: unknown key");
+    expect(parseConfig("check-queue:\n  priority-rules:\n    - { priority: high, type: '^Story$' }\n    - { priority: low, label: tech-debt }\n", "f.yml").checkQueue.priorityRules).toEqual([
+      { priority: "high", type: "^Story$" },
+      { priority: "low", label: "tech-debt" },
+    ]);
+    expect(problems("check-queue:\n  priority-rules:\n    - { priority: high, type: '(' }\n")[0]).toStartWith("check-queue.priority-rules[0].type: not a valid regex");
+    expect(problems("check-queue:\n  priority-rules:\n    - { priority: high, type: null, label: null }\n")).toContain(
+      "check-queue.priority-rules[0]: needs branch, item, type or label: a rule with none matches every claim (use check-queue.priority for that)",
+    );
   });
 
   test("bad values name their key", () => {

@@ -20,20 +20,46 @@ const configWith = (queue: Partial<ProjectConfig["checkQueue"]>): ProjectConfig 
   checkQueue: { ...defaultCheckQueue(), classes: CLASSES, ...queue },
 });
 
+const noFacts = () => undefined;
+
 const claim = (queue: Partial<ProjectConfig["checkQueue"]>, branch: string): ClaimContext => ({ config: configWith(queue), dir: "/nowhere", branch });
 
 describe("workspaceClass", () => {
   test("takes the highest class across claims, with item rules resolved from the branch", () => {
     const lowRepo = claim({ priority: "low" }, "chore/ENG-1-x");
     const tipRepo = claim({ priorityRules: [{ priority: "high", item: "^TIP-" }] }, "feat/TIP-3-x");
-    expect(workspaceClass([lowRepo, tipRepo], make)).toEqual({ name: "high", rank: 0, icon: "🔺" });
+    expect(workspaceClass([lowRepo, tipRepo], noFacts, make)).toEqual({ name: "high", rank: 0, icon: "🔺" });
   });
 
   test("a claim no rule or repo priority names gets the default class", () => {
-    expect(workspaceClass([claim({}, "feat/ENG-2-y")], make)?.name).toBe("normal");
+    expect(workspaceClass([claim({}, "feat/ENG-2-y")], noFacts, make)?.name).toBe("normal");
   });
 
   test("no claims, no class", () => {
-    expect(workspaceClass([], make)).toBeUndefined();
+    expect(workspaceClass([], noFacts, make)).toBeUndefined();
+  });
+
+  test("a type or label rule reads the claim's item facts by repo and item id", () => {
+    const rules = { priorityRules: [{ priority: "low", label: "^tech-debt$" }, { priority: "high", type: "^Story$" }] };
+    const story = { ...claim(rules, "feat/ENG-2-y"), repo: "web" };
+    const asked: string[] = [];
+
+    const factsOf = (repo: string, item: string) => {
+      asked.push(`${repo} ${item}`);
+
+      return item === "ENG-2" ? { type: "Story", labels: [] } : undefined;
+    };
+
+    expect(workspaceClass([story], factsOf, make)?.name).toBe("high");
+    expect(workspaceClass([{ ...claim(rules, "feat/ENG-3-z"), repo: "web" }], factsOf, make)?.name).toBe("normal");
+    expect(asked).toEqual(["web ENG-2", "web ENG-3"]);
+  });
+
+  test("rules without type or label never read item facts", () => {
+    const factsOf = () => {
+      throw new Error("read item facts");
+    };
+
+    expect(workspaceClass([{ ...claim({ priorityRules: [{ priority: "high", item: "^ENG-" }] }, "feat/ENG-2-y"), repo: "web" }], factsOf, make)?.name).toBe("high");
   });
 });
