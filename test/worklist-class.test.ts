@@ -96,4 +96,11 @@ describe("worklistFacts", () => {
       expect(readWorklist()).toEqual({ at: 0, rows: [], notes: [] });
     }
   });
+
+  test("drops a cached row whose fields have the wrong types, keeping the good ones", () => {
+    const bad = [{ ...row("ENG-2"), repos: 42 }, { ...row("ENG-3"), labels: [null] }, { ...row("ENG-4"), blockedBy: [1] }, { ...row("ENG-5"), type: 7 }];
+    writeCache(JSON.stringify({ at: 1, rows: [...bad, row("ENG-1")], notes: [] }));
+    expect(readWorklist().rows.map((r) => r.id)).toEqual(["ENG-1"]);
+    expect(worklistFacts("web", "ENG-2")).toBeUndefined();
+  });
 });

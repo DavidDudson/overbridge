@@ -153,6 +153,9 @@ describe("check-queue", () => {
       { priority: "low", label: "tech-debt" },
     ]);
     expect(problems("check-queue:\n  priority-rules:\n    - { priority: high, type: '(' }\n")[0]).toStartWith("check-queue.priority-rules[0].type: not a valid regex");
+    expect(problems("check-queue:\n  priority-rules:\n    - { priority: high, type: null, label: null }\n")).toContain(
+      "check-queue.priority-rules[0]: needs branch, item, type or label: a rule with none matches every claim (use check-queue.priority for that)",
+    );
   });
 
   test("bad values name their key", () => {

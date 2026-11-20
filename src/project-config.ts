@@ -794,7 +794,7 @@ function parsePriorityRules(p: Problems, checkQueue: JsonObject): PriorityRule[]
     const type = pattern(p, rule, "type", at);
     const label = pattern(p, rule, "label", at);
 
-    if ([rule.branch, rule.item, rule.type, rule.label].every((v) => v === undefined)) {
+    if ([branch, item, type, label].every((v) => v === undefined)) {
       p.add(at, "needs branch, item, type or label: a rule with none matches every claim (use check-queue.priority for that)");
     }
 

@@ -21,13 +21,10 @@ const CHROME = 5;
 
 type ClassOf = (row: WorkRow) => RowClass | undefined;
 
-/** The repos `rows` can be started in, once each and sorted, so an unchanged list gives the same key. */
-const reposOf = (rows: readonly WorkRow[]): string[] => [...new Set(rows.flatMap(rowRepos))].toSorted();
-
 /** Each row's priority class from its repos' committed config; no class when the repos cannot be read, so the list keeps ranking. */
 export function loadClassOf(rows: readonly WorkRow[]): ClassOf {
   try {
-    const queues = loadQueues(new Set(reposOf(rows)));
+    const queues = loadQueues(new Set(rows.flatMap(rowRepos)));
 
     return rowClassOf((repo) => queues.get(repo));
   } catch {
@@ -134,14 +131,12 @@ export async function worklistPane() {
   let typing = false;
   /** The item whose detail view is open. */
   let detail: Ranked | undefined;
-  /** Read again only when the listed repos change, since each read runs git in every one of them. */
-  let classes: { repos: string; classOf: ClassOf } | undefined;
+  /** Read once per refreshed list, since each read runs git in every repo the list names. */
+  let classes: { at: number; classOf: ClassOf } | undefined;
 
   const classOf = () => {
-    const repos = reposOf(cache.rows).join(" ");
-
-    if (classes?.repos !== repos) {
-      classes = { repos, classOf: loadClassOf(cache.rows) };
+    if (classes?.at !== cache.at) {
+      classes = { at: cache.at, classOf: loadClassOf(cache.rows) };
     }
 
     return classes.classOf;

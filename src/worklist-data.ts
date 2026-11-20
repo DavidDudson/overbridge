@@ -29,7 +29,11 @@ export const worklistPath = () => join(metaDir(), "worklist.json");
 
 const WORK_STATUSES = ["todo", "in-progress", "blocked", "done"] as const satisfies readonly WorkStatus[];
 
-/** A cached work row: every required `WorkRow` field is present (the rest are optional). */
+const isStrings = (v: Json | undefined) => Array.isArray(v) && v.every(isString);
+
+const optional = (v: Json | undefined, check: (v: Json) => boolean) => v === undefined || check(v);
+
+/** A cached work row: every `WorkRow` field present has its type, so no reader of the cache can throw on it. */
 export const isWorkRow = (v: Json): v is Json & WorkRow =>
   isRecord(v) &&
   isString(v.repo) &&
@@ -38,8 +42,12 @@ export const isWorkRow = (v: Json): v is Json & WorkRow =>
   isString(v.url) &&
   isString(v.updatedAt) &&
   WORK_STATUSES.some((s) => s === v.status) &&
-  Array.isArray(v.blockedBy) &&
-  Array.isArray(v.labels);
+  isStrings(v.blockedBy) &&
+  isStrings(v.labels) &&
+  optional(v.repos, isStrings) &&
+  optional(v.parent, isString) &&
+  optional(v.type, isString) &&
+  optional(v.priority, isNumber);
 
 /** The cached list; an empty one when the file is missing, unreadable or not a cache, so no reader has to check its shape. */
 export function readWorklist(): WorklistCache {
