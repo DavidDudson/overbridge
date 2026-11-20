@@ -54,15 +54,26 @@ export interface ClaimFacts {
   labels?: readonly string[] | undefined;
 }
 
-const matches = (pattern: string | undefined, value: string | undefined) => pattern === undefined || (value !== undefined && new RegExp(pattern).test(value));
-
 const matchesAny = (pattern: string | undefined, values: readonly string[] | undefined) => pattern === undefined || (values ?? []).some((v) => new RegExp(pattern).test(v));
+
+const matches = (pattern: string | undefined, value: string | undefined) => matchesAny(pattern, value === undefined ? [] : [value]);
 
 const ruleMatches = (r: PriorityRule, facts: ClaimFacts) =>
   matches(r.branch, facts.branch) && matches(r.item, facts.item) && matches(r.type, facts.type) && matchesAny(r.label, facts.labels);
 
 /** The class name of a claim or work item: the first matching rule, else `fallback`. */
 export const priorityOf = (rules: readonly PriorityRule[], fallback: string, facts: ClaimFacts): string => rules.find((r) => ruleMatches(r, facts))?.priority ?? fallback;
+
+/** The settings a repo's class comes from: the root `priority-classes` and its `check-queue` rules and fallback. */
+export interface ClassRules {
+  classes: readonly PriorityClass[];
+  priorityRules: readonly PriorityRule[];
+  priority?: string | undefined;
+}
+
+/** The class `rules` give these facts: the first matching rule, else the repo's `priority`, else the default class. */
+export const queueClass = (rules: ClassRules, facts: ClaimFacts): ClassInfo =>
+  classInfo(rules.classes, priorityOf(rules.priorityRules, rules.priority ?? defaultClassName(rules.classes), facts));
 
 /** The class that starts first among `classes`, or undefined for none. */
 export const highest = (classes: readonly ClassInfo[]): ClassInfo | undefined => classes.toSorted((a, b) => a.rank - b.rank)[0];

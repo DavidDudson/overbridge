@@ -337,7 +337,8 @@ async function main(argv: string[]): Promise<number> {
         const cache = refreshWorklist();
         log(`worklist: ${cache.rows.length} open item(s)${cache.notes.length ? `; ${cache.notes.join("; ")}` : ""}`);
       } else if (sub === "show") {
-        console.log(showWorklist(readWorklist(), loadClassOf()).join("\n"));
+        const cache = readWorklist();
+        console.log(showWorklist(cache, loadClassOf(cache.rows)).join("\n"));
       } else if (sub !== undefined) {
         throw new OverbridgeError("usage: overbridge worklist [refresh|show]");
       } else {

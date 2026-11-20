@@ -1,7 +1,7 @@
 import { subscribeEvents } from "./events-client";
 import { selfCommand } from "./paths";
 import { detailLines, filterRanked } from "./pm/worklist-filter";
-import { keyOf, rank, type Ranked, type RowClass, type WorkRow } from "./pm/worklist";
+import { keyOf, noClass, rank, type Ranked, type RowClass, rowRepos, type WorkRow } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
 import { serverRefreshWorklist } from "./server-client";
 import { readWorklist, WORKLIST_REFRESH_MS, type WorklistCache } from "./worklist-data";
@@ -13,7 +13,7 @@ import { spinner } from "./anim";
 import { silencedTitle } from "./silence";
 import { mentionScanError, silencedSet, spawnMentionRefresh, toggleMessage } from "./silence-refresh";
 import { statusGlyph, workAnimated } from "./worklist-look";
-import { loadQueues, rowClass } from "./worklist-class";
+import { loadQueues, rowClassOf } from "./worklist-class";
 import { bold, boxBottom, boxRow, boxTop, cell, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN, stripControl } from "./term";
 
 /** Rows the frame uses besides the item rows: top border, header, reasons, legend, bottom border. */
@@ -21,11 +21,18 @@ const CHROME = 5;
 
 type ClassOf = (row: WorkRow) => RowClass | undefined;
 
-/** Each row's priority class from every registered repo's committed config. */
-export function loadClassOf(): ClassOf {
-  const queues = loadQueues();
+/** The repos `rows` can be started in, once each and sorted, so an unchanged list gives the same key. */
+const reposOf = (rows: readonly WorkRow[]): string[] => [...new Set(rows.flatMap(rowRepos))].toSorted();
 
-  return rowClass((repo) => queues.get(repo));
+/** Each row's priority class from its repos' committed config; no class when the repos cannot be read, so the list keeps ranking. */
+export function loadClassOf(rows: readonly WorkRow[]): ClassOf {
+  try {
+    const queues = loadQueues(new Set(reposOf(rows)));
+
+    return rowClassOf((repo) => queues.get(repo));
+  } catch {
+    return noClass;
+  }
 }
 
 /** The list `overbridge worklist show` prints for a Claude: one ranked row per line, then the repos that could not be read. */
@@ -127,12 +134,14 @@ export async function worklistPane() {
   let typing = false;
   /** The item whose detail view is open. */
   let detail: Ranked | undefined;
-  /** Read once per cache, since each read runs git in every registered repo. */
-  let classes: { at: number; classOf: ClassOf } | undefined;
+  /** Read again only when the listed repos change, since each read runs git in every one of them. */
+  let classes: { repos: string; classOf: ClassOf } | undefined;
 
   const classOf = () => {
-    if (classes?.at !== cache.at) {
-      classes = { at: cache.at, classOf: loadClassOf() };
+    const repos = reposOf(cache.rows).join(" ");
+
+    if (classes?.repos !== repos) {
+      classes = { repos, classOf: loadClassOf(cache.rows) };
     }
 
     return classes.classOf;
@@ -214,7 +223,7 @@ export async function worklistPane() {
         else if (input.key === "q" || input.key === "ctrl-c") quit();
         else if (input.key === "s") {
           const item = detail;
-          const repos = item.repos ?? [item.repo];
+          const repos = rowRepos(item);
           detail = undefined;
 
           if (repos.length === 1) await startIn(repos[0]!, item);
@@ -252,7 +261,7 @@ export async function worklistPane() {
       else if ((input.key === "enter" || input.key === "l" || input.key === "right") && list[selected]) detail = list[selected];
       else if (input.key === "s" && list[selected]) {
         const item = list[selected]!;
-        const repos = item.repos ?? [item.repo];
+        const repos = rowRepos(item);
 
         if (repos.length === 1) {
           await startIn(repos[0]!, item);

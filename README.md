@@ -428,7 +428,8 @@ only. With none set, the classes are `high`, `normal` (the default), and `low`. 
 `check-queue.priority-rules` entry whose regexes all match, else from `check-queue.priority`, else the default
 class. A rule can set `branch` (the claimed branch), `item` (its work item id), `type` (the item's type, such as
 Jira's `Story`) and `label` (any one of its labels). A claim reads its item's type and labels from the `@work`
-list's cache, so a `type` or `label` rule matches only an item that list has read. A workspace with several repos takes the highest
+list's cache, so a `type` or `label` rule matches only an item that list has read. An older overbridge rejects
+`type` and `label` as unknown keys, so update every install that reads the config before adding one. A workspace with several repos takes the highest
 class among them, and each check it queues records that class and its rank. For example:
 
 ```yaml

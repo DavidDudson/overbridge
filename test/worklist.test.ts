@@ -105,7 +105,7 @@ describe("worklist", () => {
     const classOf = (r: WorkRow) => {
       const at = r.type === undefined ? undefined : classes.get(r.type);
 
-      return at === undefined ? undefined : { name: r.type!, rank: at };
+      return r.type !== undefined && at !== undefined ? { name: r.type, rank: at } : undefined;
     };
 
     const rows = [row("1", { priority: 3, type: "Task" }), row("2", { priority: 3 }), row("3", { priority: 3, type: "Story" }), row("4", { priority: 2 })];
@@ -113,5 +113,9 @@ describe("worklist", () => {
     expect(ranked.map((r) => r.id)).toEqual(["4", "3", "1", "2"]);
     expect(ranked.find((r) => r.id === "3")!.reasons).toEqual(["ready", "priority p3", "class Story"]);
     expect(rank(rows).map((r) => r.id)).toEqual(["4", "1", "2", "3"]);
+
+    // class sorts before fan-out
+    const unblocking = [...rows, row("5", { priority: 3, type: "Story", status: "in-progress", blockedBy: ["r#1"] })];
+    expect(rank(unblocking, classOf).filter((r) => r.ready).map((r) => r.id)).toEqual(["4", "3", "1", "2"]);
   });
 });

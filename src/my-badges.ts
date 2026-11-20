@@ -1,11 +1,11 @@
 import { cachedRead } from "./gauge";
-import { rank, type WorkRow, type WorkStatus } from "./pm/worklist";
+import { rank } from "./pm/worklist";
 import type { CiState, HealthInput } from "./pr-look";
 import { prListPath, type PrListKind } from "./prlist-data";
 import { type Silenceable, silencedNow } from "./silence";
 import { badgeOf, type TabBadge } from "./tab-badge";
 import { isRecord, isString, type Json } from "./util";
-import { worklistPath } from "./worklist-data";
+import { isWorkRow, worklistPath } from "./worklist-data";
 import { workInput } from "./worklist-look";
 
 // cachedRead keys on the parser's identity, so every parser here is a module-level function.
@@ -65,20 +65,6 @@ export function prListBadge(kind: PrListKind): TabBadge | undefined {
 
   return raw === undefined ? undefined : prBadgeFromCache(raw, silencedNow());
 }
-
-const WORK_STATUSES = ["todo", "in-progress", "blocked", "done"] as const satisfies readonly WorkStatus[];
-
-/** A cached work row: every required `WorkRow` field is present (the rest are optional). */
-const isWorkRow = (v: Json): v is Json & WorkRow =>
-  isRecord(v) &&
-  isString(v.repo) &&
-  isString(v.id) &&
-  isString(v.title) &&
-  isString(v.url) &&
-  isString(v.updatedAt) &&
-  WORK_STATUSES.some((s) => s === v.status) &&
-  Array.isArray(v.blockedBy) &&
-  Array.isArray(v.labels);
 
 /** The work list cache as its badge: open items that are not silenced, since a done item needs nothing. */
 export function workBadgeFromCache(raw: Json, silenced: SilencedTest = noneSilenced): TabBadge | undefined {

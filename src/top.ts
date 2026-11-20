@@ -9,6 +9,7 @@ import { isOrchestrationTab } from "./orchestration";
 import { metaDir, wsDir, worktreePath } from "./paths";
 import { isJsonNumber, isJsonBoolean, isJsonObject, isJsonString, type JsonObject, type JsonValue } from "./json";
 import { type ClaimContext, workspaceClass } from "./workspace-class";
+import { worklistFacts } from "./worklist-class";
 import { itemIdOf, providerFor, refreshTitle, TITLE_TTL_MS } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
@@ -690,7 +691,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 
   if (titleNow) cache.title = titleNow;
 
-  const cls = workspaceClass(claimContexts, provider);
+  const cls = workspaceClass(claimContexts, worklistFacts, provider);
 
   if (cls) {
     cache.priority = cls.name;

@@ -73,6 +73,7 @@ check-queue:
   # and the @work list ranks items of the same priority by class.
   # priority: normal         # this repo's class when no rule matches
   # priority-rules:          # first match wins; set any of branch, item (the work item id), type, label, as regexes
+  #                          # (type and label need every overbridge install that reads this config on a version that has them)
   #   - { priority: high, item: "^HOTFIX-" }
   #   - { priority: high, type: "^Story$" }
   #   - { priority: low, label: "^tech-debt$" }

@@ -19,6 +19,7 @@ import { defaultMux, layoutPath, type Mux, MuxKind, tmuxConfPath } from "./mux";
 import { requireTab, TabFocus } from "./tab";
 import { runCheck } from "./check-queue";
 import { type ClaimContext, workspaceClass } from "./workspace-class";
+import { worklistFacts } from "./worklist-class";
 import { trustFolder, untrustFolder } from "./claude-trust";
 import { shellInvocation } from "./shell";
 import { chain, cover, displayStacks, hasGhStack, localStacks, remoteStack, type Stack, stackOf } from "./stack";
@@ -645,7 +646,7 @@ export async function check(repoArg: string | undefined, cmd: string[], wsOpt?: 
 
   const { config, inv } = inRepoShell(ws, repo, cmd);
   const settings = timeoutSeconds === undefined ? config.checkQueue : { ...config.checkQueue, timeoutSeconds };
-  const cls = workspaceClass(claimContexts(ws, repo, config));
+  const cls = workspaceClass(claimContexts(ws, repo, config), worklistFacts);
   const who: Parameters<typeof runCheck>[1] = { ws, repo, command: cmd.map(shellQuote).join(" ") };
 
   if (cls) {

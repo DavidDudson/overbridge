@@ -36,6 +36,9 @@ export interface Ranked extends WorkRow {
   reasons: string[];
 }
 
+/** The repos a row can be started in: its `repos`, else its own repo. */
+export const rowRepos = (row: Pick<WorkRow, "repo" | "repos">): readonly string[] => row.repos ?? [row.repo];
+
 /** A Jira key such as `ENG-12` is unique on its own; a bare number needs its repo. */
 export const keyOf = (r: Pick<WorkRow, "repo" | "id">): string => (/^[A-Z][A-Z0-9_]*-\d+$/.test(r.id) ? r.id : `${r.repo}#${r.id}`);
 
@@ -132,8 +135,8 @@ export interface RowClass {
   rank: number;
 }
 
-/** No classes: every row ties on rule 3. */
-const noClass = (): RowClass | undefined => undefined;
+/** No classes: every row ties on class. */
+export const noClass = (): RowClass | undefined => undefined;
 
 /**
  * Rules, in order; the first that differs decides:

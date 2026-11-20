@@ -51,6 +51,11 @@ describe("jira board", () => {
     expect(b!.type).toBeUndefined();
   });
 
+  test("reads the issue type under Jira REST's `issuetype` spelling too", () => {
+    const rest = JSON.stringify([{ key: "ABC-4", fields: { summary: "four", status: { name: "Open" }, issuetype: { name: "Bug" } } }]);
+    expect(rowsFromJiraRaw(rest, "ABC", ["web"])[0]!.type).toBe("Bug");
+  });
+
   test("no site means no links, and an empty reply gives no rows", () => {
     expect(rowsFromJiraRaw(reply, "ABC", ["web"])[0]!.url).toBe("");
     expect(rowsFromJiraRaw("", "ABC", ["web"])).toEqual([]);
