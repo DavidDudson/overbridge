@@ -60,6 +60,8 @@ interface RunWatch {
 interface HeldRun {
   runPid?: number;
   startedMs?: number;
+  /** A stop signal arrived and `stopRun` is killing the run; it records the run and exits the process. */
+  stopping?: NodeJS.Signals;
 }
 
 const TURN_POLL_MS = 1_000;
@@ -264,16 +266,21 @@ function reap(ticket: Ticket, dir: string) {
   rmSync(join(dir, ticketName(ticket)), { force: true });
 }
 
-/** Stop a queued or running check and drop its ticket; its owner records the run as killed. */
+/**
+ * Stop a queued or running check. Its owner kills the command's group (KILL after the grace period), records the run
+ * as killed and drops the ticket; with no owner left, the group is killed and the ticket dropped here.
+ */
 export function stopTicket(t: Ticket, dir = queueDir()) {
-  if (t.runPid !== undefined && groupAlive(t.runPid)) {
-    signalGroup(t.runPid, "SIGTERM");
-  }
-
   try {
     process.kill(t.pid, "SIGTERM");
+
+    return;
   } catch {
     // the owner is already gone
+  }
+
+  if (t.runPid !== undefined && groupAlive(t.runPid)) {
+    signalGroup(t.runPid, "SIGKILL");
   }
 
   rmSync(join(dir, ticketName(t)), { force: true });
@@ -476,15 +483,26 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
   const held: HeldRun = {};
   const leave = () => rmSync(file, { force: true });
 
-  const onSignal = (signal: NodeJS.Signals) => {
+  /** Keeps the ticket, so the run still counts against `max-parallel`, until the group is gone (`killGroup` ends in KILL). */
+  const stopRun = async (signal: NodeJS.Signals): Promise<never> => {
     if (held.runPid !== undefined) {
-      signalGroup(held.runPid, "SIGTERM");
+      await killGroup(held.runPid);
     }
 
     const now = Date.now();
     recordKilled(me, held.startedMs ?? now, held.startedMs === undefined ? undefined : now, signalExit(signal));
     leave();
     process.exit(signalExit(signal));
+  };
+
+  const onSignal = (signal: NodeJS.Signals) => {
+    if (held.stopping) {
+      return;
+    }
+
+    // set before stopRun: Bun's spawnSync (in groupAlive) runs the event loop, so the run can end inside it
+    held.stopping = signal;
+    void stopRun(signal);
   };
 
   STOP_SIGNALS.forEach((s) => process.on(s, onSignal));
@@ -505,6 +523,11 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
       held.runPid = pid;
       held.startedMs = startedMs;
     });
+
+    // the run ended because a stop signal killed it; that handler records it and exits
+    if (held.stopping) {
+      return await new Promise<never>(() => {});
+    }
 
     recordCheck(me, startedMs, Date.now(), code);
 

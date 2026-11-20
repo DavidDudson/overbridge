@@ -525,6 +525,18 @@ describe("check queue", () => {
     expect(history.at(-1).runMs).toBeGreaterThan(0);
   }, CHECK_TEST_MS);
 
+  test("a killed check that ignores TERM keeps its ticket until KILL ends its group", async () => {
+    config();
+    const marker = join(tmp, "stubborn.started");
+    const run = spawnCheck(["--", "sh", "-c", `trap "" TERM; touch ${marker}; sleep 30`]);
+    await waitFor(() => existsSync(marker) && readTickets(queue()).some((t) => t.runPid !== undefined));
+    readTickets(queue()).forEach((t) => stopTicket(t, queue()));
+    await Bun.sleep(1_000);
+    expect(tickets()).toHaveLength(1);
+    expect(await run.exited).toBe(143);
+    expect(tickets()).toEqual([]);
+  }, CHECK_TEST_MS);
+
   test("a nested check inside a held run runs at once", () => {
     config();
     const r = check(["--", "sh", "-c", `${process.execPath} ${CLI} check -- echo nested`]);
