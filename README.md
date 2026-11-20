@@ -408,9 +408,12 @@ workspace's only repo.
 1. **Queue.** Each call writes a ticket to `.overbridge/check-queue/`. Tickets start by priority class (see
    **Priority** below), then in the order they were queued: a ticket waits until every ticket ahead of it, whose
    process is still alive, has started. Waiters remove tickets
-   whose process has died. If a dead ticket left its command running, they kill that command too.
-2. **Load.** The next ticket in line starts once the 1-minute load average is under `max-load-percent` of the cores,
-   whether or not other runs are still going. The average takes about a minute to show a new run, so each run that
+   whose process has died. If a dead ticket left its command running, they kill that command too. Each waiter looks
+   up every owner with one `ps` per poll.
+2. **Load.** With nothing running, the first ticket in line starts at once, whatever the load: load from outside
+   the queue (agents, panes, dev servers) can stay over the limit for hours, and a queue that runs nothing only adds
+   waiting. Beside a running check, the next ticket in line starts once the 1-minute load average is under
+   `max-load-percent` of the cores. The average takes about a minute to show a new run, so each run that
    started in the last minute counts as up to one extra core of load. Set `max-parallel` to cap how many run at once;
    `max-parallel: 1` runs them one at a time.
 3. **Run.** The command runs in the repo's dev shell, as with `overbridge shell`, in a process group of its own. A
@@ -484,7 +487,9 @@ older one does, so the two never wait on each other. Classes and moves apply aga
 
 The `@checks` orchestration tab (`overbridge checks`) lists the queue: running checks first, then the waiting ones in
 the order they will start. `j`/`k` select a check, `K`/`J` move a waiting one up or down, `t` moves it to the top
-and `b` to the bottom. A move is saved in `.overbridge/check-queue/order.state` and lasts until the check leaves the
+and `b` to the bottom. `x` then `y` kills the selected check, running or waiting: its `overbridge check` exits
+with 143 and the run is recorded as killed. Each row shows `est`, the median of that command's last 20 runs in the repo (or of its command group when the exact command is new), and `eta`: when a waiting check should start, or how long a running one has left. The bottom border shows when the queue should be clear, and the sidebar shows when each workspace's checks should be done. A waiting `overbridge check` prints its estimated start and run time too. Run times live in `.overbridge/check-estimates.json`, built from the last week of history the first time the tab opens. `v` switches to the checks that finished in the last 24 hours, newest
+first, with each one's result, queue wait and run time, and the totals in the bottom border. A move is saved in `.overbridge/check-queue/order.state` and lasts until the check leaves the
 queue. A running check never moves. A low class can wait behind a stream of higher ones until `wait-seconds` runs
 out, so move it up if it has to run.
 
@@ -508,7 +513,7 @@ out, so move it up if it has to run.
 | `board.columns` | none | GitHub Projects v2 only: maps a `Status` column name (any case) to `todo`, `in-progress`, `blocked` or `done`. Unlisted names fall back to common ones (done, in progress, blocked), then to labels. Needs `gh auth refresh -s read:project` |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
-| `check-queue.max-load-percent` | `70` | start a queued run only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. See [Check queue](#check-queue) |
+| `check-queue.max-load-percent` | `70` | beside a running check, start another only while the 1-minute load average is under this share of the cores (with none running, the first in line always starts); over 100 allows more load than cores. See [Check queue](#check-queue) |
 | `check-queue.max-parallel` | none | run at most this many commands at once; unset leaves the load as the only limit |
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |

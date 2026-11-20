@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HELD_ENV } from "../src/check-queue";
+import { HELD_ENV, readTickets, stopTicket } from "../src/check-queue";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 let tmp: string;
@@ -484,7 +484,9 @@ describe("check queue", () => {
     const second = spawnCheck(step("b"));
     expect(await first.exited).toBe(0);
     expect(await second.exited).toBe(0);
-    expect(await new Response(second.stderr).text()).toContain("waiting behind 1 in the queue (max-parallel 1)");
+    const waited = await new Response(second.stderr).text();
+    expect(waited).toContain("waiting behind 1 in the queue (max-parallel 1)");
+    expect(waited).toContain("estimated start in ~");
     expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "end a", "start b", "end b"]);
   }, CHECK_TEST_MS);
 
@@ -510,6 +512,31 @@ describe("check queue", () => {
     writeFileSync(join(queue(), "order.state"), JSON.stringify({ [thirdTicket ?? ""]: 0 }));
     expect([await first.exited, await second.exited, await third.exited]).toEqual([0, 0, 0]);
     expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["a", "c", "b"]);
+  }, CHECK_TEST_MS);
+
+  test("stopTicket kills a running check, and history records it as killed", async () => {
+    config();
+    const marker = join(tmp, "killed.started");
+    const run = spawnCheck(["--", "sh", "-c", `touch ${marker}; sleep 30`]);
+    await waitFor(() => existsSync(marker) && readTickets(queue()).some((t) => t.runPid !== undefined));
+    readTickets(queue()).forEach((t) => stopTicket(t, queue()));
+    expect(await run.exited).toBe(143);
+    expect(tickets()).toEqual([]);
+    const history = readFileSync(join(root, ".overbridge", "history", "cq.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(history.at(-1)).toMatchObject({ kind: "check", exit: 143, killed: true });
+    expect(history.at(-1).runMs).toBeGreaterThan(0);
+  }, CHECK_TEST_MS);
+
+  test("a killed check that ignores TERM keeps its ticket until KILL ends its group", async () => {
+    config();
+    const marker = join(tmp, "stubborn.started");
+    const run = spawnCheck(["--", "sh", "-c", `trap "" TERM; touch ${marker}; sleep 30`]);
+    await waitFor(() => existsSync(marker) && readTickets(queue()).some((t) => t.runPid !== undefined));
+    readTickets(queue()).forEach((t) => stopTicket(t, queue()));
+    await Bun.sleep(1_000);
+    expect(tickets()).toHaveLength(1);
+    expect(await run.exited).toBe(143);
+    expect(tickets()).toEqual([]);
   }, CHECK_TEST_MS);
 
   test("a nested check inside a held run runs at once", () => {

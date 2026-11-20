@@ -1,11 +1,19 @@
-import { queueDir, readQueue, ticketName } from "./check-queue";
+import { dirname } from "node:path";
+import { queueDir, readQueue, stopTicket, ticketName } from "./check-queue";
 import { Move, readOverrides, readOverridesForWrite, writeOverrides } from "./check-priority";
-import { CHECKS_CHROME, type CheckRow, checkRows, movedOverrides, renderChecks } from "./checks";
-import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN } from "./term";
+import { CHECKS_CHROME, type CheckRow, checkRows, ChecksMode, queueEstimates, type QueueEstimates, movedOverrides, nextChecksMode, RECENT_WINDOW_MS, type RecentCheck, recentChecks, recentKey, renderChecks, renderRecent } from "./checks";
+import { readEstimates, seedEstimates } from "./check-estimate";
+import { historyStore } from "./history";
+import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN, stripControl } from "./term";
 import { errorMessage } from "./util";
 import { createPainter } from "./zellij-view";
 
 const POLL_MS = 1_000;
+
+/** Reading every workspace's history is heavier than the queue, so the recent view refreshes less often. */
+const RECENT_POLL_MS = 5_000;
+
+const SEED_WINDOW_MS = 7 * 24 * 60 * 60_000;
 
 const MOVE_KEYS = new Map<string, Move>([
   ["K", Move.Up],
@@ -14,7 +22,7 @@ const MOVE_KEYS = new Map<string, Move>([
   ["b", Move.Bottom],
 ]);
 
-/** `overbridge checks`: the pane of the @checks tab. Lists the check queue; K/J/t/b move the selected waiting check. */
+/** `overbridge checks`: the pane of the @checks tab, over the check queue and the runs that finished recently. */
 export async function checksPane() {
   const dir = queueDir();
 
@@ -35,19 +43,41 @@ export async function checksPane() {
       }
     })();
 
-    return checkRows(readQueue(dir, overrides), overrides);
+    const queue = readQueue(dir, overrides);
+    estimates = queueEstimates(queue, readEstimates(dirname(dir)), Date.now());
+
+    return checkRows(queue, overrides);
   };
 
+  const readRecent = (): RecentCheck[] => recentChecks(historyStore(), Date.now() - RECENT_WINDOW_MS);
+
+  // a store from before this build: build it from the last week of history once
+  seedEstimates(
+    dirname(dir),
+    recentChecks(historyStore(), Date.now() - SEED_WINDOW_MS, Number.POSITIVE_INFINITY)
+      .filter((r) => r.record.runMs > 0 && !r.record.killed)
+      .toReversed()
+      .map((r) => ({ repo: r.record.repo, command: r.record.full ?? r.record.command, runMs: r.record.runMs })),
+  );
+
+  let estimates: QueueEstimates = { etas: new Map(), wsDoneMs: new Map() };
   let rows = read();
+  let recent: RecentCheck[] = [];
+  let recentReadMs = 0;
+  let mode: ChecksMode = ChecksMode.Queue;
+  /** The ticket `x` asked to kill, until `y` confirms or another key cancels. */
+  let killing: string | undefined;
   let selected = 0;
   let offset = 0;
   let message = "";
+
+  const listLength = () => (mode === ChecksMode.Queue ? rows.length : recent.length);
   const painter = createPainter((text) => process.stdout.write(text));
 
   const draw = () => {
     const height = process.stdout.rows ?? 24;
     const width = process.stdout.columns ?? 80;
-    selected = Math.min(selected, Math.max(0, rows.length - 1));
+    selected = Math.min(selected, Math.max(0, listLength() - 1));
     const body = Math.max(1, height - CHECKS_CHROME);
 
     if (selected < offset) {
@@ -58,11 +88,27 @@ export async function checksPane() {
       offset = selected - body + 1;
     }
 
-    painter.paint(frame(renderChecks(rows, { selected, offset, height, width, message: message || fault, now: Date.now() }), height, width));
+    const view = { selected, offset, height, width, message: message || fault, now: Date.now() };
+    painter.paint(frame(mode === ChecksMode.Queue ? renderChecks(rows, view, estimates) : renderRecent(recent, view), height, width));
   };
 
   /** Re-read the queue; the cursor stays on the same check while it is queued. */
   const reload = () => {
+    if (mode === ChecksMode.Recent) {
+      const shown = recent[selected];
+      recent = readRecent();
+      recentReadMs = Date.now();
+      const at = shown ? recent.findIndex((r) => recentKey(r) === recentKey(shown)) : -1;
+
+      if (at >= 0) {
+        selected = at;
+      }
+
+      draw();
+
+      return;
+    }
+
     const current = rows[selected];
     const name = current && ticketName(current.ticket);
     rows = read();
@@ -103,6 +149,45 @@ export async function checksPane() {
     reload();
   };
 
+  const describe = (r: CheckRow) => stripControl(`${r.ticket.ws}/${r.ticket.repo}: ${r.ticket.command}`);
+
+  const askKill = () => {
+    const chosen = rows[selected];
+
+    if (!chosen) {
+      return;
+    }
+
+    killing = ticketName(chosen.ticket);
+    message = `kill ${describe(chosen)}? y to confirm, any other key cancels`;
+  };
+
+  const confirmKill = (name: string) => {
+    const chosen = rows.find((r) => ticketName(r.ticket) === name);
+
+    if (!chosen) {
+      message = "that check already finished";
+
+      return;
+    }
+
+    try {
+      stopTicket(chosen.ticket, dir);
+      message = `killed ${describe(chosen)}`;
+    } catch (e) {
+      message = `error: could not kill the check: ${errorMessage(e)}`;
+    }
+
+    reload();
+  };
+
+  const switchMode = () => {
+    mode = nextChecksMode(mode);
+    selected = 0;
+    offset = 0;
+    reload();
+  };
+
   const quit = () => {
     process.stdout.write(LEAVE_SCREEN);
     process.stdin.setRawMode?.(false);
@@ -120,12 +205,20 @@ export async function checksPane() {
       }
 
       message = "";
-      const move = MOVE_KEYS.get(input.key);
+      const move = mode === ChecksMode.Queue ? MOVE_KEYS.get(input.key) : undefined;
+      const pending = killing;
+      killing = undefined;
 
       if (input.key === "q" || input.key === "ctrl-c") {
         quit();
+      } else if (pending && input.key === "y") {
+        confirmKill(pending);
+      } else if (input.key === "x" && mode === ChecksMode.Queue) {
+        askKill();
+      } else if (input.key === "v") {
+        switchMode();
       } else if (input.key === "j" || input.key === "down") {
-        selected = Math.max(0, Math.min(rows.length - 1, selected + 1));
+        selected = Math.max(0, Math.min(listLength() - 1, selected + 1));
       } else if (input.key === "k" || input.key === "up") {
         selected = Math.max(0, selected - 1);
       } else if (move) {
@@ -141,7 +234,11 @@ export async function checksPane() {
     painter.invalidate();
     draw();
   });
-  setInterval(reload, POLL_MS);
+  setInterval(() => {
+    if (mode === ChecksMode.Queue || Date.now() - recentReadMs >= RECENT_POLL_MS) {
+      reload();
+    }
+  }, POLL_MS);
   draw();
   await new Promise(() => {});
 }

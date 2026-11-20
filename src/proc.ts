@@ -80,6 +80,54 @@ export const pidAlive = (pid: number): boolean => {
   return !!p && !p.state.startsWith("Z");
 };
 
+/** Whether `pid` exists at all, zombies included, without starting a process. */
+const signalable = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+
+    return true;
+  } catch (e) {
+    // EPERM: the process exists but belongs to another user
+    return e instanceof Error && "code" in e && e.code === "EPERM";
+  }
+};
+
+/** The live, non-zombie processes among `pids`, as `pidAlive` judges each, with at most one `ps` on macOS. */
+export function pidsAlive(pids: readonly number[]): Set<number> {
+  const existing = [...new Set(pids)].filter((pid) => pid > 0 && signalable(pid));
+
+  if (hasProc || existing.length === 0) {
+    return new Set(existing.filter(pidAlive));
+  }
+
+  return aliveFromPs(existing, spawnSync("ps", ["-o", PS_FIELDS, "-p", existing.join(",")], { cwd: homedir(), encoding: "utf8", timeout: 5_000 }));
+}
+
+/** What a `ps -p` run returned, as much of it as `aliveFromPs` reads. */
+export interface PsResult {
+  status: number | null;
+  stdout?: string | null;
+  error?: Error;
+}
+
+/** The pids in `existing` (each answered `kill(pid, 0)`) that `ps` does not list as zombies. */
+export function aliveFromPs(existing: readonly number[], r: PsResult): Set<number> {
+  // ps exits 1 when none of the pids is listed; a timeout or a crash leaves no status, and then a reap would kill every run
+  if (r.status === null || r.error) {
+    return new Set(existing);
+  }
+
+  const zombies = new Set(
+    (r.stdout ?? "")
+      .split("\n")
+      .flatMap((l) => parsePsLine(l) ?? [])
+      .filter((p) => p.state.startsWith("Z"))
+      .map((p) => p.pid),
+  );
+
+  return new Set(existing.filter((pid) => !zombies.has(pid)));
+}
+
 /** One process of a group listing: its group, state letters and CPU seconds used so far. */
 export interface GroupProc {
   pgid: number;

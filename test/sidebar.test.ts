@@ -533,6 +533,7 @@ describe("check queue rows", () => {
 
   test("nothing when the queue is empty", () => {
     expect(queueRows({ running: [], waiting: [] }, 30, 0)).toEqual([]);
+    expect(plain(queueRows({ running: [t("67", { runPid: 9, runningSinceMs: 0 })], waiting: [t("68"), t("68")] }, 60, 5_000, new Map([["67", 40_000], ["68", 100_000]])))).toEqual(["▶ 67 5s ~40s just test", "⧗ 2 waiting: 68 ~1m40s"]);
   });
 
   test("the running command with its time, then who waits", () => {

@@ -72,6 +72,7 @@ describe("bash", () => {
     "cd app && ws send ws2 hi",
     "overbridge up --fresh",
     "overbridge spinup -p 2",
+    "printf 'xyq' | overbridge checks",
     "overbridge config set guard.deny '[]'",
     "cd app && ws config  set defaults.hooks.post-add 'curl x | sh'",
     "cd app && overbridge new",
@@ -105,6 +106,7 @@ describe("bash", () => {
 
   test.each([
     "git status",
+    "overbridge check app -- just test",
     "git checkout -- src/x.ts",
     "git restore src/x.ts",
     "git commit -m 'fix checkout flow'",

@@ -1,10 +1,11 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, constants, loadavg } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { defaultKey, type QueueOverrides, readOverrides } from "./check-priority";
-import { classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
+import { type CheckRecord, classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
+import { etaSlots, formatDuration, overallMs, queueEtas, readEstimates, recordRunTime } from "./check-estimate";
 import { metaDir } from "./paths";
-import { groupAlive, groupCpuSeconds, pidAlive } from "./proc";
+import { groupAlive, groupCpuSeconds, pidsAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
 import type { ShellInvocation } from "./shell";
 import { exec, isNumber, isRecord, type Json, log } from "./util";
@@ -59,6 +60,9 @@ interface RunWatch {
 /** The group leader of the command this process is running, so a signal can reach it. */
 interface HeldRun {
   runPid?: number;
+  startedMs?: number;
+  /** A stop signal arrived and `stopRun` is killing the run; it records the run and exits the process. */
+  stopping?: NodeJS.Signals;
 }
 
 const TURN_POLL_MS = 1_000;
@@ -135,6 +139,13 @@ export function splitQueue(tickets: Ticket[], alive: (pid: number) => boolean): 
   return { live: tickets.filter((t) => alive(t.pid)), dead: tickets.filter((t) => !alive(t.pid)) };
 }
 
+/** `splitQueue` with every owner looked up in one batch (`pidsAlive`). */
+export function splitLive(tickets: Ticket[]): SplitQueue {
+  const alive = pidsAlive(tickets.map((t) => t.pid));
+
+  return splitQueue(tickets, (pid) => alive.has(pid));
+}
+
 /** Whether the 1-minute load leaves room to start: under `percent` of `cores`. */
 export const loadAllows = (load1: number, cores: number, percent: number) => load1 < (cores * percent) / 100;
 
@@ -194,6 +205,11 @@ export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machin
     return Gate.Parallel;
   }
 
+  // outside load can stay high for hours, so an idle queue always starts one run
+  if (running.length === 0) {
+    return Gate.Start;
+  }
+
   return loadAllows(machine.load1 + unsettledLoad(running, nowMs), machine.cores, settings.maxLoadPercent) ? Gate.Start : Gate.Load;
 }
 
@@ -209,7 +225,7 @@ export function queueView(tickets: Ticket[]): QueueView {
 
 /** The live queue as the sidebar and the @checks tab show it. */
 export function readQueue(dir = queueDir(), overrides: QueueOverrides = readOverrides(dir)): QueueView {
-  const { live } = splitQueue(readTickets(dir, overrides), pidAlive);
+  const { live } = splitLive(readTickets(dir, overrides));
 
   // sorted by the live tickets alone, as `gateFor` sorts, so a dead ticket left by an older build cannot change the order shown
   return queueView(live.toSorted(comparatorFor(live, overrides)));
@@ -252,24 +268,65 @@ function reap(ticket: Ticket, dir: string) {
 }
 
 /**
- * Stop every check `ws` has queued or running: TERM the command's group, TERM the owning `overbridge check`, and
- * drop the ticket so the queue moves on. Returns how many tickets it stopped.
+ * Stop a queued or running check. Its owner kills the command's group (KILL after the grace period), records the run
+ * as killed and drops the ticket; with no owner left, the group is killed and the ticket dropped here.
  */
-export function stopChecksFor(ws: string, dir = queueDir()): number {
+export function stopTicket(t: Ticket, dir = queueDir()) {
+  try {
+    process.kill(t.pid, "SIGTERM");
+
+    return;
+  } catch {
+    // the owner is already gone
+  }
+
+  if (t.runPid !== undefined && groupAlive(t.runPid)) {
+    signalGroup(t.runPid, "SIGKILL");
+  }
+
+  rmSync(join(dir, ticketName(t)), { force: true });
+}
+
+/** Time an owner gets to stop its run (`killGroup` ends in KILL) before `stopChecksFor` kills the group itself. */
+const STOP_WAIT_MS = KILL_GRACE_MS + 5_000;
+
+/** How long a group gets to die after SIGKILL before `stopChecksFor` gives up. */
+const KILL_WAIT_MS = 2_000;
+
+const stopped = (t: Ticket, dir: string) => !existsSync(join(dir, ticketName(t))) && (t.runPid === undefined || !groupAlive(t.runPid));
+
+/**
+ * Stop every check `ws` has queued or running (see `stopTicket`) and resolve once each one's command is gone, so a
+ * caller can remove the files it was using. Returns how many tickets it stopped.
+ */
+export async function stopChecksFor(ws: string, dir = queueDir()): Promise<number> {
   const mine = readTickets(dir).filter((t) => t.ws === ws);
+  mine.forEach((t) => stopTicket(t, dir));
+  const deadline = Date.now() + STOP_WAIT_MS;
 
-  for (const t of mine) {
-    if (t.runPid !== undefined && groupAlive(t.runPid)) {
-      signalGroup(t.runPid, "SIGTERM");
-    }
+  while (!mine.every((t) => stopped(t, dir)) && Date.now() < deadline) {
+    await Bun.sleep(200);
+  }
 
-    try {
-      process.kill(t.pid, "SIGTERM");
-    } catch {
-      // the owner is already gone
+  const late = mine.filter((t) => !stopped(t, dir));
+  late.forEach((t) => {
+    if (t.runPid !== undefined) {
+      signalGroup(t.runPid, "SIGKILL");
     }
 
     rmSync(join(dir, ticketName(t)), { force: true });
+  });
+
+  const killDeadline = Date.now() + KILL_WAIT_MS;
+
+  while (!late.every((t) => stopped(t, dir)) && Date.now() < killDeadline) {
+    await Bun.sleep(100);
+  }
+
+  const alive = late.filter((t) => !stopped(t, dir));
+
+  if (alive.length) {
+    throw new Error(`could not stop ${alive.map((t) => `${t.repo}: ${t.command} (process group ${t.runPid})`).join("; ")} for ${ws}; kill it, then retry`);
   }
 
   return mine.length;
@@ -277,6 +334,15 @@ export function stopChecksFor(ws: string, dir = queueDir()): number {
 
 /** Append the run to the workspace's history. Never throws: a check's exit code does not depend on it. */
 export function recordCheck(me: Ticket, startedMs: number, endedMs: number | undefined, exit: number, store: HistoryStore = historyStore()) {
+  appendCheck(me, startedMs, endedMs, { exit }, store);
+}
+
+/** Append a run someone stopped (`STOP_SIGNALS`), so history does not count it as the command failing. Never throws. */
+export function recordKilled(me: Ticket, startedMs: number, endedMs: number | undefined, exit: number, store: HistoryStore = historyStore()) {
+  appendCheck(me, startedMs, endedMs, { exit, killed: true }, store);
+}
+
+function appendCheck(me: Ticket, startedMs: number, endedMs: number | undefined, end: Pick<CheckRecord, "exit" | "killed">, store: HistoryStore) {
   try {
     store.append(me.ws, {
       kind: "check",
@@ -288,7 +354,7 @@ export function recordCheck(me: Ticket, startedMs: number, endedMs: number | und
       cls: classifyCommand(me.command),
       queuedMs: startedMs - me.queuedAtMs,
       runMs: endedMs === undefined ? 0 : endedMs - startedMs,
-      exit,
+      ...end,
     });
   } catch {
     // history is best effort
@@ -296,6 +362,21 @@ export function recordCheck(me: Ticket, startedMs: number, endedMs: number | und
 }
 
 const label = (t: Ticket) => `${t.ws}/${t.repo}: ${t.command}`;
+
+/** `; estimated start in ~2m, run ~3m10s` from past run times, so the agent knows how long it waits. */
+function etaLine(me: Ticket, live: Ticket[], settings: CheckQueue, now: number, dir: string): string {
+  const store = readEstimates(dirname(dir));
+  const queue = queueView(live);
+  const eta = queueEtas(queue, store, etaSlots(queue.running.length, settings.maxParallel), now, ticketName, overallMs(store)).get(ticketName(me));
+
+  if (!eta) {
+    return "";
+  }
+
+  const run = eta.runMs === undefined ? "no past runs to estimate from" : `run ~${formatDuration(eta.runMs)}`;
+
+  return `; estimated start in ~${formatDuration(eta.startMs)}, ${run}`;
+}
 
 /** Wait until `me` may start (see `gateFor`); false when `deadlineMs` passes first. */
 async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadlineMs: number): Promise<boolean> {
@@ -305,7 +386,7 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
 
   for (;;) {
     const overrides = readOverrides(dir);
-    const { live, dead } = splitQueue(readTickets(dir, overrides), pidAlive);
+    const { live, dead } = splitLive(readTickets(dir, overrides));
     dead.forEach((t) => reap(t, dir));
     const now = Date.now();
     const ahead = aheadOf(me, live, comparatorFor(live, overrides));
@@ -335,7 +416,8 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
     if (announced !== key) {
       announced = key;
       const cap = gate === Gate.Parallel ? ` (max-parallel ${settings.maxParallel})` : "";
-      log(gate === Gate.Load ? `overbridge check: ${overLoad}, waiting; ${runningNow}` : `overbridge check: waiting behind ${ahead.length} in the queue${cap}; ${runningNow}`);
+      const eta = etaLine(me, live, settings, now, dir);
+      log(gate === Gate.Load ? `overbridge check: ${overLoad}, waiting; ${runningNow}${eta}` : `overbridge check: waiting behind ${ahead.length} in the queue${cap}; ${runningNow}${eta}`);
     }
 
     await Bun.sleep(Math.min(TURN_POLL_MS, Math.max(0, deadlineMs - now)));
@@ -345,6 +427,38 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
 const signalExitOf = (signal: NodeJS.Signals | number) => (isNumber(signal) ? 128 + signal : signalExit(signal));
 
 const signalExit = (signal: NodeJS.Signals) => 128 + (constants.signals[signal] ?? 0);
+
+/** The signals that stop an `overbridge check` from outside: the @checks tab's kill, Ctrl-C, a closed terminal. */
+const STOP_SIGNALS: readonly NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+
+/** How a check run ended, from its exit code. */
+export const Outcome = { Passed: "passed", Failed: "failed", TimedOut: "timed-out", Stalled: "stalled", GaveUp: "gave-up", Killed: "killed" } as const;
+
+export type Outcome = (typeof Outcome)[keyof typeof Outcome];
+
+export function outcomeOf({ exit, killed }: Pick<CheckRecord, "exit" | "killed">): Outcome {
+  if (killed) {
+    return Outcome.Killed;
+  }
+
+  if (exit === 0) {
+    return Outcome.Passed;
+  }
+
+  if (exit === CheckExit.GaveUp) {
+    return Outcome.GaveUp;
+  }
+
+  if (exit === CheckExit.TimedOut) {
+    return Outcome.TimedOut;
+  }
+
+  if (exit === CheckExit.Stalled) {
+    return Outcome.Stalled;
+  }
+
+  return Outcome.Failed;
+}
 
 /** Run the command in its own process group and watch it until it exits, times out or stalls. */
 async function runHeld(inv: ShellInvocation, me: Ticket, file: string, settings: CheckQueue, onStart: (pid: number) => void): Promise<number> {
@@ -423,17 +537,29 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
   const held: HeldRun = {};
   const leave = () => rmSync(file, { force: true });
 
-  const onSignal = (signal: NodeJS.Signals) => {
+  /** Keeps the ticket, so the run still counts against `max-parallel`, until the group is gone (`killGroup` ends in KILL). */
+  const stopRun = async (signal: NodeJS.Signals): Promise<never> => {
     if (held.runPid !== undefined) {
-      signalGroup(held.runPid, "SIGTERM");
+      await killGroup(held.runPid);
     }
 
+    const now = Date.now();
+    recordKilled(me, held.startedMs ?? now, held.startedMs === undefined ? undefined : now, signalExit(signal));
     leave();
     process.exit(signalExit(signal));
   };
 
-  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
-  signals.forEach((s) => process.on(s, onSignal));
+  const onSignal = (signal: NodeJS.Signals) => {
+    if (held.stopping) {
+      return;
+    }
+
+    // set before stopRun: Bun's spawnSync (in groupAlive) runs the event loop, so the run can end inside it
+    held.stopping = signal;
+    void stopRun(signal);
+  };
+
+  STOP_SIGNALS.forEach((s) => process.on(s, onSignal));
   process.on("exit", leave);
 
   try {
@@ -449,13 +575,24 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
 
     const code = await runHeld(inv, me, file, settings, (pid) => {
       held.runPid = pid;
+      held.startedMs = startedMs;
     });
 
-    recordCheck(me, startedMs, Date.now(), code);
+    // the run ended because a stop signal killed it; that handler records it and exits
+    if (held.stopping) {
+      return await new Promise<never>(() => {});
+    }
+
+    const endedMs = Date.now();
+    recordCheck(me, startedMs, endedMs, code);
+
+    if (code !== CheckExit.TimedOut && code !== CheckExit.Stalled) {
+      recordRunTime(dirname(dir), me.repo, me.command, endedMs - startedMs);
+    }
 
     return code;
   } finally {
-    signals.forEach((s) => process.off(s, onSignal));
+    STOP_SIGNALS.forEach((s) => process.off(s, onSignal));
     process.off("exit", leave);
     leave();
   }

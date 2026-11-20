@@ -25,7 +25,7 @@ export const thawFirstMessage = (prompt?: string): string => (prompt ? `${THAW_P
 
 export interface IceboxDeps extends Pick<RemovalDeps, "mux"> {
   stopApps: (ws: string) => Promise<void>;
-  stopChecks: (ws: string) => number;
+  stopChecks: (ws: string) => Promise<number>;
 }
 
 const defaultIceboxDeps = (): IceboxDeps => {
@@ -180,7 +180,7 @@ export async function icebox(ws: string, opts: IceboxOptions = {}, deps: IceboxD
   }
 
   await deps.stopApps(ws);
-  deps.stopChecks(ws);
+  await deps.stopChecks(ws);
 
   const rows = Object.entries(w.repos).map(([repo, c]) => {
     const wt = worktreePath(ws, repo);
