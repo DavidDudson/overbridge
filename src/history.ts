@@ -191,6 +191,8 @@ export interface CheckRecord {
   /** Time the command ran. */
   runMs: number;
   exit: number;
+  /** Someone stopped the run (the @checks tab, Ctrl-C): not a failure of the command. */
+  killed?: true;
 }
 
 export type HistoryRecord = ClaudeRecord | CheckRecord;
@@ -334,6 +336,9 @@ export interface GroupTally extends Tally {
   fulls: string[];
 }
 
+/** A run that ended non-zero on its own; a killed run is not the command's failure. */
+export const checkFailed = (r: Pick<CheckRecord, "exit" | "killed">) => r.exit !== 0 && !r.killed;
+
 /** Add a check run to `groups`. */
 export function addCheck(groups: Record<string, GroupTally>, r: CheckRecord): void {
   const key = r.group ?? r.command;
@@ -342,7 +347,7 @@ export function addCheck(groups: Record<string, GroupTally>, r: CheckRecord): vo
   groups[key] = {
     count: (prev?.count ?? 0) + 1,
     ms: (prev?.ms ?? 0) + r.runMs,
-    failed: (prev?.failed ?? 0) + (r.exit === 0 ? 0 : 1),
+    failed: (prev?.failed ?? 0) + (checkFailed(r) ? 1 : 0),
     queuedMs: (prev?.queuedMs ?? 0) + r.queuedMs,
     cls: r.cls,
     maxMs: Math.max(prev?.maxMs ?? 0, r.runMs),
@@ -371,7 +376,7 @@ export function summarizeRepos(records: readonly HistoryRecord[]): RepoSummary[]
     t.ms += r.runMs;
     t.queuedMs += r.queuedMs;
 
-    if (r.exit !== 0) t.failed++;
+    if (checkFailed(r)) t.failed++;
     addCheck(t.groups, r);
     repos.set(r.repo, t);
   }
@@ -492,7 +497,7 @@ export function summarize(records: readonly HistoryRecord[], awayAfterMs = AWAY_
   for (const r of [...records].sort((a, b) => a.at - b.at)) {
     if (r.kind === "check") {
       const prev = s.checks[r.cls];
-      s.checks[r.cls] = { ...bump(prev, r.runMs), failed: (prev?.failed ?? 0) + (r.exit === 0 ? 0 : 1), queuedMs: (prev?.queuedMs ?? 0) + r.queuedMs };
+      s.checks[r.cls] = { ...bump(prev, r.runMs), failed: (prev?.failed ?? 0) + (checkFailed(r) ? 1 : 0), queuedMs: (prev?.queuedMs ?? 0) + r.queuedMs };
       addCheck(s.groups, r);
       continue;
     }

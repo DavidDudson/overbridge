@@ -123,6 +123,10 @@ describe("start gate", () => {
     expect(gateFor(me, [me], settings, { load1: 50, cores: 8 }, NOW_MS)).toBe(Gate.Start);
   });
 
+  test("with nothing running, a ticket still waits for the one ahead of it", () => {
+    expect(gateFor(me, [ticket(2, 2), me], settings, { load1: 50, cores: 8 }, NOW_MS)).toBe(Gate.Queue);
+  });
+
   test("beside a running check, the load gates the next one", () => {
     expect(gateFor(me, [settled(1), me], settings, { load1: 5.6, cores: 8 }, NOW_MS)).toBe(Gate.Load);
   });

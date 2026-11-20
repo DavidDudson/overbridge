@@ -2,7 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync
 import { availableParallelism, constants, loadavg } from "node:os";
 import { join } from "node:path";
 import { defaultKey, type QueueOverrides, readOverrides } from "./check-priority";
-import { classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
+import { type CheckRecord, classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
 import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidsAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
@@ -202,7 +202,7 @@ export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machin
     return Gate.Parallel;
   }
 
-  // load from outside the queue (agents, panes, dev servers) can stay over the limit for hours; one run keeps it moving
+  // outside load can stay high for hours, so an idle queue always starts one run
   if (running.length === 0) {
     return Gate.Start;
   }
@@ -264,10 +264,7 @@ function reap(ticket: Ticket, dir: string) {
   rmSync(join(dir, ticketName(ticket)), { force: true });
 }
 
-/**
- * Stop one check, queued or running: TERM the command's group, TERM the owning `overbridge check` (which records the
- * run as killed), and drop the ticket so the queue moves on.
- */
+/** Stop a queued or running check and drop its ticket; its owner records the run as killed. */
 export function stopTicket(t: Ticket, dir = queueDir()) {
   if (t.runPid !== undefined && groupAlive(t.runPid)) {
     signalGroup(t.runPid, "SIGTERM");
@@ -292,6 +289,15 @@ export function stopChecksFor(ws: string, dir = queueDir()): number {
 
 /** Append the run to the workspace's history. Never throws: a check's exit code does not depend on it. */
 export function recordCheck(me: Ticket, startedMs: number, endedMs: number | undefined, exit: number, store: HistoryStore = historyStore()) {
+  appendCheck(me, startedMs, endedMs, { exit }, store);
+}
+
+/** Append a run someone stopped (`STOP_SIGNALS`), so history does not count it as the command failing. Never throws. */
+export function recordKilled(me: Ticket, startedMs: number, endedMs: number | undefined, exit: number, store: HistoryStore = historyStore()) {
+  appendCheck(me, startedMs, endedMs, { exit, killed: true }, store);
+}
+
+function appendCheck(me: Ticket, startedMs: number, endedMs: number | undefined, end: Pick<CheckRecord, "exit" | "killed">, store: HistoryStore) {
   try {
     store.append(me.ws, {
       kind: "check",
@@ -303,7 +309,7 @@ export function recordCheck(me: Ticket, startedMs: number, endedMs: number | und
       cls: classifyCommand(me.command),
       queuedMs: startedMs - me.queuedAtMs,
       runMs: endedMs === undefined ? 0 : endedMs - startedMs,
-      exit,
+      ...end,
     });
   } catch {
     // history is best effort
@@ -360,6 +366,38 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
 const signalExitOf = (signal: NodeJS.Signals | number) => (isNumber(signal) ? 128 + signal : signalExit(signal));
 
 const signalExit = (signal: NodeJS.Signals) => 128 + (constants.signals[signal] ?? 0);
+
+/** The signals that stop an `overbridge check` from outside: the @checks tab's kill, Ctrl-C, a closed terminal. */
+const STOP_SIGNALS: readonly NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+
+/** How a check run ended, from its exit code. */
+export const Outcome = { Passed: "passed", Failed: "failed", TimedOut: "timed-out", Stalled: "stalled", GaveUp: "gave-up", Killed: "killed" } as const;
+
+export type Outcome = (typeof Outcome)[keyof typeof Outcome];
+
+export function outcomeOf({ exit, killed }: Pick<CheckRecord, "exit" | "killed">): Outcome {
+  if (killed) {
+    return Outcome.Killed;
+  }
+
+  if (exit === 0) {
+    return Outcome.Passed;
+  }
+
+  if (exit === CheckExit.GaveUp) {
+    return Outcome.GaveUp;
+  }
+
+  if (exit === CheckExit.TimedOut) {
+    return Outcome.TimedOut;
+  }
+
+  if (exit === CheckExit.Stalled) {
+    return Outcome.Stalled;
+  }
+
+  return Outcome.Failed;
+}
 
 /** Run the command in its own process group and watch it until it exits, times out or stalls. */
 async function runHeld(inv: ShellInvocation, me: Ticket, file: string, settings: CheckQueue, onStart: (pid: number) => void): Promise<number> {
@@ -444,13 +482,12 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
     }
 
     const now = Date.now();
-    recordCheck(me, held.startedMs ?? now, held.startedMs === undefined ? undefined : now, signalExit(signal));
+    recordKilled(me, held.startedMs ?? now, held.startedMs === undefined ? undefined : now, signalExit(signal));
     leave();
     process.exit(signalExit(signal));
   };
 
-  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
-  signals.forEach((s) => process.on(s, onSignal));
+  STOP_SIGNALS.forEach((s) => process.on(s, onSignal));
   process.on("exit", leave);
 
   try {
@@ -473,7 +510,7 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
 
     return code;
   } finally {
-    signals.forEach((s) => process.off(s, onSignal));
+    STOP_SIGNALS.forEach((s) => process.off(s, onSignal));
     process.off("exit", leave);
     leave();
   }

@@ -521,7 +521,7 @@ describe("check queue", () => {
     expect(await run.exited).toBe(143);
     expect(tickets()).toEqual([]);
     const history = readFileSync(join(root, ".overbridge", "history", "cq.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
-    expect(history.at(-1)).toMatchObject({ kind: "check", exit: 143 });
+    expect(history.at(-1)).toMatchObject({ kind: "check", exit: 143, killed: true });
     expect(history.at(-1).runMs).toBeGreaterThan(0);
   }, CHECK_TEST_MS);
 

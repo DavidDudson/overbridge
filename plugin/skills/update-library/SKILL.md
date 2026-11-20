@@ -143,7 +143,7 @@ During the implement phase:
    - **Small, mechanical, localised** (few callsites, no behaviour change, no design decision): apply it now, in this PR.
    - **Large** (many callsites, behaviour change, or needs a design decision): **do not** balloon this PR. Recommend a **separate tech-debt item** per deprecation cluster, and record the recommendation in the template's Deprecations and Migration plan sections. Optionally file those items (`overbridge item create --tech-debt`) and link them. Do not start them from here while this PR is open unless the user asks: a follow-up that builds on this PR is a stacked layer in this workspace, anything else is its own workspace (`overbridge start <repo> <id>`). Leave a `// TODO(<item link>): migrate off <deprecated API>` at the callsites, naming the follow-up item.
    - State the reasoning for each apply-vs-defer decision in the template.
-5. Verify with the **smallest** scope that proves it: the repo's `commands.typecheck`, then `commands.test` on the touched files or project only. Run the full suite once at the end.
+5. Verify with the **smallest** scope that proves it: the repo's `commands.typecheck`, then `commands.test` on the touched files or project only, or the repo's affected-only mode. CI runs the full suite.
 
 The outcome is always: **the mandatory breaking-change-only code change ships**, plus whatever small deprecations you judged safe. Large deprecations become recommended or filed follow-up items, not scope creep.
 

@@ -265,8 +265,8 @@ access to other workspaces and direct branch switching. Do not try to work aroun
 - Run lint, typecheck, test, and build commands through \`overbridge check <repo> -- <cmd>\`. It queues them
   across all workspaces and runs several at once, in the repo's dev shell, while the machine's load allows. overbridge kills a run that
   goes over its time limit (exit 124) or stops using CPU (exit 137). If it cannot start in time, it gives up with exit 75.
-- Scope each check to what the branch changed: one file, one project, or an affected-only mode (\`nx affected -t <target> --base=origin/main\`,
-  \`vitest run --changed origin/main\`). Do not run every project (\`nx run-many\` with no \`-p\`) or turn off the build cache: CI runs the full suite.
+- Scope each check to what the branch changed: one file, one project, or an affected-only mode (\`nx affected -t <target> --base=origin/<base>\`,
+  \`vitest run --changed origin/<base>\`, \`<base>\` being the PR's base branch). Do not run every project (\`nx run-many\` with no \`-p\`) or turn off the build cache: CI runs the full suite.
 ${devShells}
 ## GitHub repos
 

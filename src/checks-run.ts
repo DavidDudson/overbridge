@@ -1,8 +1,8 @@
 import { queueDir, readQueue, stopTicket, ticketName } from "./check-queue";
 import { Move, readOverrides, readOverridesForWrite, writeOverrides } from "./check-priority";
-import { CHECKS_CHROME, type CheckRow, checkRows, ChecksMode, movedOverrides, nextChecksMode, RECENT_WINDOW_MS, type RecentCheck, recentChecks, renderChecks, renderRecent } from "./checks";
+import { CHECKS_CHROME, type CheckRow, checkRows, ChecksMode, movedOverrides, nextChecksMode, RECENT_WINDOW_MS, type RecentCheck, recentChecks, recentKey, renderChecks, renderRecent } from "./checks";
 import { historyStore } from "./history";
-import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN } from "./term";
+import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN, stripControl } from "./term";
 import { errorMessage } from "./util";
 import { createPainter } from "./zellij-view";
 
@@ -18,10 +18,7 @@ const MOVE_KEYS = new Map<string, Move>([
   ["b", Move.Bottom],
 ]);
 
-/**
- * `overbridge checks`: the pane of the @checks tab. Lists the check queue; K/J/t/b move the selected waiting check,
- * x then y kills the selected check, and v switches to the runs that finished in the last day.
- */
+/** `overbridge checks`: the pane of the @checks tab, over the check queue and the runs that finished recently. */
 export async function checksPane() {
   const dir = queueDir();
 
@@ -81,8 +78,15 @@ export async function checksPane() {
   /** Re-read the queue; the cursor stays on the same check while it is queued. */
   const reload = () => {
     if (mode === ChecksMode.Recent) {
+      const shown = recent[selected];
       recent = readRecent();
       recentReadMs = Date.now();
+      const at = shown ? recent.findIndex((r) => recentKey(r) === recentKey(shown)) : -1;
+
+      if (at >= 0) {
+        selected = at;
+      }
+
       draw();
 
       return;
@@ -128,6 +132,8 @@ export async function checksPane() {
     reload();
   };
 
+  const describe = (r: CheckRow) => stripControl(`${r.ticket.ws}/${r.ticket.repo}: ${r.ticket.command}`);
+
   const askKill = () => {
     const chosen = rows[selected];
 
@@ -136,12 +142,11 @@ export async function checksPane() {
     }
 
     killing = ticketName(chosen.ticket);
-    message = `kill ${chosen.ticket.ws}/${chosen.ticket.repo}: ${chosen.ticket.command}? y to confirm, any other key cancels`;
+    message = `kill ${describe(chosen)}? y to confirm, any other key cancels`;
   };
 
-  const confirmKill = () => {
-    const chosen = rows.find((r) => ticketName(r.ticket) === killing);
-    killing = undefined;
+  const confirmKill = (name: string) => {
+    const chosen = rows.find((r) => ticketName(r.ticket) === name);
 
     if (!chosen) {
       message = "that check already finished";
@@ -151,7 +156,7 @@ export async function checksPane() {
 
     try {
       stopTicket(chosen.ticket, dir);
-      message = `killed ${chosen.ticket.ws}/${chosen.ticket.repo}: ${chosen.ticket.command}`;
+      message = `killed ${describe(chosen)}`;
     } catch (e) {
       message = `error: could not kill the check: ${errorMessage(e)}`;
     }
@@ -190,8 +195,7 @@ export async function checksPane() {
       if (input.key === "q" || input.key === "ctrl-c") {
         quit();
       } else if (pending && input.key === "y") {
-        killing = pending;
-        confirmKill();
+        confirmKill(pending);
       } else if (input.key === "x" && mode === ChecksMode.Queue) {
         askKill();
       } else if (input.key === "v") {

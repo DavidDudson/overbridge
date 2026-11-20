@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Move, type QueueOverrides } from "../src/check-priority";
-import { queueComparator, queueView, type Ticket, ticketName } from "../src/check-queue";
-import { type CheckRow, checkRows, elapsed, movedOverrides, nextChecksMode, ChecksMode, Outcome, outcomeOf, recentChecks, recentTotals, renderChecks, renderRecent } from "../src/checks";
+import { Outcome, outcomeOf, queueComparator, queueView, type Ticket, ticketName } from "../src/check-queue";
+import { type CheckRow, checkRows, formatDuration, movedOverrides, nextChecksMode, ChecksMode, recentChecks, recentTotals, renderChecks, renderRecent } from "../src/checks";
 import type { CheckRecord, HistoryRecord, HistoryStore } from "../src/history";
 
 // eslint-disable-next-line no-control-regex -- stripping colour codes is the point
@@ -126,21 +126,12 @@ describe("recent checks", () => {
   });
 
   test("names how each run ended from its exit code", () => {
-    expect([0, 1, 2, 75, 124, 137, 143, 130, 129].map(outcomeOf)).toEqual([
-      Outcome.Passed,
-      Outcome.Failed,
-      Outcome.Failed,
-      Outcome.GaveUp,
-      Outcome.TimedOut,
-      Outcome.Stalled,
-      Outcome.Killed,
-      Outcome.Killed,
-      Outcome.Killed,
-    ]);
+    expect([0, 1, 143, 75, 124, 137].map((exit) => outcomeOf({ exit }))).toEqual([Outcome.Passed, Outcome.Failed, Outcome.Failed, Outcome.GaveUp, Outcome.TimedOut, Outcome.Stalled]);
+    expect(outcomeOf({ exit: 143, killed: true })).toBe(Outcome.Killed);
   });
 
   test("durations read as seconds, minutes or hours", () => {
-    expect([0, 42_000, 185_000, 7_620_000].map(elapsed)).toEqual(["0s", "42s", "3m05s", "2h07m"]);
+    expect([0, 42_000, 185_000, 7_620_000].map(formatDuration)).toEqual(["0s", "42s", "3m05s", "2h07m"]);
   });
 
   test("the view toggles between the queue and the recent runs", () => {
@@ -149,7 +140,7 @@ describe("recent checks", () => {
   });
 
   test("totals count runs that were not ok and the time run and waited", () => {
-    const rows = [checkRecord(1, { exit: 1 }), checkRecord(2), checkRecord(3, { exit: 143, runMs: 0 })].map((record) => ({ ws: "w", record }));
+    const rows = [checkRecord(1, { exit: 1 }), checkRecord(2), checkRecord(3, { exit: 143, runMs: 0, killed: true })].map((record) => ({ ws: "w", record }));
     expect(recentTotals(rows)).toBe("3 runs · 2 not ok · ran 2m10s · waited 15s");
   });
 

@@ -281,7 +281,7 @@ Then, for everything you applied:
    overbridge config get commands.typecheck
    overbridge config get commands.lint
    overbridge config get commands.format
-   overbridge config get commands.test      # a single file or project first; ask before a full suite
+   overbridge config get commands.test      # scoped to what the branch changed; CI runs the full suite
    ```
    Run each through the check queue: `overbridge check <repo> -- <command>` (it runs in the repo's dev shell).
    A key that is unset means the repo has no such command: say so rather than guessing one. Follow the repo's `CLAUDE.md`/`AGENTS.md` for how to scope a run.

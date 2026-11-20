@@ -1,7 +1,7 @@
-import { CheckExit, type QueueView, type Ticket, ticketKey, ticketName } from "./check-queue";
+import { Outcome, outcomeOf, type QueueView, type Ticket, ticketKey, ticketName } from "./check-queue";
 import { type Move, movedIndex, type QueueOverrides, spreadKeys } from "./check-priority";
 import type { CheckRecord, HistoryStore } from "./history";
-import { bold, boxBottom, boxRow, boxTop, cell, colorize, dim, fit, inverse, stripControl, textWidth } from "./term";
+import { bold, boxBottom, type Color, boxRow, boxTop, cell, colorize, dim, fit, inverse, stripControl, textWidth } from "./term";
 
 /** One check as the @checks tab lists it. */
 export interface CheckRow {
@@ -65,7 +65,7 @@ const REPO_COLUMNS = 14;
 const STATE_COLUMNS = 9;
 
 /** A duration as `42s`, `3m05s` or `2h07m`. */
-export const elapsed = (ms: number) => {
+export const formatDuration = (ms: number) => {
   const secs = Math.max(0, Math.round(ms / 1000));
 
   if (secs < 60) {
@@ -94,7 +94,7 @@ const iconCell = (icon: string | undefined) => {
 
 const rowText = (r: CheckRow, now: number) => {
   const t = r.ticket;
-  const state = r.running ? `▶ ${elapsed(now - (t.runningSinceMs ?? now))}` : `⧗ ${elapsed(now - t.queuedAtMs)}`;
+  const state = r.running ? `▶ ${formatDuration(now - (t.runningSinceMs ?? now))}` : `⧗ ${formatDuration(now - t.queuedAtMs)}`;
 
   return `${iconCell(t.icon)} ${cell(t.ws.slice(0, WS_COLUMNS), WS_COLUMNS)} ${cell(t.repo.slice(0, REPO_COLUMNS), REPO_COLUMNS)} ${cell(state, STATE_COLUMNS)} ${stripControl(t.command)}`;
 };
@@ -119,6 +119,9 @@ export function renderChecks(rows: readonly CheckRow[], { selected, offset, heig
   return [boxTop("Check queue", width), boxRow(dim(fit(head, inner))), ...lines, ...padding, boxRow(footer), boxBottom(width, `${running} running · ${rows.length - running} waiting`, "blue")];
 }
 
+/** Identifies a finished run across re-reads, so the cursor can stay on it. */
+export const recentKey = (r: RecentCheck) => `${r.ws}@${r.record.at}`;
+
 /** One finished check run, with the workspace whose history holds it. */
 export interface RecentCheck {
   ws: string;
@@ -139,34 +142,6 @@ export const recentChecks = (store: HistoryStore, sinceMs: number, limit = RECEN
     .toSorted((a, b) => b.record.at - a.record.at)
     .slice(0, limit);
 
-/** How a run ended, from its exit code. */
-export const Outcome = { Passed: "passed", Failed: "failed", TimedOut: "timed-out", Stalled: "stalled", GaveUp: "gave-up", Killed: "killed" } as const;
-
-export type Outcome = (typeof Outcome)[keyof typeof Outcome];
-
-/** SIGHUP, SIGINT and SIGTERM as exit codes: a run someone stopped. */
-const KILLED_EXITS: readonly number[] = [129, 130, 143];
-
-export function outcomeOf(exit: number): Outcome {
-  if (exit === 0) {
-    return Outcome.Passed;
-  }
-
-  if (exit === CheckExit.GaveUp) {
-    return Outcome.GaveUp;
-  }
-
-  if (exit === CheckExit.TimedOut) {
-    return Outcome.TimedOut;
-  }
-
-  if (exit === CheckExit.Stalled) {
-    return Outcome.Stalled;
-  }
-
-  return KILLED_EXITS.includes(exit) ? Outcome.Killed : Outcome.Failed;
-}
-
 const OUTCOME_TEXT: Record<Outcome, string> = {
   [Outcome.Passed]: "✓ ok",
   [Outcome.Failed]: "✗ exit",
@@ -176,13 +151,13 @@ const OUTCOME_TEXT: Record<Outcome, string> = {
   [Outcome.Killed]: "■ killed",
 };
 
-const outcomeText = (exit: number) => {
-  const outcome = outcomeOf(exit);
+const outcomeText = (record: CheckRecord) => {
+  const outcome = outcomeOf(record);
 
-  return outcome === Outcome.Failed ? `${OUTCOME_TEXT[outcome]} ${exit}` : OUTCOME_TEXT[outcome];
+  return outcome === Outcome.Failed ? `${OUTCOME_TEXT[outcome]} ${record.exit}` : OUTCOME_TEXT[outcome];
 };
 
-const OUTCOME_COLOR: Record<Outcome, "green" | "red" | "yellow" | "grey"> = {
+const OUTCOME_COLOR: Record<Outcome, Color> = {
   [Outcome.Passed]: "green",
   [Outcome.Failed]: "red",
   [Outcome.TimedOut]: "red",
@@ -191,28 +166,28 @@ const OUTCOME_COLOR: Record<Outcome, "green" | "red" | "yellow" | "grey"> = {
   [Outcome.Killed]: "grey",
 };
 
-const AGO_COLUMNS = 8;
+const AGO_COLUMNS = 10;
 const RESULT_COLUMNS = 11;
 const TIME_COLUMNS = 7;
 
 const recentText = ({ ws, record }: RecentCheck, now: number) =>
   [
-    cell(`${elapsed(now - record.at)} ago`, AGO_COLUMNS),
+    cell(`${formatDuration(now - record.at)} ago`, AGO_COLUMNS),
     cell(ws.slice(0, WS_COLUMNS), WS_COLUMNS),
     cell(record.repo.slice(0, REPO_COLUMNS), REPO_COLUMNS),
-    cell(outcomeText(record.exit), RESULT_COLUMNS),
-    cell(elapsed(record.queuedMs), TIME_COLUMNS),
-    cell(record.runMs ? elapsed(record.runMs) : "-", TIME_COLUMNS),
+    cell(outcomeText(record), RESULT_COLUMNS),
+    cell(formatDuration(record.queuedMs), TIME_COLUMNS),
+    cell(record.runMs ? formatDuration(record.runMs) : "-", TIME_COLUMNS),
     stripControl(record.full ?? record.command),
   ].join(" ");
 
 /** Totals for the recent view's bottom border: runs, failures, and the time spent running and waiting. */
 export function recentTotals(rows: readonly RecentCheck[]): string {
-  const failed = rows.filter((r) => outcomeOf(r.record.exit) !== Outcome.Passed).length;
+  const failed = rows.filter((r) => outcomeOf(r.record) !== Outcome.Passed).length;
   const runMs = rows.reduce((sum, r) => sum + r.record.runMs, 0);
   const queuedMs = rows.reduce((sum, r) => sum + r.record.queuedMs, 0);
 
-  return `${rows.length} runs · ${failed} not ok · ran ${elapsed(runMs)} · waited ${elapsed(queuedMs)}`;
+  return `${rows.length} runs · ${failed} not ok · ran ${formatDuration(runMs)} · waited ${formatDuration(queuedMs)}`;
 }
 
 /** The recent view of the @checks panel as screen rows: finished runs, newest first. Pure, so it is snapshot-tested. */
@@ -225,7 +200,7 @@ export function renderRecent(rows: readonly RecentCheck[], { selected, offset, h
   const lines = visible.map((r, i) => {
     const text = fit(recentText(r, now), inner);
 
-    return boxRow(offset + i === selected ? inverse(text) : colorize(text, OUTCOME_COLOR[outcomeOf(r.record.exit)]));
+    return boxRow(offset + i === selected ? inverse(text) : colorize(text, OUTCOME_COLOR[outcomeOf(r.record)]));
   });
 
   const padding = Array.from({ length: body - visible.length }, (_, i) => boxRow(rows.length === 0 && i === 0 ? dim(fit(RECENT_EMPTY, inner)) : fit("", inner)));

@@ -118,7 +118,7 @@ export interface ShellSpec {
 
 /** How `overbridge check` queues a command: when it may start, and when it is killed. */
 export interface CheckQueue {
-  /** Beside a running check, start another only while the 1-minute load average is under this share of the cores; over 100 allows more load than cores. */
+  /** Beside a running check, start another only while the 1-minute load average is under this share of the cores. */
   maxLoadPercent: number;
   /** At most this many runs at once; unset leaves the load as the only limit. */
   maxParallel?: number;

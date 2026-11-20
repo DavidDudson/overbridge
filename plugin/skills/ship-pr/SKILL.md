@@ -78,7 +78,7 @@ overbridge config get commands.format
 overbridge config get commands.test
 ```
 
-An unset key means the repo has no such command: say so rather than guessing. Scope every run to what the branch changed: one file, one project, or the repo's affected-only mode (such as `nx affected -t <target> --base=origin/main` or `vitest run --changed origin/main`). Do not run every project (such as `nx run-many` with no `-p`) or turn off the build cache (such as `--skip-nx-cache`): CI runs the full suite. Follow the repo's `CLAUDE.md` for how to scope a run.
+An unset key means the repo has no such command: say so rather than guessing. Scope every run to what the branch changed: one file, one project, or the repo's affected-only mode (such as `nx affected -t <target> --base=origin/<base>` or `vitest run --changed origin/<base>`, where `<base>` is the PR's base: the stack base on a stacked layer, else the default branch). Do not run every project (such as `nx run-many` with no `-p`) or turn off the build cache (such as `--skip-nx-cache`): CI runs the full suite. Follow the repo's `CLAUDE.md` for how to scope a run.
 
 Run each through the check queue: `overbridge check <repo> -- <command>`. It queues them across workspaces and runs several at once while the load allows, in the repo's dev shell. Exit 124 means it went over its time limit, 137 that it stopped using CPU, and 75 that no turn came: report it rather than retrying in a loop.
 

@@ -92,10 +92,7 @@ const signalable = (pid: number): boolean => {
   }
 };
 
-/**
- * The live, non-zombie processes among `pids`, as `pidAlive` judges each, but with at most one `ps` on macOS:
- * a poll that checks every ticket in a queue would otherwise start one `ps` per ticket.
- */
+/** The live, non-zombie processes among `pids`, as `pidAlive` judges each, with at most one `ps` on macOS. */
 export function pidsAlive(pids: readonly number[]): Set<number> {
   const existing = [...new Set(pids)].filter((pid) => pid > 0 && signalable(pid));
 
@@ -103,11 +100,22 @@ export function pidsAlive(pids: readonly number[]): Set<number> {
     return new Set(existing.filter(pidAlive));
   }
 
-  return new Set(
-    ps(["-p", existing.join(",")])
-      .filter((p) => !p.state.startsWith("Z"))
+  const r = spawnSync("ps", ["-o", PS_FIELDS, "-p", existing.join(",")], { cwd: homedir(), encoding: "utf8", timeout: 5_000 });
+
+  // ps exits 1 when none of the pids is listed; a timeout or a crash leaves no status, and then a reap would kill every run
+  if (r.status === null || r.error) {
+    return new Set(existing);
+  }
+
+  const zombies = new Set(
+    (r.stdout ?? "")
+      .split("\n")
+      .flatMap((l) => parsePsLine(l) ?? [])
+      .filter((p) => p.state.startsWith("Z"))
       .map((p) => p.pid),
   );
+
+  return new Set(existing.filter((pid) => !zombies.has(pid)));
 }
 
 /** One process of a group listing: its group, state letters and CPU seconds used so far. */
