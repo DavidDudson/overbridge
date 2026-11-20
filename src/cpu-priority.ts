@@ -168,7 +168,7 @@ function parseReport(raw: Json): PriorityReport | undefined {
     return undefined;
   }
 
-  return { at: raw.at, workspaces: Object.fromEntries(Object.entries(raw.workspaces).filter((e): e is [string, WorkspacePriority] => isWorkspacePriority(e[1]))) };
+  return { at: raw.at, workspaces: Object.fromEntries(Object.entries(raw.workspaces).flatMap(([ws, w]) => (isWorkspacePriority(w) ? [[ws, w] as const] : []))) };
 }
 
 /** The last pass's report; an empty one when the file is missing or unreadable, so a bad file only loses hints. */
