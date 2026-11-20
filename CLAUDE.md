@@ -41,7 +41,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   Tickets sort by `queueComparator`: the workspace's class rank (`src/workspace-class.ts` over `check-queue.priority` and
   `priority-rules`; classes are the root-only `priority-classes`, `src/check-priority.ts`), recorded in the ticket when
   queued, then queue time, unless `order.state` (written only by the `@checks` tab, `src/checks.ts` pure rows/render +
-  `src/checks-run.ts` pane) holds an override key. The tab kills a check with `stopTicket` (the owner records it as killed) and
+  `src/checks-run.ts` pane) holds an override key. The tab kills a check with `stopTicket` (the owner kills the group, records the run as killed and keeps its ticket until the group is gone; `stopChecksFor` awaits that) and
   its `v` view lists finished runs from history (`recentChecks`, `renderRecent`). A ticket with no `rank` is from an older build: `comparatorFor`
   then sorts everyone by time, as that build does. The caps in `gateFor` count every running ticket, not only those
   ahead. `refreshTop` stores the workspace class in `TopCache.priority`/`priorityIcon` for the sidebar card.

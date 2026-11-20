@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, constants, loadavg } from "node:os";
 import { join } from "node:path";
 import { defaultKey, type QueueOverrides, readOverrides } from "./check-priority";
@@ -286,10 +286,33 @@ export function stopTicket(t: Ticket, dir = queueDir()) {
   rmSync(join(dir, ticketName(t)), { force: true });
 }
 
-/** Stop every check `ws` has queued or running (see `stopTicket`). Returns how many tickets it stopped. */
-export function stopChecksFor(ws: string, dir = queueDir()): number {
+/** Time an owner gets to stop its run (`killGroup` ends in KILL) before `stopChecksFor` kills the group itself. */
+const STOP_WAIT_MS = KILL_GRACE_MS + 5_000;
+
+const stopped = (t: Ticket, dir: string) => !existsSync(join(dir, ticketName(t))) && (t.runPid === undefined || !groupAlive(t.runPid));
+
+/**
+ * Stop every check `ws` has queued or running (see `stopTicket`) and resolve once each one's command is gone, so a
+ * caller can remove the files it was using. Returns how many tickets it stopped.
+ */
+export async function stopChecksFor(ws: string, dir = queueDir()): Promise<number> {
   const mine = readTickets(dir).filter((t) => t.ws === ws);
   mine.forEach((t) => stopTicket(t, dir));
+  const deadline = Date.now() + STOP_WAIT_MS;
+
+  while (!mine.every((t) => stopped(t, dir)) && Date.now() < deadline) {
+    await Bun.sleep(200);
+  }
+
+  mine
+    .filter((t) => !stopped(t, dir))
+    .forEach((t) => {
+      if (t.runPid !== undefined) {
+        signalGroup(t.runPid, "SIGKILL");
+      }
+
+      rmSync(join(dir, ticketName(t)), { force: true });
+    });
 
   return mine.length;
 }

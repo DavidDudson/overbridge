@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { queueDir, stopChecksFor, ticketName, type Ticket } from "../src/check-queue";
+import { groupAlive } from "../src/proc";
 import { handoffStamp, HandoffReason, renderHandoff } from "../src/handoff";
 import { zellijMux } from "../src/mux";
 import { icebox, type IceboxDeps, prunable, THAW_PROMPT, thaw, thawFirstMessage } from "../src/icebox";
@@ -55,7 +56,7 @@ function fakeDeps(listTabs: string, focused = "") {
       { env: { ZELLIJ: "0" } },
     ),
     stopApps: async (ws) => void stopped.apps.push(ws),
-    stopChecks: (ws) => (stopped.checks.push(ws), 0),
+    stopChecks: async (ws) => (stopped.checks.push(ws), 0),
   };
 
   return { deps, calls, stopped };
@@ -357,7 +358,8 @@ describe("stopChecksFor", () => {
     const other = ticket("other", { queuedAtMs: Date.now() + 1 });
     writeFileSync(join(dir, ticketName(mine)), JSON.stringify(mine));
     writeFileSync(join(dir, ticketName(other)), JSON.stringify(other));
-    expect(stopChecksFor("calm", dir)).toBe(1);
+    expect(await stopChecksFor("calm", dir)).toBe(1);
+    expect(groupAlive(child.pid)).toBe(false);
     await child.exited;
     expect(existsSync(join(dir, ticketName(mine)))).toBe(false);
     expect(existsSync(join(dir, ticketName(other)))).toBe(true);
