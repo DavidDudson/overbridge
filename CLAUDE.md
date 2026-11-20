@@ -44,6 +44,14 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   `src/checks-run.ts` pane) holds an override key. A ticket with no `rank` is from an older build: `comparatorFor`
   then sorts everyone by time, as that build does. The caps in `gateFor` count every running ticket, not only those
   ahead. `refreshTop` stores the workspace class in `TopCache.priority`/`priorityIcon` for the sidebar card.
+- CPU priority: `src/cpu-priority.ts` is the pure pass (`planPriority`): a process belongs to the workspace whose
+  `OVERBRIDGE_NAME` it set (not inherited), descendants follow, and the multiplexer, its ancestors and the server are
+  never touched, so they stay at nice 0 above every workspace. Each class has a `nice` (`classTargets` in `src/check-priority.ts`, 1 + 4 × rank
+  by default) and, on macOS, `background` (`taskpolicy -b/-B`, reversible). Only root lowers a nice, so a class that
+  rose leaves `stuck` processes, which the sidebar card shows. `src/cpu-priority-run.ts` runs it (`overbridge priority`,
+  the server every `PRIORITY_PASS_MS`, the sidebar's sweep fallback) and writes `<meta>/cpu-priority.json`.
+  A workspace with no class in its top cache yet gets no target, and the root `cpu-priority: false` stops every pass.
+  Processes come from `listEnvProcs` in `src/proc.ts`. Never pass a workspace's `OVERBRIDGE_NAME` to the server.
 - `src/mux.ts` is the only code that runs `zellij` or `tmux`: the `Mux` interface (tabs, panes, sessions) with `zellijMux` and
   `tmuxMux`, chosen by `defaultMux` (`$TMUX`, `$ZELLIJ`, then `OVERBRIDGE_MUX`, else zellij; outside a session zellij is reached
   by `--session`). Call sites take an injectable `Mux`; tests fake the exec with `zellijMux(fake)` or `tmuxMux(fake)`. tmux

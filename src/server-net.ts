@@ -42,6 +42,17 @@ export const serverDisabled = (): boolean => !!process.env.OVERBRIDGE_NO_SERVER;
 const metaOf = () => join(root(), ".overbridge");
 export const pidFile = () => join(metaOf(), "server.pid");
 
+/** The pid the server's pid file holds, or undefined when it is missing or not a pid. */
+export function readServerPid(): number | undefined {
+  try {
+    const pid = Number(readFileSync(pidFile(), "utf8").trim());
+
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Written by `overbridge server stop`, so the watchdog does not bring back a server the user stopped. */
 export const stoppingFile = () => join(metaOf(), "server.stopping");
 
@@ -144,7 +155,9 @@ export function spawnServer(): void {
 }
 
 function defaultSpawn(cmd: string[]) {
-  Bun.spawn({ cmd, cwd: process.env.HOME ?? "/", stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
+  // blank the workspace a hook's Claude passes down, so the CPU priority pass never counts the server as that workspace's
+  const env = { ...process.env, OVERBRIDGE_NAME: "" };
+  Bun.spawn({ cmd, cwd: process.env.HOME ?? "/", env, stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
 }
 
 /**

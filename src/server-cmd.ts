@@ -1,6 +1,6 @@
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { pidAlive, readProc } from "./proc";
-import { call, pidFile, socketPath, spawnServer, stoppingFile } from "./server-net";
+import { call, pidFile, readServerPid, socketPath, spawnServer, stoppingFile } from "./server-net";
 import { OverbridgeError } from "./util";
 
 /** `overbridge server status|stop|restart`: look at, stop and restart the long-running server. */
@@ -104,16 +104,6 @@ export async function readStatus(sock?: string): Promise<ServerStatus | undefine
   }
 }
 
-function pidFromFile(): number | undefined {
-  try {
-    const pid = Number(readFileSync(pidFile(), "utf8").trim());
-
-    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /** Looks like a process this tool starts: a pid file outlives a crash, and the OS may hand its pid to anything. */
 const looksLikeServer = (pid: number): boolean => /bun|overbridge|node/i.test(readProc(pid)?.comm ?? "");
 
@@ -125,7 +115,7 @@ async function findServer(): Promise<number | undefined> {
   const status = await readStatus();
 
   if (status?.pid !== undefined) return status.pid;
-  const pid = pidFromFile();
+  const pid = readServerPid();
 
   return pid !== undefined && pidAlive(pid) && looksLikeServer(pid) ? pid : undefined;
 }

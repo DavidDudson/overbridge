@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { groupAlive, groupCpuSeconds, listProcs, parseCpuTime, parseGroupLine, parsePsLine, parseStat, pidAlive, readProc } from "../src/proc";
+import { getPriority } from "node:os";
+import { groupAlive, groupCpuSeconds, listEnvProcs, threadIds, listProcs, parseCpuTime, parseEnvPsLine, parseGroupLine, parsePsLine, parseStat, pidAlive, readProc } from "../src/proc";
 
 describe("parseStat (Linux /proc)", () => {
   test("reads state and parent, even when comm has spaces and parens", () => {
@@ -29,7 +30,30 @@ describe("parsePsLine (macOS ps)", () => {
   });
 });
 
+describe("parseEnvPsLine (macOS ps -E)", () => {
+  test("reads nice, the executable's name and the last value of the variable from the environment ps appends", () => {
+    expect(parseEnvPsLine("  13   12   5 S+   /usr/local/bin/claude --name a HOME=/u OVERBRIDGE_NAME=a TERM=x", "OVERBRIDGE_NAME")).toEqual({ pid: 13, ppid: 12, nice: 5, state: "S+", comm: "claude", env: "a" });
+    expect(parseEnvPsLine("  14   1  -2 Ss   env OVERBRIDGE_NAME=x zsh OVERBRIDGE_NAME=b", "OVERBRIDGE_NAME")?.env).toBe("b");
+  });
+
+  test("an empty value is kept, a missing one is unset, and a prefix match is not a match", () => {
+    expect(parseEnvPsLine(" 7 1 0 S zsh OVERBRIDGE_NAME= X=1", "OVERBRIDGE_NAME")?.env).toBe("");
+    expect(parseEnvPsLine(" 7 1 0 S zsh MY_OVERBRIDGE_NAME=a", "OVERBRIDGE_NAME")).toEqual({ pid: 7, ppid: 1, nice: 0, state: "S", comm: "zsh" });
+    expect(parseEnvPsLine("garbage", "OVERBRIDGE_NAME")).toBeUndefined();
+  });
+});
+
 describe("on this machine", () => {
+  test("listEnvProcs finds this process with its environment and nice", () => {
+    const me = listEnvProcs("HOME")?.find((p) => p.pid === process.pid);
+    expect(me?.env).toBe(process.env.HOME);
+    expect(me?.nice).toBe(getPriority(process.pid));
+  });
+
+  test("threadIds includes the process itself", () => {
+    expect(threadIds(process.pid)).toContain(process.pid);
+  });
+
   test("finds this process, its parent and a live pid, and not a dead one", () => {
     const me = readProc(process.pid);
     expect(me?.pid).toBe(process.pid);
