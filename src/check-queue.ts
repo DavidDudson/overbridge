@@ -289,6 +289,9 @@ export function stopTicket(t: Ticket, dir = queueDir()) {
 /** Time an owner gets to stop its run (`killGroup` ends in KILL) before `stopChecksFor` kills the group itself. */
 const STOP_WAIT_MS = KILL_GRACE_MS + 5_000;
 
+/** How long a group gets to die after SIGKILL before `stopChecksFor` gives up. */
+const KILL_WAIT_MS = 2_000;
+
 const stopped = (t: Ticket, dir: string) => !existsSync(join(dir, ticketName(t))) && (t.runPid === undefined || !groupAlive(t.runPid));
 
 /**
@@ -304,15 +307,26 @@ export async function stopChecksFor(ws: string, dir = queueDir()): Promise<numbe
     await Bun.sleep(200);
   }
 
-  mine
-    .filter((t) => !stopped(t, dir))
-    .forEach((t) => {
-      if (t.runPid !== undefined) {
-        signalGroup(t.runPid, "SIGKILL");
-      }
+  const late = mine.filter((t) => !stopped(t, dir));
+  late.forEach((t) => {
+    if (t.runPid !== undefined) {
+      signalGroup(t.runPid, "SIGKILL");
+    }
 
-      rmSync(join(dir, ticketName(t)), { force: true });
-    });
+    rmSync(join(dir, ticketName(t)), { force: true });
+  });
+
+  const killDeadline = Date.now() + KILL_WAIT_MS;
+
+  while (!late.every((t) => stopped(t, dir)) && Date.now() < killDeadline) {
+    await Bun.sleep(100);
+  }
+
+  const alive = late.filter((t) => !stopped(t, dir));
+
+  if (alive.length) {
+    throw new Error(`could not stop ${alive.map((t) => `${t.repo}: ${t.command} (process group ${t.runPid})`).join("; ")} for ${ws}; kill it, then retry`);
+  }
 
   return mine.length;
 }
