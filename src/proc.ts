@@ -100,8 +100,18 @@ export function pidsAlive(pids: readonly number[]): Set<number> {
     return new Set(existing.filter(pidAlive));
   }
 
-  const r = spawnSync("ps", ["-o", PS_FIELDS, "-p", existing.join(",")], { cwd: homedir(), encoding: "utf8", timeout: 5_000 });
+  return aliveFromPs(existing, spawnSync("ps", ["-o", PS_FIELDS, "-p", existing.join(",")], { cwd: homedir(), encoding: "utf8", timeout: 5_000 }));
+}
 
+/** What a `ps -p` run returned, as much of it as `aliveFromPs` reads. */
+export interface PsResult {
+  status: number | null;
+  stdout?: string | null;
+  error?: Error;
+}
+
+/** The pids in `existing` (each answered `kill(pid, 0)`) that `ps` does not list as zombies. */
+export function aliveFromPs(existing: readonly number[], r: PsResult): Set<number> {
   // ps exits 1 when none of the pids is listed; a timeout or a crash leaves no status, and then a reap would kill every run
   if (r.status === null || r.error) {
     return new Set(existing);

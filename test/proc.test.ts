@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { groupAlive, groupCpuSeconds, listProcs, parseCpuTime, parseGroupLine, parsePsLine, parseStat, pidAlive, pidsAlive, readProc } from "../src/proc";
+import { groupAlive, groupCpuSeconds, listProcs, parseCpuTime, parseGroupLine, parsePsLine, parseStat, pidAlive, pidsAlive, readProc, aliveFromPs } from "../src/proc";
 
 describe("parseStat (Linux /proc)", () => {
   test("reads state and parent, even when comm has spaces and parens", () => {
@@ -91,5 +91,20 @@ describe("pidsAlive", () => {
     expect(pidsAlive([process.pid, zombie, process.pid, 0, -1])).toEqual(new Set([process.pid]));
     parent.kill();
     await parent.exited;
+  });
+});
+
+describe("aliveFromPs", () => {
+  test("drops the zombies ps lists and keeps the rest", () => {
+    expect(aliveFromPs([10, 11, 12], { status: 0, stdout: "   10     1 S    sh\n   11     1 Z    sh\n" })).toEqual(new Set([10, 12]));
+  });
+
+  test("keeps every pid when ps lists none of them", () => {
+    expect(aliveFromPs([10, 11], { status: 1, stdout: "" })).toEqual(new Set([10, 11]));
+  });
+
+  test("keeps every pid when ps times out or fails to start, so no ticket is reaped on a slow machine", () => {
+    expect(aliveFromPs([10, 11], { status: null, stdout: null })).toEqual(new Set([10, 11]));
+    expect(aliveFromPs([10, 11], { status: 0, error: new Error("spawnSync ps ETIMEDOUT") })).toEqual(new Set([10, 11]));
   });
 });

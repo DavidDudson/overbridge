@@ -12,6 +12,19 @@ import { serverRefreshPerf } from "../src/server-client";
 const strip = (s: string) => s.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
 const run = (over: Partial<CheckRecord>): CheckRecord => ({ kind: "check", at: 10, repo: "app", command: "just check", full: "nix develop --command just check", group: "check", cls: "other", queuedMs: 1000, runMs: 60_000, exit: 0, ...over });
 
+describe("killed runs", () => {
+  test("count as runs but not as failures in every check tally", () => {
+    const records = [run({ exit: 1 }), run({ exit: 143, killed: true }), run({ exit: 0 })];
+    const s = summarize(records);
+    const [repo] = summarizeRepos(records);
+    expect(s.checks.other?.failed).toBe(1);
+    expect(s.groups.check?.failed).toBe(1);
+    expect(repo?.failed).toBe(1);
+    expect(repo?.groups.check?.failed).toBe(1);
+    expect(repo?.count).toBe(3);
+  });
+});
+
 describe("commandGroup", () => {
   test.each([
     ["just check", "check"],
