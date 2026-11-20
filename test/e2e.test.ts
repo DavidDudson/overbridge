@@ -81,14 +81,16 @@ describe("workflow", () => {
     const settings = JSON.parse(readFileSync(join(root, "ws1", ".claude", "settings.json"), "utf8"));
     expect(settings.env.OVERBRIDGE_NAME).toBe("ws1");
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain("guard");
-    expect(settings.plansDirectory).toBe("plans");
-    // the copy a Claude started in a repo folder loads with --settings: same hooks, plans kept in the workspace
+    // Claude ignores a plansDirectory outside the folder it starts in, so it stays relative to that folder
+    expect(settings.plansDirectory).toBe(".overbridge-plans");
+    // the copy a Claude started in a repo folder loads with --settings
     const copy = JSON.parse(readFileSync(join(root, ".overbridge", "workspaces", "ws1.settings.json"), "utf8"));
-    expect(copy.hooks).toEqual(settings.hooks);
-    expect(copy.env).toEqual(settings.env);
-    expect(copy.plansDirectory).toBe(join(root, "ws1", "plans"));
-    // plans sit beside the repo worktrees, never inside one, so they can't dirty git
-    expect(existsSync(join(root, "ws1", "app", "plans"))).toBe(false);
+    expect(copy).toEqual(settings);
+    // a plan written in the repo worktree never shows in git status
+    mkdirSync(join(root, "ws1", "app", ".overbridge-plans"), { recursive: true });
+    writeFileSync(join(root, "ws1", "app", ".overbridge-plans", "p.md"), "plan\n");
+    expect(Bun.spawnSync(["git", "-C", join(root, "ws1", "app"), "status", "--porcelain"]).stdout.toString()).toBe("");
+    rmSync(join(root, "ws1", "app", ".overbridge-plans"), { recursive: true });
     expect(settings.permissions.allow).toContain("Bash(gh pr ready:*)");
     expect(settings.permissions.allow).toContain("Bash(gh stack push:*)");
     expect(settings.permissions.allow).not.toContain("Bash(gh pr merge:*)");

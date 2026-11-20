@@ -7,7 +7,7 @@ import { HandoffReason, writeHandoff } from "./handoff";
 import type { Mux } from "./mux";
 import { landingTab } from "./next";
 import { isOrchestrationTab } from "./orchestration";
-import { worktreePath } from "./paths";
+import { PLANS_DIR, worktreePath } from "./paths";
 import { loadRepoConfig, normalizePrunePath } from "./project-config";
 import { defaultDeps, leaveTab, type RemovalDeps, stopApps } from "./remove";
 import { entries } from "./sidebar";
@@ -131,7 +131,8 @@ export function ignoredLeft(wt: string, pruned: string[]): string[] {
     return ["(git could not list the ignored files)"];
   }
 
-  const roots = pruned.map(normalizePrunePath);
+  // plans are spent once the work is in a commit, and every worktree holds the folder
+  const roots = [...pruned.map(normalizePrunePath), PLANS_DIR];
 
   return r.stdout
     .split("\n")

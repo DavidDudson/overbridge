@@ -20,15 +20,16 @@ describe("file tools", () => {
     expect(check(tool("Read", { file_path: "/w/ws1/other/y" }), ctx)).toBeUndefined();
   });
 
-  test("allows plan-mode plans in the workspace folder, outside every repo worktree", () => {
-    expect(check(tool("Write", { file_path: "/w/ws1/plans/shiny-plan.md" }), ctx)).toBeUndefined();
-    expect(check(tool("Edit", { file_path: "/w/ws1/plans/shiny-plan.md" }), ctx)).toBeUndefined();
-    expect(check(tool("Write", { file_path: "../plans/p.md" }), ctx)).toBeUndefined();
+  test("allows plan-mode plans in the folder the agent starts in", () => {
+    expect(check(tool("Write", { file_path: "/w/ws1/app/.overbridge-plans/shiny-plan.md" }), ctx)).toBeUndefined();
+    expect(check(tool("Edit", { file_path: "/w/ws1/app/.overbridge-plans/shiny-plan.md" }), ctx)).toBeUndefined();
+    expect(check(tool("Write", { file_path: ".overbridge-plans/p.md" }), ctx)).toBeUndefined();
+    expect(check({ ...tool("Write", { file_path: ".overbridge-plans/p.md" }), cwd: "/w/ws1" }, ctx)).toBeUndefined();
   });
 
   test("blocks the default plans folder and the workspace's generated config", () => {
     expect(check(tool("Write", { file_path: "/home/u/.claude/plans/p.md" }), ctx)).toContain("outside workspace ws1");
-    expect(check(tool("Write", { file_path: "/w/ws2/plans/p.md" }), ctx)).toContain("outside workspace ws1");
+    expect(check(tool("Write", { file_path: "/w/ws2/app/.overbridge-plans/p.md" }), ctx)).toContain("outside workspace ws1");
     expect(check(tool("Write", { file_path: "/w/ws1/.claude/plans/p.md" }), ctx)).toContain("managed by overbridge");
   });
 
