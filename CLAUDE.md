@@ -51,7 +51,10 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   rose leaves `stuck` processes, which the sidebar card shows. `src/cpu-priority-run.ts` runs it (`overbridge priority`,
   the server every `PRIORITY_PASS_MS`, the sidebar's sweep fallback) and writes `<meta>/cpu-priority.json`.
   A workspace with no class in its top cache yet gets no target, and the root `cpu-priority: false` stops every pass.
-  Processes come from `listEnvProcs` in `src/proc.ts`. Never pass a workspace's `OVERBRIDGE_NAME` to the server.
+  Processes come from `listEnvProcs` in `src/proc.ts`; one that set another root's `OVERBRIDGE_ROOT` is not ours.
+  Passes run one at a time (`withPassLock`), and a failed `taskpolicy` stays in the report for a retry (`settleReport`).
+  Apps start with their workspace's `OVERBRIDGE_NAME`. Never pass a workspace's `OVERBRIDGE_NAME` to the server, and
+  never start it from a reniced workspace process (`mayStartServer`): it would inherit that nice.
 - `src/mux.ts` is the only code that runs `zellij` or `tmux`: the `Mux` interface (tabs, panes, sessions) with `zellijMux` and
   `tmuxMux`, chosen by `defaultMux` (`$TMUX`, `$ZELLIJ`, then `OVERBRIDGE_MUX`, else zellij; outside a session zellij is reached
   by `--session`). Call sites take an injectable `Mux`; tests fake the exec with `zellijMux(fake)` or `tmuxMux(fake)`. tmux

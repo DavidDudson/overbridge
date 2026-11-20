@@ -36,6 +36,10 @@ describe("parseEnvPsLine (macOS ps -E)", () => {
     expect(parseEnvPsLine("  14   1  -2 Ss   env OVERBRIDGE_NAME=x zsh OVERBRIDGE_NAME=b", "OVERBRIDGE_NAME")?.env).toBe("b");
   });
 
+  test("reads a second variable, the root, when asked for one", () => {
+    expect(parseEnvPsLine(" 7 1 0 S zsh OVERBRIDGE_NAME=a OVERBRIDGE_ROOT=/ws", "OVERBRIDGE_NAME", "OVERBRIDGE_ROOT")).toEqual({ pid: 7, ppid: 1, nice: 0, state: "S", comm: "zsh", env: "a", root: "/ws" });
+  });
+
   test("an empty value is kept, a missing one is unset, and a prefix match is not a match", () => {
     expect(parseEnvPsLine(" 7 1 0 S zsh OVERBRIDGE_NAME= X=1", "OVERBRIDGE_NAME")?.env).toBe("");
     expect(parseEnvPsLine(" 7 1 0 S zsh MY_OVERBRIDGE_NAME=a", "OVERBRIDGE_NAME")).toEqual({ pid: 7, ppid: 1, nice: 0, state: "S", comm: "zsh" });

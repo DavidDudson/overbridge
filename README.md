@@ -452,7 +452,8 @@ each workspace's processes from its class. A class with `nice` set uses that val
 the second 5, the third 9, and so on up to 19. Zellij or tmux and the sidebars stay at 0, so they get the CPU before any workspace. On macOS a class with
 `background: true` also puts its processes in Darwin background, which runs them on the efficiency cores and slows
 their disk I/O. The built-in `low` class does this. A process belongs to a workspace when it started with
-`OVERBRIDGE_NAME` set to that workspace: its Claude, the shells and checks Claude starts, and its apps. Any process
+`OVERBRIDGE_NAME` set to that workspace and `OVERBRIDGE_ROOT` set to this root: its Claude, the shells and checks
+Claude starts, and its apps. Any process
 that one of those starts belongs to the workspace too.
 
 Only root can lower a nice value. When a workspace's class goes up, its running processes keep the old nice, and the

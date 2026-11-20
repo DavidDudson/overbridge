@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
-import { tmpdir } from "node:os";
+import { getPriority, tmpdir } from "node:os";
 import { join } from "node:path";
 import { root, selfCommand } from "./paths";
 import { overbridgeBuildTime, overbridgeVersion } from "./version";
@@ -136,9 +136,15 @@ export function claimStart(now = Date.now()): boolean {
   return true;
 }
 
+/**
+ * Whether this process may start the server: not a workspace process the CPU priority pass has reniced, since the
+ * server would inherit that nice and only root can lower it. A sidebar (nice 0, no workspace) starts it instead.
+ */
+export const mayStartServer = (env: NodeJS.ProcessEnv = process.env, nice: number = getPriority()): boolean => !env.OVERBRIDGE_NAME || nice <= 0;
+
 /** Start `overbridge serve` detached, at most once per `START_LOCK_MS` across every client. */
-export function startServer(spawn: (cmd: string[]) => void = defaultSpawn, now = Date.now()): boolean {
-  if (serverDisabled() || !claimStart(now)) return false;
+export function startServer(spawn: (cmd: string[]) => void = defaultSpawn, now = Date.now(), allowed: boolean = mayStartServer()): boolean {
+  if (serverDisabled() || !allowed || !claimStart(now)) return false;
 
   try {
     spawn([...selfCommand(), "serve"]);

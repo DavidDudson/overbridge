@@ -156,6 +156,15 @@ export interface EnvProc extends Proc {
   nice: number;
   /** Unset when the process has no such variable, or its environment cannot be read. */
   env?: string;
+  /** The value of the second variable asked for (the root), when there is one. */
+  root?: string;
+}
+
+/** `proc` with `env` and `root` set from `values`, each only when found. */
+function withEnv(proc: EnvProc, env: string | undefined, root: string | undefined): EnvProc {
+  const withName = env === undefined ? proc : { ...proc, env };
+
+  return root === undefined ? withName : { ...withName, root };
 }
 
 /** The last `name=value` in `text`; values hold no spaces, as workspace names never do. */
@@ -169,7 +178,7 @@ function envValue(text: string, name: string): string | undefined {
  * One line of `ps -E -o pid=,ppid=,nice=,stat=,command=`. macOS appends the environment to the command line, so the
  * variable is the last `name=` on it, and the executable is the command's first word.
  */
-export function parseEnvPsLine(line: string, name: string): EnvProc | undefined {
+export function parseEnvPsLine(line: string, name: string, rootName?: string): EnvProc | undefined {
   const m = /^\s*(\d+)\s+(\d+)\s+(-?\d+)\s+(\S+)\s+(\S+)(.*)$/.exec(line);
 
   if (!m) {
@@ -177,13 +186,12 @@ export function parseEnvPsLine(line: string, name: string): EnvProc | undefined 
   }
 
   const proc: EnvProc = { pid: Number(m[1]), ppid: Number(m[2]), nice: Number(m[3]), state: m[4]!, comm: basename(m[5]!) };
-  const env = envValue(m[6]!, name);
 
-  return env === undefined ? proc : { ...proc, env };
+  return withEnv(proc, envValue(m[6]!, name), rootName === undefined ? undefined : envValue(m[6]!, rootName));
 }
 
 /** `/proc/<pid>/stat` plus its `environ`. The nice value is field 19 of `proc(5)`: index 16 once the text after `comm)` is split on spaces. */
-function readEnvProc(pid: number, name: string): EnvProc | undefined {
+function readEnvProc(pid: number, name: string, rootName?: string): EnvProc | undefined {
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
     const proc = parseStat(pid, stat);
@@ -193,9 +201,7 @@ function readEnvProc(pid: number, name: string): EnvProc | undefined {
       return undefined;
     }
 
-    const env = readEnviron(pid, name);
-
-    return env === undefined ? { ...proc, nice } : { ...proc, nice, env };
+    return withEnv({ ...proc, nice }, readEnviron(pid, name), rootName === undefined ? undefined : readEnviron(pid, rootName));
   } catch {
     return undefined;
   }
@@ -215,12 +221,15 @@ function readEnviron(pid: number, name: string): string | undefined {
   }
 }
 
-/** Every process with its nice value and environment variable `name` (readable for this user's processes only); undefined when `ps` fails. */
-export function listEnvProcs(name: string): EnvProc[] | undefined {
+/**
+ * Every process with its nice value and environment variables `name` and `rootName` (readable for this user's
+ * processes only); undefined when `ps` fails.
+ */
+export function listEnvProcs(name: string, rootName?: string): EnvProc[] | undefined {
   if (hasProc) {
     return readdirSync("/proc")
       .filter((d) => /^\d+$/.test(d))
-      .flatMap((d) => readEnvProc(Number(d), name) ?? []);
+      .flatMap((d) => readEnvProc(Number(d), name, rootName) ?? []);
   }
 
   const r = spawnSync("ps", ["-AE", "-o", "pid=,ppid=,nice=,stat=,command="], { cwd: homedir(), encoding: "utf8", timeout: 10_000, maxBuffer: 256 * 1024 * 1024 });
@@ -229,7 +238,7 @@ export function listEnvProcs(name: string): EnvProc[] | undefined {
     return undefined;
   }
 
-  return r.stdout.split("\n").flatMap((l) => parseEnvPsLine(l, name) ?? []);
+  return r.stdout.split("\n").flatMap((l) => parseEnvPsLine(l, name, rootName) ?? []);
 }
 
 /**

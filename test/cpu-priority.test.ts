@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classTarget, classTargets, DEFAULT_CLASSES, defaultNice } from "../src/check-priority";
-import { BackgroundPolicy, backgroundPolicy, type PlanInput, planPriority, protectedPids, readPriorityReport, readPriorityReportCached, workspaceOf, writePriorityReport } from "../src/cpu-priority";
-import { type ApplyDeps, applyPriority, formatReport, liveClassesFrom } from "../src/cpu-priority-run";
+import { BackgroundPolicy, backgroundPolicy, type PlanInput, planPriority, protectedPids, readPriorityReport, readPriorityReportCached, settleReport, workspaceOf, writePriorityReport } from "../src/cpu-priority";
+import { type ApplyDeps, applyPriority, formatReport, liveClassesFrom, withPassLock } from "../src/cpu-priority-run";
 import type { WorkspaceState } from "../src/state";
 import type { EnvProc } from "../src/proc";
 
@@ -27,8 +27,11 @@ const tree = (ws = "a"): EnvProc[] => [
   proc(20, 1, { comm: "node", env: ws }), // a detached app
 ];
 
+const ROOT = "/ws";
+
 const input = (over: Partial<PlanInput> = {}): PlanInput => ({
   procs: tree(),
+  root: ROOT,
   extraProtected: [],
   targets: { a: NORMAL },
   classNices: NICES,
@@ -67,19 +70,19 @@ describe("protectedPids and workspaceOf", () => {
   });
 
   test("a process belongs where OVERBRIDGE_NAME was set, and its descendants follow; panes without it belong nowhere", () => {
-    const owners = workspaceOf(tree(), protectedPids(tree(), []));
+    const owners = workspaceOf(tree(), protectedPids(tree(), []), ROOT);
     expect([...owners.keys()].toSorted((x, y) => x - y)).toEqual([13, 14, 15, 20]);
     expect(owners.get(15)).toBe("a");
   });
 
   test("a child that inherited nothing still follows its workspace ancestor", () => {
     const procs = [...tree(), proc(16, 15, { comm: "esbuild" })];
-    expect(workspaceOf(procs, protectedPids(procs, [])).get(16)).toBe("a");
+    expect(workspaceOf(procs, protectedPids(procs, []), ROOT).get(16)).toBe("a");
   });
 
   test("a value inherited from the multiplexer binds no pane: the climb stops at the protected server", () => {
     const procs = tree().map((p) => (p.pid === 10 || p.pid === 11 || p.pid === 12 ? { ...p, env: "z" } : p));
-    const owners = workspaceOf(procs, protectedPids(procs, []));
+    const owners = workspaceOf(procs, protectedPids(procs, []), ROOT);
     expect(owners.has(11)).toBe(false);
     expect(owners.has(12)).toBe(false);
     expect(owners.get(13)).toBe("a");
@@ -87,14 +90,22 @@ describe("protectedPids and workspaceOf", () => {
 
   test("an empty value (an orchestration tab) belongs to no workspace, nor do its children", () => {
     const procs = [...tree(), proc(30, 10, { comm: "claude", env: "" }), proc(31, 30, { comm: "zsh", env: "" })];
-    const owners = workspaceOf(procs, protectedPids(procs, []));
+    const owners = workspaceOf(procs, protectedPids(procs, []), ROOT);
     expect(owners.has(30)).toBe(false);
     expect(owners.has(31)).toBe(false);
   });
 
+  test("a process that set another root's OVERBRIDGE_ROOT belongs to no workspace here, even with a matching name", () => {
+    const procs = [...tree(), proc(60, 1, { comm: "claude", env: "a", root: "/other" }), proc(61, 60, { comm: "zsh", env: "a", root: "/other" })];
+    const owners = workspaceOf(procs, protectedPids(procs, []), ROOT);
+    expect(owners.has(60)).toBe(false);
+    expect(owners.has(61)).toBe(false);
+    expect(owners.get(13)).toBe("a");
+  });
+
   test("a nested workspace value starts that workspace's own subtree", () => {
     const procs = [...tree(), proc(40, 14, { comm: "bun", env: "b" })];
-    expect(workspaceOf(procs, protectedPids(procs, [])).get(40)).toBe("b");
+    expect(workspaceOf(procs, protectedPids(procs, []), ROOT).get(40)).toBe("b");
   });
 });
 
@@ -154,12 +165,17 @@ describe("applyPriority", () => {
     const d: ApplyDeps = {
       enabled: () => true,
       procs: () => tree(),
+      root: ROOT,
       classes: () => ({ a: "low" }),
       priorityClasses: () => DEFAULT_CLASSES,
       extraProtected: () => [],
       threads: (pid) => [pid],
       previous: () => ({ at: 0, workspaces: {} }),
-      run: (cmd) => void ran.push(cmd),
+      run: (cmd) => {
+        ran.push(cmd);
+
+        return true;
+      },
       write: (r) => void written.push(r),
       policy: BackgroundPolicy.Darwin,
       now: () => 5,
@@ -191,6 +207,12 @@ describe("applyPriority", () => {
     expect(ran[0]).toEqual(["renice", "5", "-p", "13", "130", "131", "14", "15", "20"]);
   });
 
+  test("a taskpolicy that fails is retried by the next pass", () => {
+    const { d, written } = deps({ run: (cmd) => !(cmd[0] === "taskpolicy" && cmd[3] === "15") });
+    applyPriority(d);
+    expect(written).toEqual([expect.objectContaining({ workspaces: { a: expect.objectContaining({ backgroundPids: [13, 14, 20] }) } })]);
+  });
+
   test("an unreadable process list changes nothing and keeps the last report", () => {
     const { d, ran, written } = deps({ procs: () => undefined });
     expect(applyPriority(d)).toBeUndefined();
@@ -207,6 +229,21 @@ describe("applyPriority", () => {
   });
 });
 
+describe("settleReport", () => {
+  const entry = (backgroundPids: number[]) => ({ class: "low", nice: 9, background: true, procs: 2, stuck: 0, backgroundPids });
+
+  test("a failed -b is not recorded as moved, and a failed -B keeps its pid for a retry", () => {
+    const report = { at: 2, workspaces: { a: entry([13, 14]) } };
+    const settled = settleReport(report, { a: entry([20]) }, new Set([14]), new Set([20]));
+    expect(settled.workspaces.a?.backgroundPids).toEqual([13, 20]);
+  });
+
+  test("a workspace that left the report stays while a pid of it is still in background", () => {
+    const settled = settleReport({ at: 2, workspaces: {} }, { a: entry([13, 14]), b: entry([30]) }, new Set(), new Set([14]));
+    expect(settled.workspaces).toEqual({ a: entry([14]) });
+  });
+});
+
 describe("liveClassesFrom", () => {
   test("keeps an active workspace with a known class; leaves out one with no class yet, an iceboxed one and one being removed", () => {
     const active: WorkspaceState = { created: "", repos: {} };
@@ -219,6 +256,30 @@ describe("liveClassesFrom", () => {
     };
 
     expect(liveClassesFrom(workspaces, (ws) => (ws === "unknown" ? undefined : "low"))).toEqual({ known: "low" });
+  });
+});
+
+describe("withPassLock", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "cpu-priority-lock-"));
+  });
+
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  test("a second pass while one holds the lock is skipped, and the lock is freed after", () => {
+    const lock = join(dir, "l");
+    expect(withPassLock(() => withPassLock(() => "inner", lock) ?? "skipped", lock)).toBe("skipped");
+    expect(withPassLock(() => "again", lock)).toBe("again");
+  });
+
+  test("a lock left by a pass that died is taken over", () => {
+    const lock = join(dir, "l");
+    writeFileSync(lock, "");
+    const old = new Date(Date.now() - 120_000);
+    utimesSync(lock, old, old);
+    expect(withPassLock(() => "ran", lock)).toBe("ran");
   });
 });
 

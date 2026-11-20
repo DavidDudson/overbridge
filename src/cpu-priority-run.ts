@@ -1,6 +1,22 @@
 import { classTarget, classTargets, type PriorityClass } from "./check-priority";
-import { backgroundPolicy, BackgroundPolicy, emptyReport, planPriority, type PriorityReport, protectedPids, readPriorityReport, WORKSPACE_ENV, workspaceOf, writePriorityReport } from "./cpu-priority";
-import { selfCommand } from "./paths";
+import { closeSync, mkdirSync, openSync, rmSync, statSync } from "node:fs";
+import { dirname } from "node:path";
+import {
+  backgroundPolicy,
+  BackgroundPolicy,
+  emptyReport,
+  planPriority,
+  priorityLockPath,
+  type PriorityReport,
+  protectedPids,
+  readPriorityReport,
+  ROOT_ENV,
+  settleReport,
+  WORKSPACE_ENV,
+  workspaceOf,
+  writePriorityReport,
+} from "./cpu-priority";
+import { root, selfCommand } from "./paths";
 import { type EnvProc, listEnvProcs, pidAlive, threadIds } from "./proc";
 import { loadRootLayers } from "./project-config";
 import { readServerPid } from "./server-net";
@@ -16,6 +32,8 @@ export interface ApplyDeps {
   enabled: () => boolean;
   /** Undefined when the process list cannot be read: the pass then changes nothing. */
   procs: () => EnvProc[] | undefined;
+  /** This root, to tell our workspaces from another root's of the same name. */
+  root: string;
   /** Each live workspace's class name, as its top cache last recorded it; a workspace with none yet is left out. */
   classes: () => Record<string, string>;
   priorityClasses: () => readonly PriorityClass[];
@@ -24,7 +42,8 @@ export interface ApplyDeps {
   /** Every thread a renice of `pid` has to reach. */
   threads: (pid: number) => number[];
   previous: () => PriorityReport;
-  run: (cmd: string[]) => void;
+  /** Runs `cmd`; true when it exited 0. */
+  run: (cmd: string[]) => boolean;
   write: (report: PriorityReport) => void;
   policy: BackgroundPolicy;
   now: () => number;
@@ -41,14 +60,11 @@ function release(deps: ApplyDeps): PriorityReport | undefined {
     return undefined;
   }
 
-  if (deps.policy === BackgroundPolicy.Darwin) {
-    const owners = workspaceOf(procs, protectedPids(procs, deps.extraProtected()));
-    Object.entries(deps.previous().workspaces)
-      .flatMap(([ws, w]) => w.backgroundPids.filter((pid) => owners.get(pid) === ws))
-      .forEach((pid) => deps.run(["taskpolicy", "-B", "-p", String(pid)]));
-  }
-
-  const report = { ...emptyReport(), at: deps.now() };
+  const previous = deps.previous().workspaces;
+  const owners = workspaceOf(procs, protectedPids(procs, deps.extraProtected()), deps.root);
+  const owned = deps.policy === BackgroundPolicy.Darwin ? Object.entries(previous).flatMap(([ws, w]) => w.backgroundPids.filter((pid) => owners.get(pid) === ws)) : [];
+  const failed = new Set(owned.filter((pid) => !deps.run(["taskpolicy", "-B", "-p", String(pid)])));
+  const report = settleReport({ ...emptyReport(), at: deps.now() }, previous, new Set(), failed);
   deps.write(report);
 
   return report;
@@ -72,23 +88,62 @@ export function applyPriority(deps: ApplyDeps): PriorityReport | undefined {
   const priorityClasses = deps.priorityClasses();
   const targets = Object.fromEntries(Object.entries(deps.classes()).map(([ws, name]) => [ws, classTarget(priorityClasses, name)]));
 
+  const previous = deps.previous().workspaces;
+
   const plan = planPriority({
     procs,
+    root: deps.root,
     extraProtected: deps.extraProtected(),
     targets,
     classNices: classTargets(priorityClasses).map((t) => t.nice),
-    previous: deps.previous().workspaces,
+    previous,
     policy: deps.policy,
     now: deps.now(),
   });
 
   // a process that exits mid-pass makes these fail for that pid only; the next pass sees the rest
   plan.renice.forEach(({ nice, pids }) => deps.run(["renice", String(nice), "-p", ...pids.flatMap(deps.threads).map(String)]));
-  plan.toBackground.forEach((pid) => deps.run(["taskpolicy", "-b", "-p", String(pid)]));
-  plan.toForeground.forEach((pid) => deps.run(["taskpolicy", "-B", "-p", String(pid)]));
-  deps.write(plan.report);
+  const failedBackground = new Set(plan.toBackground.filter((pid) => !deps.run(["taskpolicy", "-b", "-p", String(pid)])));
+  const failedForeground = new Set(plan.toForeground.filter((pid) => !deps.run(["taskpolicy", "-B", "-p", String(pid)])));
+  const report = settleReport(plan.report, previous, failedBackground, failedForeground);
+  deps.write(report);
 
-  return plan.report;
+  return report;
+}
+
+/** A lock older than this is from a pass that died; a pass takes a few seconds at most. */
+const LOCK_STALE_MS = 60_000;
+
+/**
+ * `fn` under a lock shared by every process that runs a pass (the server, a sidebar, `overbridge priority apply`),
+ * so two passes never read the same report and overwrite each other's background pids. Undefined when another
+ * pass holds it.
+ */
+export function withPassLock<T>(fn: () => T, lockFile = priorityLockPath()): T | undefined {
+  mkdirSync(dirname(lockFile), { recursive: true });
+
+  try {
+    if (Date.now() - statSync(lockFile).mtimeMs > LOCK_STALE_MS) {
+      rmSync(lockFile, { force: true });
+    }
+  } catch {
+    // no lock file: nothing is running
+  }
+
+  let fd: number;
+
+  try {
+    fd = openSync(lockFile, "wx");
+  } catch {
+    return undefined;
+  }
+
+  try {
+    return fn();
+  } finally {
+    closeSync(fd);
+    rmSync(lockFile, { force: true });
+  }
 }
 
 /**
@@ -115,15 +170,14 @@ function serverPid(): number[] {
 
 export const defaultApplyDeps = (): ApplyDeps => ({
   enabled: () => loadRootLayers().cpuPriority,
-  procs: () => listEnvProcs(WORKSPACE_ENV),
+  procs: () => listEnvProcs(WORKSPACE_ENV, ROOT_ENV),
+  root: root(),
   classes: liveClasses,
   priorityClasses: () => loadRootLayers().checkClasses,
   extraProtected: serverPid,
   threads: threadIds,
   previous: () => readPriorityReport(),
-  run: (cmd) => {
-    Bun.spawnSync({ cmd, cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
-  },
+  run: (cmd) => Bun.spawnSync({ cmd, cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" }).exitCode === 0,
   write: (report) => writePriorityReport(report),
   policy: backgroundPolicy(),
   now: Date.now,
@@ -150,10 +204,17 @@ export function priorityCommand(args: readonly string[]): void {
   const json = rest.includes("--json") || action === "--json";
 
   if (action === "apply") {
-    const report = applyPriority(defaultApplyDeps());
+    const report = withPassLock(() => applyPriority(defaultApplyDeps()) ?? Error("could not list processes (ps failed or timed out)"));
 
     if (!report) {
-      throw new Error("overbridge priority apply: could not list processes (ps failed or timed out); nothing was changed");
+      // the pass already running does this one's work, so skipping is not a failure
+      console.log(`another pass is running (${priorityLockPath()}); skipped`);
+
+      return;
+    }
+
+    if (report instanceof Error) {
+      throw new Error(`overbridge priority apply: ${report.message}; nothing was changed`);
     }
 
     console.log(json ? JSON.stringify(report, null, 2) : formatReport(report));

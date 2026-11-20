@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { getRepo } from "./config";
 import { EXPLORE_TAB } from "./orchestration";
 import * as git from "./git";
-import { wsDir } from "./paths";
+import { root, wsDir } from "./paths";
 import { groupAlive } from "./proc";
 import type { AppSpec } from "./project-config";
 import { readState } from "./state";
@@ -155,10 +155,12 @@ export function startApp(ws: string, repo: string, spec: AppSpec, repoDir: strin
 
   const cwd = appCwd(spec, repoDir);
   const log = openSync(logPath(ws, repo, spec.id), "w");
+  // marks the app as the workspace's, so the CPU priority pass gives it the workspace's class; a tab such as @explore is no workspace
+  const env = { ...process.env, OVERBRIDGE_NAME: ws.startsWith("@") ? "" : ws, OVERBRIDGE_ROOT: root() };
 
   try {
     if (spec.prepare) {
-      const p = Bun.spawnSync({ cmd: ["sh", "-c", withPort(spec.prepare, port)], cwd, stdout: log, stderr: log, stdin: "ignore" });
+      const p = Bun.spawnSync({ cmd: ["sh", "-c", withPort(spec.prepare, port)], cwd, env, stdout: log, stderr: log, stdin: "ignore" });
 
       if (p.exitCode !== 0) fail(`${spec.id}: prepare failed (exit ${p.exitCode}); see ${logPath(ws, repo, spec.id)}`);
     }
@@ -166,6 +168,7 @@ export function startApp(ws: string, repo: string, spec: AppSpec, repoDir: strin
     const proc = Bun.spawn({
       cmd: ["sh", "-c", withPort(spec.start, port)],
       cwd,
+      env,
       stdout: log,
       stderr: log,
       stdin: "ignore",

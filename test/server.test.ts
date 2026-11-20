@@ -9,7 +9,7 @@ import { staleCandidates } from "../src/merge-sweep";
 import { serverRefresh, serverRefreshAll } from "../src/server-client";
 import type { ServerStatus } from "../src/server-cmd";
 import { withState } from "../src/state";
-import { BUILD_HEADER, call, claimStart, notifyRefresh, socketPath, START_LOCK_MS, startServer, takePidFile, VERSION_HEADER } from "../src/server-net";
+import { BUILD_HEADER, call, claimStart, mayStartServer, notifyRefresh, socketPath, START_LOCK_MS, startServer, takePidFile, VERSION_HEADER } from "../src/server-net";
 import { pidAlive } from "../src/proc";
 import type { TopCache } from "../src/top";
 
@@ -355,11 +355,18 @@ describe("pid file", () => {
 describe("start throttle", () => {
   test("a start is attempted once per window", () => {
     const spawned: string[][] = [];
-    expect(startServer((c) => spawned.push(c), 1_000_000)).toBe(true);
-    expect(startServer((c) => spawned.push(c), 1_000_000 + START_LOCK_MS - 1)).toBe(false);
+    expect(startServer((c) => spawned.push(c), 1_000_000, true)).toBe(true);
+    expect(startServer((c) => spawned.push(c), 1_000_000 + START_LOCK_MS - 1, true)).toBe(false);
     expect(spawned).toHaveLength(1);
     expect(spawned[0]!.at(-1)).toBe("serve");
     expect(claimStart(Date.now() + START_LOCK_MS * 2)).toBe(true);
+  });
+
+  test("a reniced workspace process leaves the start to a nice-0 caller, so the server never inherits its nice", () => {
+    expect(mayStartServer({ OVERBRIDGE_NAME: "a" }, 5)).toBe(false);
+    expect(mayStartServer({ OVERBRIDGE_NAME: "a" }, 0)).toBe(true);
+    expect(mayStartServer({}, 5)).toBe(true);
+    expect(startServer(() => expect.unreachable("started a server"), 2_000_000, false)).toBe(false);
   });
 });
 

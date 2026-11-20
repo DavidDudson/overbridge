@@ -11,6 +11,9 @@ import { isBoolean, isNumber, isRecord, isString, type Json } from "./util";
 /** The environment variable a workspace's agent and apps start with. */
 export const WORKSPACE_ENV = "OVERBRIDGE_NAME";
 
+/** The environment variable naming the root a workspace's processes belong to; two roots can share a workspace name. */
+export const ROOT_ENV = "OVERBRIDGE_ROOT";
+
 const MUX_COMMANDS: ReadonlySet<string> = new Set(["zellij", "tmux"]);
 
 /** How Darwin background is applied: only macOS has it. */
@@ -47,6 +50,8 @@ export interface PriorityPlan {
 
 export interface PlanInput {
   procs: readonly EnvProc[];
+  /** This root: a process that set another root's `OVERBRIDGE_ROOT` belongs to that root's workspace, not ours. */
+  root: string;
   /** Processes never touched, on top of the multiplexers and their ancestors (the overbridge server). */
   extraProtected: readonly number[];
   /** Each live workspace's target; a process of any other workspace is left alone. */
@@ -86,7 +91,7 @@ export function protectedPids(procs: readonly EnvProc[], extraProtected: readonl
  * Each process's workspace: the nearest ancestor-or-self that set `OVERBRIDGE_NAME` (a value that differs from its
  * parent's, not one it inherited), stopping at a protected process.
  */
-export function workspaceOf(procs: readonly EnvProc[], protectedSet: ReadonlySet<number>): Map<number, string> {
+export function workspaceOf(procs: readonly EnvProc[], protectedSet: ReadonlySet<number>, root: string): Map<number, string> {
   const byPid = new Map(procs.map((p) => [p.pid, p]));
   const memo = new Map<number, string | undefined>();
 
@@ -103,8 +108,9 @@ export function workspaceOf(procs: readonly EnvProc[], protectedSet: ReadonlySet
 
     const parent = byPid.get(p.ppid);
     const setsOwnEnv = p.env !== undefined && p.env !== parent?.env;
+    const foreign = p.root !== undefined && p.root !== root;
     // an empty value (an orchestration tab) is set on purpose and means no workspace
-    const found = setsOwnEnv ? p.env || undefined : owner(p.ppid, new Set([...seen, pid]));
+    const found = setsOwnEnv ? (foreign ? undefined : p.env || undefined) : owner(p.ppid, new Set([...seen, pid]));
     memo.set(pid, found);
 
     return found;
@@ -119,7 +125,7 @@ export function workspaceOf(procs: readonly EnvProc[], protectedSet: ReadonlySet
 
 /** What to renice and move in or out of Darwin background, and the report to keep. */
 export function planPriority(input: PlanInput): PriorityPlan {
-  const owners = workspaceOf(input.procs, protectedPids(input.procs, input.extraProtected));
+  const owners = workspaceOf(input.procs, protectedPids(input.procs, input.extraProtected), input.root);
   const members = (ws: string) => input.procs.filter((p) => owners.get(p.pid) === ws);
   const darwin = input.policy === BackgroundPolicy.Darwin;
 
@@ -153,7 +159,27 @@ export function planPriority(input: PlanInput): PriorityPlan {
   };
 }
 
+/**
+ * `report` with each workspace's `backgroundPids` corrected for the `taskpolicy` calls that failed: a pid whose
+ * `-b` failed is not in background, and one whose `-B` failed still is, so a later pass retries it. A workspace
+ * that left the report keeps an entry while any of its pids is still in background.
+ */
+export function settleReport(report: PriorityReport, previous: PriorityReport["workspaces"], failedBackground: ReadonlySet<number>, failedForeground: ReadonlySet<number>): PriorityReport {
+  const stillBackground = (ws: string) => (previous[ws]?.backgroundPids ?? []).filter((pid) => failedForeground.has(pid));
+
+  const kept = Object.fromEntries(
+    Object.entries(previous).flatMap(([ws, w]): [string, WorkspacePriority][] => (ws in report.workspaces || !stillBackground(ws).length ? [] : [[ws, { ...w, backgroundPids: stillBackground(ws) }]])),
+  );
+
+  const current = Object.fromEntries(
+    Object.entries(report.workspaces).map(([ws, w]): [string, WorkspacePriority] => [ws, { ...w, backgroundPids: [...new Set([...w.backgroundPids.filter((pid) => !failedBackground.has(pid)), ...stillBackground(ws)])] }]),
+  );
+
+  return { at: report.at, workspaces: { ...kept, ...current } };
+}
+
 export const priorityReportPath = () => join(metaDir(), "cpu-priority.json");
+export const priorityLockPath = () => join(metaDir(), "cpu-priority.lock");
 
 const isPidList = (v: unknown): v is number[] => Array.isArray(v) && v.every((n) => isNumber(n));
 
