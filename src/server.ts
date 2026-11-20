@@ -11,6 +11,7 @@ import { startWatchdog } from "./server-watchdog";
 import { createSweeper } from "./server-sweep";
 import { readState } from "./state";
 import { claimSweep } from "./sweep-trigger";
+import { PRIORITY_PASS_MS, startPriorityPass } from "./cpu-priority-run";
 import { type PrefetchedPrs, type PrView, readTopCache, type TopCache } from "./top";
 import { PrBatcher } from "./pr-batch";
 import { createWorklistRefresher } from "./server-worklist";
@@ -722,6 +723,17 @@ export async function serve(): Promise<void> {
       }),
     SWEEP_TICK_MS,
   );
+  // one pass at a time: a slow `ps` is skipped over, never stacked
+  let priorityPassRunning = false;
+  setInterval(() => {
+    if (exiting || priorityPassRunning) return;
+    priorityPassRunning = true;
+    startPriorityPass()
+      .catch((e: Error) => log(`priority pass failed: ${e.message}`))
+      .finally(() => {
+        priorityPassRunning = false;
+      });
+  }, PRIORITY_PASS_MS);
   setInterval(() => {
     if (handler.idleForMs() >= IDLE_EXIT_MS && !handler.busy()) void shutdown();
   }, 30_000);

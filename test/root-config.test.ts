@@ -119,6 +119,18 @@ describe("loadRootLayers", () => {
     expect(thrown(() => loadRootLayers())).toContain("priority-classes[0].default: expected true or false");
   });
 
+  test("a class may set its nice (1 to 19) and Darwin background", () => {
+    writeRoot("priority-classes:\n  - { name: hot, icon: a, nice: 2 }\n  - { name: cold, icon: b, background: true }\n");
+    expect(loadRootLayers().checkClasses).toEqual([
+      { name: "hot", icon: "a", nice: 2 },
+      { name: "cold", icon: "b", background: true },
+    ]);
+    writeRoot("priority-classes:\n  - { name: hot, icon: a, nice: 0 }\n");
+    expect(thrown(() => loadRootLayers())).toContain("priority-classes[0].nice: expected a whole number from 1 to 19");
+    writeRoot("priority-classes:\n  - { name: hot, icon: a, background: 1 }\n");
+    expect(thrown(() => loadRootLayers())).toContain("priority-classes[0].background: expected true or false");
+  });
+
   test("priority-classes must be a non-empty list of distinct names with one default at most", () => {
     writeRoot("priority-classes: []\n");
     expect(thrown(() => loadRootLayers())).toContain("priority-classes: expected a non-empty list");

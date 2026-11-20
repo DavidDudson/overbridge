@@ -144,7 +144,9 @@ export function spawnServer(): void {
 }
 
 function defaultSpawn(cmd: string[]) {
-  Bun.spawn({ cmd, cwd: process.env.HOME ?? "/", stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
+  // blank the workspace a hook's Claude passes down, so the CPU priority pass never counts the server as that workspace's
+  const env = { ...process.env, OVERBRIDGE_NAME: "" };
+  Bun.spawn({ cmd, cwd: process.env.HOME ?? "/", env, stdin: "ignore", stdout: "ignore", stderr: "ignore", detached: true }).unref();
 }
 
 /**

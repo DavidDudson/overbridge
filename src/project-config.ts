@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_KINDS, AgentKind } from "./agent-kind";
-import { DEFAULT_CLASSES, type PriorityClass, type PriorityRule } from "./check-priority";
+import { DEFAULT_CLASSES, MAX_NICE, MIN_WORKSPACE_NICE, type PriorityClass, type PriorityRule } from "./check-priority";
 import { repoOf, root, worktreePath } from "./paths";
 import { loadRepos } from "./config";
 import { slugFromUrl, WORKLIST_SCOPES, type WorklistScope } from "./pm/board-github";
@@ -815,7 +815,7 @@ export function checkClassNames(queue: Pick<CheckQueue, "priority" | "priorityRu
   return [...fallback, ...rules];
 }
 
-/** The root `priority-classes`: a list of `{ name, icon, default? }`, highest first. */
+/** The root `priority-classes`: a list of `{ name, icon, default?, nice?, background? }`, highest first. */
 function parseClasses(p: Problems, raw: JsonObject): PriorityClass[] | undefined {
   const list = raw["priority-classes"];
 
@@ -836,15 +836,31 @@ function parseClasses(p: Problems, raw: JsonObject): PriorityClass[] | undefined
       return [];
     }
 
-    p.unknownKeys(entry, ["name", "icon", "default"], at);
+    p.unknownKeys(entry, ["name", "icon", "default", "nice", "background"], at);
     const name = p.string(entry, "name", at, true);
     const icon = p.string(entry, "icon", at, true);
 
     if (entry.default !== undefined && !isBoolean(entry.default)) p.add(`${at}.default`, "expected true or false");
 
+    if (entry.background !== undefined && !isBoolean(entry.background)) p.add(`${at}.background`, "expected true or false");
+    const nice = entry.nice;
+    const niceOk = isNumber(nice) && Number.isInteger(nice) && nice >= MIN_WORKSPACE_NICE && nice <= MAX_NICE;
+
+    if (nice !== undefined && !niceOk) {
+      p.add(`${at}.nice`, `expected a whole number from ${MIN_WORKSPACE_NICE} to ${MAX_NICE} (0 belongs to the multiplexer and the sidebars), got ${JSON.stringify(nice)}`);
+    }
+
     if (!name || !icon) return [];
 
-    return [entry.default === true ? { name, icon, default: true } : { name, icon }];
+    const cls: PriorityClass = { name, icon };
+
+    if (entry.default === true) cls.default = true;
+
+    if (niceOk) cls.nice = nice;
+
+    if (entry.background === true) cls.background = true;
+
+    return [cls];
   });
 
   const names = classes.map((c) => c.name);
