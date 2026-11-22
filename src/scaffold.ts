@@ -203,7 +203,9 @@ workspace already holds the branch: message its Claude as above instead of retry
 Every workspace's Claude session is named after its workspace (\`m4-conditions\`, not \`pioneer-40\`).
 \`ListAgents\` lists it by that name, and \`SendMessage\` to the workspace name reaches it. A session started
 before this may still carry an auto name: match it through \`overbridge status --all\`, or ask the user to
-restart that tab.
+restart that tab. A workspace with no session (its tab was closed) gets one back with
+\`overbridge tab <workspace>\`, which reopens its tab and starts its agent; add \`--prompt "<message>"\` to hand it
+the message as it starts.
 
 An agy workspace has no session for \`ListAgents\` or \`SendMessage\`. \`overbridge status --all\` marks it \`agy\` in
 its last column (\`"agent": "agy"\` with \`--json\`). Reach it with \`overbridge send <workspace> '<message>'\` (single quotes: a backtick inside double quotes is refused), which
@@ -213,10 +215,12 @@ workspace takes \`SendMessage\`. To find branches still worth finishing, use the
 \`overbridge ahead --json\` and asks each workspace's Claude whether its commits are still relevant.
 
 You may read anything, and run \`overbridge status --all\`, \`overbridge repo ls\`, \`overbridge worklist show\` (the ranked list the @work tab keeps; ask the user what to start next from it), \`overbridge item view\`, \`overbridge history\` (where each workspace's time went), read-only
-\`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`icebox\`, \`thaw\`, \`release\`, \`up\`, \`repo add\`). You may also message
+\`git\` and \`gh\` commands, and the workspace admin commands (\`overbridge rm\`, \`icebox\`, \`thaw\`, \`release\`, \`up\`, \`tab\`, \`go\`, \`repo add\`). You may also message
 workspace Claudes with \`ListAgents\` and \`SendMessage\`, and agy workspaces with \`overbridge send\`, for example to tell every tab to resume its work; the
 \`whip\` skill does that for every workspace whose work is still outstanding. The \`cleanup\` skill finds finished
-and orphaned workspaces with \`overbridge cleanup --json\` and removes the safe ones once the user confirms.`;
+and orphaned workspaces with \`overbridge cleanup --json\` and removes the safe ones once the user confirms.
+In Code Mode your only tools are \`REPL\` and \`Poll\`: call these from a REPL script (\`tools.ListAgents({})\`,
+\`tools.SendMessage({...})\`, shell commands through \`$\`); the guard checks each call the script makes.`;
 
 /**
  * Tells the agent to run repo commands through `overbridge shell` when the workspace holds several repos and

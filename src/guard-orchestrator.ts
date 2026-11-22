@@ -16,8 +16,9 @@ export const START_HINT =
 const blocked = (what: string) => `the orchestrator only coordinates, so ${what} is not allowed here. ${START_HINT}`;
 
 /**
- * Tools that cannot change anything, whose own tool calls come back through this hook (Agent, Skill), or that
- * only talk to other Claude sessions (ListAgents, SendMessage), which run their own guards.
+ * Tools that cannot change anything, whose own tool calls come back through this hook (Agent, Skill, and Code
+ * Mode's REPL, whose scripts' Bash, Read and Write calls each fire PreToolUse), or that only talk to other Claude
+ * sessions (ListAgents, SendMessage), which run their own guards.
  */
 const ALLOWED_TOOLS = new Set([
   "Read",
@@ -36,6 +37,8 @@ const ALLOWED_TOOLS = new Set([
   "EnterPlanMode",
   "ExitPlanMode",
   "BashOutput",
+  "REPL",
+  "Poll",
   "ListAgents",
   "SendMessage",
   "ListMcpResourcesTool",
@@ -134,6 +137,8 @@ const OVERBRIDGE_ALLOWED = new Map<string, readonly string[]>(
     icebox: [],
     thaw: [],
     send: [],
+    tab: [],
+    go: [],
     cleanup: [],
     release: [],
     up: [],
