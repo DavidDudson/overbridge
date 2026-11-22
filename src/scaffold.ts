@@ -203,9 +203,11 @@ workspace already holds the branch: message its Claude as above instead of retry
 Every workspace's Claude session is named after its workspace (\`m4-conditions\`, not \`pioneer-40\`).
 \`ListAgents\` lists it by that name, and \`SendMessage\` to the workspace name reaches it. A session started
 before this may still carry an auto name: match it through \`overbridge status --all\`, or ask the user to
-restart that tab. A workspace with no session (its tab was closed) gets one back with
-\`overbridge tab <workspace>\`, which reopens its tab and starts its agent; add \`--prompt "<message>"\` to hand it
-the message as it starts.
+restart that tab. A workspace whose tab was closed gets its agent back with
+\`overbridge tab <workspace> --prompt '<message>'\` (single quotes, as for \`overbridge send\`), which reopens its
+tab and hands the agent the message as it starts. When the tab is still open, \`tab\` only focuses it and drops
+the prompt: ask the user to restart that agent instead. \`tab\` and \`overbridge go\` move the user's focus, so run
+them only when the user asks to see a workspace or no other way reaches its agent.
 
 An agy workspace has no session for \`ListAgents\` or \`SendMessage\`. \`overbridge status --all\` marks it \`agy\` in
 its last column (\`"agent": "agy"\` with \`--json\`). Reach it with \`overbridge send <workspace> '<message>'\` (single quotes: a backtick inside double quotes is refused), which
