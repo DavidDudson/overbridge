@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PrBatcher } from "../src/pr-batch";
-import { DEFAULT_PAUSE_MS, isRateLimited, MAX_PAUSE_MS, MIN_PAUSE_MS, RateGate } from "../src/rate-limit";
+import { DEFAULT_PAUSE_MS, ghResetLookup, GitHubApi, isRateLimited, limitedApi, MAX_PAUSE_MS, MIN_PAUSE_MS, RateGate } from "../src/rate-limit";
 import { createHandler } from "../src/server";
 import { Cache } from "../src/server-cache";
 import { formatStatus, keyRows, readStatus, type ServerStatus, stopServer } from "../src/server-cmd";
@@ -71,6 +71,48 @@ describe("rate limit gate", () => {
     expect(await at(1_000)).toBe(MIN_PAUSE_MS);
     expect(await at(10 * 3_600_000)).toBe(MAX_PAUSE_MS);
     expect(await at(undefined)).toBe(DEFAULT_PAUSE_MS);
+  });
+
+  test("tells a GraphQL limit from a REST one", () => {
+    expect(limitedApi("GraphQL: API rate limit already exceeded for user ID 1.")).toBe(GitHubApi.GraphQL);
+    expect(limitedApi(`{"errors":[{"type":"RATE_LIMITED"}]}`)).toBe(GitHubApi.GraphQL);
+    expect(limitedApi("gh: API rate limit exceeded for user ID 1 (HTTP 403)")).toBe(GitHubApi.Rest);
+  });
+
+  test("a GraphQL limit pauses until the reset GraphQL reports", async () => {
+    const asked: GitHubApi[] = [];
+    const graphqlReset = 40 * 60_000;
+
+    const gate = new RateGate({
+      now: () => 0,
+      lookupReset: async (api) => {
+        asked.push(api);
+
+        return api === GitHubApi.GraphQL ? graphqlReset : 10 * 60_000;
+      },
+    });
+
+    gate.observe("GraphQL: API rate limit already exceeded for user ID 1.");
+    await settle();
+    expect(asked).toEqual([GitHubApi.GraphQL]);
+    expect(gate.stats().untilMs).toBe(graphqlReset);
+  });
+
+  test("the reset lookup reads GraphQL's own rateLimit field for GraphQL and rate_limit for REST", async () => {
+    const calls: string[][] = [];
+
+    const gh = async (args: string[]) => {
+      calls.push(args);
+
+      return args[1] === "graphql" ? "2026-11-17T05:00:00Z" : "1763355600";
+    };
+
+    expect(await ghResetLookup(GitHubApi.GraphQL, gh)).toBe(Date.parse("2026-11-17T05:00:00Z"));
+    expect(calls[0]).toEqual(["api", "graphql", "-f", "query=query{rateLimit{resetAt}}", "--jq", ".data.rateLimit.resetAt"]);
+    expect(await ghResetLookup(GitHubApi.Rest, gh)).toBe(1763355600 * 1000);
+    expect(calls[1]?.slice(0, 2)).toEqual(["api", "rate_limit"]);
+    expect(await ghResetLookup(GitHubApi.GraphQL, async () => "")).toBeUndefined();
+    expect(await ghResetLookup(GitHubApi.Rest, async () => "")).toBeUndefined();
   });
 
   test("another failure during a pause does not count as a new trip", () => {
