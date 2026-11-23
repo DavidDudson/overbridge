@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type EstimateStore, estimateFor, estimateKey, estimatesFile, etaSlots, formatDuration, KEPT_RUNS, queueEtas, readEstimates, recordRunTime, seedEstimates, withRun, workspaceDone } from "../src/check-estimate";
+import { type EstimateStore, estimateFor, estimateKey, estimatesFile, etaSlots, etaSummary, formatDuration, lastDoneMs, seedRuns, KEPT_RUNS, queueEtas, readEstimates, recordRunTime, seedEstimates, withRun, workspaceDone } from "../src/check-estimate";
 import type { Ticket } from "../src/check-queue";
+import type { CheckRecord } from "../src/history";
 
 const NOW_MS = 1_000_000;
 
@@ -71,6 +72,12 @@ describe("queueEtas", () => {
     expect(etas.get("3")).toEqual({ startMs: undefined, doneMs: undefined, runMs: 60_000 });
   });
 
+  test("with two lanes, a busy lane with no estimate still blocks the start, though the other lane is free", () => {
+    const unknown = ticket(1, { runPid: 10, runningSinceMs: NOW_MS, command: "make lint" });
+    const etas = queueEtas({ running: [unknown], waiting: [ticket(2)] }, store, 2, NOW_MS, name);
+    expect(etas.get("2")).toEqual({ startMs: undefined, doneMs: undefined, runMs: 60_000 });
+  });
+
   test("an unknown check waiting ahead blocks the start of those after it", () => {
     const etas = queueEtas({ running: [], waiting: [ticket(1, { command: "make lint" }), ticket(2)] }, store, 1, NOW_MS, name);
     expect(etas.get("1")).toEqual({ startMs: 0, doneMs: undefined, runMs: undefined });
@@ -110,7 +117,13 @@ describe("the store file", () => {
     writeFileSync(estimatesFile(dir), "{oops");
     expect(readEstimates(dir)).toEqual({});
     writeFileSync(estimatesFile(dir), JSON.stringify({ "cmd app a": [1, "x"], "cmd app b": [2], "group app test": [3] }));
-    expect(readEstimates(dir)).toEqual({ "cmd app b": [2] });
+    expect(readEstimates(dir)).toEqual({ "cmd app b": [2], "group app test": [3] });
+  });
+
+  test("a run keeps keys this build does not read, so an older build sharing the file keeps them", () => {
+    writeFileSync(estimatesFile(dir), JSON.stringify({ "group app test": [3] }));
+    recordRunTime(dir, "app", "just test", 12_000);
+    expect(readEstimates(dir)).toEqual({ "group app test": [3], [estimateKey("app", "just test")]: [12_000] });
   });
 
   test("seeding builds a missing store and never replaces one", () => {
@@ -119,6 +132,34 @@ describe("the store file", () => {
     seedEstimates(dir, [{ repo: "app", command: "just test", runMs: 99_000 }]);
     expect(JSON.parse(readFileSync(estimatesFile(dir), "utf8"))).toEqual(readEstimates(dir));
     expect(estimateFor(readEstimates(dir), "app", "just test")?.runMs).toBe(30_000);
+  });
+});
+
+test("lastDoneMs is the latest finish, or undefined when any is unknown", () => {
+  expect([lastDoneMs([]), lastDoneMs([5_000, 9_000]), lastDoneMs([5_000, undefined])]).toEqual([0, 9_000, undefined]);
+});
+
+test.each([
+  [undefined, ""],
+  [{ startMs: undefined, doneMs: undefined, runMs: undefined }, ""],
+  [{ startMs: 120_000, doneMs: undefined, runMs: undefined }, "; estimated start in ~2m00s"],
+  [{ startMs: undefined, doneMs: undefined, runMs: 190_000 }, "; run ~3m10s"],
+  [{ startMs: 120_000, doneMs: 310_000, runMs: 190_000 }, "; estimated start in ~2m00s, run ~3m10s"],
+])("etaSummary(%o) is %p", (eta, text) => expect(etaSummary(eta)).toBe(text));
+
+describe("seedRuns", () => {
+  const checkRecord = (at: number, extra: Partial<CheckRecord> = {}): CheckRecord => ({ kind: "check", at, repo: "app", command: "just test", full: "just test a.ts", cls: "test", queuedMs: 0, runMs: 30_000, exit: 0, ...extra });
+  const record = (at: number, extra: Partial<CheckRecord> = {}) => ({ record: checkRecord(at, extra) });
+
+  test.each([
+    ["a finished run is kept under its full command", record(1), [{ repo: "app", command: "just test a.ts", runMs: 30_000 }]],
+    ["a run with no full command is dropped", record(1, { full: undefined }), []],
+    ["a killed run is dropped", record(1, { killed: true }), []],
+    ["a run that never started is dropped", record(1, { runMs: 0 }), []],
+  ])("%s", (_, input, expected) => expect(seedRuns([input])).toEqual(expected));
+
+  test("newest-first history seeds oldest first", () => {
+    expect(seedRuns([record(2, { runMs: 2_000 }), record(1, { runMs: 1_000 })]).map((r) => r.runMs)).toEqual([1_000, 2_000]);
   });
 });
 

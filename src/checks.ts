@@ -1,6 +1,6 @@
 import { Outcome, outcomeOf, type QueueView, type Ticket, ticketKey, ticketName } from "./check-queue";
 import { type Move, movedIndex, type QueueOverrides, spreadKeys } from "./check-priority";
-import { type EstimateStore, type Eta, etaSlots, formatDuration, queueEtas, workspaceDone } from "./check-estimate";
+import { type EstimateStore, type Eta, etaSlots, formatDuration, lastDoneMs, queueEtas, workspaceDone } from "./check-estimate";
 import type { CheckRecord, HistoryStore } from "./history";
 import { bold, boxBottom, type Color, boxRow, boxTop, cell, colorize, dim, fit, inverse, stripControl, textWidth } from "./term";
 
@@ -76,7 +76,7 @@ export interface ChecksView {
   now: number;
 }
 
-/** The queue view's estimates: each ticket's ETA by `ticketName`, when each workspace's checks should be done, and when the whole queue should be empty (undefined when any check has no estimate). */
+/** The queue view's estimates: each ticket's ETA by `ticketName`, each workspace's done time, and when the queue should be empty. */
 export interface QueueEstimates {
   etas: ReadonlyMap<string, Eta>;
   wsDoneMs: ReadonlyMap<string, number>;
@@ -88,10 +88,8 @@ const NO_ESTIMATES: QueueEstimates = { etas: new Map(), wsDoneMs: new Map() };
 /** Estimates for a live queue from past run times; `maxParallel` caps the lanes when known. */
 export function queueEstimates(queue: QueueView, store: EstimateStore, now: number, maxParallel?: number): QueueEstimates {
   const etas = queueEtas(queue, store, etaSlots(queue.running.length, maxParallel), now, ticketName);
-  const done = [...etas.values()].map((eta) => eta.doneMs);
-  const clearMs = done.every((ms) => ms !== undefined) ? Math.max(0, ...done) : undefined;
 
-  return { etas, wsDoneMs: workspaceDone(queue, etas, ticketName), clearMs };
+  return { etas, wsDoneMs: workspaceDone(queue, etas, ticketName), clearMs: lastDoneMs([...etas.values()].map((eta) => eta.doneMs)) };
 }
 
 const EST_COLUMNS = 7;

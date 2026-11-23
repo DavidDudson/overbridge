@@ -3,7 +3,7 @@ import { availableParallelism, constants, loadavg } from "node:os";
 import { dirname, join } from "node:path";
 import { defaultKey, type QueueOverrides, readOverrides } from "./check-priority";
 import { type CheckRecord, classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
-import { etaSlots, formatDuration, queueEtas, readEstimates, recordRunTime } from "./check-estimate";
+import { etaSlots, etaSummary, queueEtas, readEstimates, recordRunTime } from "./check-estimate";
 import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidsAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
@@ -367,14 +367,8 @@ const label = (t: Ticket) => `${t.ws}/${t.repo}: ${t.command}`;
 function etaLine(me: Ticket, live: Ticket[], settings: CheckQueue, now: number, dir: string): string {
   const store = readEstimates(dirname(dir));
   const queue = queueView(live);
-  const eta = queueEtas(queue, store, etaSlots(queue.running.length, settings.maxParallel), now, ticketName).get(ticketName(me));
 
-  const parts = [
-    ...(eta?.startMs === undefined ? [] : [`estimated start in ~${formatDuration(eta.startMs)}`]),
-    ...(eta?.runMs === undefined ? [] : [`run ~${formatDuration(eta.runMs)}`]),
-  ];
-
-  return parts.length ? `; ${parts.join(", ")}` : "";
+  return etaSummary(queueEtas(queue, store, etaSlots(queue.running.length, settings.maxParallel), now, ticketName).get(ticketName(me)));
 }
 
 /** Wait until `me` may start (see `gateFor`); false when `deadlineMs` passes first. */

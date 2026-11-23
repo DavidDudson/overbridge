@@ -1,14 +1,14 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ticket } from "./check-queue";
-import { redactCommand } from "./history";
+import { type CheckRecord, redactCommand } from "./history";
 import { isRecord } from "./util";
 
 /**
  * How long a check usually runs, and when each queued check should start and finish. Run times come from
  * `<meta>/check-estimates.json`: the last `KEPT_RUNS` run times per repo and exact command, appended as each run ends.
- * A command with no past run of its own gets no estimate: a similar command can take far longer or shorter. Reading it is one small file, so the sidebar, the @checks tab and `overbridge check`
- * all use it.
+ * Only that exact command's runs count, since a similar command can take far longer or shorter. Reading it is one
+ * small file, so the sidebar, the @checks tab and `overbridge check` all use it.
  */
 
 /** Recent run times (ms, oldest first) per key from `estimateKey`. */
@@ -42,7 +42,7 @@ const median = (values: readonly number[]) => {
 export function withRun(store: EstimateStore, repo: string, command: string, runMs: number): EstimateStore {
   const key = estimateKey(repo, command);
 
-  return Object.fromEntries([...Object.entries(store), [key, [...(store[key] ?? []), runMs].slice(-KEPT_RUNS)]]);
+  return Object.fromEntries([...Object.entries(store), [key, [...(store[key] ?? []), runMs].slice(-KEPT_RUNS)] as const]);
 }
 
 /** The usual run time of exactly `command` in `repo`, or undefined when that command has never finished there. */
@@ -54,12 +54,12 @@ export function estimateFor(store: EstimateStore, repo: string, command: string)
 
 const isRuns = (v: unknown): v is number[] => Array.isArray(v) && v.every((n) => Number.isFinite(n) && n >= 0);
 
-/** The store in `dir`; empty when it is missing or unreadable, since estimates are only a hint. Keys of another shape are dropped. */
+/** The store in `dir`; empty when it is missing or unreadable, since estimates are only a hint. Keys this build never reads are kept for older builds. */
 export function readEstimates(dir: string): EstimateStore {
   try {
     const parsed: unknown = JSON.parse(readFileSync(estimatesFile(dir), "utf8"));
 
-    return isRecord(parsed) ? Object.fromEntries(Object.entries(parsed).filter((e): e is [string, number[]] => e[0].startsWith(KEY_PREFIX) && isRuns(e[1]))) : {};
+    return isRecord(parsed) ? Object.fromEntries(Object.entries(parsed).filter((e): e is [string, number[]] => isRuns(e[1]))) : {};
   } catch {
     return {};
   }
@@ -76,10 +76,7 @@ export function recordRunTime(dir: string, repo: string, command: string, runMs:
   }
 }
 
-/**
- * When a check should start and finish, as ms from now. A field is undefined when it cannot be known: `runMs` when the
- * exact command has never finished, and `startMs`/`doneMs` when a check it waits on (or the check itself) has no `runMs`.
- */
+/** When a check should start and finish, as ms from now; each field is undefined when it cannot be known (see `queueEtas`). */
 export interface Eta {
   startMs?: number;
   doneMs?: number;
@@ -96,8 +93,8 @@ const sortLanes = (lanes: readonly Lane[]) => lanes.toSorted((a, b) => (a ?? Num
 
 /**
  * The ETA of every live ticket, keyed by `ticketName` (`nameOf`), from a queue in queue order. Runs share `slots` lanes:
- * a waiting check starts when the first lane frees up. A lane holding a check with no estimate could free at any time,
- * so while one is busy no later check gets a start.
+ * a waiting check starts when the first lane frees up. A check with no `runMs` has no `doneMs`, and while it holds a lane
+ * no later check gets a `startMs`, since that lane could free at any time.
  */
 export function queueEtas(
   queue: { running: readonly Ticket[]; waiting: readonly Ticket[] },
@@ -135,6 +132,9 @@ export function queueEtas(
 /** How many checks run at once in the estimate: what runs now, at least one, at most `maxParallel`. */
 export const etaSlots = (runningCount: number, maxParallel?: number) => Math.min(maxParallel ?? Number.POSITIVE_INFINITY, Math.max(1, runningCount));
 
+/** When the last of `doneMsList` finishes, or undefined when any of them is unknown. */
+export const lastDoneMs = (doneMsList: readonly (number | undefined)[]) => (doneMsList.every((ms) => ms !== undefined) ? Math.max(0, ...doneMsList) : undefined);
+
 /** When each workspace's queued checks should all be done, as ms from now; a workspace with any unknown `doneMs` is left out. */
 export function workspaceDone(queue: { running: readonly Ticket[]; waiting: readonly Ticket[] }, etas: ReadonlyMap<string, Eta>, nameOf: (t: Ticket) => string): Map<string, number> {
   const byWs = [...queue.running, ...queue.waiting].reduce(
@@ -142,8 +142,30 @@ export function workspaceDone(queue: { running: readonly Ticket[]; waiting: read
     new Map<string, (number | undefined)[]>(),
   );
 
-  return new Map([...byWs].flatMap(([ws, done]) => (done.every((ms) => ms !== undefined) ? [[ws, Math.max(0, ...done)] as const] : [])));
+  return new Map(
+    [...byWs].flatMap(([ws, doneMsList]) => {
+      const doneMs = lastDoneMs(doneMsList);
+
+      return doneMs === undefined ? [] : [[ws, doneMs] as const];
+    }),
+  );
 }
+
+/** `; estimated start in ~2m, run ~3m10s`, with each part only when it is known, or empty when neither is. */
+export function etaSummary(eta: Eta | undefined): string {
+  const parts = [
+    ...(eta?.startMs === undefined ? [] : [`estimated start in ~${formatDuration(eta.startMs)}`]),
+    ...(eta?.runMs === undefined ? [] : [`run ~${formatDuration(eta.runMs)}`]),
+  ];
+
+  return parts.length ? `; ${parts.join(", ")}` : "";
+}
+
+/** The runs to seed from `records` (newest first), oldest first: only finished, unkilled runs that recorded their full command. */
+export const seedRuns = (records: readonly { record: CheckRecord }[]) =>
+  records
+    .flatMap(({ record }) => (record.runMs > 0 && !record.killed && record.full !== undefined ? [{ repo: record.repo, command: record.full, runMs: record.runMs }] : []))
+    .toReversed();
 
 /** Seed a missing store from past check runs, oldest first, so estimates work before the next run ends. */
 export function seedEstimates(dir: string, runs: readonly { repo: string; command: string; runMs: number }[]) {

@@ -180,9 +180,30 @@ describe("queue estimates", () => {
     expect(lines[2]).toMatch(/▶ 20s\s+~1m00s\s+done ~40s\s+just test/);
     expect(lines[3]).toMatch(/⧗ 40s\s+~1m00s\s+start ~40s\s+just test/);
     expect(lines[4]).toMatch(/⧗ 30s\s+\?\s+start ~1m40s\s+make lint/);
-    expect(lines.at(-1)).toMatch(/1 running · 2 waiting$|1 running · 2 waiting ─/);
+    expect(lines.at(-1)).toContain("1 running · 2 waiting");
     expect(lines.at(-1)).not.toContain("clear");
+    expect(estimates.clearMs).toBeUndefined();
     expect(estimates.wsDoneMs.get("w2")).toBe(100_000);
     expect(estimates.wsDoneMs.has("w3")).toBe(false);
+  });
+
+  test("the border shows when the queue clears once every check has an estimate", () => {
+    const NOW_MS = 100_000;
+    const store = withRun({}, "app", "just test", 60_000);
+    const live = { running: [ticket(1, NOW_MS - 50_000, { runPid: 11, runningSinceMs: NOW_MS - 20_000 })], waiting: [ticket(2, NOW_MS - 40_000), ticket(3, NOW_MS - 30_000)] };
+    const estimates = queueEstimates(live, store, NOW_MS);
+    const lines = renderChecks(checkRows(live, {}), { selected: 9, offset: 0, height: 9, width: 140, message: "", now: NOW_MS }, estimates).map(strip);
+
+    expect(estimates.clearMs).toBe(160_000);
+    expect(lines.at(-1)).toContain("1 running · 2 waiting · clear ~2m40s");
+  });
+
+  test("a running check with no estimate shows no time left and is never overdue", () => {
+    const NOW_MS = 100_000;
+    const live = { running: [ticket(1, NOW_MS - 50_000, { runPid: 11, runningSinceMs: NOW_MS - 20_000, command: "make lint" })], waiting: [] };
+    const lines = renderChecks(checkRows(live, {}), { selected: 9, offset: 0, height: 9, width: 140, message: "", now: NOW_MS }, queueEstimates(live, {}, NOW_MS)).map(strip);
+
+    expect(lines[2]).toMatch(/▶ 20s\s+\?\s+make lint/);
+    expect(lines[2]).not.toMatch(/overdue|done ~/);
   });
 });
