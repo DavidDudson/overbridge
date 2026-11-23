@@ -144,7 +144,8 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - `src/claude-trust.ts` records Claude folder trust in `~/.claude.json` (`$CLAUDE_CONFIG_DIR` when set) for workspace
   folders only: `createWorkspace` and `claude()` trust, `removeWorkspace` untrusts. Claude rewrites that file while
   it runs, so change only the one key and write it with an atomic rename. `bunfig.toml` preloads
-  `test/helpers/isolate-claude-config.ts` so tests never touch the real file.
+  `test/helpers/isolate-env.ts` so tests never touch the real file; it also gives every test a temp `OVERBRIDGE_ROOT` and
+  clears the workspace's `OVERBRIDGE_NAME`/`SELF`/`SESSION`/`TAB`, so a run inside a workspace never reaches the real root.
 - `src/state.ts`: all claim mutations go through `withState()` (lockfile + atomic rename; throw = no write).
 - `test/e2e.test.ts` drives the real CLI against a temp `OVERBRIDGE_ROOT` and a local bare "remote".
 - Generated files (`<ws>/.claude/settings.json`, `<ws>/CLAUDE.md`, layout) come from
