@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { chainRefusal, withLocalBin } from "./check-command";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
 import type { PrChecksTarget } from "./pr-checks";
@@ -739,13 +740,15 @@ export function claudeOrchestration(t: OrchestrationTab, extra: string[]): never
 
 /** `overbridge shell <repo> -- <cmd>`: run `cmd` in the repo's dev shell, or as it is when the repo has none. */
 /** `cmd` in `repo`'s dev shell, run from the cwd when it is inside the worktree, else from the worktree. */
-function inRepoShell(ws: string, repo: string, cmd: string[]) {
+/** `argvFor` can rewrite the command from the repo's config, the directory it runs in, and the worktree. */
+function inRepoShell(ws: string, repo: string, cmd: string[], argvFor = (_config: ProjectConfig, _cwd: string, _dir: string) => cmd) {
   if (!getWorkspace(readState(), ws).repos[repo]) fail(`${repo} is not in ${ws}`);
   const dir = worktreePath(ws, repo);
   const here = process.cwd();
   const config = loadRepoConfig(dir, repo);
+  const cwd = isInside(here, dir) ? here : dir;
 
-  return { config, inv: shellInvocation(repo, dir, config.shell, cmd, isInside(here, dir) ? here : dir) };
+  return { config, inv: shellInvocation(repo, dir, config.shell, argvFor(config, cwd, dir), cwd) };
 }
 
 export function shell(repo: string, cmd: string[], wsOpt?: string) {
@@ -771,7 +774,13 @@ export async function check(repoArg: string | undefined, cmd: string[], wsOpt?: 
     (repos.length === 1 ? repos[0] : undefined) ??
     fail(`name the repo to check in: overbridge check <repo> -- <cmd> (${ws} holds ${repos.join(", ") || "no repos"})`);
 
-  const { config, inv } = inRepoShell(ws, repo, cmd);
+  const chained = chainRefusal(cmd, repo);
+
+  if (chained) {
+    fail(chained);
+  }
+
+  const { config, inv } = inRepoShell(ws, repo, cmd, (repoConfig, cwd, dir) => withLocalBin(cmd, cwd, dir, repoConfig.checkQueue.binDirs));
   const command = cmd.map(shellQuote).join(" ");
   const scope = config.checkScope;
   const refusal = scope.mode === CheckScopeMode.Off ? undefined : scopeRefusal(cmd, scope.maxProjects, process.env);

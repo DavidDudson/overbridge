@@ -4,7 +4,9 @@ import { agentDirOf } from "./layout";
 import { excludeInRepo } from "./git";
 import { ghReposCache, metaDir, ORCHESTRATION_ENV, orchestrationPlansDir, PLANS_DIR, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { pluginSettings } from "./plugins";
-import { loadRepoConfig, rootMcpServers } from "./project-config";
+import { defaultIde, fileLinkSection } from "./file-links";
+import { type IdeConfig, ideFromEnv } from "./ide";
+import { loadRepoConfig, resolveConfig, rootConfigPath, rootMcpServers } from "./project-config";
 import { agentOf, getWorkspace, readState } from "./state";
 import { AgentKind } from "./agent-kind";
 import { scaffoldAgy } from "./agy";
@@ -43,7 +45,7 @@ export function scaffold(ws: string) {
   mkdirSync(dirname(workspaceSettingsPath(ws)), { recursive: true });
   writeFileSync(workspaceSettingsPath(ws), settings);
   excludePlans(ws);
-  const brief = claudeMd(ws, dir, devShellSection(ws));
+  const brief = claudeMd(ws, dir, devShellSection(ws) + fileLinkSection(workspaceIde(ws)));
   writeFileSync(join(dir, "CLAUDE.md"), brief);
 
   if (agentOf(readState().workspaces[ws]) === AgentKind.Agy) scaffoldAgy(ws, brief);
@@ -164,6 +166,42 @@ export function scaffoldPlugins(): string {
   return file;
 }
 
+/**
+ * The `ide` a workspace's file links follow: the first repo whose config sets one, else the root `defaults`,
+ * else `$OVERBRIDGE_IDE`, as the top panel's editor button does. A config that does not load is skipped with a
+ * warning: the generated files must never block a launch.
+ */
+function workspaceIde(ws: string): IdeConfig | undefined {
+  const fromRepos = Object.keys(getWorkspace(readState(), ws).repos).flatMap((repo) => {
+    try {
+      return [loadRepoConfig(worktreePath(ws, repo), repo).ide];
+    } catch (e) {
+      log(`warning: ${errorMessage(e)}\n${repo}'s ide is left out of the file links in CLAUDE.md`);
+
+      return [];
+    }
+  });
+
+  return fromRepos.find((ide) => ide !== undefined) ?? rootIde();
+}
+
+/** The root `defaults` layer's `ide`, else `$OVERBRIDGE_IDE`; undefined when neither names one. */
+function rootIde(env: NodeJS.ProcessEnv = process.env): IdeConfig | undefined {
+  try {
+    const ide = resolveConfig(undefined, undefined, rootConfigPath()).ide;
+
+    if (ide) {
+      return ide;
+    }
+  } catch (e) {
+    log(`warning: ${errorMessage(e)}\nfile links follow $OVERBRIDGE_IDE alone`);
+  }
+
+  const name = ideFromEnv(env.OVERBRIDGE_IDE);
+
+  return name && defaultIde(name);
+}
+
 /** The orchestrator's brief, appended to its system prompt: it coordinates and starts workspaces for all work. */
 export const orchestratorPrompt = () => `You are the overbridge orchestrator, running in the overbridge root (${root()}).
 You coordinate: you read, check status and start workspaces. You never do the work yourself. A guard blocks
@@ -222,7 +260,8 @@ workspace Claudes with \`ListAgents\` and \`SendMessage\`, and agy workspaces wi
 \`whip\` skill does that for every workspace whose work is still outstanding. The \`cleanup\` skill finds finished
 and orphaned workspaces with \`overbridge cleanup --json\` and removes the safe ones once the user confirms.
 In Code Mode your only tools are \`REPL\` and \`Poll\`: call these from a REPL script (\`tools.ListAgents({})\`,
-\`tools.SendMessage({...})\`, shell commands through \`$\`); the guard checks each call the script makes.`;
+\`tools.SendMessage({...})\`, shell commands through \`$\`); the guard checks each call the script makes.
+${fileLinkSection(rootIde())}`;
 
 /**
  * Tells the agent to run repo commands through `overbridge shell` when the workspace holds several repos and
@@ -280,8 +319,11 @@ access to other workspaces and direct branch switching. Do not try to work aroun
   \`push\`, \`submit\`, \`rebase\` and \`sync\` work as normal; pull an existing stack with \`overbridge checkout <repo> #<pr>\`
   (never \`gh stack checkout\` or \`gh stack trunk\`). Run \`overbridge pr <repo>\` after moving between layers or submitting.
 - Run lint, typecheck, test, and build commands through \`overbridge check <repo> -- <cmd>\`. It queues them
-  across all workspaces and runs several at once, in the repo's dev shell, while the machine's load allows. overbridge kills a run that
+  across all workspaces and runs several at once, in the repo's dev shell, while the machine's CPU and load allow. overbridge kills a run that
   goes over its time limit (exit 124) or stops using CPU (exit 137). If it cannot start in time, it gives up with exit 75.
+- One check is one command: never chain commands inside it (\`sh -c 'a; b'\`, \`a && b\`). Queue each as its own
+  \`overbridge check\`, \`cd\` before the call, and pipe the check's output with \`pipefail\` on, so a failed check still fails (\`set -o pipefail; overbridge check <repo> -- vitest run a.ts | tail\`).
+  Run package bins by name (\`nx\`, \`vitest\`, \`eslint\`, \`tsc\`): they run from \`node_modules/.bin\` with no \`npx\` or \`sh -c\`.
 - Scope each check to what the branch changed: one file, one project, or an affected-only mode (\`nx affected -t <target> --base=origin/<base>\`,
   \`vitest run --changed origin/<base>\`, \`<base>\` being the PR's base branch). CI runs the full suite. \`overbridge check\` refuses an unscoped run:
   \`nx run-many\` with no \`-p\`, a \`-p\` list over the cap or a \`*\`/\`tag:\` pattern, \`nx affected --all\`, a \`test\`/\`test:unit\` target or vitest or jest run

@@ -7,6 +7,8 @@ import { repoOf, root, worktreePath } from "./paths";
 import { loadRepos } from "./config";
 import { slugFromUrl, WORKLIST_SCOPES, type WorklistScope } from "./pm/board-github";
 import type { WorkStatus } from "./pm/worklist";
+import { defaultIde, linkTemplateProblems } from "./file-links";
+import { IDES, type IdeConfig } from "./ide";
 import { errorMessage, fail, isBoolean, isNumber, isRecord, isString, type Json, type JsonObject } from "./util";
 
 /** Per-repo rules live in `overbridge.yml` at the repo (worktree) root. */
@@ -17,9 +19,6 @@ export const PM_NAMES = ["github", "jira"] as const;
 
 export type PmName = (typeof PM_NAMES)[number];
 
-export const IDES = ["vscode", "zed", "webstorm"] as const;
-
-export type Ide = (typeof IDES)[number];
 
 export interface ProjectManagement {
   name: PmName;
@@ -121,6 +120,8 @@ export interface ShellSpec {
 export interface CheckQueue {
   /** Beside a running check, start another only while the 1-minute load average is under this share of the cores. */
   maxLoadPercent: number;
+  /** Beside a running check, start another only while the CPU, measured over the last second, is less busy than this; over 100 never holds one back. */
+  maxCpuPercent: number;
   /** At most this many runs at once; unset leaves the load as the only limit. */
   maxParallel?: number;
   /** Kill the run after this long, busy or not. */
@@ -129,6 +130,10 @@ export interface CheckQueue {
   stallSeconds: number;
   /** Give up waiting for a turn after this long. */
   waitSeconds: number;
+  /** A check whose past runs took under this long starts at once, past the queue and the load gate; 0 queues every check. */
+  skipQueueSeconds: number;
+  /** Repo-relative folders a bare program in a check is looked up in, nearest the cwd first, before PATH. */
+  binDirs: readonly string[];
   /** The class a claim's checks queue at; higher classes start first. */
   priority?: string;
   /** Tried in order before `priority`; the first whose patterns match the claim names its class. */
@@ -154,10 +159,13 @@ export interface CheckScope {
 export const defaultCheckScope = (): CheckScope => ({ mode: CheckScopeMode.Enforce, maxProjects: 5 });
 
 export const defaultCheckQueue = (): CheckQueue => ({
-  maxLoadPercent: 70,
+  maxLoadPercent: 300,
+  maxCpuPercent: 75,
   timeoutSeconds: 180,
   stallSeconds: 300,
   waitSeconds: 900,
+  skipQueueSeconds: 10,
+  binDirs: ["node_modules/.bin"],
   priorityRules: [],
   classes: DEFAULT_CLASSES,
 });
@@ -192,7 +200,7 @@ export interface ProjectConfig {
   apps: AppSpec[];
   commands: Commands;
   review: ReviewConfig;
-  ide?: Ide;
+  ide?: IdeConfig;
   /** The repo's dev shell, if it declares one. */
   shell?: ShellSpec;
   checkQueue: CheckQueue;
@@ -225,7 +233,7 @@ export const defaultConfig = (): ProjectConfig => ({
 const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "check-scope", "icebox", "hooks", "buttons", "mcp-servers"];
 const CHECK_SCOPE_KEYS = ["mode", "max-projects"];
 const SHELL_KEYS = ["enter", "env", "key"];
-const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds", "priority", "priority-rules"];
+const CHECK_QUEUE_KEYS = ["max-load-percent", "max-cpu-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds", "skip-queue-seconds", "bin-dirs", "priority", "priority-rules"];
 const PRIORITY_RULE_KEYS = ["priority", "branch", "item", "type", "label"];
 const ICEBOX_KEYS = ["prune", "idle-days"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir", "ship-pr"];
@@ -326,13 +334,22 @@ class Problems {
   }
   /** A whole number from 1 to `max`, or undefined when the key is absent. */
   positiveInt(obj: JsonObject, key: string, path: string, max = Number.MAX_SAFE_INTEGER): number | undefined {
+    return this.wholeNumber(obj, key, path, 1, max);
+  }
+  /** A whole number from 0 up, or undefined when the key is absent. */
+  wholeInt(obj: JsonObject, key: string, path: string): number | undefined {
+    return this.wholeNumber(obj, key, path, 0, Number.MAX_SAFE_INTEGER);
+  }
+  private wholeNumber(obj: JsonObject, key: string, path: string, min: number, max: number): number | undefined {
     const at = path ? `${path}.${key}` : key;
     const v = obj[key];
 
-    if (v === undefined || v === null) return;
+    if (v === undefined || v === null) {
+      return;
+    }
 
-    if (!isNumber(v) || !Number.isInteger(v) || v < 1 || v > max) {
-      this.add(at, `expected a whole number from 1${max === Number.MAX_SAFE_INTEGER ? " up" : ` to ${max}`} (got ${JSON.stringify(v)})`);
+    if (!isNumber(v) || !Number.isInteger(v) || v < min || v > max) {
+      this.add(at, `expected a whole number from ${min}${max === Number.MAX_SAFE_INTEGER ? " up" : ` to ${max}`} (got ${JSON.stringify(v)})`);
 
       return;
     }
@@ -729,9 +746,11 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
     }
   }
 
-  const ide = p.oneOf(p.string(raw, "ide", "", false), IDES, "ide");
+  const ide = parseIde(p, raw.ide);
 
-  if (ide) config.ide = ide;
+  if (ide) {
+    config.ide = ide;
+  }
 
   const shell = raw.shell;
 
@@ -769,10 +788,15 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
       };
 
       set(p.positiveInt(checkQueue, "max-load-percent", "check-queue"), "maxLoadPercent");
+      set(p.positiveInt(checkQueue, "max-cpu-percent", "check-queue"), "maxCpuPercent");
       set(p.positiveInt(checkQueue, "max-parallel", "check-queue"), "maxParallel");
       set(p.positiveInt(checkQueue, "timeout-seconds", "check-queue"), "timeoutSeconds");
       set(p.positiveInt(checkQueue, "stall-seconds", "check-queue"), "stallSeconds");
       set(p.positiveInt(checkQueue, "wait-seconds", "check-queue"), "waitSeconds");
+      set(p.wholeInt(checkQueue, "skip-queue-seconds", "check-queue"), "skipQueueSeconds");
+      const binDirs = p.stringList(checkQueue, "bin-dirs", "check-queue");
+
+      if (binDirs) config.checkQueue = { ...config.checkQueue, binDirs };
       const priority = p.string(checkQueue, "priority", "check-queue", false);
       const rules = parsePriorityRules(p, checkQueue);
 
@@ -785,6 +809,47 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
   if (p.list.length) fail(`${file}:\n${p.list.map((line) => `  ${line}`).join("\n")}`);
 
   return config;
+}
+
+const IDE_KEYS = ["name", "link", "github"];
+
+/** `ide`: an ide name, or `{ name, link?, github? }`; undefined when unset or invalid. */
+function parseIde(p: Problems, raw: Json | undefined): IdeConfig | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+
+  if (isString(raw)) {
+    const name = p.oneOf(raw, IDES, "ide");
+
+    return name && defaultIde(name);
+  }
+
+  if (!isRecord(raw)) {
+    p.add("ide", `expected one of ${IDES.join(", ")}, or a mapping with ${IDE_KEYS.join(", ")}`);
+
+    return undefined;
+  }
+
+  p.unknownKeys(raw, IDE_KEYS, "ide");
+  const name = p.oneOf(p.string(raw, "name", "ide", true), IDES, "ide.name");
+  const link = p.string(raw, "link", "ide", false);
+
+  if (link !== undefined) {
+    linkTemplateProblems(link).forEach((problem) => p.add("ide.link", problem));
+  }
+
+  if (raw.github !== undefined && !isBoolean(raw.github)) {
+    p.add("ide.github", "expected true or false");
+  }
+
+  if (!name) {
+    return undefined;
+  }
+
+  const github = raw.github !== false;
+
+  return link === undefined ? { ...defaultIde(name), github } : { name, link, github };
 }
 
 /** A regex pattern, reported when it does not compile. */
@@ -1213,10 +1278,34 @@ export function resolveConfig(
 
   const label = sources.join(" + ") || file;
   // the repo file was checked for root-only keys above, so any left come from the root config
-  const config = validateConfig(overlay(overlay(overlay(layers.defaults, under?.layer), repoRaw), over), label, { root: true });
+  const [base, owned, own, top] = [layers.defaults, under?.layer, repoRaw, over].map(ideAsMapping);
+  const config = validateConfig(overlay(overlay(overlay(base, owned), own), top), label, { root: true });
 
   // an unknown class name falls back to the default class (`classInfo`), so a repo file naming a class this user's root lacks never blocks loading; `overbridge config check` reports it
   return { ...config, checkQueue: { ...config.checkQueue, classes: layers.checkClasses } };
+}
+
+/**
+ * A layer whose `ide` names an editor, written as a name or a mapping with `name` and no `link`, gets
+ * `{ name, link: null }`. A plain name then layers under a mapping that sets only `github`, and naming a
+ * different editor drops a lower layer's `link` for the other editor.
+ */
+function ideAsMapping(layer: Json | undefined): Json | undefined {
+  if (!isRecord(layer)) {
+    return layer;
+  }
+
+  const ide = layer.ide;
+
+  if (isString(ide) && IDES.some((name) => name === ide)) {
+    return { ...layer, ide: { name: ide, link: null } };
+  }
+
+  if (isRecord(ide) && ide.name !== undefined && ide.link === undefined) {
+    return { ...layer, ide: { ...ide, link: null } };
+  }
+
+  return layer;
 }
 
 /** Load a config file for `repo` with the root layers applied. A missing file means the root layers alone. */

@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { estimateKey, estimatesFile } from "../src/check-estimate";
 import { HELD_ENV, readTickets, stopTicket } from "../src/check-queue";
+import { shellQuote } from "../src/util";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 let tmp: string;
@@ -17,6 +19,7 @@ const env = () => ({
   OVERBRIDGE_ROOT: root,
   ZELLIJ_CONFIG_DIR: join(root, "zellij-config"), // keep a real user layout out of the tests
   OVERBRIDGE_NAME: "",
+  OVERBRIDGE_IDE: "", // file links follow it when no ide is configured
   CLAUDECODE: "", // the suite may run inside Claude Code; this marks a caller as an agent
   XDG_CACHE_HOME: join(tmp, "cache"),
   GIT_AUTHOR_NAME: "t",
@@ -66,6 +69,7 @@ describe("workflow", () => {
   test("new workspaces get worktrees and claude scaffolding", () => {
     expect(ws(["new", "ws1", "-r", "app"]).out.trim()).toBe("ws1");
     expect(readFileSync(join(root, "ws1", "CLAUDE.md"), "utf8")).toContain("No cache yet");
+    expect(readFileSync(join(root, "ws1", "CLAUDE.md"), "utf8")).not.toContain("## File references");
 
     const repos = [
       { name: "zeta", url: "https://github.com/u/zeta", isFork: true },
@@ -101,6 +105,26 @@ describe("workflow", () => {
 
     for (const event of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "PermissionRequest", "SubagentStart", "SubagentStop", "PreCompact", "Stop", "SessionEnd"]) {
       expect(settings.hooks[event][0].hooks[0].command).toMatch(/ hook$/);
+    }
+  });
+
+  test("CLAUDE.md's file links follow the repo's ide over the root defaults, and a bad repo layer never blocks a launch", () => {
+    const config = join(root, "config.yml");
+
+    try {
+      writeFileSync(config, "defaults:\n  ide: zed\nrepos:\n  app:\n    ide: { name: vscode, github: false }\n");
+      expect(ws(["new", "links", "-r", "app"]).code).toBe(0);
+      const md = readFileSync(join(root, "links", "CLAUDE.md"), "utf8");
+      expect(md).toContain("(vscode://file/");
+      expect(md).not.toContain("zed://");
+      expect(md).not.toContain("↗");
+      expect(ws(["rm", "links"]).code).toBe(0);
+      writeFileSync(config, "defaults:\n  ide: zed\n");
+      expect(ws(["new", "links", "-r", "app"]).code).toBe(0);
+      expect(readFileSync(join(root, "links", "CLAUDE.md"), "utf8")).toContain("(zed://file/abs/path/to/repo/AGENTS.md:268) [↗](");
+      expect(ws(["rm", "links"]).code).toBe(0);
+    } finally {
+      rmSync(config, { force: true });
     }
   });
 
@@ -424,10 +448,18 @@ describe("check queue", () => {
   const cq = () => join(root, "cq");
   const queue = () => join(root, ".overbridge", "check-queue");
 
-  const config = (extra = "") =>
-    writeFileSync(join(cq(), "app", "overbridge.yml"), `shell: env FOO=queued\ncheck-queue:\n  max-load-percent: 100000\n${extra}`);
+  const config = (extra = "", skipQueueSeconds = 0) =>
+    writeFileSync(join(cq(), "app", "overbridge.yml"), `shell: env FOO=queued\ncheck-queue:\n  max-load-percent: 100000\n  max-cpu-percent: 100000\n  skip-queue-seconds: ${skipQueueSeconds}\n${extra}`);
 
   const check = (args: string[]) => ws(["check", ...args], cq());
+
+  /** A check runs one command, so a multi-step test command goes in a script file. */
+  const script = (name: string, body: string) => {
+    const file = join(tmp, `${name}.sh`);
+    writeFileSync(file, body);
+
+    return ["--", "sh", file];
+  };
 
   const spawnCheck = (args: string[]) =>
     Bun.spawn({ cmd: [process.execPath, CLI, "check", ...args], cwd: cq(), env: env(), stdout: "pipe", stderr: "pipe" });
@@ -450,7 +482,7 @@ describe("check queue", () => {
   test("runs in the repo's dev shell, passes the exit code through and leaves no ticket", () => {
     expect(ws(["new", "cq", "-r", "app"]).code).toBe(0);
     config();
-    const r = check(["--", "sh", "-c", 'echo "$FOO $OVERBRIDGE_CHECK_HELD"; exit 3']);
+    const r = check(script("exit3", 'echo "$FOO $OVERBRIDGE_CHECK_HELD"; exit 3'));
     expect(r.code).toBe(3);
     expect(r.out.trim()).toBe("queued 1");
     expect(tickets()).toEqual([]);
@@ -458,44 +490,53 @@ describe("check queue", () => {
     expect(check(["nope", "--", "true"]).err).toContain("nope is not in cq");
     expect(check(["app"]).code).toBe(1);
     expect(check(["--timeout-seconds", "x", "--", "true"]).err).toContain("--timeout-seconds expects a whole number");
+    const chained = check(["--", "sh", "-c", "true && true"]);
+    expect(chained.code).toBe(1);
+    expect(chained.err).toContain("overbridge check runs one command, but this script chains 2");
   }, CHECK_TEST_MS);
 
   test("refuses an unscoped run before it queues; the root config.yml sets the cap and the mode", () => {
     config();
     const rootConfig = join(root, "config.yml");
+    const marker = join(tmp, "unscoped-ran");
+    const bin = join(cq(), "app", "node_modules", ".bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "nx"), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
 
     try {
       writeFileSync(rootConfig, "defaults:\n  check-scope:\n    max-projects: 2\n");
-      const marker = join(tmp, "unscoped-ran");
-      const all = check(["--", "sh", "-c", `touch ${marker}; nx run-many -t lint`]);
+      const all = check(["--", "nx", "run-many", "-t", "lint"]);
       expect(all.code).toBe(1);
       expect(all.err).toContain("overbridge check refused");
       expect(all.err).toContain("nx affected -t lint --base=origin/<base>");
       expect(existsSync(marker)).toBe(false);
       expect(check(["--", "npx", "nx", "run-many", "-t", "lint", "-p", "a,b,c"]).err).toContain("over the cap of 2 (check-scope.max-projects)");
-      expect(check(["--", "pnpm", "exec", "nx", "affected", "-t", "lint", "--skip-nx-cache"]).err).toContain("--skip-nx-cache turns off the nx cache");
+      expect(check(["--", "nx", "affected", "-t", "lint", "--skip-nx-cache"]).err).toContain("--skip-nx-cache turns off the nx cache");
       expect(check(["--", "pnpm", "test"]).err).toContain("the test script runs every test");
       expect(tickets()).toEqual([]);
 
       writeFileSync(rootConfig, "defaults:\n  check-scope:\n    mode: warn\n");
-      const warned = check(["--", "sh", "-c", `touch ${marker}; nx run-many -t lint 2>/dev/null || true`]);
+      const warned = check(["--", "nx", "run-many", "-t", "lint"]);
       expect(warned.code).toBe(0);
       expect(warned.err).toContain("running it anyway (check-scope.mode: warn)");
       expect(existsSync(marker)).toBe(true);
+      rmSync(marker);
 
       writeFileSync(rootConfig, "defaults:\n  check-scope:\n    mode: off\n");
-      const off = check(["--", "sh", "-c", "nx run-many -t lint 2>/dev/null || true"]);
+      const off = check(["--", "nx", "run-many", "-t", "lint"]);
       expect(off.code).toBe(0);
       expect(off.err).not.toContain("unscoped");
+      expect(existsSync(marker)).toBe(true);
     } finally {
       rmSync(rootConfig, { force: true });
+      rmSync(join(cq(), "app", "node_modules"), { recursive: true, force: true });
     }
   }, CHECK_TEST_MS);
 
   test("two runs overlap while the load allows", async () => {
     config();
     const log = join(tmp, "overlap.log");
-    const step = (name: string) => ["--", "sh", "-c", `echo start ${name} >> ${log}; sleep 2; echo end ${name} >> ${log}`];
+    const step = (name: string) => script(`overlap-${name}`, `echo start ${name} >> ${log}; sleep 2; echo end ${name} >> ${log}`);
     const first = spawnCheck(step("a"));
     await waitFor(() => existsSync(log));
     const second = spawnCheck(step("b"));
@@ -511,7 +552,7 @@ describe("check queue", () => {
   test("with max-parallel 1, two runs take turns instead of overlapping", async () => {
     config("  max-parallel: 1\n");
     const log = join(tmp, "turns.log");
-    const step = (name: string) => ["--", "sh", "-c", `echo start ${name} >> ${log}; sleep 1; echo end ${name} >> ${log}`];
+    const step = (name: string) => script(`turns-${name}`, `echo start ${name} >> ${log}; sleep 1; echo end ${name} >> ${log}`);
     const first = spawnCheck(step("a"));
     await waitFor(() => existsSync(log));
     const second = spawnCheck(step("b"));
@@ -519,7 +560,8 @@ describe("check queue", () => {
     expect(await second.exited).toBe(0);
     const waited = await new Response(second.stderr).text();
     expect(waited).toContain("waiting behind 1 in the queue (max-parallel 1)");
-    expect(waited).toContain("estimated start in ~");
+    // `a` has never finished before, so nothing estimates when `b` can start
+    expect(waited).not.toContain("estimated start");
     expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "end a", "start b", "end b"]);
   }, CHECK_TEST_MS);
 
@@ -533,7 +575,7 @@ describe("check queue", () => {
   test("a waiting check moved in order.state starts before the one queued ahead of it", async () => {
     config("  max-parallel: 1\n");
     const log = join(tmp, "moved.log");
-    const step = (name: string, secs: number) => ["--", "sh", "-c", `echo ${name} >> ${log}; sleep ${secs}`];
+    const step = (name: string, secs: number) => script(`moved-${name}`, `echo ${name} >> ${log}; sleep ${secs}`);
     const first = spawnCheck(step("a", 2));
     await waitFor(() => existsSync(log));
     const second = spawnCheck(step("b", 0));
@@ -550,7 +592,7 @@ describe("check queue", () => {
   test("stopTicket kills a running check, and history records it as killed", async () => {
     config();
     const marker = join(tmp, "killed.started");
-    const run = spawnCheck(["--", "sh", "-c", `touch ${marker}; sleep 30`]);
+    const run = spawnCheck(script("killed", `touch ${marker}; sleep 30`));
     await waitFor(() => existsSync(marker) && readTickets(queue()).some((t) => t.runPid !== undefined));
     readTickets(queue()).forEach((t) => stopTicket(t, queue()));
     expect(await run.exited).toBe(143);
@@ -563,13 +605,48 @@ describe("check queue", () => {
   test("a killed check that ignores TERM keeps its ticket until KILL ends its group", async () => {
     config();
     const marker = join(tmp, "stubborn.started");
-    const run = spawnCheck(["--", "sh", "-c", `trap "" TERM; touch ${marker}; sleep 30`]);
+    const run = spawnCheck(script("stubborn", `trap "" TERM; touch ${marker}; sleep 30`));
     await waitFor(() => existsSync(marker) && readTickets(queue()).some((t) => t.runPid !== undefined));
     readTickets(queue()).forEach((t) => stopTicket(t, queue()));
     await Bun.sleep(1_000);
     expect(tickets()).toHaveLength(1);
     expect(await run.exited).toBe(143);
     expect(tickets()).toEqual([]);
+  }, CHECK_TEST_MS);
+
+  test("a bare program runs from the nearest bin-dirs folder, and history keeps its name", () => {
+    config();
+    const app = join(cq(), "app");
+
+    const bin = (dir: string, text: string) => {
+      mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
+      writeFileSync(join(dir, "node_modules", ".bin", "hello"), `#!/bin/sh\necho ${text}\n`, { mode: 0o755 });
+    };
+
+    try {
+      bin(app, "root");
+      bin(join(app, "sub"), "sub");
+      expect(ws(["check", "app", "--", "hello"], join(app, "sub")).out.trim()).toBe("sub");
+      expect(ws(["check", "app", "--", "hello"], app).out.trim()).toBe("root");
+      const history = readFileSync(join(root, ".overbridge", "history", "cq.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+      expect(history.at(-1)).toMatchObject({ kind: "check", command: "hello" });
+    } finally {
+      rmSync(join(app, "node_modules"), { recursive: true, force: true });
+      rmSync(join(app, "sub"), { recursive: true, force: true });
+    }
+  }, CHECK_TEST_MS);
+
+  test("a check whose own passing runs were quick skips the queue", async () => {
+    config("  max-parallel: 1\n", 10);
+    const log = join(tmp, "skip.log");
+    const quick = script("skip-quick", `echo quick >> ${log}`);
+    const command = quick.slice(1).map(shellQuote).join(" ");
+    writeFileSync(estimatesFile(join(root, ".overbridge")), JSON.stringify({ [estimateKey("app", command)]: [100, 100, 100] }));
+    const slow = spawnCheck(script("skip-slow", `echo start >> ${log}; sleep 3; echo end >> ${log}`));
+    await waitFor(() => existsSync(log));
+    expect(check(quick).code).toBe(0);
+    expect(await slow.exited).toBe(0);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start", "quick", "end"]);
   }, CHECK_TEST_MS);
 
   test("a nested check inside a held run runs at once", () => {

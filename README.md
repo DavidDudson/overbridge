@@ -389,7 +389,7 @@ review:
   exclude: [pr-size]                   # skipped after selection
   local-dir: .overbridge/personas      # repo-local personas (this is the default)
   ship-pr: true                        # ship-pr runs mob-review before pushing and opening the PR (this is the default)
-ide: vscode           # vscode | zed | webstorm
+ide: vscode           # vscode | zed | webstorm | none; or { name, link, github }
 ```
 
 `overbridge config check [path]` validates a repo's file together with the root `config.yml`, or the root
@@ -431,7 +431,7 @@ Where it applies:
 ### Check queue
 
 `overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>` runs a heavy command, such as lint, typecheck,
-test or build, in queue order across every workspace. Several run at once while the machine's load leaves room. The skills send the repo's `commands.lint`,
+test or build, in queue order across every workspace. Several run at once while the machine's CPU and load leave room. The skills send the repo's `commands.lint`,
 `typecheck`, `test`, and `build` through it. The repo defaults to the one the current directory is in, then to the
 workspace's only repo.
 
@@ -460,18 +460,29 @@ defaults:
    up every owner with one `ps` per poll.
 2. **Load.** With nothing running, the first ticket in line starts at once, whatever the load: load from outside
    the queue (agents, panes, dev servers) can stay over the limit for hours, and a queue that runs nothing only adds
-   waiting. Beside a running check, the next ticket in line starts once the 1-minute load average is under
-   `max-load-percent` of the cores. The average takes about a minute to show a new run, so each run that
-   started in the last minute counts as up to one extra core of load. Set `max-parallel` to cap how many run at once;
+   waiting. Beside a running check, the next ticket in line starts once the CPU, measured over the last second, is
+   less busy than `max-cpu-percent` and the 1-minute load average is under `max-load-percent` of the cores. The load
+   average also counts threads waiting on disk and locks, so on a busy Mac it runs at about twice the CPU use; it
+   is only a backstop. Neither measure shows a new run at once, so each run that started in the last minute counts
+   as up to one extra busy core. Set `max-parallel` to cap how many run at once;
    `max-parallel: 1` runs them one at a time.
 3. **Run.** The command runs in the repo's dev shell, as with `overbridge shell`, in a process group of its own. A
    command started inside a held run, such as a git hook, runs straight away instead of queueing behind its parent.
 4. **Stop.** The command is killed (TERM, then KILL after 10 seconds) when it runs past `timeout-seconds` (exit 124),
    or when its process group uses no CPU for `stall-seconds` (exit 137). If a call cannot start within `wait-seconds`, it
    gives up with exit 75. Otherwise it exits with the command's own code.
+5. **Quick checks.** A check whose own passing runs took under `skip-queue-seconds` (the median of its last runs,
+   default 10) starts at once, past the queue and the CPU and load gates. It needs at least 3 passing runs of the exact
+   command: a failed run is not timed, and a command never borrows the time of others in its group.
+6. **One command.** A check is one command. `overbridge check` refuses a `sh -c` script that chains several with `;`,
+   `&&`, `||`, `&` or a newline (quotes, `$(...)`, backticks, `[[ ]]` and comments do not count), so queue each as
+   its own check, `cd` before the call and pipe its output with `pipefail` on, so a failed check still fails (`set -o pipefail; overbridge check -- vitest run a.ts | tail`). A bare
+   program found in one of `bin-dirs` (`node_modules/.bin` by default), such as `nx`, `vitest`, `eslint` or `tsc`,
+   runs from the nearest one between the current directory and the repo root, as `npx` picks it, ahead of the dev
+   shell's PATH. `bin-dirs: []` leaves every program to PATH.
 
 `--timeout-seconds` raises or lowers the time limit for one run. The tab sidebar shows each running command, how long
-it has run, and who is waiting.
+it has run, and who is waiting, under a count of the checks running and queued.
 
 **Priority.** Each workspace has a class, and checks start by class, then by queue time. The root `config.yml`
 lists the classes, highest first, under `priority-classes`; every repo shares one queue, so the list lives there
@@ -536,7 +547,7 @@ older one does, so the two never wait on each other. Classes and moves apply aga
 The `@checks` orchestration tab (`overbridge checks`) lists the queue: running checks first, then the waiting ones in
 the order they will start. `j`/`k` select a check, `K`/`J` move a waiting one up or down, `t` moves it to the top
 and `b` to the bottom. `x` then `y` kills the selected check, running or waiting: its `overbridge check` exits
-with 143 and the run is recorded as killed. Each row shows `est`, the median of that command's last 20 runs in the repo (or of its command group when the exact command is new), and `eta`: when a waiting check should start, or how long a running one has left. The bottom border shows when the queue should be clear, and the sidebar shows when each workspace's checks should be done. A waiting `overbridge check` prints its estimated start and run time too. Run times live in `.overbridge/check-estimates.json`, built from the last week of history the first time the tab opens. `v` switches to the checks that finished in the last 24 hours, newest
+with 143 and the run is recorded as killed. Each row shows `est`, the median of the last 20 runs of exactly that command in the repo, and `eta`: when a waiting check should start, or how long a running one has left. The bottom border shows when the queue should be clear, and the sidebar shows when each workspace's checks should be done. A waiting `overbridge check` prints its estimated start and run time too. A command that has never finished in the repo has no estimate (`?`), and nothing that waits behind it gets a start, clear or done time. Run times live in `.overbridge/check-estimates.json`, built from the last week of history the first time the tab opens. `v` switches to the checks that finished in the last 24 hours, newest
 first, with each one's result, queue wait and run time, and the totals in the bottom border. A move is saved in `.overbridge/check-queue/order.state` and lasts until the check leaves the
 queue. A running check never moves. A low class can wait behind a stream of higher ones until `wait-seconds` runs
 out, so move it up if it has to run.
@@ -561,11 +572,14 @@ out, so move it up if it has to run.
 | `board.columns` | none | GitHub Projects v2 only: maps a `Status` column name (any case) to `todo`, `in-progress`, `blocked` or `done`. Unlisted names fall back to common ones (done, in progress, blocked), then to labels. Needs `gh auth refresh -s read:project` |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
-| `check-queue.max-load-percent` | `70` | beside a running check, start another only while the 1-minute load average is under this share of the cores (with none running, the first in line always starts); over 100 allows more load than cores. See [Check queue](#check-queue) |
+| `check-queue.max-load-percent` | `300` | beside a running check, start another only while the 1-minute load average is under this share of the cores (with none running, the first in line always starts); over 100 allows more load than cores. See [Check queue](#check-queue) |
+| `check-queue.max-cpu-percent` | `75` | beside a running check, start another only while the CPU, measured over the last second, is less busy than this; over 100 turns the gate off |
 | `check-queue.max-parallel` | none | run at most this many commands at once; unset leaves the load as the only limit |
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
 | `check-queue.wait-seconds` | `900` | give up (exit 75) when a run cannot start for this long, because of the queue ahead, `max-parallel`, or the load |
+| `check-queue.skip-queue-seconds` | `10` | a check whose last passing runs (at least 3) took under this long starts at once, skipping the queue and the CPU and load gates; `0` queues every check |
+| `check-queue.bin-dirs` | `[node_modules/.bin]` | repo-relative folders a bare program in a check is looked up in, nearest the current directory first, before the dev shell's PATH; `[]` turns the lookup off |
 | `check-queue.priority` | the default class | the class this repo's claims get when no rule matches: a name from the root `priority-classes` |
 | `check-queue.priority-rules` | none | list of `{ priority, branch?, item?, type?, label? }`; the first rule whose regexes all match the claim or work item sets the class, for the check queue and the `@work` list |
 | `icebox.idle-days` | none | suggest iceboxing a workspace whose claimed PRs are all drafts and idle this many days (last commit, PR update and agent activity, whichever is latest). The sidebar card shows `draft PRs idle <n>d · icebox?`; nothing is iceboxed automatically. Unset turns it off. Set it for every repo in the root `config.yml` under `defaults.icebox` |
@@ -575,11 +589,29 @@ out, so move it up if it has to run.
 | `review.exclude` | `[]` | personas to skip, applied after selection |
 | `review.local-dir` | `.overbridge/personas` | repo-local personas, relative to the repo root |
 | `review.ship-pr` | `true` | `ship-pr` runs `mob-review` on the committed branch and applies its fixes before it pushes and opens the PR. `false` skips that step |
-| `ide` | `$OVERBRIDGE_IDE`, then `$EDITOR` | `vscode`, `zed` or `webstorm`; the top panel's editor button opens the workspace folder. Unset, the button runs `$OVERBRIDGE_IDE` (an ide name or a command) or else `$EDITOR`; set those per user, not in the repo file. GUI editors only, as it is launched detached |
+| `ide` | `$OVERBRIDGE_IDE`, then `$EDITOR` | `vscode`, `zed`, `webstorm` or `none`; the top panel's editor button opens the workspace folder. Unset or `none`, the button runs `$OVERBRIDGE_IDE` (an ide name or a command) or else `$EDITOR`; set those per user, not in the repo file. GUI editors only, as it is launched detached. The ide also sets the links agents write for file references (see [File links](#file-links)) |
+| `ide.link` | per ide | the editor link for a file reference, with `{path}` (absolute), `{line}`, `{relpath}`, `{owner}`, `{repo}` and `{sha}`; it needs `{path}` or `{relpath}`. Defaults: `zed://file{path}:{line}`, `vscode://file{path}:{line}`, `webstorm://open?file={path}&line={line}`, none for `none`. `{path}` already starts with `/` |
+| `ide.github` | `true` | add a GitHub permalink, `[↗](https://github.com/{owner}/{repo}/blob/{sha}/{relpath}#L{line})`, after the editor link |
 
 Providers shell out to `gh` (GitHub) and `jira` ([jira-cli](https://github.com/ankitpokhrel/jira-cli), Jira), so there
 is no token to store in the config. A branch names its item when it contains the id: `123-title` or
 `feat/123-title` for GitHub, `feat/ENG-12-title` for Jira (only the configured project's key counts).
+
+### File links
+
+Every agent writes a file reference as a markdown link, with an absolute path and a line wherever the point is
+one spot in the file. The workspace `CLAUDE.md` (and agy's `AGENTS.md`) and the orchestrator's brief say how,
+from the `ide` of the workspace's first repo that sets one, else the root `defaults`, else `$OVERBRIDGE_IDE`
+when it names an ide. With none of those, the brief has no file links section. With `ide: zed`:
+
+```markdown
+[AGENTS.md:268](zed://file/<absolute path>:268) [↗](https://github.com/<owner>/<repo>/blob/<sha>/AGENTS.md#L268)
+```
+
+The name opens the file in the editor and the arrow opens the line on GitHub, pinned to `git rev-parse HEAD`.
+`ide: { name: zed, github: false }` drops the arrow. With `ide: none` the GitHub permalink is the only link, and
+`ide: { name: none, github: false }` turns file links off. A layer can set `ide: { github: false }` over a plain
+`ide: zed` below it; a layer that names another editor drops the `link` a lower layer set for the first one.
 
 ### Root config.yml
 
@@ -944,7 +976,7 @@ by URL. The next toggle drops every entry whose item has left all three lists. o
 `overbridge silence` lists what is silenced now, and `overbridge silence toggle <url>` flips one item from a shell.
 
 Under the list, up to three rows show workspaces being removed or removed in the last hour (see **Seeing what was
-removed** above). Below them, while the [check queue](#check-queue) is busy, a `▶` row for each running command shows its
+removed** above). Below them, while the [check queue](#check-queue) is busy, a `checks: n running · n queued` row, then a `▶` row for each running command shows its
 workspace and how long it has run, and a `⧗` row lists the workspaces waiting.
 
 The width (default 60) comes from the global config:

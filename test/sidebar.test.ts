@@ -533,17 +533,21 @@ describe("check queue rows", () => {
 
   test("nothing when the queue is empty", () => {
     expect(queueRows({ running: [], waiting: [] }, 30, 0)).toEqual([]);
-    expect(plain(queueRows({ running: [t("67", { runPid: 9, runningSinceMs: 0 })], waiting: [t("68"), t("68")] }, 60, 5_000, new Map([["67", 40_000], ["68", 100_000]])))).toEqual(["▶ 67 5s ~40s just test", "⧗ 2 waiting: 68 ~1m40s"]);
+    expect(plain(queueRows({ running: [t("67", { runPid: 9, runningSinceMs: 0 })], waiting: [t("68"), t("68")] }, 60, 5_000, new Map([["67", 40_000], ["68", 100_000]])))).toEqual(["checks: 1 running · 2 waiting", "▶ 67 5s ~40s just test", "⧗ 68 ~1m40s"]);
   });
 
   test("the running command with its time, then who waits", () => {
     const rows = queueRows({ running: [t("67", { runPid: 9, runningSinceMs: 0 })], waiting: [t("68"), t("70")] }, 40, 83_000);
-    expect(plain(rows)).toEqual(["▶ 67 1m23s just test", "⧗ 2 waiting: 68 70"]);
+    expect(plain(rows)).toEqual(["checks: 1 running · 2 waiting", "▶ 67 1m23s just test", "⧗ 68 70"]);
+  });
+
+  test("only waiting checks still get the summary", () => {
+    expect(plain(queueRows({ running: [], waiting: [t("68")] }, 40, 0))).toEqual(["checks: 0 running · 1 waiting", "⧗ 68"]);
   });
 
   test("a row for each running command", () => {
     const running = [t("67", { runPid: 9, runningSinceMs: 0 }), t("68", { runPid: 10, runningSinceMs: 60_000, command: "just lint" })];
-    expect(plain(queueRows({ running, waiting: [t("70")] }, 40, 83_000))).toEqual(["▶ 67 1m23s just test", "▶ 68 23s just lint", "⧗ 1 waiting: 70"]);
+    expect(plain(queueRows({ running, waiting: [t("70")] }, 40, 83_000))).toEqual(["checks: 2 running · 1 waiting", "▶ 67 1m23s just test", "▶ 68 23s just lint", "⧗ 70"]);
   });
 
   test("the rows take space from the list, so the frame keeps its height", () => {

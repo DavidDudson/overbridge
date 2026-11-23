@@ -31,7 +31,7 @@ Work out, per repo and per group, from the JSON (percentages are the share of th
 | --- | --- | --- |
 | Big share of run time | `ms` / repo `ms` | The first thing to optimise. A group at 50% or more of a repo's check time is the target. |
 | Many runs | `count` | A cheap run repeated often costs as much as one slow run. Multiply `count` by the mean. |
-| Queue wait | `queuedMs` against `ms` | Runs wait for a slot. Queue time near or over run time says the machine, `check-queue.max-parallel` or `max-load-percent` is the limit, not the tool. |
+| Queue wait | `queuedMs` against `ms` | Runs wait for a slot. Queue time near or over run time says the machine, `check-queue.max-parallel`, `max-cpu-percent` or `max-load-percent` is the limit, not the tool. |
 | Failures | `failed` against `count` | A failed run that was fixed and rerun doubled its cost. Many failures on one group: run the cheaper check first. |
 | Overlapping groups | `fulls` of two groups | `check` that already runs `lint` and `test` makes separate `lint` and `test` runs duplicate work. |
 | Permission prompts | per-workspace `summary.permissionMs` | Time waiting on an approval. Recommend an allow rule for the repeated command. |

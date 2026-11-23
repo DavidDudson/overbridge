@@ -24,7 +24,14 @@ const app = (extra: string) => `apps:\n  - id: a\n    start: x\n${extra}`;
 describe("config validation messages", () => {
   test("each problem names its key path", () => {
     expect(problems("version: 2\n")).toEqual(["version: unsupported version 2 (this overbridge reads version 1)"]);
-    expect(problems("ide: emacs\n")).toEqual(['ide: expected one of vscode, zed, webstorm (got "emacs")']);
+    expect(problems("ide: emacs\n")).toEqual(['ide: expected one of vscode, zed, webstorm, none (got "emacs")']);
+    expect(problems("ide: 3\n")).toEqual(["ide: expected one of vscode, zed, webstorm, none, or a mapping with name, link, github"]);
+    expect(problems("ide:\n  link: x://{path}\n")).toEqual(["ide.name: required"]);
+    expect(problems("ide:\n  name: zed\n  github: yes please\n  lnk: x\n")).toEqual(["ide.lnk: unknown key, did you mean 'link'?", "ide.github: expected true or false"]);
+    expect(problems('ide:\n  name: zed\n  link: "x://{file}"\n')).toEqual([
+      "ide.link: unknown placeholder {file} (allowed: {path}, {line}, {relpath}, {owner}, {repo}, {sha})",
+      "ide.link: needs {path} or {relpath}, so the link names a file",
+    ]);
     expect(problems("project-management:\n  name: trello\n  project: x\n")).toEqual([
       'project-management.name: expected one of github, jira (got "trello")',
     ]);
@@ -103,7 +110,7 @@ describe("shipped example", () => {
     expect(config.projectManagement?.name).toBe("github");
     expect(config.apps.map((a) => a.id)).toEqual(["web"]);
     expect(Object.keys(config.commands).sort()).toEqual(["build", "format", "lint", "test", "typecheck"]);
-    expect(config.ide).toBe("vscode");
+    expect(config.ide?.name).toBe("vscode");
     expect(config.shell).toEqual({ enter: "direnv exec .", key: [] });
   });
 
@@ -118,12 +125,15 @@ describe("shipped example", () => {
 
 describe("check-queue", () => {
   test("defaults apply and each key overrides its own value", () => {
-    expect(parseConfig("", "f.yml").checkQueue).toEqual({ maxLoadPercent: 70, timeoutSeconds: 180, stallSeconds: 300, waitSeconds: 900, priorityRules: [], classes: DEFAULT_CLASSES });
+    expect(parseConfig("", "f.yml").checkQueue).toEqual({ maxLoadPercent: 300, maxCpuPercent: 75, timeoutSeconds: 180, stallSeconds: 300, waitSeconds: 900, skipQueueSeconds: 10, binDirs: ["node_modules/.bin"], priorityRules: [], classes: DEFAULT_CLASSES });
     expect(parseConfig("check-queue:\n  timeout-seconds: 360\n  max-load-percent: 50\n", "f.yml").checkQueue).toEqual({
       maxLoadPercent: 50,
+      maxCpuPercent: 75,
       timeoutSeconds: 360,
       stallSeconds: 300,
       waitSeconds: 900,
+      skipQueueSeconds: 10,
+      binDirs: ["node_modules/.bin"],
       priorityRules: [],
       classes: DEFAULT_CLASSES,
     });
@@ -160,12 +170,17 @@ describe("check-queue", () => {
 
   test("bad values name their key", () => {
     expect(problems("check-queue: 5\n")).toEqual([
-      "check-queue: expected a mapping with max-load-percent, max-parallel, timeout-seconds, stall-seconds, wait-seconds, priority, priority-rules",
+      "check-queue: expected a mapping with max-load-percent, max-cpu-percent, max-parallel, timeout-seconds, stall-seconds, wait-seconds, skip-queue-seconds, bin-dirs, priority, priority-rules",
     ]);
     expect(problems("check-queue:\n  max-load-percent: 1.5\n")).toEqual(["check-queue.max-load-percent: expected a whole number from 1 up (got 1.5)"]);
     expect(parseConfig("check-queue:\n  max-load-percent: 400\n", "f.yml").checkQueue.maxLoadPercent).toBe(400);
     expect(parseConfig("check-queue:\n  max-parallel: 3\n", "f.yml").checkQueue.maxParallel).toBe(3);
     expect(problems("check-queue:\n  max-parallel: 0\n")).toEqual(["check-queue.max-parallel: expected a whole number from 1 up (got 0)"]);
+    expect(parseConfig("check-queue:\n  skip-queue-seconds: 0\n", "f.yml").checkQueue.skipQueueSeconds).toBe(0);
+    expect(parseConfig("check-queue:\n  max-cpu-percent: 90\n", "f.yml").checkQueue.maxCpuPercent).toBe(90);
+    expect(parseConfig("check-queue:\n  bin-dirs: []\n", "f.yml").checkQueue.binDirs).toEqual([]);
+    expect(parseConfig("check-queue:\n  bin-dirs: [bin, tools/bin]\n", "f.yml").checkQueue.binDirs).toEqual(["bin", "tools/bin"]);
+    expect(problems("check-queue:\n  skip-queue-seconds: -1\n")).toEqual(["check-queue.skip-queue-seconds: expected a whole number from 0 up (got -1)"]);
     expect(problems("check-queue:\n  stall-seconds: 0\n")).toEqual(["check-queue.stall-seconds: expected a whole number from 1 up (got 0)"]);
     expect(problems("check-queue:\n  wait-seconds: '10'\n")).toEqual(['check-queue.wait-seconds: expected a whole number from 1 up (got "10")']);
     expect(problems("check-queue:\n  timeout-secs: 10\n")).toEqual(["check-queue.timeout-secs: unknown key, did you mean 'timeout-seconds'?"]);

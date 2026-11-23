@@ -2,7 +2,7 @@ import { dirname } from "node:path";
 import { queueDir, readQueue, stopTicket, ticketName } from "./check-queue";
 import { Move, readOverrides, readOverridesForWrite, writeOverrides } from "./check-priority";
 import { CHECKS_CHROME, type CheckRow, checkRows, ChecksMode, queueEstimates, type QueueEstimates, movedOverrides, nextChecksMode, RECENT_WINDOW_MS, type RecentCheck, recentChecks, recentKey, renderChecks, renderRecent } from "./checks";
-import { readEstimates, seedEstimates } from "./check-estimate";
+import { readEstimates, seedEstimates, seedRuns } from "./check-estimate";
 import { historyStore } from "./history";
 import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN, stripControl } from "./term";
 import { errorMessage } from "./util";
@@ -52,13 +52,7 @@ export async function checksPane() {
   const readRecent = (): RecentCheck[] => recentChecks(historyStore(), Date.now() - RECENT_WINDOW_MS);
 
   // a store from before this build: build it from the last week of history once
-  seedEstimates(
-    dirname(dir),
-    recentChecks(historyStore(), Date.now() - SEED_WINDOW_MS, Number.POSITIVE_INFINITY)
-      .filter((r) => r.record.runMs > 0 && !r.record.killed)
-      .toReversed()
-      .map((r) => ({ repo: r.record.repo, command: r.record.full ?? r.record.command, runMs: r.record.runMs })),
-  );
+  seedEstimates(dirname(dir), seedRuns(recentChecks(historyStore(), Date.now() - SEED_WINDOW_MS, Number.POSITIVE_INFINITY)));
 
   let estimates: QueueEstimates = { etas: new Map(), wsDoneMs: new Map() };
   let rows = read();

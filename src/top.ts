@@ -12,7 +12,8 @@ import { type ClaimContext, workspaceClass } from "./workspace-class";
 import { worklistFacts } from "./worklist-class";
 import { itemIdOf, providerFor, refreshLineage, refreshTitle, TITLE_TTL_MS } from "./pm";
 import type { Provider } from "./pm/provider";
-import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
+import { type AppSpec, type ButtonSpec, loadRepoConfig, type ProjectManagement } from "./project-config";
+import { type IdeConfig, IdeName } from "./ide";
 import { getWorkspace, isTaskClaim, readState } from "./state";
 import { boxBottom, boxRow, boxTop, type Color, colorize, fit, inverse, isColor, stripControl, textWidth } from "./term";
 import { parseUnresolved, REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses, threadsCommand } from "./reviewers";
@@ -365,7 +366,7 @@ export interface TopSnapshot {
   /** The task name: the item's title without id or conventional prefix, else the workspace name. */
   title?: string;
   links: TopLink[];
-  ide?: Ide;
+  ide?: EditorIde;
   /** `$OVERBRIDGE_IDE`, else `$EDITOR`; used for the editor button when no `ide` is configured. */
   editor?: string;
   apps: TopApp[];
@@ -380,7 +381,13 @@ export interface TopSnapshot {
   message?: string;
 }
 
-export const IDE_COMMANDS: Record<Ide, string> = { vscode: "code", zed: "zed", webstorm: "webstorm" };
+/** An ide that names an editor to launch: every one but `none`. */
+export type EditorIde = Exclude<IdeName, typeof IdeName.None>;
+
+export const IDE_COMMANDS: Record<EditorIde, string> = { vscode: "code", zed: "zed", webstorm: "webstorm" };
+
+/** The editor `ide` names, or undefined for `none` or no ide, which leaves the button to the env. */
+export const editorIde = (ide: IdeConfig | undefined): EditorIde | undefined => (ide === undefined || ide.name === IdeName.None ? undefined : ide.name);
 
 const cacheFile = (ws: string) => join(metaDir(), "top", `${ws}.json`);
 
@@ -896,14 +903,14 @@ export async function snapshotTop(ws: string, env: NodeJS.ProcessEnv = process.e
   const cache = readTopCache(ws);
   const apps: TopApp[] = [];
   const custom: CustomButton[] = [];
-  let ide: Ide | undefined;
+  let ide: EditorIde | undefined;
   const problems: string[] = cache.message ? [cache.message] : [];
 
   for (const { repo, dir: repoDir, claim } of scope.repos) {
 
     try {
       const config = loadRepoConfig(repoDir, repo);
-      ide ??= config.ide;
+      ide ??= editorIde(config.ide);
 
       for (const spec of config.buttons) {
         const state = cache.buttons?.[buttonKey(repo, spec.id)];
@@ -1001,7 +1008,7 @@ export const ALT_COMMANDS = Object.fromEntries([["zed", "zeditor"]]);
 
 export const appUrlOf = (app: TopApp): string | undefined => appUrl(app.spec, app.port);
 
-const isIde = (name: string): name is Ide => Object.hasOwn(IDE_COMMANDS, name);
+const isIde = (name: string): name is EditorIde => Object.hasOwn(IDE_COMMANDS, name);
 
 /** Split an editor env value like `code -w` (or an ide name like `zed`) into a command and a label. */
 function editorFromEnv(editor: string | undefined): { label: string; cmd: string[] } | undefined {
@@ -1009,6 +1016,10 @@ function editorFromEnv(editor: string | undefined): { label: string; cmd: string
 
   if (!cmd?.length) return undefined;
   const name = cmd[0]!;
+
+  if (cmd.length === 1 && name === IdeName.None) {
+    return undefined;
+  }
 
   if (cmd.length === 1 && isIde(name)) return { label: name, cmd: [IDE_COMMANDS[name]] };
 

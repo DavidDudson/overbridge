@@ -214,7 +214,7 @@ describe("owners layer", () => {
 
   test("applies only to repos whose GitHub owner matches, ignoring case", () => {
     writeRoot("owners:\n  megaport:\n    ide: zed\n");
-    expect(loadRepoConfig(worktree("ws1", "app")).ide).toBe("zed");
+    expect(loadRepoConfig(worktree("ws1", "app")).ide?.name).toBe("zed");
     expect(loadRepoConfig(worktree("ws1", "mine")).ide).toBeUndefined();
     expect(loadRepoConfig(worktree("ws1", "lab")).ide).toBeUndefined();
     expect(loadRepoConfig(worktree("ws1", "unregistered")).ide).toBeUndefined();
@@ -236,7 +236,7 @@ describe("owners layer", () => {
       ].join("\n"),
     );
     const config = loadRepoConfig(worktree("ws1", "app", "commands:\n  test: repo-test\n  lint: repo-lint\n"));
-    expect(config.ide).toBe("webstorm");
+    expect(config.ide?.name).toBe("webstorm");
     expect(config.commands).toEqual({ test: "repo-test", lint: "root-lint", format: "owner-format" });
   });
 
@@ -250,7 +250,7 @@ describe("owners layer", () => {
 
   test("an explicit owner wins over the registry", () => {
     writeRoot("owners:\n  someone:\n    ide: zed\n");
-    expect(resolveConfig(undefined, "app", "f.yml", loadRootLayers(), "Someone").ide).toBe("zed");
+    expect(resolveConfig(undefined, "app", "f.yml", loadRootLayers(), "Someone").ide?.name).toBe("zed");
   });
 
   test("names the owner layer in a merged problem", () => {
@@ -287,7 +287,7 @@ describe("resolveConfig", () => {
       ].join("\n"),
     );
     const config = loadRepoConfig(worktree("ws1", "app", "ide: vscode\ncommands:\n  test: repo-test\n  lint: repo-lint\n"));
-    expect(config.ide).toBe("vscode");
+    expect(config.ide?.name).toBe("vscode");
     expect(config.commands).toEqual({ test: "repo-test", lint: "root-lint" });
   });
 
@@ -314,7 +314,7 @@ describe("resolveConfig", () => {
     const outside = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-outside-")));
 
     try {
-      expect(loadRepoConfig(join(outside, "app")).ide).toBe("zed");
+      expect(loadRepoConfig(join(outside, "app")).ide?.name).toBe("zed");
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
