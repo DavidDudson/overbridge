@@ -3,7 +3,7 @@ import { dirname, join, sep } from "node:path";
 import { stopChecksFor } from "./check-queue";
 import { getRepo } from "./config";
 import * as git from "./git";
-import { HandoffReason, writeHandoff } from "./handoff";
+import { HandoffReason, type HandoffRow, writeHandoff } from "./handoff";
 import type { Mux } from "./mux";
 import { landingTab } from "./next";
 import { isOrchestrationTab } from "./orchestration";
@@ -41,6 +41,16 @@ export function unsavedRepos(ws: string): string[] {
 
     return existsSync(wt) && (git.isDirty(wt) || git.hasUnpushed(wt));
   });
+}
+
+/** Each claim of `ws` with its worktree's HEAD, as a handoff's State table lists them. */
+export function handoffRows(ws: string): HandoffRow[] {
+  return Object.entries(getWorkspace(readState(), ws).repos).map(([repo, c]) => ({
+    repo,
+    branch: c.branch ?? "",
+    head: git.headSha(worktreePath(ws, repo))?.slice(0, 7) ?? "",
+    pr: c.pr,
+  }));
 }
 
 /** Reclaim `icebox` does only when asked: nothing is removed unless its flag is set. */
@@ -182,13 +192,7 @@ export async function icebox(ws: string, opts: IceboxOptions = {}, deps: IceboxD
   await deps.stopApps(ws);
   await deps.stopChecks(ws);
 
-  const rows = Object.entries(w.repos).map(([repo, c]) => {
-    const wt = worktreePath(ws, repo);
-
-    return { repo, branch: c.branch ?? "", head: git.headSha(wt)?.slice(0, 7) ?? "", pr: c.pr };
-  });
-
-  const handoff = writeHandoff({ ws, reason: HandoffReason.Icebox, next: `\`overbridge thaw ${ws}\` was run${opts.dropWorktree ? " and recreated the worktrees" : ""}; check each PR and branch, then carry on`, rows });
+  const handoff = writeHandoff({ ws, reason: HandoffReason.Icebox, next: `\`overbridge thaw ${ws}\` was run${opts.dropWorktree ? " and recreated the worktrees" : ""}; check each PR and branch, then carry on`, rows: handoffRows(ws) });
   withState((s) => {
     const current = getWorkspace(s, ws);
     s.workspaces[ws] = { ...current, iceboxed: { since: new Date().toISOString(), handoff } };

@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { wsDir } from "./paths";
 
-export const HandoffReason = { Context: "context", Manual: "manual", Icebox: "icebox" } as const;
+export const HandoffReason = { Context: "context", Manual: "manual", Icebox: "icebox", Relaunch: "relaunch" } as const;
 
 export type HandoffReason = (typeof HandoffReason)[keyof typeof HandoffReason];
 

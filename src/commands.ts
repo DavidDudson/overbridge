@@ -26,7 +26,8 @@ import { chain, cover, displayStacks, hasGhStack, localStacks, remoteStack, type
 import { agentOf, type Claim, claimOwner, type ReboundFrom, getWorkspace, isIceboxed, readState, withState, type WorkspaceState } from "./state";
 import { AgentKind } from "./agent-kind";
 import { agyArgs, agyTrust, agyUntrust } from "./agy";
-import { errorMessage, exec, fail, isRecord, log, must, naturalSort, run, shellQuote } from "./util";
+import { errorMessage, exec, fail, isRecord, log, must, naturalSort, run, shellQuote, spawnCwd } from "./util";
+import { type AgentLaunch, clearLauncher, mergeLaunch, RELAUNCH_SIGNAL, relaunchExtra, takeRelaunchRequest, writeLauncher } from "./agent-launch";
 
 /** What a workspace really holds in `repo`: its claim, its worktree head, and the stacks of either. */
 export const holdings = (repo: string, stacks: Stack[]) => (ws: string, c: Claim) =>
@@ -542,8 +543,59 @@ export const workspaceClaudeArgs = (ws: string, settings: string, extra: readonl
  * CLAUDE.md points it at `overbridge shell`. Started in a repo folder it loads the workspace settings through
  * `--settings`, because Claude reads `.claude/settings.json` only from its own folder (CLAUDE.md it finds upward).
  */
-export function claude(ws: string, extra: string[]) {
+export async function claude(ws: string, extra: string[]): Promise<never> {
+  // Ctrl-C belongs to the agent; without a handler it would also kill this supervisor
+  process.on("SIGINT", () => {});
+
+  const session = async (args: string[]): Promise<never> => {
+    const code = await runAgent(ws, args);
+    const request = takeRelaunchRequest(ws);
+
+    if (!request) {
+      process.exit(code);
+    }
+
+    log(`${ws}: relaunching the agent`);
+
+    return session(relaunchExtra(request));
+  };
+
+  return session(extra);
+}
+
+/** Root config's `agent-launch` for the workspace's agent kind, then the workspace's own (set by `relaunch`). */
+export const agentLaunchOf = (w: WorkspaceState, layers = loadRootLayers()): AgentLaunch => mergeLaunch(layers.agentLaunch[agentOf(w)], w.launch);
+
+/** How long a relaunch waits for the agent to exit on SIGTERM before it sends SIGKILL. */
+const RELAUNCH_KILL_MS = 10_000;
+
+/** Run the agent once, recording this supervisor and its child so `overbridge relaunch` can restart it. */
+async function runAgent(ws: string, extra: string[]): Promise<number> {
+  const inv = agentInvocation(ws, extra);
+  const child = Bun.spawn({ cmd: inv.cmd, cwd: spawnCwd(inv.cwd), env: { ...process.env, ...inv.env }, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+
+  const onRelaunch = () => {
+    child.kill("SIGTERM");
+    const timer = setTimeout(() => child.kill("SIGKILL"), RELAUNCH_KILL_MS);
+    void child.exited.then(() => clearTimeout(timer));
+  };
+
+  writeLauncher(ws, { pid: process.pid, child: child.pid });
+  process.on(RELAUNCH_SIGNAL, onRelaunch);
+
+  try {
+    await child.exited;
+  } finally {
+    process.off(RELAUNCH_SIGNAL, onRelaunch);
+    clearLauncher(ws, process.pid);
+  }
+
+  return child.exitCode ?? 1;
+}
+
+function agentInvocation(ws: string, extra: string[]) {
   const w = getWorkspace(readState(), ws);
+  const launch = agentLaunchOf(w);
   const repos = Object.keys(w.repos);
   const isAgy = agentOf(w) === AgentKind.Agy;
   scaffold(ws);
@@ -555,13 +607,15 @@ export function claude(ws: string, extra: string[]) {
   if (cwd !== wsDir(ws)) trustFolder(cwd);
   const [only] = repos;
   const spec = repos.length === 1 && only ? loadRepoConfig(worktreePath(ws, only), only).shell : undefined;
-  const argv = isAgy ? agyArgs(extra) : workspaceClaudeArgs(ws, cwd === wsDir(ws) ? scaffoldPlugins() : workspaceSettingsPath(ws), extra);
+  const args = [...launch.args, ...extra];
+  const argv = isAgy ? agyArgs(args) : workspaceClaudeArgs(ws, cwd === wsDir(ws) ? scaffoldPlugins() : workspaceSettingsPath(ws), args);
   const inv = shellInvocation(only ?? "", only ? worktreePath(ws, only) : wsDir(ws), spec, argv, cwd);
   mkdirSync(dirname(agentShellFile(ws)), { recursive: true });
 
   if (spec && only) writeFileSync(agentShellFile(ws), only);
   else rmSync(agentShellFile(ws), { force: true });
-  process.exit(exec(inv.cmd, { cwd: inv.cwd, env: { ...inv.env, OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() } }));
+
+  return { cmd: inv.cmd, cwd: inv.cwd, env: { ...inv.env, ...launch.env, OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() } };
 }
 
 /**

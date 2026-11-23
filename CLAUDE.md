@@ -114,6 +114,11 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   `up`/`layout`. Any new code that lists workspaces for tabs must skip `isIceboxed`.
   `f` in a sidebar runs `icebox` on its own workspace in a child (`runFreeze`); the `@frozen` tab (`src/frozen.ts` pure rows and
   render, `src/frozen-run.ts` pane) lists iceboxed workspaces from state and `t` runs `thaw` in a child (`runThaw`).
+- `src/relaunch.ts` is `overbridge relaunch`: a handoff, the workspace's `WorkspaceState.launch`, then a restart. `claude()` in
+  `src/commands.ts` supervises the agent (async spawn, `<meta>/agent/<ws>.launcher.json`) and restarts it when
+  `RELAUNCH_SIGNAL` arrives with a request file (`src/agent-launch.ts`: pure merge, request, and ancestry parts). Launch
+  settings are the root-only `agent-launch.<kind>` under the workspace's own (`agentLaunchOf`), so `up`, `tab`, and `thaw` keep them.
+  An agent may relaunch only its own workspace (`workspaceAbove` over the caller's process ancestry).
 - `src/explore.ts` is the `@explore` tab (`overbridge explore`, pane in `src/explore-run.ts`): a repo picker, then the top
   panel (`topPanel` with `PanelOptions`: its own `TopScope`, only the terminal pane, a `back` button) over a detached
   checkout of the default branch at `<root>/@explore/<repo>`. `syncPlan` moves that checkout only while it is clean and on

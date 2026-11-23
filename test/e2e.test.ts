@@ -632,3 +632,42 @@ describe("thaw --prompt", () => {
     expect(readFileSync(layouts, "utf8")).toContain("/read-handoff --then /pickup #7");
   });
 });
+
+describe("relaunch", () => {
+  test("restarts the agent in place with the new env and args, resuming on /read-handoff", async () => {
+    expect(ws(["new", "rl"]).code).toBe(0);
+    const bin = join(tmp, "rl-bin");
+    const out = join(tmp, "rl-runs");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "claude"), `#!/bin/sh\necho "CM=${"$"}{CLAUDE_CODE_EXPERIMENTAL_CODE_MODE-unset} ARGS=$*" >> ${out}\nexec sleep 30\n`, { mode: 0o755 });
+
+    const runs = () => (existsSync(out) ? readFileSync(out, "utf8").split("\n").filter(Boolean) : []);
+
+    const until = async (done: () => boolean) => {
+      const deadline = Date.now() + 10_000;
+
+      while (!done() && Date.now() < deadline) await Bun.sleep(50);
+    };
+
+    const launcherFile = join(root, ".overbridge", "agent", "rl.launcher.json");
+    const supervisor = Bun.spawn({ cmd: [process.execPath, CLI, "claude", "rl"], cwd: tmp, env: { ...env(), CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: "1", PATH: `${bin}:${process.env.PATH}` }, stdout: "pipe", stderr: "pipe" });
+    await until(() => runs().length === 1 && existsSync(launcherFile));
+    const first = JSON.parse(readFileSync(launcherFile, "utf8"));
+
+    const r = ws(["relaunch", "rl", "--no-code-mode", "--chrome", "--", "--model", "m"]);
+    expect(r.err).toBe("");
+    expect(r.out).toContain("handoff at");
+    await until(() => runs().length === 2 && existsSync(launcherFile) && JSON.parse(readFileSync(launcherFile, "utf8")).child !== first.child);
+
+    const [before, after] = runs();
+    // the caller's env reaches the agent, and the relaunch's own setting wins over it
+    expect(before).toStartWith("CM=1 ARGS=--settings");
+    expect(after).toStartWith("CM=0 ARGS=--settings");
+    expect(after).toEndWith("--chrome --model m --continue -- /read-handoff");
+    expect(readdirSync(join(root, "rl", ".overbridge", "handoffs")).some((f) => f.endsWith("-relaunch.md"))).toBe(true);
+
+    process.kill(JSON.parse(readFileSync(launcherFile, "utf8")).child, "SIGTERM");
+    await supervisor.exited;
+    expect(existsSync(launcherFile)).toBe(false);
+  }, 20_000);
+});

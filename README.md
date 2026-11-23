@@ -123,6 +123,27 @@ on its claimed branch under the same workspace name; it refuses, leaving the wor
 the way or git cannot check the branch out. It refuses up front when a worktree holds ignored files (a `.env`) that
 `--prune` would not delete, since git does not count them as unsaved work. Both flags can be combined.
 
+**Relaunch.** `overbridge relaunch <name>` restarts a workspace's agent in its own tab with new settings. It writes a
+handoff (reason `relaunch`), stores the settings, and restarts the agent on `/read-handoff`, resuming its last
+conversation. `--fresh` starts a new conversation instead, and `--prompt <text>` gives the agent a request to carry out
+after the handoff. `--no-code-mode` sets `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=0`, `--chrome` adds Claude Code's
+`--chrome` flag, `--env NAME=VALUE` sets any variable, and arguments after `--` go on the agent's command line. These
+settings replace the workspace's earlier ones and stay for `up`, `tab`, and `thaw`. A relaunch with no flags goes back to
+the root `config.yml`'s `agent-launch`, which sets env and args per agent kind for every workspace:
+
+```yaml
+agent-launch:
+  claude:
+    env: { CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: 0 }
+    args: [--chrome]
+```
+
+`overbridge claude <name>` supervises the agent, and a relaunch signals it to stop the agent (SIGTERM, then SIGKILL
+after 10 seconds) and start it again. A tab whose agent was started by an older overbridge build has no supervisor, so
+the relaunch closes that tab and opens it again. Relaunch refuses an agent that is mid-turn unless you pass `--force`.
+The orchestrator can relaunch any workspace. A workspace's own agent can relaunch only its own workspace: the command
+walks up its process tree and refuses when it runs under another workspace's supervisor.
+
 **Seeing what was removed.** The bottom of the sidebar shows `🧹 next check 42s`, a countdown to the next merged-PR check.
 Below it, a yellow `🧹 removing <title>` row shows a removal in progress and a grey `🧹 removed <title>` row one that finished;
 a failed one shows red as `✗ failed <title>`. Finished rows stay until the next check, then drop off. The sidebar shows at most
