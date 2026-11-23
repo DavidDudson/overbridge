@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { cachedTitle, refreshTitle } from "../src/pm/cache";
 import { createTechDebtItem, slug } from "../src/pm/provider";
 import { clearProviders, providerFor, registerProvider } from "../src/pm/registry";
+import { registerBuiltins } from "../src/pm";
 import { fakeProvider } from "./helpers/fake-provider";
 
 let tmp: string;
@@ -17,6 +18,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // later test files in the same process build real providers
+  registerBuiltins();
   savedRoot === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = savedRoot);
   rmSync(tmp, { recursive: true, force: true });
 });
