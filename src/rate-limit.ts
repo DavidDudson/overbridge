@@ -153,12 +153,40 @@ export class RateGate {
   }
 }
 
-/** The earliest reset among the `gh api rate_limit` resources that are used up (that endpoint is not itself limited). */
-export async function ghResetLookup(): Promise<number | undefined> {
-  const p = Bun.spawn(["gh", "api", "rate_limit", "--jq", "[.resources[] | select(.remaining == 0) | .reset] | min // empty"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+/** Runs `gh` with these arguments and resolves its trimmed stdout. */
+export type GhOutput = (args: string[]) => Promise<string>;
+
+const ghOutput: GhOutput = async (args) => {
+  const p = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
   const out = (await new Response(p.stdout).text()).trim();
   await p.exited;
-  const seconds = Number(out);
+
+  return out;
+};
+
+const RATE_LIMIT_QUERY = "query{rateLimit{remaining resetAt}}";
+
+/** GraphQL's own `rateLimit` reading; undefined when the reply cannot be read. */
+async function graphqlReset(gh: GhOutput): Promise<number | undefined> {
+  const [remaining, resetAt] = (await gh(["api", "graphql", "-f", `query=${RATE_LIMIT_QUERY}`, "--jq", ".data.rateLimit | \"\\(.remaining) \\(.resetAt)\""])).split(" ");
+  const ms = Date.parse(resetAt ?? "");
+
+  return remaining === "0" && Number.isFinite(ms) ? ms : undefined;
+}
+
+/** The earliest reset among the used-up `gh api rate_limit` resources other than GraphQL. */
+async function restReset(gh: GhOutput): Promise<number | undefined> {
+  const seconds = Number(await gh(["api", "rate_limit", "--jq", '[.resources | to_entries[] | select(.key != "graphql" and .value.remaining == 0) | .value.reset] | min // empty']));
 
   return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
+}
+
+/**
+ * When the used-up budget resets: the earlier of GraphQL's and REST's. GraphQL's comes from its own `rateLimit` field,
+ * because `gh api rate_limit` can show GraphQL points left while GraphQL refuses every call.
+ */
+export async function ghResetLookup(gh: GhOutput = ghOutput): Promise<number | undefined> {
+  const resets = (await Promise.all([graphqlReset(gh), restReset(gh)])).flatMap((ms) => ms ?? []);
+
+  return resets.length > 0 ? Math.min(...resets) : undefined;
 }

@@ -223,6 +223,28 @@ describe("cachedExec", () => {
   const fail: RunResult = { ok: false, code: 1, stdout: "", stderr: "boom" };
   const view = ["gh", "pr", "view", "12", "--json", "state"];
 
+  test.each([
+    ["repos/{owner}/{repo}/pulls?head={owner}:feat%2Fx&state=all", 1],
+    ["repos/{owner}/{repo}/pulls/12/files", 2],
+  ])("gh api %s is read %d time(s) for two calls", (path, expected) => {
+    let calls = 0;
+    const exec = cachedExec(() => (calls++, ok("{}")), () => 0, new Map());
+    exec(["gh", "api", path], "/a");
+    exec(["gh", "api", path], "/a");
+    expect(calls).toBe(expected);
+  });
+
+  test("a REST PR read is cached like a gh pr read", () => {
+    let calls = 0;
+    const exec = cachedExec(() => (calls++, ok("{}")), () => 0, new Map());
+    const rest = ["gh", "api", "repos/{owner}/{repo}/pulls/12"];
+    exec(rest, "/a");
+    exec(rest, "/a");
+    exec(["gh", "api", "search/issues?q=repo:{owner}/{repo}+is:pr+12&per_page=30"], "/a");
+    exec(["gh", "api", "search/issues?q=repo:{owner}/{repo}+is:pr+12&per_page=30"], "/a");
+    expect(calls).toBe(2);
+  });
+
   test("a PR read is made once per TTL, per command and directory", () => {
     let calls = 0;
     let t = 0;

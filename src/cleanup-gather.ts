@@ -15,7 +15,7 @@ import type { Provider } from "./pm/provider";
 import { loadRepoConfig } from "./project-config";
 import { localStacks, stackOf } from "./stack";
 import { type Claim, isRemoving, readState, type State, TASK_BRANCH_PREFIX } from "./state";
-import { isJsonObject, type JsonValue, numberField, parseJson, stringField } from "./json";
+import { isJsonObject, type JsonObject, type JsonValue, numberField, parseJson, stringField } from "./json";
 import { errorMessage, log, naturalSort, type RunResult, run } from "./util";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
@@ -37,7 +37,7 @@ export interface GatherDeps {
 export const PR_FACT_TTL_MS = 60_000;
 
 /** The `gh` reads that name a PR's state; nothing else is cached (git facts always come straight from git). */
-const isPrRead = (cmd: string[]) => cmd[0] === "gh" && ((cmd[1] === "pr" && (cmd[2] === "view" || cmd[2] === "list")) || (cmd[1] === "api" && /\/commits\/[^/]+\/pulls$/.test(cmd[2] ?? "")));
+const isPrRead = (cmd: string[]) => cmd[0] === "gh" && ((cmd[1] === "pr" && (cmd[2] === "view" || cmd[2] === "list")) || (cmd[1] === "api" && /\/pulls(\/\d+|\?head=.*)?$|^search\/issues\?/.test(cmd[2] ?? "")));
 
 /**
  * `run`, with a PR read answered from memory while it is under the TTL. A failed read is never cached or served stale.
@@ -88,40 +88,53 @@ const defaultDeps = (): GatherDeps => ({
   strayFiles: (ws, repos) => strayFiles(wsDir(ws), repos),
 });
 
-const PR_FIELDS = "number,state,headRefName,url,title";
 const PR_SEARCH_LIMIT = 30;
 
-const GH_STATES = new Map<string, PrState>([
-  ["OPEN", PrState.Open],
-  ["MERGED", PrState.Merged],
-  ["CLOSED", PrState.Closed],
-]);
+/** The REST pulls endpoints of the repo `gh` finds in the working directory. They draw on the core budget, not GraphQL's. */
+const PULLS = "repos/{owner}/{repo}/pulls";
 
 interface RawPr {
   number?: number | undefined;
-  state?: string | undefined;
+  state?: PrState | undefined;
   headRefName?: string | undefined;
   url?: string | undefined;
   title?: string | undefined;
 }
 
-/** The `gh` fields of a parsed PR; a field of the wrong type reads as absent. */
+/** REST says `closed` for a merged PR too; only `merged_at` tells them apart. */
+function restState(value: JsonObject): PrState | undefined {
+  if (value.merged_at) {
+    return PrState.Merged;
+  }
+
+  const state = stringField(value, "state");
+
+  if (state === "open") {
+    return PrState.Open;
+  }
+
+  return state === "closed" ? PrState.Closed : undefined;
+}
+
+/** The fields of a parsed REST pull; a field of the wrong type reads as absent. */
 function rawPr(value: JsonValue | undefined): RawPr {
   if (!isJsonObject(value)) {
     return {};
   }
 
+  const head = value.head;
+
   return {
     number: numberField(value, "number"),
-    state: stringField(value, "state"),
-    headRefName: stringField(value, "headRefName"),
-    url: stringField(value, "url"),
+    state: restState(value),
+    headRefName: isJsonObject(head) ? stringField(head, "ref") : undefined,
+    url: stringField(value, "html_url"),
     title: stringField(value, "title"),
   };
 }
 
 function prFact(raw: RawPr, provider: Provider | undefined): PrFact | undefined {
-  const state = GH_STATES.get(raw.state ?? "");
+  const state = raw.state;
 
   if (raw.number === undefined || !state) {
     return undefined;
@@ -154,27 +167,52 @@ interface Read<T> {
 
 const read = <T>(value: T, ...problems: string[]): Read<T> => ({ value, problems });
 
-/** The PR `selector` (a number or a branch) names. A branch with no PR is not a problem; a PR number that can't be read is. */
-function readPr(selector: string, wt: string, deps: GatherDeps, provider: Provider | undefined): Read<PrFact | undefined> {
-  const r = deps.exec(["gh", "pr", "view", selector, "--json", PR_FIELDS], wt);
+/** PR number `n`; a PR that can't be read is a problem. */
+function readPrNumber(n: number, wt: string, deps: GatherDeps, provider: Provider | undefined): Read<PrFact | undefined> {
+  const r = deps.exec(["gh", "api", `${PULLS}/${n}`], wt);
   const pr = r.ok ? prFact(rawPr(parse(r.stdout)), provider) : undefined;
-  const numbered = /^\d+$/.test(selector);
 
-  return pr || !numbered ? read(pr) : read(pr, `PR #${selector} could not be read: ${r.stderr || "gh printed nothing usable"}`);
+  return pr ? read(pr) : read(pr, `PR #${n} could not be read: ${r.stderr || "gh printed nothing usable"}`);
 }
+
+/** The PR from `branch`, an open one first. REST answers `[]` for a branch with no PR, so any other reply is a problem. */
+function readBranchPr(branch: string, wt: string, deps: GatherDeps, provider: Provider | undefined): Read<PrFact | undefined> {
+  const r = deps.exec(["gh", "api", `${PULLS}?head={owner}:${encodeURIComponent(branch)}&state=all`], wt);
+  const listed = r.ok ? parse(r.stdout) : undefined;
+
+  if (!Array.isArray(listed)) {
+    return read(undefined, `PRs from ${branch} could not be read: ${r.stderr || "gh printed nothing usable"}`);
+  }
+
+  const prs = listed.flatMap((raw) => prFact(rawPr(raw), provider) ?? []);
+
+  return read(prs.find((pr) => pr.state === PrState.Open) ?? prs[0]);
+}
+
+/** The PR `selector` (a number or a branch) names. */
+const readPr = (selector: string, wt: string, deps: GatherDeps, provider: Provider | undefined): Read<PrFact | undefined> =>
+  /^\d+$/.test(selector) ? readPrNumber(Number(selector), wt, deps, provider) : readBranchPr(selector, wt, deps, provider);
 
 /** Every PR whose branch or title names item `id`, whatever branch it came from. */
 function readItemPrs(id: string, wt: string, deps: GatherDeps, provider: Provider): Read<PrFact[]> {
-  const r = deps.exec(["gh", "pr", "list", "--state", "all", "--search", id, "--limit", String(PR_SEARCH_LIMIT), "--json", PR_FIELDS], wt);
+  const query = `repo:{owner}/{repo}+is:pr+${encodeURIComponent(id)}`;
+  const r = deps.exec(["gh", "api", `search/issues?q=${query}&per_page=${PR_SEARCH_LIMIT}`], wt);
+  const found = r.ok ? parse(r.stdout) : undefined;
+  const items = isJsonObject(found) ? found.items : undefined;
 
-  if (!r.ok) {
-    return read([], `PRs for ${id} could not be listed: ${r.stderr || r.stdout}`);
+  if (!Array.isArray(items)) {
+    return read([], `PRs for ${id} could not be listed: ${r.stderr || "the search reply had no items"}`);
   }
 
-  const listed = parse(r.stdout);
-  const prs = Array.isArray(listed) ? listed.flatMap((raw) => prFact(rawPr(raw), provider) ?? []) : [];
+  // Search hits carry no head branch, so each PR is read on its own. A failed read of a hit whose title does not name the
+  // item is dropped: it is most likely a PR that only mentions the id.
+  const hits = items.flatMap((item) => (isJsonObject(item) ? [{ n: numberField(item, "number"), title: stringField(item, "title") ?? "" }] : []));
+  const prs = hits.flatMap(({ n, title }) => (n === undefined ? [] : [{ pr: readPrNumber(n, wt, deps, provider), named: new RegExp(`\\b${escapeRegex(id)}\\b`).test(title) }]));
 
-  return read(prs.filter((pr) => pr.item === id));
+  return read(
+    prs.flatMap(({ pr }) => (pr.value?.item === id ? [pr.value] : [])),
+    ...prs.flatMap(({ pr, named }) => (named ? pr.problems : [])),
+  );
 }
 
 /** Whether commit `sha` is part of a merged PR: a squash merge leaves the branch's commits on no remote branch. */

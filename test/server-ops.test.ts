@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PrBatcher } from "../src/pr-batch";
-import { budgetOf, DEFAULT_PAUSE_MS, isRateLimited, MAX_PAUSE_MS, MIN_PAUSE_MS, RateBudget, RateGate } from "../src/rate-limit";
+import { budgetOf, DEFAULT_PAUSE_MS, ghResetLookup, isRateLimited, MAX_PAUSE_MS, MIN_PAUSE_MS, RateBudget, RateGate } from "../src/rate-limit";
 import { createHandler } from "../src/server";
 import { Cache } from "../src/server-cache";
 import { formatStatus, keyRows, readStatus, type ServerStatus, stopServer } from "../src/server-cmd";
@@ -71,6 +71,53 @@ describe("rate limit gate", () => {
     expect(await at(1_000)).toBe(MIN_PAUSE_MS);
     expect(await at(10 * 3_600_000)).toBe(MAX_PAUSE_MS);
     expect(await at(undefined)).toBe(DEFAULT_PAUSE_MS);
+  });
+
+  describe("reset lookup", () => {
+    const GRAPHQL_RESET = "2026-11-17T05:00:00Z";
+    const CORE_RESET_SECONDS = 1763355600;
+
+    /** A `gh` that answers the GraphQL `rateLimit` read with `graphql` and the REST `rate_limit` read with `rest`. */
+    const fakeGh = (graphql: string, rest: string) => {
+      const calls: string[][] = [];
+
+      const gh = async (args: string[]) => {
+        calls.push(args);
+
+        return args[1] === "graphql" ? graphql : rest;
+      };
+
+      return { gh, calls };
+    };
+
+    test("a used-up GraphQL budget pauses until the reset GraphQL's own rateLimit field reports", async () => {
+      const { gh, calls } = fakeGh(`0 ${GRAPHQL_RESET}`, "");
+      expect(await ghResetLookup(gh)).toBe(Date.parse(GRAPHQL_RESET));
+      expect(calls.find((c) => c[1] === "graphql")).toContain("query=query{rateLimit{remaining resetAt}}");
+    });
+
+    test("GraphQL points left mean the reset comes from the used-up REST resources", async () => {
+      expect(await ghResetLookup(fakeGh(`4000 ${GRAPHQL_RESET}`, String(CORE_RESET_SECONDS)).gh)).toBe(CORE_RESET_SECONDS * 1000);
+    });
+
+    test.each([
+      ["REST", 600, CORE_RESET_SECONDS * 1000],
+      ["GraphQL", -600, (CORE_RESET_SECONDS - 600) * 1000],
+    ])("both budgets used up: the earlier reset (%s) wins", async (_, graphqlOffsetSeconds, expected) => {
+      const graphqlAt = new Date((CORE_RESET_SECONDS + graphqlOffsetSeconds) * 1000).toISOString();
+      expect(await ghResetLookup(fakeGh(`0 ${graphqlAt}`, String(CORE_RESET_SECONDS)).gh)).toBe(expected);
+    });
+
+    test("the REST read leaves out its own graphql resource, which can disagree with GraphQL", async () => {
+      const { gh, calls } = fakeGh("", "");
+      await ghResetLookup(gh);
+      expect(calls.find((c) => c[1] === "rate_limit")?.at(-1)).toContain('.key != "graphql"');
+    });
+
+    test("nothing readable keeps the default pause", async () => {
+      expect(await ghResetLookup(fakeGh("", "").gh)).toBeUndefined();
+      expect(await ghResetLookup(fakeGh("null null", "0").gh)).toBeUndefined();
+    });
   });
 
   test("another failure during a pause does not count as a new trip", () => {
