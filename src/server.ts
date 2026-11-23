@@ -6,7 +6,7 @@ import { Cache, type CacheStats, errorText, type Served } from "./server-cache";
 import { CONNECTED_FRAME, createEvents, HEARTBEAT_FRAME, HEARTBEAT_MS } from "./server-events";
 import { BUILD_HEADER, pidFile, stoppingFile, socketPath, takePidFile, VERSION_HEADER } from "./server-net";
 import { defaultSweepDeps, staleCandidates, sweepMerged } from "./merge-sweep";
-import { ghResetLookup, RateGate } from "./rate-limit";
+import { ghResetLookup, RateBudget, RateGate } from "./rate-limit";
 import { startWatchdog } from "./server-watchdog";
 import { createSweeper } from "./server-sweep";
 import { readState } from "./state";
@@ -393,6 +393,8 @@ interface WorkerReply {
   at?: number;
   /** A rate-limit failure seen inside the job. */
   limited?: string;
+  /** The budget the call behind `limited` spent. */
+  budget?: RateBudget;
   error?: string;
 }
 
@@ -440,6 +442,8 @@ interface RefreshJob {
   force?: boolean;
   /** Set while the rate-limit gate is paused, even on a forced refresh that may read PRs: button `status` commands keep their last output. */
   buttonsPaused?: string;
+  /** Why REST is paused too: `refreshTop` skips its REST merge check. */
+  restPaused?: string;
 }
 
 /** How a top refresh runs in its worker. */
@@ -447,10 +451,11 @@ export interface RefreshOptions {
   timeoutMs?: number;
   /** Why `gh` is paused: no PR is read and the last values are kept. */
   paused?: string;
-  /** Told the first rate-limit failure the worker's `gh` calls hit. */
-  onLimited?: (text: string) => void;
+  /** Told the first rate-limit failure the worker's `gh` calls hit, and the budget that call spent. */
+  onLimited?: (text: string, budget: RateBudget) => void;
   force?: boolean;
   buttonsPaused?: string;
+  restPaused?: string;
 }
 
 const refreshJob = (ws: string, prefetched: PrefetchedPrs, o: RefreshOptions): RefreshJob => {
@@ -461,6 +466,10 @@ const refreshJob = (ws: string, prefetched: PrefetchedPrs, o: RefreshOptions): R
   if (o.force) job.force = true;
 
   if (o.buttonsPaused) job.buttonsPaused = o.buttonsPaused;
+
+  if (o.restPaused) {
+    job.restPaused = o.restPaused;
+  }
 
   return job;
 };
@@ -507,7 +516,7 @@ export const refreshInWorker = (ws: string, prefetched: PrefetchedPrs = {}, o: R
     label: `refresh of ${ws}`,
     fallback: "refresh failed",
     pick: (r) => {
-      if (r.limited) o.onLimited?.(r.limited);
+      if (r.limited) o.onLimited?.(r.limited, r.budget ?? RateBudget.Unknown);
 
       return r.cache;
     },
@@ -550,7 +559,7 @@ export async function serve(): Promise<void> {
     claimed: cachedClaimedPrs(CLAIMED_TTL_MS),
     paused: () => gate.message(),
     onError: (key, e) => {
-      gate.observe(e.message);
+      gate.observe(e.message, RateBudget.GraphQl);
       log(`${key}: ${e.message}`);
     },
   });
@@ -636,13 +645,18 @@ export async function serve(): Promise<void> {
       const forced = o?.force === true && gate.allowForced();
 
       const prefetched = await prefetchFor(ws, batcher, { force: forced });
-      const job: RefreshOptions = { onLimited: (text) => void gate.observe(text), force: forced };
+      const job: RefreshOptions = { onLimited: (text, budget) => void gate.observe(text, budget), force: forced };
       // a forced refresh reads PRs through a pause to learn whether it is over; the button commands call GitHub themselves, so they wait for the gate
       const paused = gate.message();
 
       if (paused) job.buttonsPaused = paused;
 
       if (paused && !forced) job.paused = paused;
+      const restPaused = gate.restMessage();
+
+      if (restPaused) {
+        job.restPaused = restPaused;
+      }
 
       return refreshInWorker(ws, prefetched, job);
     },

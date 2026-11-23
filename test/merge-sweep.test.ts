@@ -8,6 +8,7 @@ import { everyClaimHasPr, type SweepDeps, sweepMerged, Verdict, type VerdictInpu
 import { entries, entryLines } from "../src/sidebar";
 import { readState, RemovalBlock, withState, type WorkspaceState } from "../src/state";
 import { claimSweep, MERGE_SWEEP_MS } from "../src/sweep-trigger";
+import { refreshTop } from "../src/top";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 const ENV_KEYS = ["OVERBRIDGE_ROOT", "OVERBRIDGE_SELF", "OVERBRIDGE_NAME", "ZELLIJ", "ZELLIJ_CONFIG_DIR", "XDG_CACHE_HOME", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_CONFIG_GLOBAL"] as const;
@@ -234,6 +235,36 @@ describe("sweepMerged", () => {
     const { deps, removed } = recordingDeps();
     expect(sweepMerged(deps).m7).toBe(Verdict.Keep);
     expect(removed).not.toContain("m7");
+  });
+});
+
+describe("sweepMerged while GraphQL is rate limited", () => {
+  const isRest = (cmd: string[]) => cmd[1] === "api" && cmd[2]?.startsWith("repos/") === true;
+
+  /** Deps whose refresh runs the real `refreshTop` with GraphQL failing and REST answering `rest`. */
+  function graphQlDown(rest: (head: string) => string | undefined, head: string) {
+    const recorded = recordingDeps(Date.now() + MERGE_SWEEP_MS);
+    recorded.deps.refresh = (ws) => {
+      refreshTop(ws, { exec: (cmd) => (isRest(cmd) ? rest(head) : undefined), paused: "GitHub rate limit reached" });
+    };
+
+    return recorded;
+  }
+
+  test("removes a workspace whose PR merged, read through REST", () => {
+    const head = mergedWorkspace("r1");
+    setAgent("r1", "idle");
+    const { deps, removed } = graphQlDown((h) => JSON.stringify({ merged_at: "2026-11-01T00:00:00Z", head: h }), head);
+    expect(sweepMerged(deps).r1).toBe(Verdict.Remove);
+    expect(removed).toContain("r1");
+  });
+
+  test("keeps the workspace when the REST read fails", () => {
+    const head = mergedWorkspace("r2");
+    setAgent("r2", "idle");
+    const { deps, removed } = graphQlDown(() => undefined, head);
+    expect(sweepMerged(deps).r2).toBe(Verdict.Keep);
+    expect(removed).not.toContain("r2");
   });
 });
 

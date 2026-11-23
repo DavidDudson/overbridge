@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PrBatcher } from "../src/pr-batch";
-import { DEFAULT_PAUSE_MS, isRateLimited, MAX_PAUSE_MS, MIN_PAUSE_MS, RateGate } from "../src/rate-limit";
+import { budgetOf, DEFAULT_PAUSE_MS, isRateLimited, MAX_PAUSE_MS, MIN_PAUSE_MS, RateBudget, RateGate } from "../src/rate-limit";
 import { createHandler } from "../src/server";
 import { Cache } from "../src/server-cache";
 import { formatStatus, keyRows, readStatus, type ServerStatus, stopServer } from "../src/server-cmd";
@@ -78,6 +78,43 @@ describe("rate limit gate", () => {
     gate.observe("API rate limit exceeded");
     gate.observe("API rate limit exceeded");
     expect(gate.stats().trips).toBe(1);
+  });
+
+  test("a primary GraphQL limit leaves REST open; a REST, secondary or unknown limit pauses it too", () => {
+    const rest = (text: string, budget?: RateBudget) => {
+      const gate = new RateGate({ now: () => 0 });
+      gate.observe(text, budget);
+
+      return gate.restMessage();
+    };
+
+    expect(rest("API rate limit exceeded", RateBudget.GraphQl)).toBeUndefined();
+    expect(rest("API rate limit exceeded", RateBudget.Core)).toContain("gh calls paused until");
+    expect(rest("You have exceeded a secondary rate limit", RateBudget.GraphQl)).toContain("gh calls paused until");
+    expect(rest("API rate limit exceeded")).toContain("gh calls paused until");
+  });
+
+  test("a REST limit during a GraphQL pause closes REST too, and the next pause starts afresh", () => {
+    let t = 0;
+    const gate = new RateGate({ now: () => t });
+    gate.observe("API rate limit exceeded", RateBudget.GraphQl);
+    expect(gate.restMessage()).toBeUndefined();
+    gate.observe("API rate limit exceeded", RateBudget.Core);
+    expect(gate.restMessage()).toBeDefined();
+    t += DEFAULT_PAUSE_MS;
+    expect(gate.restMessage()).toBeUndefined();
+    gate.observe("API rate limit exceeded", RateBudget.GraphQl);
+    expect(gate.restMessage()).toBeUndefined();
+  });
+
+  test.each([
+    [["gh", "api", "graphql", "-f", "query=x"], RateBudget.GraphQl],
+    [["gh", "pr", "view", "3"], RateBudget.GraphQl],
+    [["gh", "api", "repos/{owner}/{repo}/pulls/3"], RateBudget.Core],
+    [["gh", "api", "rate_limit"], RateBudget.Unknown],
+    [["sh", "-c", "gh pr view"], RateBudget.Unknown],
+  ])("%p spends the %p budget", (cmd, budget) => {
+    expect(budgetOf(cmd)).toBe(budget);
   });
 
   test("a failure that is not a limit changes nothing", () => {
