@@ -9,6 +9,9 @@ import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
 import { agentRefusal, configSet } from "./config-set";
 import { icebox, thaw } from "./icebox";
+import { launchFromFlags } from "./agent-launch";
+import { SessionMode } from "./agent-supervisor";
+import { relaunch } from "./relaunch";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
 import { historyStore } from "./history";
@@ -28,6 +31,8 @@ import { loadClassOf, readWorklist, refreshWorklist, showWorklist, worklistPane 
 import { currentWorkspace, silenceLegacyWarnings } from "./paths";
 import { externalCommand, externalEnv, externalHelp } from "./external";
 import { errorMessage, exec, log, OverbridgeError } from "./util";
+
+const RELAUNCH_USAGE = "usage: overbridge relaunch <name> [--no-code-mode] [--chrome] [--env NAME=VALUE]... [--prompt text] [--fresh] [--force] [-- agent args]";
 
 const START_USAGE =
   "usage: overbridge start <repo> <id> [--prompt text] [--here] [--agent claude|agy] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] [--agent claude|agy] | overbridge start <repo> --task <slug> --prompt <text> [--agent claude|agy]";
@@ -128,6 +133,12 @@ Workspaces
   overbridge thaw <name> [--prompt text]        reopen an iceboxed workspace's tab, its agent resuming,
                                         reading the handoff, then doing --prompt (else the handoff's Next);
                                         recreates dropped worktrees on their branches
+  overbridge relaunch <name> [--no-code-mode] [--chrome] [--env NAME=VALUE]... [--prompt text] [--fresh] [--force] [-- args]
+                                        write a handoff and restart the workspace's agent in its tab on
+                                        /read-handoff, resuming its conversation (--fresh: a new one). The
+                                        flags replace its launch settings and stick for up and thaw; none
+                                        resets them to config.yml's agent-launch. Refuses a mid-turn agent
+                                        unless --force; an agent can relaunch only its own workspace
   overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty and iceboxed state
   overbridge ahead [--json]                     workspaces whose branch holds commits main lacks (count, how far main
                                         moved, subjects, the Claude session name to message); the revisit skill reads it
@@ -545,6 +556,42 @@ async function main(argv: string[]): Promise<number> {
       break;
     }
 
+    case "relaunch": {
+      // everything after the `--` terminator goes to the agent; parseArgs finds it, so a `--` given as an option's value never splits the command
+      const parsed = parseArgs({
+        args: rest,
+        options: {
+          "no-code-mode": { type: "boolean" },
+          chrome: { type: "boolean" },
+          env: { type: "string", multiple: true },
+          prompt: { type: "string" },
+          fresh: { type: "boolean" },
+          force: { type: "boolean" },
+        },
+        allowPositionals: true,
+        strict: true,
+        tokens: true,
+      });
+
+      const terminator = parsed.tokens.find((t) => t.kind === "option-terminator");
+      const agentArgs = terminator ? rest.slice(terminator.index + 1) : [];
+      const names = parsed.positionals.slice(0, parsed.positionals.length - agentArgs.length);
+      const { values } = parsed;
+
+      if (names.length !== 1) throw new OverbridgeError(RELAUNCH_USAGE);
+      const launch = launchFromFlags({ noCodeMode: values["no-code-mode"], chrome: values.chrome, env: values.env, args: agentArgs });
+
+      const handoff = relaunch(cmd.requireWs(names[0]!), {
+        launch,
+        prompt: values.prompt,
+        session: values.fresh ? SessionMode.Fresh : SessionMode.Continue,
+        force: values.force,
+      });
+
+      console.log(`relaunching ${names[0]}; handoff at ${handoff}`);
+      break;
+    }
+
     case "thaw": {
       const { values, positionals } = opts(rest, { prompt: { type: "string" } });
 
@@ -600,7 +647,7 @@ async function main(argv: string[]): Promise<number> {
       if (tab?.pane) throw new OverbridgeError(`${tab.tab} runs \`overbridge ${tab.pane}\`, not Claude`);
 
       if (tab) cmd.claudeOrchestration(tab, args);
-      else cmd.claude(name, args);
+      else await cmd.claude(name, args);
       break;
     }
 

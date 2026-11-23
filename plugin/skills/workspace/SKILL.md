@@ -99,6 +99,17 @@ also removes itself when the user exits its Claude with every repo clean and pus
 Once every PR has merged and nothing is unsaved, overbridge removes the workspace after your turn ends.
 Commit and push everything before then. Otherwise the workspace stays, marked "merged · unsaved work".
 
+## Restart this agent with other settings
+
+When the user asks you to restart with Code Mode off or with Claude in Chrome, run:
+
+```sh
+overbridge relaunch "$OVERBRIDGE_NAME" --no-code-mode --chrome   # either flag alone works too
+```
+
+It writes a handoff and restarts you in this tab on `/read-handoff`, continuing this conversation. It works only on your
+own workspace. `--env` and agent arguments after `--` are for the user; every other flag is yours. Finish or commit what is in hand first: the restart stops the current turn.
+
 ## Branch naming
 
 New branches: short kebab-case with a type prefix, e.g. `feat/zellij-layout`,

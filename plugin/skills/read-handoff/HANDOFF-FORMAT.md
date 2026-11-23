@@ -9,6 +9,7 @@ One file per handoff, written by the session that is stopping and read by `read-
 - A session whose context is running low, once it has finished the task in hand (reason `context`). Overbridge ships no hook for this; write it when you notice, or when the user asks.
 - Anyone, when the user asks for a handoff (reason `manual`).
 - `overbridge icebox` writes one itself (reason `icebox`) when it pauses a workspace; `overbridge thaw` then starts the agent on `/read-handoff`.
+- `overbridge relaunch` writes one itself (reason `relaunch`) before it restarts the agent with new settings, and the new agent starts on `/read-handoff`.
 
 Write for a reader who has none of this conversation. Give facts the reader can check, such as SHAs, paths, and commands, rather than an account of how the session went. Leave out any section with nothing in it.
 
@@ -16,7 +17,7 @@ Write for a reader who has none of this conversation. Give facts the reader can 
 # Handoff: <item id or PR title> <goal in one line>
 
 Next: <the first action, as a skill name or command, such as `ship-pr`>
-Reason: context | manual | icebox
+Reason: context | manual | icebox | relaunch
 Workspace: <name>
 
 ## State

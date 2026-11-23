@@ -71,6 +71,11 @@ describe("bash", () => {
     'overbridge send ws2 "/pickup #3"',
     "cd app && ws send ws2 hi",
     "overbridge up --fresh",
+    "overbridge relaunch ws1 -- --dangerously-skip-permissions",
+    "overbridge relaunch ws1 --env NODE_OPTIONS=x",
+    "cd app && ws relaunch ws1 --chrome --",
+    'overbridge relaunch ws1 "--env" A=1',
+    "overbridge relaunch ws1 '--' --dangerously-skip-permissions",
     "overbridge spinup -p 2",
     "printf 'xyq' | overbridge checks",
     "overbridge config set guard.deny '[]'",
@@ -233,5 +238,18 @@ describe("agy calls", () => {
     expect(check(agy("write_to_file", { TargetFile: "/w/ws1/app/x.ts", CodeContent: "/** doc */" }), ctx)).toBeUndefined();
     expect(check(agy("run_command", { CommandLine: "bun test", Cwd: "/w/ws1/app" }), ctx)).toBeUndefined();
     expect(check(agy("search_web", { query: "bun test" }), ctx)).toBeUndefined();
+  });
+});
+
+describe("relaunch", () => {
+  test.each(["overbridge relaunch ws1 --no-code-mode --chrome", "overbridge relaunch ws1 --fresh --prompt 'carry on'", "overbridge relaunch ws1 --prompt 'see --envelope'"])(
+    "allows the agent's own settings: %s",
+    (cmd) => {
+      expect(check(bash(cmd), ctx)).toBeUndefined();
+    },
+  );
+
+  test("blocks --env and agent arguments with the reason", () => {
+    expect(check(bash("overbridge relaunch ws1 -- --permission-mode bypassPermissions"), ctx)).toContain("--env and agent arguments are for the user");
   });
 });

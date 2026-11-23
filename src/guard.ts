@@ -68,6 +68,10 @@ const BASH_RULES: [RegExp, string][] = [
   ],
   [new RegExp(GIT + String.raw`worktree\b`), "worktrees are managed by overbridge; ask the user"],
   [new RegExp(CMD + String.raw`(?:overbridge|ws)\s+(?:new|rm|up|claude|send|init|layout|spinup|checks|config\s+set)\b`),"workspace admin commands are for the user, not a workspace Claude"],
+  [
+    new RegExp(CMD + String.raw`(?:overbridge|ws)\s+relaunch\b[^;&|\n]*\s['"]?(?:--env\b|--['"]?(?:\s|$))`),
+    "an agent can relaunch only with --no-code-mode and --chrome; --env and agent arguments are for the user",
+  ],
 ];
 
 // Absolute, home-relative or parent-relative path tokens in a shell command.
