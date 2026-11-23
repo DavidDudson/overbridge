@@ -1,4 +1,4 @@
-import { isRateLimited } from "./rate-limit";
+import { budgetOf, isRateLimited, type RateBudget } from "./rate-limit";
 import { errorText } from "./server-cache";
 import { type PrefetchedPrs, type RefreshDeps, refreshTop, type TopCache } from "./top";
 
@@ -9,17 +9,21 @@ import { type PrefetchedPrs, type RefreshDeps, refreshTop, type TopCache } from 
  */
 declare const self: Worker;
 
-type RefreshReply = { ok: true; cache: TopCache; limited?: string };
+type RefreshReply = { ok: true; cache: TopCache; limited?: string; budget?: RateBudget };
 
-self.onmessage = (event: MessageEvent<{ ws: string; prefetched?: PrefetchedPrs; /** Set while `gh` is paused by a rate limit: the last values are kept and this is shown on the message row. */ paused?: string; /** The user's `r`: button `status` commands run even when their last output could be reused. */ force?: boolean; /** The gate is paused: button `status` commands keep their last output, forced or not. */ buttonsPaused?: string }>) => {
+self.onmessage = (event: MessageEvent<{ ws: string; prefetched?: PrefetchedPrs; /** Set while `gh` is paused by a rate limit: the last values are kept and this is shown on the message row. */ paused?: string; /** The user's `r`: button `status` commands run even when their last output could be reused. */ force?: boolean; /** The gate is paused: button `status` commands keep their last output, forced or not. */ buttonsPaused?: string; /** REST is paused too: no REST merge check. */ restPaused?: string }>) => {
   try {
-    const { ws, prefetched, paused, force, buttonsPaused } = event.data;
+    const { ws, prefetched, paused, force, buttonsPaused, restPaused } = event.data;
     let limited: string | undefined;
+    let budget: RateBudget | undefined;
 
     const deps: RefreshDeps = {
       prefetched,
       onFailure: (cmd, stderr) => {
-        if (!limited && cmd[0] === "gh" && isRateLimited(stderr)) limited = stderr.trim().split("\n")[0];
+        if (!limited && cmd[0] === "gh" && isRateLimited(stderr)) {
+          limited = stderr.trim().split("\n")[0];
+          budget = budgetOf(cmd);
+        }
       },
     };
 
@@ -28,10 +32,20 @@ self.onmessage = (event: MessageEvent<{ ws: string; prefetched?: PrefetchedPrs; 
     if (force) deps.force = true;
 
     if (buttonsPaused) deps.buttonsPaused = buttonsPaused;
+
+    if (restPaused) {
+      deps.restPaused = restPaused;
+    }
+
     const cache = refreshTop(ws, deps);
     const reply: RefreshReply = { ok: true, cache };
 
     if (limited) reply.limited = limited;
+
+    if (budget) {
+      reply.budget = budget;
+    }
+
     postMessage(reply);
   } catch (e) {
     postMessage({ ok: false, error: errorText(e) });

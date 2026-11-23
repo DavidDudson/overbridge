@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentState } from "../src/agent-state";
 import { agentStateFile } from "../src/agent-state";
-import { everyClaimHasPr, mergedCache, type SweepDeps, sweepMerged, Verdict, type VerdictInput, verdictFor } from "../src/merge-sweep";
+import { everyClaimHasPr, type SweepDeps, sweepMerged, Verdict, type VerdictInput, verdictFor } from "../src/merge-sweep";
 import { entries, entryLines } from "../src/sidebar";
 import { readState, RemovalBlock, withState, type WorkspaceState } from "../src/state";
 import { claimSweep, MERGE_SWEEP_MS } from "../src/sweep-trigger";
+import { refreshTop } from "../src/top";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 const ENV_KEYS = ["OVERBRIDGE_ROOT", "OVERBRIDGE_SELF", "OVERBRIDGE_NAME", "ZELLIJ", "ZELLIJ_CONFIG_DIR", "XDG_CACHE_HOME", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_CONFIG_GLOBAL"] as const;
@@ -52,7 +53,7 @@ function setAgent(ws: string, state: AgentState) {
 }
 
 /** Sweep deps that record refreshes and removals instead of calling `gh` or zellij. */
-function recordingDeps(now = Date.now(), restMerged: SweepDeps["restMerged"] = () => undefined) {
+function recordingDeps(now = Date.now()) {
   const refreshed: string[] = [];
   const removed: string[] = [];
 
@@ -65,7 +66,6 @@ function recordingDeps(now = Date.now(), restMerged: SweepDeps["restMerged"] = (
 
       return undefined;
     },
-    restMerged,
     now,
   };
 
@@ -238,61 +238,33 @@ describe("sweepMerged", () => {
   });
 });
 
-describe("mergedCache", () => {
-  const heads = { app: "abc" };
-
-  test("keeps a cache that already knows the PRs merged, without asking REST", () => {
-    const asked: string[] = [];
-    const cache = { links: [], at: 1, merged: heads, prsUnread: true };
-    expect(mergedCache(cache, "w", (ws) => (asked.push(ws), undefined))).toBe(cache);
-    expect(asked).toEqual([]);
-  });
-
-  test("does not ask REST when every PR was read", () => {
-    const asked: string[] = [];
-    expect(mergedCache({ links: [], at: 1 }, "w", (ws) => (asked.push(ws), heads)).merged).toBeUndefined();
-    expect(asked).toEqual([]);
-  });
-
-  test("takes REST's heads when a PR could not be read", () => {
-    expect(mergedCache({ links: [], at: 1, prsUnread: true }, "w", () => heads).merged).toEqual(heads);
-  });
-
-  test("a failed REST read leaves merged unset", () => {
-    expect(mergedCache({ links: [], at: 1, prsUnread: true }, "w", () => undefined).merged).toBeUndefined();
-  });
-});
-
 describe("sweepMerged while GraphQL is rate limited", () => {
-  /** What `refreshTop` records when it could not read the claimed PR: no `merged`, `prsUnread` set. */
-  function cacheUnread(ws: string) {
-    mkdirSync(join(root, ".overbridge", "top"), { recursive: true });
-    writeFileSync(join(root, ".overbridge", "top", `${ws}.json`), JSON.stringify({ links: [], prsUnread: true, message: "API rate limit exceeded", branches: { app: `feat/${ws}` }, at: Date.now() }));
+  const isRest = (cmd: string[]) => cmd[1] === "api" && cmd[2]?.startsWith("repos/") === true;
+
+  /** Deps whose refresh runs the real `refreshTop` with GraphQL failing and REST answering `rest`. */
+  function graphQlDown(rest: (head: string) => string | undefined, head: string) {
+    const recorded = recordingDeps(Date.now() + MERGE_SWEEP_MS);
+    recorded.deps.refresh = (ws) => {
+      refreshTop(ws, { exec: (cmd) => (isRest(cmd) ? rest(head) : undefined), paused: "GitHub rate limit reached" });
+    };
+
+    return recorded;
   }
 
   test("removes a workspace whose PR merged, read through REST", () => {
     const head = mergedWorkspace("r1");
-    cacheUnread("r1");
     setAgent("r1", "idle");
-    const { deps, removed } = recordingDeps(Date.now(), (ws) => (ws === "r1" ? { app: head } : undefined));
+    const { deps, removed } = graphQlDown((h) => JSON.stringify({ merged_at: "2026-11-01T00:00:00Z", head: h }), head);
     expect(sweepMerged(deps).r1).toBe(Verdict.Remove);
     expect(removed).toContain("r1");
   });
 
   test("keeps the workspace when the REST read fails", () => {
-    mergedWorkspace("r2");
-    cacheUnread("r2");
+    const head = mergedWorkspace("r2");
     setAgent("r2", "idle");
-    const { deps, removed } = recordingDeps(Date.now(), () => undefined);
+    const { deps, removed } = graphQlDown(() => undefined, head);
     expect(sweepMerged(deps).r2).toBe(Verdict.Keep);
     expect(removed).not.toContain("r2");
-  });
-
-  test("a commit past the REST head counts as unsaved work", () => {
-    const head = mergedWorkspace("r3");
-    cacheUnread("r3");
-    sh(["git", "commit", "-q", "--allow-empty", "-m", "after merge"], join(root, "r3", "app"));
-    expect(sweepMerged(recordingDeps(Date.now(), () => ({ app: head })).deps).r3).toBe(Verdict.MergedUnsaved);
   });
 });
 

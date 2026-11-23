@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
-import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, claimedCache, hit, itemLabel, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type PrView, type TopApp, type TopLink, type TopSnapshot, topRowsNeeded } from "../src/top";
+import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, claimedCache, hit, itemLabel, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, REST_MERGE_CHECK_MS, snapshotTop, type PrInfo, type PrView, type TopApp, type TopLink, type TopSnapshot, topRowsNeeded } from "../src/top";
 import { textWidth } from "../src/term";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -258,7 +258,7 @@ describe("refreshTop", () => {
     const notice = "GitHub rate limit reached: gh calls paused until 14:32:10, showing cached data";
     const reads: string[][] = [];
     const paused = refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => (reads.push(cmd), undefined), paused: notice });
-    expect(reads.filter((c) => c[0] === "gh")).toEqual([]);
+    expect(reads.filter((c) => c[0] === "gh" && c[1] === "pr")).toEqual([]);
     expect(paused.message).toBe(notice);
     expect(paused.links).toEqual(first.links);
     expect(paused.prsOpen).toBe(first.prsOpen);
@@ -276,12 +276,61 @@ describe("refreshTop", () => {
     expect(claimedCache("w1", paused).merged).toBeUndefined();
   });
 
-  test("marks the PRs unread when a claimed PR could not be read or gh is paused, so the sweep can ask REST", () => {
-    expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", {}) }).prsUnread).toBeUndefined();
-    const failed = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => undefined });
-    expect(failed.prsUnread).toBe(true);
-    expect(failed.merged).toBeUndefined();
-    expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: () => undefined, paused: "paused" }).prsUnread).toBe(true);
+  describe("REST merge check while GraphQL cannot answer", () => {
+    const isRest = (cmd: string[]) => cmd[1] === "api" && cmd[2]?.startsWith("repos/") === true;
+    const restReply = (mergedAt: string | null) => JSON.stringify({ merged_at: mergedAt, head: "resthead" });
+
+    /** GraphQL reads fail; REST answers with `rest` and every call is recorded. */
+    function restOnly(rest: string | undefined) {
+      const calls: string[][] = [];
+
+      const exec = (cmd: string[]) => {
+        calls.push(cmd);
+
+        return isRest(cmd) ? rest : undefined;
+      };
+
+      return { exec, restCalls: () => calls.filter(isRest) };
+    }
+
+    test("a PR GraphQL could not read is found merged through REST", () => {
+      const { exec, restCalls } = restOnly(restReply("2026-11-01T00:00:00Z"));
+      expect(refreshTop("w1", { provider: () => fakeProvider(items), exec }).merged).toEqual({ r: "resthead" });
+      expect(restCalls()).toEqual([["gh", "api", "repos/{owner}/{repo}/pulls/3", "--jq", "{merged_at, head: .head.sha}"]]);
+    });
+
+    test("while gh is paused for GraphQL only, REST still finds the merge", () => {
+      refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", {}) });
+      const { exec } = restOnly(restReply("2026-11-01T00:00:00Z"));
+      expect(refreshTop("w1", { provider: () => fakeProvider(items), exec, paused: "paused" }).merged).toEqual({ r: "resthead" });
+    });
+
+    test("while REST is paused too, no REST call is made", () => {
+      const { exec, restCalls } = restOnly(restReply("2026-11-01T00:00:00Z"));
+      expect(refreshTop("w1", { provider: () => fakeProvider(items), exec, paused: "paused", restPaused: "paused" }).merged).toBeUndefined();
+      expect(restCalls()).toEqual([]);
+    });
+
+    test.each([
+      ["fails", undefined],
+      ["says the PR is open", restReply(null)],
+    ])("a REST read that %s leaves merged unset, and waits before asking again", (_, rest) => {
+      const start = 1_000_000;
+      const first = restOnly(rest);
+      const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: first.exec, now: () => start });
+      expect(cache.merged).toBeUndefined();
+      expect(cache.restCheckedAt).toBe(start);
+      const soon = restOnly(restReply("2026-11-01T00:00:00Z"));
+      expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: soon.exec, now: () => start + REST_MERGE_CHECK_MS - 1 }).merged).toBeUndefined();
+      expect(soon.restCalls()).toEqual([]);
+      expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: soon.exec, now: () => start + REST_MERGE_CHECK_MS }).merged).toEqual({ r: "resthead" });
+    });
+
+    test("a PR GraphQL read makes no REST call", () => {
+      const calls: string[][] = [];
+      refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => (calls.push(cmd), prJson("OPEN", {})) });
+      expect(calls.filter(isRest)).toEqual([]);
+    });
   });
 
   test("caches the headline, the item link and the PR link", () => {

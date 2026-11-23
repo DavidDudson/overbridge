@@ -6,11 +6,8 @@ export interface RestClaim {
   pr?: number;
 }
 
-/**
- * Read one PR through REST (`repos/{owner}/{repo}/pulls/<n>`), which spends the core budget, not GraphQL's. `gh` fills
- * `{owner}/{repo}` from the worktree it runs in.
- */
-export const restPrCommand = (n: number): string[] => ["gh", "api", `repos/{owner}/{repo}/pulls/${n}`, "--jq", "{merged_at, head: .head.sha}"];
+/** Read one PR through REST (`gh` fills `{owner}/{repo}` from the worktree), which spends the core budget, not GraphQL's. */
+export const restPrCommand = (prNumber: number): string[] => ["gh", "api", `repos/{owner}/{repo}/pulls/${prNumber}`, "--jq", "{merged_at, head: .head.sha}"];
 
 /** The PR's head commit when the REST reply says it merged; undefined while open, closed unmerged, or when the reply is unreadable. */
 export function mergedHead(out: string | undefined): string | undefined {
@@ -33,11 +30,7 @@ export function mergedHead(out: string | undefined): string | undefined {
   return raw.head;
 }
 
-/**
- * Each claimed repo's PR head, read through REST, when every claimed branch's PR has merged: the same shape as
- * `TopCache.merged`. Undefined when a claim has no PR, a PR has not merged, or any read fails, so a failed read never
- * makes a workspace look finished.
- */
+/** Each claimed repo's merged PR head, as `TopCache.merged`; undefined unless every claimed PR merged and every read worked. */
 export function restMergedHeads(claims: Readonly<Record<string, RestClaim>>, dirOf: (repo: string) => string, exec: (cmd: string[], cwd: string) => string | undefined): Record<string, string> | undefined {
   const claimed = Object.entries(claims).filter(([, c]) => c.branch);
 
@@ -45,11 +38,18 @@ export function restMergedHeads(claims: Readonly<Record<string, RestClaim>>, dir
     return undefined;
   }
 
-  const heads = claimed.flatMap(([repo, c]) => {
-    const head = mergedHead(exec(restPrCommand(c.pr!), dirOf(repo)));
+  const heads: Record<string, string> = {};
 
-    return head ? [[repo, head] as const] : [];
-  });
+  // stop at the first PR that has not merged: the answer is known, and every read spends the REST budget
+  for (const [repo, c] of claimed) {
+    const head = c.pr === undefined ? undefined : mergedHead(exec(restPrCommand(c.pr), dirOf(repo)));
 
-  return heads.length === claimed.length ? Object.fromEntries(heads) : undefined;
+    if (!head) {
+      return undefined;
+    }
+
+    heads[repo] = head;
+  }
+
+  return heads;
 }
