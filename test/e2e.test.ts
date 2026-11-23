@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { estimateKeys, estimatesFile } from "../src/check-estimate";
 import { HELD_ENV, readTickets, stopTicket } from "../src/check-queue";
+import { shellQuote } from "../src/util";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 let tmp: string;
@@ -424,8 +426,8 @@ describe("check queue", () => {
   const cq = () => join(root, "cq");
   const queue = () => join(root, ".overbridge", "check-queue");
 
-  const config = (extra = "") =>
-    writeFileSync(join(cq(), "app", "overbridge.yml"), `shell: env FOO=queued\ncheck-queue:\n  max-load-percent: 100000\n  max-cpu-percent: 100000\n  skip-queue-seconds: 0\n${extra}`);
+  const config = (extra = "", skipQueueSeconds = 0) =>
+    writeFileSync(join(cq(), "app", "overbridge.yml"), `shell: env FOO=queued\ncheck-queue:\n  max-load-percent: 100000\n  max-cpu-percent: 100000\n  skip-queue-seconds: ${skipQueueSeconds}\n${extra}`);
 
   const check = (args: string[]) => ws(["check", ...args], cq());
 
@@ -549,6 +551,40 @@ describe("check queue", () => {
     expect(tickets()).toHaveLength(1);
     expect(await run.exited).toBe(143);
     expect(tickets()).toEqual([]);
+  }, CHECK_TEST_MS);
+
+  test("a bare program runs from the nearest bin-dirs folder, and history keeps its name", () => {
+    config();
+    const app = join(cq(), "app");
+    const bin = (dir: string, text: string) => {
+      mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
+      writeFileSync(join(dir, "node_modules", ".bin", "hello"), `#!/bin/sh\necho ${text}\n`, { mode: 0o755 });
+    };
+
+    try {
+      bin(app, "root");
+      bin(join(app, "sub"), "sub");
+      expect(ws(["check", "app", "--", "hello"], join(app, "sub")).out.trim()).toBe("sub");
+      expect(ws(["check", "app", "--", "hello"], app).out.trim()).toBe("root");
+      const history = readFileSync(join(root, ".overbridge", "history", "cq.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+      expect(history.at(-1)).toMatchObject({ kind: "check", command: "hello" });
+    } finally {
+      rmSync(join(app, "node_modules"), { recursive: true, force: true });
+      rmSync(join(app, "sub"), { recursive: true, force: true });
+    }
+  }, CHECK_TEST_MS);
+
+  test("a check whose own passing runs were quick skips the queue", async () => {
+    config("  max-parallel: 1\n", 10);
+    const log = join(tmp, "skip.log");
+    const quick = script("skip-quick", `echo quick >> ${log}`);
+    const command = quick.slice(1).map(shellQuote).join(" ");
+    writeFileSync(estimatesFile(join(root, ".overbridge")), JSON.stringify({ [estimateKeys("app", command)[0]]: [100, 100, 100] }));
+    const slow = spawnCheck(script("skip-slow", `echo start >> ${log}; sleep 3; echo end >> ${log}`));
+    await waitFor(() => existsSync(log));
+    expect(check(quick).code).toBe(0);
+    expect(await slow.exited).toBe(0);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start", "quick", "end"]);
   }, CHECK_TEST_MS);
 
   test("a nested check inside a held run runs at once", () => {

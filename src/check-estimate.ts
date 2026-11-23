@@ -56,6 +56,13 @@ export function estimateFor(store: EstimateStore, repo: string, command: string)
   return runs ? { runMs: median(runs), runs: runs.length } : undefined;
 }
 
+/** The usual run time of exactly `command` in `repo`, from its own runs only; undefined before its first. */
+export function exactEstimateFor(store: EstimateStore, repo: string, command: string): Estimate | undefined {
+  const runs = store[estimateKeys(repo, command)[0]] ?? [];
+
+  return runs.length ? { runMs: median(runs), runs: runs.length } : undefined;
+}
+
 const isRuns = (v: unknown): v is number[] => Array.isArray(v) && v.every((n) => Number.isFinite(n) && n >= 0);
 
 /** The store in `dir`; empty when it is missing or unreadable, since estimates are only a hint. */

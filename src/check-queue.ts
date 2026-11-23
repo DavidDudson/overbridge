@@ -3,7 +3,7 @@ import { availableParallelism, constants, cpus, loadavg } from "node:os";
 import { dirname, join } from "node:path";
 import { defaultKey, type QueueOverrides, readOverrides } from "./check-priority";
 import { type CheckRecord, classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
-import { type Estimate, estimateFor, etaSlots, formatDuration, overallMs, queueEtas, readEstimates, recordRunTime } from "./check-estimate";
+import { type Estimate, etaSlots, exactEstimateFor, formatDuration, overallMs, queueEtas, readEstimates, recordRunTime } from "./check-estimate";
 import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidsAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
@@ -151,7 +151,13 @@ export const loadAllows = (load1: number, cores: number, percent: number) => loa
 
 /** Whether the measured CPU use, plus the runs it does not show yet, leaves room to start: under `percent` busy. */
 export const cpuAllows = (cpuPercent: number | undefined, unsettled: number, cores: number, percent: number) =>
-  cpuPercent !== undefined && cpuPercent + (unsettled * 100) / cores < percent;
+  percent > 100 || (cpuPercent !== undefined && effectiveCpuPercent(cpuPercent, unsettled, cores) < percent);
+
+/** The CPU use the gate compares: what was measured, plus one core per run too new to show in it. */
+export const effectiveCpuPercent = (cpuPercent: number, unsettled: number, cores: number) => cpuPercent + (unsettled * 100) / cores;
+
+/** Below this many ms per core, a reading spans a scheduler tick or two and reads as 0% or 100%. */
+const MIN_CPU_WINDOW_MS = 500;
 
 /** Every core's idle and total time so far, summed; two of them give the share the CPU was busy in between. */
 export interface CpuTimes {
@@ -165,11 +171,27 @@ export const cpuTimes = (): CpuTimes =>
     { idleMs: 0, totalMs: 0 },
   );
 
-/** How busy every core was, in percent, between two samples; undefined when no time passed between them. */
-export function cpuBusyPercent(prev: CpuTimes, next: CpuTimes): number | undefined {
+/** How busy every core was, in percent, between two samples; undefined when they span under `minWindowMs` per core. */
+export function cpuBusyPercent(prev: CpuTimes, next: CpuTimes, cores: number, minWindowMs = 0): number | undefined {
   const totalMs = next.totalMs - prev.totalMs;
 
-  return totalMs > 0 ? 100 * (1 - (next.idleMs - prev.idleMs) / totalMs) : undefined;
+  return totalMs > 0 && totalMs / cores >= minWindowMs ? 100 * (1 - (next.idleMs - prev.idleMs) / totalMs) : undefined;
+}
+
+/** A reader of how busy the CPU was since its last reading; it keeps its baseline until a reading spans `minWindowMs`. */
+export function cpuMeter(cores: number, sample: () => CpuTimes = cpuTimes, minWindowMs = MIN_CPU_WINDOW_MS): () => number | undefined {
+  const baseline = { times: sample() };
+
+  return () => {
+    const now = sample();
+    const busy = cpuBusyPercent(baseline.times, now, cores, minWindowMs);
+
+    if (busy !== undefined) {
+      baseline.times = now;
+    }
+
+    return busy;
+  };
 }
 
 /** When the process group's CPU time last moved. */
@@ -247,9 +269,15 @@ export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machin
   return cpuAllows(machine.cpuPercent, unsettled, machine.cores, settings.maxCpuPercent) ? Gate.Start : Gate.Cpu;
 }
 
-/** Whether a check this quick (by its past runs) starts at once instead of queueing; with no past runs it queues. */
+/** Passing runs of the exact command a skip needs, so one lucky run cannot send a slow check past the queue. */
+export const SKIP_MIN_RUNS = 3;
+
+/**
+ * Whether a check this quick starts at once instead of queueing. `estimate` is the exact command's own (`exactEstimateFor`):
+ * a command's group mixes in other arguments, so `vitest run` must not borrow the speed of `vitest run a.ts`.
+ */
 export const skipsQueue = (estimate: Estimate | undefined, settings: Pick<CheckQueue, "skipQueueSeconds">) =>
-  estimate !== undefined && estimate.runMs < settings.skipQueueSeconds * 1_000;
+  estimate !== undefined && estimate.runs >= SKIP_MIN_RUNS && estimate.runMs < settings.skipQueueSeconds * 1_000;
 
 export interface QueueView {
   running: Ticket[];
@@ -421,7 +449,7 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
   const cores = availableParallelism();
   const limit = (cores * settings.maxLoadPercent) / 100;
   let announced: string | undefined;
-  let cpuSample = cpuTimes();
+  const readCpu = cpuMeter(cores);
 
   for (;;) {
     const overrides = readOverrides(dir);
@@ -430,9 +458,7 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
     const now = Date.now();
     const ahead = aheadOf(me, live, comparatorFor(live, overrides));
     const load1 = loadavg()[0] ?? 0;
-    const cpuNow = cpuTimes();
-    const cpuPercent = cpuBusyPercent(cpuSample, cpuNow);
-    cpuSample = cpuNow;
+    const cpuPercent = readCpu();
     const gate = gateFor(me, live, settings, { load1, cores, cpuPercent }, now, overrides);
 
     if (gate === Gate.Start) {
@@ -441,8 +467,9 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
 
     const running = live.filter(isRunning);
     const runningNow = running.length ? `running: ${running.map(label).join("; ")}` : "nothing running yet";
-    const overLoad = `load ${(load1 + unsettledLoad(running, now)).toFixed(2)} is over ${limit.toFixed(1)} (${settings.maxLoadPercent}% of ${cores} cores)`;
-    const busy = cpuPercent === undefined ? "CPU not sampled yet" : `CPU ${Math.round(cpuPercent + (unsettledLoad(running, now) * 100) / cores)}% busy`;
+    const unsettled = unsettledLoad(running, now);
+    const overLoad = `load ${(load1 + unsettled).toFixed(2)} is over ${limit.toFixed(1)} (${settings.maxLoadPercent}% of ${cores} cores)`;
+    const busy = cpuPercent === undefined ? "CPU not sampled yet" : `CPU ${Math.round(effectiveCpuPercent(cpuPercent, unsettled, cores))}% busy`;
     const overCpu = `${busy}, max-cpu-percent ${settings.maxCpuPercent}`;
     const overMachine = gate === Gate.Cpu ? overCpu : overLoad;
 
@@ -610,7 +637,7 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
   try {
     const deadlineMs = me.queuedAtMs + settings.waitSeconds * 1_000;
 
-    const quick = skipsQueue(estimateFor(readEstimates(dirname(dir)), me.repo, me.command), settings);
+    const quick = skipsQueue(exactEstimateFor(readEstimates(dirname(dir)), me.repo, me.command), settings);
 
     if (!quick && !(await waitForStart(me, dir, settings, deadlineMs))) {
       recordCheck(me, Date.now(), undefined, CheckExit.GaveUp);
@@ -633,7 +660,8 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
     const endedMs = Date.now();
     recordCheck(me, startedMs, endedMs, code);
 
-    if (code !== CheckExit.TimedOut && code !== CheckExit.Stalled) {
+    // a run that fails fast (a config error, a missing dependency) says nothing about how long a real run takes
+    if (code === 0) {
       recordRunTime(dirname(dir), me.repo, me.command, endedMs - startedMs);
     }
 

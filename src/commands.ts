@@ -739,13 +739,15 @@ export function claudeOrchestration(t: OrchestrationTab, extra: string[]): never
 
 /** `overbridge shell <repo> -- <cmd>`: run `cmd` in the repo's dev shell, or as it is when the repo has none. */
 /** `cmd` in `repo`'s dev shell, run from the cwd when it is inside the worktree, else from the worktree. */
-function inRepoShell(ws: string, repo: string, cmd: string[]) {
+/** `argvFor` can rewrite the command from the repo's config, the directory it runs in, and the worktree. */
+function inRepoShell(ws: string, repo: string, cmd: string[], argvFor = (_config: ProjectConfig, _cwd: string, _dir: string) => cmd) {
   if (!getWorkspace(readState(), ws).repos[repo]) fail(`${repo} is not in ${ws}`);
   const dir = worktreePath(ws, repo);
   const here = process.cwd();
   const config = loadRepoConfig(dir, repo);
+  const cwd = isInside(here, dir) ? here : dir;
 
-  return { config, inv: shellInvocation(repo, dir, config.shell, cmd, isInside(here, dir) ? here : dir) };
+  return { config, inv: shellInvocation(repo, dir, config.shell, argvFor(config, cwd, dir), cwd) };
 }
 
 export function shell(repo: string, cmd: string[], wsOpt?: string) {
@@ -777,9 +779,7 @@ export async function check(repoArg: string | undefined, cmd: string[], wsOpt?: 
     fail(refusal);
   }
 
-  const dir = worktreePath(ws, repo);
-  const cwd = process.cwd();
-  const { config, inv } = inRepoShell(ws, repo, withLocalBin(cmd, isInside(cwd, dir) ? cwd : dir, dir));
+  const { config, inv } = inRepoShell(ws, repo, cmd, (repoConfig, cwd, dir) => withLocalBin(cmd, cwd, dir, repoConfig.checkQueue.binDirs));
   const settings = timeoutSeconds === undefined ? config.checkQueue : { ...config.checkQueue, timeoutSeconds };
   const cls = workspaceClass(claimContexts(ws, repo, config), worklistFacts);
   const who: Parameters<typeof runCheck>[1] = { ws, repo, command: cmd.map(shellQuote).join(" ") };

@@ -7,6 +7,9 @@ import {
   CheckExit,
   cpuAllows,
   cpuBusyPercent,
+  cpuMeter,
+  effectiveCpuPercent,
+  SKIP_MIN_RUNS,
   exitFor,
   Gate,
   gateFor,
@@ -140,6 +143,20 @@ describe("start gate", () => {
     expect(gateFor(me, [settled(1), me], settings, { load1: 0, cores: 8 }, NOW_MS)).toBe(Gate.Cpu);
   });
 
+  test("with both over, the load is the reason given", () => {
+    expect(gateFor(me, [settled(1), me], settings, { load1: 5.6, cores: 8, cpuPercent: 80 }, NOW_MS)).toBe(Gate.Load);
+  });
+
+  test("a run that just started counts toward the CPU gate", () => {
+    const fresh = ticket(1, 1, { runPid: 10, runningSinceMs: NOW_MS });
+    expect(gateFor(me, [fresh, me], settings, { load1: 0, cores: 8, cpuPercent: 70 }, NOW_MS)).toBe(Gate.Cpu);
+    expect(gateFor(me, [settled(1), me], settings, { load1: 0, cores: 8, cpuPercent: 70 }, NOW_MS)).toBe(Gate.Start);
+  });
+
+  test("max-cpu-percent over 100 starts before the CPU is sampled", () => {
+    expect(gateFor(me, [settled(1), me], { ...settings, maxCpuPercent: 101 }, { load1: 0, cores: 8 }, NOW_MS)).toBe(Gate.Start);
+  });
+
   test("with nothing running, a busy CPU does not hold the first in line", () => {
     expect(gateFor(me, [me], settings, { load1: 0, cores: 8, cpuPercent: 100 }, NOW_MS)).toBe(Gate.Start);
   });
@@ -190,8 +207,12 @@ describe("skipsQueue", () => {
   const settings = { skipQueueSeconds: 10 };
 
   test("a check whose past runs took under skip-queue-seconds skips the queue", () => {
-    expect(skipsQueue({ runMs: 4_000, runs: 3 }, settings)).toBe(true);
-    expect(skipsQueue({ runMs: 10_000, runs: 3 }, settings)).toBe(false);
+    expect(skipsQueue({ runMs: 4_000, runs: SKIP_MIN_RUNS }, settings)).toBe(true);
+    expect(skipsQueue({ runMs: 10_000, runs: SKIP_MIN_RUNS }, settings)).toBe(false);
+  });
+
+  test("too few runs of the exact command queue, however quick", () => {
+    expect(skipsQueue({ runMs: 1_000, runs: SKIP_MIN_RUNS - 1 }, settings)).toBe(false);
   });
 
   test("a check with no past runs queues", () => {
@@ -201,13 +222,38 @@ describe("skipsQueue", () => {
 
 describe("CPU gate", () => {
   test("busy share between two samples", () => {
-    expect(cpuBusyPercent({ idleMs: 100, totalMs: 200 }, { idleMs: 150, totalMs: 400 })).toBe(75);
-    expect(cpuBusyPercent({ idleMs: 100, totalMs: 200 }, { idleMs: 100, totalMs: 200 })).toBeUndefined();
+    expect(cpuBusyPercent({ idleMs: 100, totalMs: 200 }, { idleMs: 150, totalMs: 400 }, 1)).toBe(75);
+    expect(cpuBusyPercent({ idleMs: 100, totalMs: 200 }, { idleMs: 100, totalMs: 200 }, 1)).toBeUndefined();
+  });
+
+  test("a reading shorter than the window per core is no reading", () => {
+    expect(cpuBusyPercent({ idleMs: 0, totalMs: 0 }, { idleMs: 0, totalMs: 3_900 }, 8, 500)).toBeUndefined();
+    expect(cpuBusyPercent({ idleMs: 0, totalMs: 0 }, { idleMs: 1_000, totalMs: 4_000 }, 8, 500)).toBe(75);
+  });
+
+  test("the meter keeps its baseline until a reading spans the window", () => {
+    const samples = [
+      { idleMs: 0, totalMs: 0 },
+      { idleMs: 0, totalMs: 100 },
+      { idleMs: 500, totalMs: 1_000 },
+      { idleMs: 1_500, totalMs: 2_000 },
+    ];
+    const next = () => samples.shift() ?? { idleMs: 0, totalMs: 0 };
+    const read = cpuMeter(1, next, 500);
+    expect(read()).toBeUndefined();
+    expect(read()).toBe(50);
+    expect(read()).toBe(0);
   });
 
   test("a run that just started counts as one more busy core", () => {
     expect(cpuAllows(70, 0, 8, 75)).toBe(true);
     expect(cpuAllows(70, 1, 8, 75)).toBe(false);
     expect(cpuAllows(undefined, 0, 8, 75)).toBe(false);
+    expect(effectiveCpuPercent(70, 1, 8)).toBe(82.5);
+  });
+
+  test("over 100 turns the gate off, sampled or not", () => {
+    expect(cpuAllows(undefined, 0, 8, 101)).toBe(true);
+    expect(cpuAllows(100, 8, 8, 200)).toBe(true);
   });
 });

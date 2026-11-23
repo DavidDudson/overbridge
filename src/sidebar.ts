@@ -619,7 +619,7 @@ export function queueRows(queue: { running: Ticket[]; waiting: Ticket[] }, inner
     return [];
   }
 
-  const summary = fit(`checks: ${queue.running.length} running · ${queue.waiting.length} queued`, inner);
+  const summary = fit(`checks: ${queue.running.length} running · ${queue.waiting.length} waiting`, inner);
 
   return [summary, ...running, ...waiting];
 }

@@ -280,7 +280,7 @@ access to other workspaces and direct branch switching. Do not try to work aroun
   \`push\`, \`submit\`, \`rebase\` and \`sync\` work as normal; pull an existing stack with \`overbridge checkout <repo> #<pr>\`
   (never \`gh stack checkout\` or \`gh stack trunk\`). Run \`overbridge pr <repo>\` after moving between layers or submitting.
 - Run lint, typecheck, test, and build commands through \`overbridge check <repo> -- <cmd>\`. It queues them
-  across all workspaces and runs several at once, in the repo's dev shell, while the machine's load allows. overbridge kills a run that
+  across all workspaces and runs several at once, in the repo's dev shell, while the machine's CPU and load allow. overbridge kills a run that
   goes over its time limit (exit 124) or stops using CPU (exit 137). If it cannot start in time, it gives up with exit 75.
 - One check is one command: never chain commands inside it (\`sh -c 'a; b'\`, \`a && b\`). Queue each as its own
   \`overbridge check\`, \`cd\` before the call, and pipe the check's output (\`overbridge check <repo> -- vitest run a.ts | tail\`).

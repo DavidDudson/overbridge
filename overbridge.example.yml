@@ -74,7 +74,8 @@ check-queue:
   timeout-seconds: 180       # kill the run after this long; `--timeout-seconds n` overrides it for one run
   stall-seconds: 300         # kill the run once its processes have used no CPU for this long
   wait-seconds: 900          # give up (exit 75) when there is still no turn after this long
-  skip-queue-seconds: 10     # a check whose past runs took under this long starts at once, skipping the queue; 0 queues every check
+  skip-queue-seconds: 10     # a check whose last passing runs took under this long starts at once, skipping the queue; 0 queues every check
+  bin-dirs: [node_modules/.bin]  # a bare program in a check runs from the nearest of these first; [] leaves it to PATH
   # Checks start by the workspace's class (the root config.yml's priority-classes; default high, normal, low),
   # and the @work list ranks items of the same priority by class.
   # priority: normal         # this repo's class when no rule matches

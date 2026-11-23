@@ -431,7 +431,7 @@ Where it applies:
 ### Check queue
 
 `overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>` runs a heavy command, such as lint, typecheck,
-test or build, in queue order across every workspace. Several run at once while the machine's load leaves room. The skills send the repo's `commands.lint`,
+test or build, in queue order across every workspace. Several run at once while the machine's CPU and load leave room. The skills send the repo's `commands.lint`,
 `typecheck`, `test`, and `build` through it. The repo defaults to the one the current directory is in, then to the
 workspace's only repo.
 
@@ -453,12 +453,15 @@ workspace's only repo.
 4. **Stop.** The command is killed (TERM, then KILL after 10 seconds) when it runs past `timeout-seconds` (exit 124),
    or when its process group uses no CPU for `stall-seconds` (exit 137). If a call cannot start within `wait-seconds`, it
    gives up with exit 75. Otherwise it exits with the command's own code.
-5. **Quick checks.** A check whose past runs took under `skip-queue-seconds` (the median of its last runs, default 10)
-   starts at once, past the queue and the load gate. A check with no past runs queues.
+5. **Quick checks.** A check whose own passing runs took under `skip-queue-seconds` (the median of its last runs,
+   default 10) starts at once, past the queue and the CPU and load gates. It needs at least 3 passing runs of the exact
+   command: a failed run is not timed, and a command never borrows the time of others in its group.
 6. **One command.** A check is one command. `overbridge check` refuses a `sh -c` script that chains several with `;`,
-   `&&`, `||`, `&` or a newline, so queue each as its own check, `cd` before the call and pipe its output
-   (`overbridge check -- vitest run a.ts | tail`). A bare program from `node_modules/.bin`, such as `nx`, `vitest`,
-   `eslint` or `tsc`, runs from the nearest one between the current directory and the repo root, as `npx` picks it.
+   `&&`, `||`, `&` or a newline (quotes, `$(...)`, backticks, `[[ ]]` and comments do not count), so queue each as
+   its own check, `cd` before the call and pipe its output (`overbridge check -- vitest run a.ts | tail`). A bare
+   program found in one of `bin-dirs` (`node_modules/.bin` by default), such as `nx`, `vitest`, `eslint` or `tsc`,
+   runs from the nearest one between the current directory and the repo root, as `npx` picks it, ahead of the dev
+   shell's PATH. `bin-dirs: []` leaves every program to PATH.
 
 `--timeout-seconds` raises or lowers the time limit for one run. The tab sidebar shows each running command, how long
 it has run, and who is waiting, under a count of the checks running and queued.
@@ -557,7 +560,8 @@ out, so move it up if it has to run.
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
 | `check-queue.wait-seconds` | `900` | give up (exit 75) when a run cannot start for this long, because of the queue ahead, `max-parallel`, or the load |
-| `check-queue.skip-queue-seconds` | `10` | a check whose past runs took under this long starts at once, skipping the queue and the load gate; `0` queues every check |
+| `check-queue.skip-queue-seconds` | `10` | a check whose last passing runs (at least 3) took under this long starts at once, skipping the queue and the CPU and load gates; `0` queues every check |
+| `check-queue.bin-dirs` | `[node_modules/.bin]` | repo-relative folders a bare program in a check is looked up in, nearest the current directory first, before the dev shell's PATH; `[]` turns the lookup off |
 | `check-queue.priority` | the default class | the class this repo's claims get when no rule matches: a name from the root `priority-classes` |
 | `check-queue.priority-rules` | none | list of `{ priority, branch?, item?, type?, label? }`; the first rule whose regexes all match the claim or work item sets the class, for the check queue and the `@work` list |
 | `icebox.idle-days` | none | suggest iceboxing a workspace whose claimed PRs are all drafts and idle this many days (last commit, PR update and agent activity, whichever is latest). The sidebar card shows `draft PRs idle <n>d · icebox?`; nothing is iceboxed automatically. Unset turns it off. Set it for every repo in the root `config.yml` under `defaults.icebox` |

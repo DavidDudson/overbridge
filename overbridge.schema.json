@@ -176,8 +176,13 @@
           "minimum": 1
         },
         "wait-seconds": { "description": "Give up waiting for a turn after this long. Default 900.", "type": "integer", "minimum": 1 },
+        "bin-dirs": {
+          "description": "Repo-relative folders a bare program in a check is looked up in, nearest the current directory first, ahead of the dev shell's PATH. An empty list turns the lookup off. Default [\"node_modules/.bin\"].",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
         "skip-queue-seconds": {
-          "description": "A check whose past runs took under this long (the median) starts at once, skipping the queue and the load gate. 0 queues every check. Default 10.",
+          "description": "A check whose last passing runs (at least 3 of the exact command) took under this long (the median) starts at once, skipping the queue and the CPU and load gates. 0 queues every check. Default 10.",
           "type": "integer",
           "minimum": 0
         },

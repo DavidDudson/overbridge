@@ -32,6 +32,19 @@ describe("chainedCommands", () => {
     expect(chainedCommands("echo a\\; b")).toEqual(["echo a\\; b"]);
   });
 
+  test.each([
+    ["vitest run |& tail", 1],
+    ["[[ -f a && -f b ]] && echo ok", 2],
+    ["vitest run $(git diff --name-only; echo x)", 1],
+    ["vitest run `git diff --name-only; echo x`", 1],
+    ["tsc --noEmit # check; fast", 1],
+    ["cmd >&2", 1],
+    ["(cd a; vitest run)", 2],
+    ["{ lint; test; }", 3],
+  ])("%p is %p command(s)", (script, count) => {
+    expect(chainedCommands(script)).toHaveLength(count);
+  });
+
   test("set lines run nothing, so they do not count", () => {
     expect(chainedCommands("set -o pipefail; nx affected -t test | tail")).toEqual(["nx affected -t test | tail"]);
   });
@@ -52,22 +65,29 @@ describe("chainRefusal", () => {
 
 describe("localBin", () => {
   const root = "/ws/app";
+  const BIN = ["node_modules/.bin"];
   const has = (...paths: string[]) => (p: string) => paths.includes(p);
 
   test("the nearest node_modules/.bin from the cwd up to the repo", () => {
     const exists = has("/ws/app/node_modules/.bin/nx", "/ws/app/libs/ui/node_modules/.bin/vitest");
-    expect(localBin("vitest", "/ws/app/libs/ui/src", root, exists)).toBe("/ws/app/libs/ui/node_modules/.bin/vitest");
-    expect(localBin("nx", "/ws/app/libs/ui", root, exists)).toBe("/ws/app/node_modules/.bin/nx");
+    expect(localBin("vitest", "/ws/app/libs/ui/src", root, BIN, exists)).toBe("/ws/app/libs/ui/node_modules/.bin/vitest");
+    expect(localBin("nx", "/ws/app/libs/ui", root, BIN, exists)).toBe("/ws/app/node_modules/.bin/nx");
+  });
+
+  test("looks only in the configured folders; none turns it off", () => {
+    const exists = has("/ws/app/node_modules/.bin/nx", "/ws/app/bin/nx");
+    expect(localBin("nx", root, root, ["bin"], exists)).toBe("/ws/app/bin/nx");
+    expect(localBin("nx", root, root, [], exists)).toBeUndefined();
   });
 
   test("never above the repo", () => {
-    expect(localBin("nx", "/ws/app", root, has("/ws/node_modules/.bin/nx"))).toBeUndefined();
+    expect(localBin("nx", "/ws/app", root, BIN, has("/ws/node_modules/.bin/nx"))).toBeUndefined();
   });
 
   test("withLocalBin swaps only a bare program it finds", () => {
     const exists = has("/ws/app/node_modules/.bin/nx");
-    expect(withLocalBin(["nx", "affected", "-t", "lint"], root, root, exists)).toEqual(["/ws/app/node_modules/.bin/nx", "affected", "-t", "lint"]);
-    expect(withLocalBin(["just", "test"], root, root, exists)).toEqual(["just", "test"]);
-    expect(withLocalBin(["./nx", "build"], root, root, exists)).toEqual(["./nx", "build"]);
+    expect(withLocalBin(["nx", "affected", "-t", "lint"], root, root, BIN, exists)).toEqual(["/ws/app/node_modules/.bin/nx", "affected", "-t", "lint"]);
+    expect(withLocalBin(["just", "test"], root, root, BIN, exists)).toEqual(["just", "test"]);
+    expect(withLocalBin(["./nx", "build"], root, root, BIN, exists)).toEqual(["./nx", "build"]);
   });
 });

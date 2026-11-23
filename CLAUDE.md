@@ -42,9 +42,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
 - `src/shell.ts` resolves a repo's dev shell (`shell` key): prefix or cached env (`$XDG_CACHE_HOME/overbridge/shell`); used by `overbridge shell`, `claude()` (one repo: agent starts inside it, marker `<meta>/agent/<ws>.shell`), the terminal pane and the generated CLAUDE.md. Keep it tool-agnostic.
 - `src/check-queue.ts` is `overbridge check`: tickets in `<meta>/check-queue/`, no lock. `gateFor` starts a ticket once every live
   ticket ahead is running, fewer than `max-parallel` are, and either none is running or both the load and the CPU measured over the last poll
-  allow (`loadAllows`, `cpuAllows`, `cpuBusyPercent`; `unsettledLoad` counts runs neither shows yet). A check whose past runs took under
-  `skip-queue-seconds` skips the gate (`skipsQueue`). `src/check-command.ts` refuses a `sh -c` script that chains commands (`chainRefusal`)
-  and runs a bare package bin from `node_modules/.bin` (`withLocalBin`); owners are looked up in one batch per poll (`splitLive`, `pidsAlive`), never one `ps` per ticket; then the command runs in its own process group, killed on `timeout-seconds` or a CPU stall
+  allow (`loadAllows`, `cpuAllows`, `cpuBusyPercent`; `unsettledLoad` counts runs neither shows yet). A check whose own passing runs took under
+  `skip-queue-seconds` skips the gate (`skipsQueue` over `exactEstimateFor`; only exit 0 records a run time). `src/check-command.ts` refuses a
+  `sh -c` script that chains commands (`chainRefusal`) and runs a bare program from the repo's `bin-dirs` (`withLocalBin`); owners are looked up in one batch per poll (`splitLive`, `pidsAlive`), never one `ps` per ticket; then the command runs in its own process group, killed on `timeout-seconds` or a CPU stall
   (`groupCpuSeconds` in `src/proc.ts`). Its pure parts are unit-tested; `test/e2e.test.ts` drives the real queue.
   Tickets sort by `queueComparator`: the workspace's class rank (`src/workspace-class.ts` over `check-queue.priority` and
   `priority-rules`; classes are the root-only `priority-classes`, `src/check-priority.ts`), recorded in the ticket when
