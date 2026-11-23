@@ -458,7 +458,7 @@ workspace's only repo.
    command: a failed run is not timed, and a command never borrows the time of others in its group.
 6. **One command.** A check is one command. `overbridge check` refuses a `sh -c` script that chains several with `;`,
    `&&`, `||`, `&` or a newline (quotes, `$(...)`, backticks, `[[ ]]` and comments do not count), so queue each as
-   its own check, `cd` before the call and pipe its output (`overbridge check -- vitest run a.ts | tail`). A bare
+   its own check, `cd` before the call and pipe its output with `pipefail` on, so a failed check still fails (`set -o pipefail; overbridge check -- vitest run a.ts | tail`). A bare
    program found in one of `bin-dirs` (`node_modules/.bin` by default), such as `nx`, `vitest`, `eslint` or `tsc`,
    runs from the nearest one between the current directory and the repo root, as `npx` picks it, ahead of the dev
    shell's PATH. `bin-dirs: []` leaves every program to PATH.

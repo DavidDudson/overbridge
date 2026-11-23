@@ -20,6 +20,13 @@ describe("exactEstimateFor", () => {
     expect(exactEstimateFor(store, "app", "just test")).toBeUndefined();
     expect(estimateFor(store, "app", "just test")).toEqual({ runMs: 4_000, runs: 2 });
   });
+
+  test("none for a command too long for its key to tell apart", () => {
+    const prefix = `just test ${"a".repeat(600)}`;
+    const store = withRun({}, "app", `${prefix} one`, 1_000);
+    expect(exactEstimateFor(store, "app", `${prefix} one`)).toBeUndefined();
+    expect(exactEstimateFor(store, "app", `${prefix} two`)).toBeUndefined();
+  });
 });
 
 describe("estimateFor", () => {

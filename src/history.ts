@@ -112,8 +112,11 @@ const REDACTIONS: readonly [RegExp, string][] = [
  * inside an escaped quote, cannot be told apart from any other word and is kept. At most 500 characters.
  */
 export function redactCommand(command: string): string {
-  return REDACTIONS.reduce((text, [re, to]) => text.replace(re, to), command.trim().slice(0, 2000).replace(/\s+/g, " ")).slice(0, 500);
+  return REDACTIONS.reduce((text, [re, to]) => text.replace(re, to), command.trim().slice(0, 2000).replace(/\s+/g, " ")).slice(0, REDACTED_MAX_CHARS);
 }
+
+/** `redactCommand` keeps at most this many characters, so two commands alike up to here share one text. */
+export const REDACTED_MAX_CHARS = 500;
 
 /** Programs whose next word is the task they run: `just check`, `make lint`. */
 const TASK_RUNNERS = new Set(["just", "make", "task", "nx", "turbo", "mise"]);

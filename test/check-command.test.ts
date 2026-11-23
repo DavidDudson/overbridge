@@ -6,11 +6,15 @@ describe("shellScript", () => {
     expect(shellScript(["sh", "-c", "just test"])).toBe("just test");
     expect(shellScript(["bash", "-lc", "just test"])).toBe("just test");
     expect(shellScript(["/bin/bash", "-e", "-c", "just test"])).toBe("just test");
+    expect(shellScript(["bash", "-Ec", "just test"])).toBe("just test");
+    expect(shellScript(["bash", "-o", "pipefail", "-c", "just test"])).toBe("just test");
   });
 
   test("nothing for a plain command or a script file", () => {
     expect(shellScript(["just", "test"])).toBeUndefined();
     expect(shellScript(["bash", "ci.sh"])).toBeUndefined();
+    expect(shellScript(["bash", "ci.sh", "-c", "a; b"])).toBeUndefined();
+    expect(shellScript(["bash", "--", "-c", "a; b"])).toBeUndefined();
   });
 });
 
@@ -36,6 +40,7 @@ describe("chainedCommands", () => {
     ["vitest run |& tail", 1],
     ["[[ -f a && -f b ]] && echo ok", 2],
     ["vitest run $(git diff --name-only; echo x)", 1],
+    ["vitest run $( (git diff --name-only); git ls-files --others)", 1],
     ["vitest run `git diff --name-only; echo x`", 1],
     ["tsc --noEmit # check; fast", 1],
     ["cmd >&2", 1],
@@ -55,6 +60,10 @@ describe("chainRefusal", () => {
     const message = chainRefusal(["bash", "-c", "just lint && just test"], "app") ?? "";
     expect(message).toContain("chains 2: `just lint`, `just test`");
     expect(message).toContain("overbridge check app -- ");
+  });
+
+  test("refuses a chain behind combined options", () => {
+    expect(chainRefusal(["bash", "-Ec", "lint && test"], "app")).toContain("chains 2");
   });
 
   test("allows one command, with or without a shell around it", () => {

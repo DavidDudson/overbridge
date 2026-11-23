@@ -10,17 +10,29 @@ import { basename, dirname, join, relative } from "node:path";
 
 const SHELLS = new Set(["sh", "bash", "zsh", "dash"]);
 
+/** Shell options that take the next word as their value: `bash -o pipefail -c ...`. */
+const VALUE_OPTIONS = new Set(["-o", "+o", "-O", "+O"]);
+
+/** The script after a `-c` among a shell's leading options; undefined once the options end (`--` or a script file). */
+function scriptAfterOptions(args: readonly string[]): string | undefined {
+  const [arg, ...rest] = args;
+
+  if (arg === undefined || arg === "--" || !/^[-+]/.test(arg)) {
+    return undefined;
+  }
+
+  if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg)) {
+    return rest[0];
+  }
+
+  return scriptAfterOptions(VALUE_OPTIONS.has(arg) ? rest.slice(1) : rest);
+}
+
 /** The script a `sh -c '<script>'` argv runs; undefined for any other argv. */
 export function shellScript(argv: readonly string[]): string | undefined {
   const [program, ...rest] = argv;
 
-  if (!program || !SHELLS.has(basename(program))) {
-    return undefined;
-  }
-
-  const at = rest.findIndex((a) => /^-[a-z]*c[a-z]*$/.test(a));
-
-  return at < 0 ? undefined : rest[at + 1];
+  return program && SHELLS.has(basename(program)) ? scriptAfterOptions(rest) : undefined;
 }
 
 const Quote = { None: "", Single: "'", Double: '"' } as const;
@@ -34,7 +46,7 @@ interface Scan {
   escaped: boolean;
   /** The second character of `&&` or `||`, already split on. */
   skipNext: boolean;
-  /** Open `$(` levels: a command substitution is part of the command around it. */
+  /** Open parentheses inside a `$(`, its own included: a command substitution is part of the command around it. */
   substitution: number;
   inBackticks: boolean;
   /** Inside `[[ ... ]]`, where `&&` and `||` join conditions, not commands. */
@@ -73,8 +85,12 @@ function nested(s: Scan, ch: string, prev: string, next: string, add: (more?: Pa
     return add({ substitution: s.substitution + 1 });
   }
 
-  if (s.substitution > 0 || s.inBackticks) {
-    return ch === ")" && s.substitution > 0 ? add({ substitution: s.substitution - 1 }) : add();
+  if (s.substitution > 0) {
+    return ch === "(" || ch === ")" ? add({ substitution: s.substitution + (ch === "(" ? 1 : -1) }) : add();
+  }
+
+  if (s.inBackticks) {
+    return add();
   }
 
   if (ch === "[" && next === "[" && startsWord(prev)) {
@@ -161,8 +177,9 @@ export function chainRefusal(argv: readonly string[], repo: string): string | un
   return [
     `overbridge check runs one command, but this script chains ${parts.length}: ${parts.map((p) => `\`${p}\``).join(", ")}.`,
     "Queue each command as its own check, run `cd <dir>` before overbridge check rather than inside it, and pipe the",
-    "check's output rather than its command. Run a package bin such as nx, vitest, eslint or tsc by name; no sh -c or npx needed:",
-    `  cd <dir> && overbridge check ${repo} -- vitest run <file> 2>&1 | tail -20`,
+    "check's output rather than its command (with set -o pipefail, so the check's exit code survives the pipe). Run a package",
+    "bin such as nx, vitest, eslint or tsc by name; no sh -c or npx needed:",
+    `  set -o pipefail; cd <dir> && overbridge check ${repo} -- vitest run <file> 2>&1 | tail -20`,
     `  overbridge check ${repo} -- nx affected -t lint --base=origin/<base>`,
   ].join("\n");
 }
