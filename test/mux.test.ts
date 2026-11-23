@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { sessionName } from "../src/paths";
 import { layoutSpecs, workspaceTabSpec } from "../src/layout";
 import { defaultMux, type MuxExec, MuxKind, muxKind, TabFocus, tmuxMux, zellijMux } from "../src/mux";
 import { layoutScript, tmuxConf, tmuxQuote } from "../src/tmux-layout";
@@ -29,7 +30,7 @@ describe("muxKind", () => {
   test("defaultMux outside a session reaches a zellij session by name", () => {
     const r = recorder();
     defaultMux({}, r.exec).tabs();
-    expect(r.calls[0]!.slice(0, 4)).toEqual(["zellij", "--session", "workspaces", "action"]);
+    expect(r.calls[0]!.slice(0, 4)).toEqual(["zellij", "--session", sessionName(), "action"]);
     expect(defaultMux({ TMUX: "x" }, r.exec).kind).toBe(MuxKind.Tmux);
   });
 });
