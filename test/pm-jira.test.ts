@@ -38,6 +38,49 @@ describe("idFromBranch", () => {
   });
 });
 
+describe("lineage", () => {
+  const issue = (key: string, summary: string, status: string, parent?: string) =>
+    JSON.stringify({ key, fields: { summary, status: { name: status }, parent: parent ? { key: parent } : null } });
+
+  const viewer = (tickets: Record<string, string>) => {
+    const calls: string[] = [];
+
+    const runner: Runner = (cmd) => {
+      calls.push(cmd[3]!);
+      const out = tickets[cmd[3]!];
+
+      return { ok: out !== undefined, code: out === undefined ? 1 : 0, stdout: out ?? "", stderr: out === undefined ? "not found" : "" };
+    };
+
+    return { runner, calls };
+  };
+
+  test("climbs from a subtask to its initiative, top first", () => {
+    const v = viewer({
+      "ENG-4": issue("ENG-4", "Subtask", "To Do", "ENG-3"),
+      "ENG-3": issue("ENG-3", "Task", "Code Review", "ENG-2"),
+      "ENG-2": issue("ENG-2", "Epic", "In Progress", "ENG-1"),
+      "ENG-1": issue("ENG-1", "Initiative", "In Progress"),
+    });
+
+    const nodes = jiraProvider(cfg, "/w", v.runner).lineage("4");
+    expect(nodes.map((n) => `${n.id} (${n.status}): ${n.title}`)).toEqual(["ENG-1 (In Progress): Initiative", "ENG-2 (In Progress): Epic", "ENG-3 (Code Review): Task", "ENG-4 (To Do): Subtask"]);
+    expect(nodes[0]!.url).toBe("https://example.atlassian.net/browse/ENG-1");
+  });
+
+  test("stops at a parent it can't read, and at a loop", () => {
+    expect(jiraProvider(cfg, "/w", viewer({ "ENG-3": issue("ENG-3", "Task", "Done", "ENG-2") }).runner).lineage("ENG-3").map((n) => n.id)).toEqual(["ENG-3"]);
+    const loop = viewer({ "ENG-1": issue("ENG-1", "a", "", "ENG-2"), "ENG-2": issue("ENG-2", "b", "", "ENG-1") });
+    expect(jiraProvider(cfg, "/w", loop.runner).lineage("ENG-1").map((n) => n.id)).toEqual(["ENG-2", "ENG-1"]);
+    expect(jiraProvider(cfg, "/w", viewer({}).runner).lineage("ENG-9")).toEqual([]);
+  });
+
+  test("an unset site gives empty links", () => {
+    const p = jiraProvider({ name: "jira", project: "ENG" }, "/w", viewer({ "ENG-1": issue("ENG-1", "a", "Open") }).runner);
+    expect(p.lineage("1")).toEqual([{ id: "ENG-1", title: "a", status: "Open", url: "" }]);
+  });
+});
+
 describe("links and names", () => {
   const p = jiraProvider(cfg, "/w");
   test("link trims the base and accepts a bare number", () => {

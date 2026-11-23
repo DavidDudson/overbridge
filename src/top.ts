@@ -10,7 +10,7 @@ import { metaDir, wsDir, worktreePath } from "./paths";
 import { isJsonNumber, isJsonBoolean, isJsonObject, isJsonString, type JsonObject, type JsonValue } from "./json";
 import { type ClaimContext, workspaceClass } from "./workspace-class";
 import { worklistFacts } from "./worklist-class";
-import { itemIdOf, providerFor, refreshTitle, TITLE_TTL_MS } from "./pm";
+import { itemIdOf, providerFor, refreshLineage, refreshTitle, TITLE_TTL_MS } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, isTaskClaim, readState } from "./state";
@@ -59,7 +59,20 @@ export interface TopLink {
   pr?: PrInfo;
   /** A PR link's state: drives its colour and icon. */
   status?: PrStatus;
+  /** Set on a work item link: one level of the claimed item's hierarchy (Initiative, Epic, Task, Subtask). */
+  item?: TopItem;
 }
+
+/** A work item link's facts, shown as `ENG-12 (In Progress): Add dark mode`. */
+export interface TopItem {
+  id: string;
+  title: string;
+  /** The provider's status name; empty when unknown. */
+  status: string;
+}
+
+/** A work item button's text: the id, then the status in brackets and the title when known. */
+export const itemLabel = (item: TopItem): string => `${item.id}${item.status ? ` (${item.status})` : ""}${item.title ? `: ${item.title}` : ""}`;
 
 export const PR_STATUSES = ["merged", "mergeable", "failing", "conflict", "pending", "blocked", "closed", "unknown"] as const;
 
@@ -560,7 +573,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   const mergedHeads: Record<string, string> = {};
   let headline: string | undefined;
   let itemTitle: string | undefined;
-  let itemLink: TopLink | undefined;
+  let itemLinks: TopLink[] = [];
   const buttonStates: Record<string, ButtonState> = {};
   const claimContexts: ClaimContext[] = [];
   const buttonRuns: Record<string, ButtonRun> = {};
@@ -580,7 +593,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     const pm = config.projectManagement;
     claimContexts.push({ config, dir, branch: claim.branch, repo });
 
-    if (pm && claim.branch && !itemLink) {
+    if (pm && claim.branch && !itemLinks.length) {
       try {
         const p = provider(pm, dir);
         const id = p.idFromBranch(claim.branch);
@@ -589,7 +602,10 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
           const title = refreshTitle(p, pm.project, id, { ttlMs: TITLE_TTL_MS });
           headline = title ? `${id} ${title}` : id;
           itemTitle = title || undefined;
-          itemLink = { label: id, url: p.link(id) };
+          const nodes = refreshLineage(p, pm.project, id, { ttlMs: TITLE_TTL_MS });
+          itemLinks = nodes.length
+            ? nodes.map((n): TopLink => ({ label: n.id, url: n.url || p.link(n.id), item: { id: n.id, title: n.title, status: n.status } }))
+            : [{ label: id, url: p.link(id), item: { id, title: title ?? "", status: "" } }];
         }
       } catch (e) {
         problems.push(`${repo}: ${errorMessage(e)}`);
@@ -680,7 +696,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   const titleNow = itemTitle ?? old.title;
 
   const cache: TopCache = {
-    links: deps.paused ? (old.links.length ? old.links : itemLink ? [itemLink] : []) : itemLink || links.length ? [...(itemLink ? [itemLink] : []), ...links] : old.links,
+    links: deps.paused ? (old.links.length ? old.links : itemLinks) : itemLinks.length || links.length ? [...itemLinks, ...links] : old.links,
     // while paused `merged` and `prsOpen` are the old ones, so they stay tied to the branches they were built for: a claim that moved meanwhile must still invalidate them (`claimedCache`)
     branches: deps.paused && old.branches ? old.branches : Object.fromEntries(claims.flatMap(([repo, c]) => (c.branch ? [[repo, c.branch] as const] : []))),
     at: Date.now(),
@@ -919,6 +935,8 @@ export interface Button {
   side?: "left" | "right";
   /** Index of the PR this button belongs to: those buttons sit on that PR's own row, the PR first and its actions at the right. */
   prRow?: number;
+  /** Level of the work item hierarchy this button links to, 0 at the top: each level sits on its own row above the PRs. */
+  itemRow?: number;
 }
 
 const MARKS: Record<AppStatus, string> = {
@@ -1015,16 +1033,23 @@ export function buttons(snap: TopSnapshot): Button[] {
 
   if (snap.back) out.push({ label: `⇄ ${snap.back}`, action: { kind: "back" }, side: "left" });
   let prRow = 0;
+  let itemRow = 0;
+  // only the claimed item, the deepest level, gets the issue key
+  const claimedItem = snap.links.findLastIndex((l) => l.item !== undefined);
 
-  for (const l of snap.links) {
+  for (const [index, l] of snap.links.entries()) {
     const isPr = l.status !== undefined || l.label.includes("#");
-    const key = isPr ? prKeys.shift() : issueKeys.shift();
+    const key = l.item ? (index === claimedItem ? issueKeys.shift() : undefined) : isPr ? prKeys.shift() : issueKeys.shift();
     const look = l.status ? PR_LOOK[l.status] : undefined;
     const pr = l.pr;
-    const name = pr ? `${pr.repo} #${pr.number}${pr.layer ? ` ${pr.layer.n}/${pr.layer.of}` : ""}${pr.title ? ` ${pr.title}` : ""}` : l.label;
+    const name = pr ? `${pr.repo} #${pr.number}${pr.layer ? ` ${pr.layer.n}/${pr.layer.of}` : ""}${pr.title ? ` ${pr.title}` : ""}` : l.item ? itemLabel(l.item) : l.label;
     const linkButton: Button = { label: look ? `${look.icon} ${name}` : `📋 ${name}`, action: { kind: "link", url: l.url }, side: "left" };
 
     if (pr) linkButton.prRow = prRow;
+
+    if (l.item) {
+      linkButton.itemRow = itemRow++;
+    }
 
     if (key) linkButton.key = key;
 
@@ -1114,8 +1139,8 @@ const clip = (s: string, width: number) => fit(s, width).trimEnd();
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 /**
- * Lay the panel out for `width` columns inside a rounded frame titled with the task name: one row of
- * buttons with the left group at the left edge and the right group against the right edge (the right
+ * Lay the panel out for `width` columns inside a rounded frame titled with the task name: a row per level
+ * of the work item hierarchy, a row per PR, then one row of buttons with the left group at the left edge and the right group against the right edge (the right
  * group drops to its own row when both do not fit; either group wraps when it is too wide alone),
  * padded to `height` rows, with the message set into the bottom border.
  * Pure, so resizing is just calling it again.
@@ -1125,7 +1150,7 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
   const content: string[] = [];
   const placed: Placed[] = [];
   const all = buttons(snap);
-  const cells = (side: "left" | "right") => all.filter((b) => b.prRow === undefined && (b.side ?? "left") === side).map((button) => ({ button, text: clip(cell(button), inner) }));
+  const cells = (side: "left" | "right") => all.filter((b) => b.prRow === undefined && b.itemRow === undefined && (b.side ?? "left") === side).map((button) => ({ button, text: clip(cell(button), inner) }));
   const widthOf = (items: { text: string }[]) => items.reduce((n, i) => n + textWidth(i.text) + 1, 0) - (items.length ? 1 : 0);
 
   // wrap `items` into rows of at most `inner`, each row starting at `start(rowWidth)`
@@ -1158,8 +1183,16 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
     return row;
   };
 
-  // one row per PR: the PR first, its actions against the right edge
   let base = 0;
+
+  // one row per level of the work item hierarchy, top level first
+  for (const button of all.filter((b) => b.itemRow !== undefined)) {
+    const text = clip(cell(button), inner);
+    placed.push({ button, row: base, col: 0, width: textWidth(text) });
+    base++;
+  }
+
+  // one row per PR: the PR first, its actions against the right edge
 
   for (const row of new Set(all.flatMap((b) => (b.prRow === undefined ? [] : [b.prRow])))) {
     const group = all.filter((b) => b.prRow === row);
@@ -1217,6 +1250,9 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
 
   return { rows, placed: shifted, rules: rules.map((r) => ({ ...r, row: r.row + 1 })), title, message, width };
 }
+
+/** The pane height, border included, that shows every button of `snap` at `width` columns. */
+export const topRowsNeeded = (snap: TopSnapshot, width: number): number => layoutTop(snap, width).rows.length;
 
 /** The button under a 0-based (col,row) cell, if any. */
 export function hit(frame: Frame, col: number, row: number): number | undefined {

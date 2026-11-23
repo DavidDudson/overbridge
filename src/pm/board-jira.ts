@@ -25,7 +25,7 @@ interface LinkedIssue {
   fields?: { status?: { name?: string }; resolution?: { name?: string } | null };
 }
 
-interface RawIssue {
+export interface RawIssue {
   key: string;
   fields?: {
     summary?: string;
@@ -54,14 +54,37 @@ function openBlockers(issue: RawIssue): string[] {
     .map((l) => l.inwardIssue!.key);
 }
 
+// SAFETY: `jira issue list --raw` prints a JSON array of issues; RawIssue marks every field except `key` optional, so absent fields are tolerated, but the array and `key` are trusted from the CLI.
+const parseIssues = (reply: string): RawIssue[] => JSON.parse(reply.trim() || "[]") as RawIssue[];
+
+const typeOf = (issue: RawIssue) => (issue.fields?.issueType ?? issue.fields?.issuetype)?.name;
+
+const isEpic = (issue: RawIssue) => /^epic$/i.test(typeOf(issue) ?? "");
+
+/** How many levels above a listed ticket `jiraRows` reads to find its epic: a subtask's task, then that task's epic. */
+const EPIC_LOOKUPS = 2;
+
+/** The epic above `issue`: its parent when that is an epic, else its parent's epic, found in `known`. */
+export function epicOf(issue: RawIssue, known: ReadonlyMap<string, RawIssue>, depth = 0): RawIssue | undefined {
+  const parentKey = issue.fields?.parent?.key;
+  const parent = parentKey ? known.get(parentKey) : undefined;
+
+  if (!parent || depth >= EPIC_LOOKUPS) {
+    return undefined;
+  }
+
+  return isEpic(parent) ? parent : epicOf(parent, known, depth + 1);
+}
+
 /**
  * Rows from `jira issue list --raw`. One project can back several repos, so each ticket appears once,
- * labelled with the project key, and carries every repo it could be started in.
+ * labelled with the project key, and carries every repo it could be started in. `ancestors` holds tickets above the
+ * listed ones (`jiraRows` reads them), so each row can name its epic.
  */
-export function rowsFromJiraRaw(reply: string, project: string, repos: string[], site?: string): WorkRow[] {
-  // SAFETY: `jira issue list --raw` prints a JSON array of issues; RawIssue marks every field except `key` optional, so absent fields are tolerated, but the array and `key` are trusted from the CLI.
-  const issues = JSON.parse(reply.trim() || "[]") as RawIssue[];
+export function rowsFromJiraRaw(reply: string, project: string, repos: string[], site?: string, ancestors: readonly RawIssue[] = []): WorkRow[] {
+  const issues = parseIssues(reply);
   const base = site?.replace(/\/+$/, "");
+  const known = new Map([...issues, ...ancestors].map((i) => [i.key, i] as const));
 
   return issues.map((i): WorkRow => {
     const f = i.fields ?? {};
@@ -81,6 +104,16 @@ export function rowsFromJiraRaw(reply: string, project: string, repos: string[],
     };
 
     if (f.parent?.key) row.parent = f.parent.key;
+
+    const epic = epicOf(i, known);
+
+    if (epic) {
+      row.epic = epic.key;
+
+      if (epic.fields?.summary) {
+        row.epicTitle = epic.fields.summary;
+      }
+    }
 
     if (priority !== undefined) row.priority = priority;
 
@@ -104,5 +137,28 @@ export function jiraRows(project: string, repos: string[], opts: { filter?: stri
     throw new Error(`jira: reading ${project} failed: ${(r.stderr || r.stdout).trim()}. Check \`jira me\` works and project-management.worklist-jql is valid JQL`);
   }
 
-  return rowsFromJiraRaw(r.stdout, project, repos, opts.site);
+  return rowsFromJiraRaw(r.stdout, project, repos, opts.site, ancestorsOf(parseIssues(r.stdout), runner));
+}
+
+/**
+ * The tickets above `issues` up to their epics, one `jira issue list` per level. `jira issue list --raw` gives a
+ * parent's key but not its type or summary, so each level is read. A failed read stops the climb: rows then show no epic.
+ */
+export function ancestorsOf(issues: readonly RawIssue[], runner: Runner = run, known: ReadonlyMap<string, RawIssue> = new Map(issues.map((i) => [i.key, i] as const)), level = 0): RawIssue[] {
+  const missing = [...new Set(issues.filter((i) => !isEpic(i)).flatMap((i) => (i.fields?.parent?.key ? [i.fields.parent.key] : [])))].filter((k) => !known.has(k));
+
+  if (!missing.length || level >= EPIC_LOOKUPS) {
+    return [];
+  }
+
+  const r = runner(["jira", "issue", "list", "--jql", `key in (${missing.join(", ")})`, "--raw"]);
+
+  if (!r.ok) {
+    return [];
+  }
+
+  const found = parseIssues(r.stdout);
+  const next = new Map([...known, ...found.map((i) => [i.key, i] as const)]);
+
+  return [...found, ...ancestorsOf(found, runner, next, level + 1)];
 }

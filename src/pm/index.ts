@@ -30,6 +30,6 @@ export function itemIdOf(
   }
 }
 
-export { cachedTitle, refreshTitle, TITLE_TTL_MS } from "./cache";
+export { cachedTitle, refreshLineage, refreshTitle, TITLE_TTL_MS } from "./cache";
 
 export type { Provider, WorkItem } from "./provider";

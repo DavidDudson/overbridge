@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_WORKLIST_JQL, jiraRows, priorityFromJira, rowsFromJiraRaw, worklistJql } from "../src/pm/board-jira";
+import { ancestorsOf, DEFAULT_WORKLIST_JQL, jiraRows, priorityFromJira, rowsFromJiraRaw, worklistJql } from "../src/pm/board-jira";
 
 const linked = (key: string, status: string, resolution = "") => ({ key, fields: { status: { name: status }, resolution: { name: resolution } } });
 const blocks = { name: "Blocks", inward: "is blocked by", outward: "blocks" };
@@ -27,6 +27,45 @@ const reply = JSON.stringify([
   },
   { key: "ABC-3", fields: { summary: "three", status: { name: "Open" }, priority: null, labels: null, parent: null, updated: "2026-01-03T00:00:00.000+1000", issueLinks: null } },
 ]);
+
+const epics = JSON.stringify([{ key: "ABC-1", fields: { summary: "Dark mode", issueType: { name: "Epic" }, parent: { key: "ABC-100" } } }]);
+
+const ticket = (key: string, type: string, parent?: string, summary = key) => ({ key, fields: { summary, issueType: { name: type }, parent: parent ? { key: parent } : null } });
+
+describe("epics", () => {
+  test("a task names its parent epic; a subtask names its task's epic, from the list or a lookup", () => {
+    const list = JSON.stringify([ticket("A-3", "Task", "A-1"), ticket("A-4", "Sub-task", "A-3"), ticket("A-5", "Sub-task", "A-9"), ticket("A-6", "Task")]);
+    const ancestors = [ticket("A-1", "Epic", undefined, "Epic one"), ticket("A-9", "Story", "A-2"), ticket("A-2", "epic", undefined, "Epic two")];
+    const rows = rowsFromJiraRaw(list, "A", ["web"], undefined, ancestors);
+    expect(rows.map((r) => [r.id, r.epic, r.epicTitle])).toEqual([
+      ["A-3", "A-1", "Epic one"],
+      ["A-4", "A-1", "Epic one"],
+      ["A-5", "A-2", "Epic two"],
+      ["A-6", undefined, undefined],
+    ]);
+  });
+
+  test("ancestorsOf reads one level per call, skips what it knows and stops at epics or a failure", () => {
+    const calls: string[] = [];
+
+    const replies = new Map([
+      ["key in (A-3, A-8)", [ticket("A-3", "Task", "A-1"), ticket("A-8", "Epic", "A-50")]],
+      ["key in (A-1)", [ticket("A-1", "Epic", "A-50")]],
+    ]);
+
+    const runner = (cmd: string[]) => {
+      calls.push(cmd[4]!);
+      const out = replies.get(cmd[4]!);
+
+      return { ok: out !== undefined, stdout: JSON.stringify(out ?? []), stderr: "", code: out ? 0 : 1 };
+    };
+
+    const found = ancestorsOf([ticket("A-4", "Sub-task", "A-3"), ticket("A-5", "Task", "A-8"), ticket("A-7", "Task", "A-4"), ticket("A-60", "Epic", "A-50")], runner);
+    expect(found.map((i) => i.key)).toEqual(["A-3", "A-8", "A-1"]);
+    expect(calls).toEqual(["key in (A-3, A-8)", "key in (A-1)"]);
+    expect(ancestorsOf([ticket("A-4", "Task", "A-3")], () => ({ ok: false, stdout: "", stderr: "x", code: 1 }))).toEqual([]);
+  });
+});
 
 describe("jira board", () => {
   test("maps status, priority, parent and only the open tickets blocking this one", () => {
@@ -73,17 +112,21 @@ describe("jira board", () => {
     expect(worklistJql("ABC", "  ")).toEndWith("issuetype != Epic");
   });
 
-  test("jiraRows runs one jira-cli call and reports a failure with the project", () => {
+  test("jiraRows lists the tickets, reads their parents for epics, and reports a failure with the project", () => {
     const calls: string[][] = [];
 
     const rows = jiraRows("ABC", ["web"], { filter: "" }, (cmd) => {
       calls.push(cmd);
 
-      return { ok: true, stdout: reply, stderr: "", code: 0 };
+      return { ok: true, stdout: cmd[4] === worklistJql("ABC", "") ? reply : epics, stderr: "", code: 0 };
     });
 
     expect(rows).toHaveLength(2);
-    expect(calls).toEqual([["jira", "issue", "list", "--jql", worklistJql("ABC", ""), "--raw"]]);
+    expect(rows[0]).toMatchObject({ epic: "ABC-1", epicTitle: "Dark mode" });
+    expect(calls).toEqual([
+      ["jira", "issue", "list", "--jql", worklistJql("ABC", ""), "--raw"],
+      ["jira", "issue", "list", "--jql", "key in (ABC-1)", "--raw"],
+    ]);
     expect(() => jiraRows("ABC", ["web"], {}, () => ({ ok: false, stdout: "", stderr: "401 Unauthorized", code: 1 }))).toThrow(/jira: reading ABC failed: 401 Unauthorized/);
   });
 });

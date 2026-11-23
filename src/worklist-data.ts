@@ -46,6 +46,8 @@ export const isWorkRow = (v: Json): v is Json & WorkRow =>
   isStrings(v.labels) &&
   optional(v.repos, isStrings) &&
   optional(v.parent, isString) &&
+  optional(v.epic, isString) &&
+  optional(v.epicTitle, isString) &&
   optional(v.type, isString) &&
   optional(v.priority, isNumber);
 

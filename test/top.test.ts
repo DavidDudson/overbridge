@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
-import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, claimedCache, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type PrView, type TopApp, type TopLink, type TopSnapshot } from "../src/top";
+import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, claimedCache, hit, itemLabel, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type PrView, type TopApp, type TopLink, type TopSnapshot, topRowsNeeded } from "../src/top";
 import { textWidth } from "../src/term";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -280,10 +280,25 @@ describe("refreshTop", () => {
     const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", { title: "" }) });
     expect(cache.headline).toBe("12 Add dark mode");
     expect(cache.links).toEqual([
-      { label: "12", url: "https://fake.test/items/12" },
+      { label: "12", url: "https://fake.test/items/12", item: { id: "12", title: "Add dark mode", status: "Open" } },
       { label: "PR #3", url: "https://host/o/r/pull/3", status: "mergeable", pr: { repo: "r", number: 3, title: "", draft: false, dir: join(tmp, "w1", "r"), stack: [], reviewers: [{ name: "Copilot", state: "none", url: "https://host/o/r/pull/3" }] } },
     ]);
     expect(readTopCache("w1")).toEqual(cache);
+  });
+
+  test("caches one item link per level of the item's hierarchy, top first", () => {
+    const tree = [
+      { id: "1", title: "Speed", url: "x" },
+      { id: "5", title: "Dashboard", url: "x" },
+      ...items,
+    ];
+
+    const cache = refreshTop("w1", { provider: () => fakeProvider(tree, "github", ["1"], { "12": "5", "5": "1" }), exec: () => prJson("OPEN", { title: "" }) });
+    expect(cache.links.filter((l) => l.item).map((l) => [l.url, l.item])).toEqual([
+      ["https://fake.test/items/1", { id: "1", title: "Speed", status: "Done" }],
+      ["https://fake.test/items/5", { id: "5", title: "Dashboard", status: "Open" }],
+      ["https://fake.test/items/12", { id: "12", title: "Add dark mode", status: "Open" }],
+    ]);
   });
 
   test("a stacked claim caches every layer, bottom first, and counts only the claimed PR", () => {
@@ -566,6 +581,26 @@ describe("button keys", () => {
       "🔀 diff": "d",
     });
     expect(cell(buttons(s)[1]!)).toBe("[ 🟢 PR #3 · p ]");
+  });
+
+  test("item links read ENG-12 (status): title, each on its own row, and only the claimed item gets i", () => {
+    const item = (id: string, title: string) => ({ label: id, url: id, item: { id, title, status: "In Progress" } });
+    const s = snap({ links: [item("ENG-1", "Initiative"), item("ENG-2", "Epic"), item("ENG-3", "Task"), { label: "PR #3", url: "up", status: "mergeable" }] });
+    const b = buttons(s);
+    expect(b.slice(0, 3).map((x) => [x.label, x.key, x.itemRow])).toEqual([
+      ["📋 ENG-1 (In Progress): Initiative", undefined, 0],
+      ["📋 ENG-2 (In Progress): Epic", undefined, 1],
+      ["📋 ENG-3 (In Progress): Task", "i", 2],
+    ]);
+    const f = layoutTop(s, 200);
+    expect(f.placed.slice(0, 3).map((p) => [p.row, p.col])).toEqual([[1, 2], [2, 2], [3, 2]]);
+    expect(f.placed.find((p) => p.button.label.includes("PR #3"))!.row).toBe(4);
+    expect(topRowsNeeded(s, 200)).toBe(f.rows.length);
+  });
+
+  test("an item label leaves out an unknown status and title", () => {
+    expect(itemLabel({ id: "ENG-1", title: "", status: "" })).toBe("ENG-1");
+    expect(itemLabel({ id: "ENG-1", title: "x", status: "" })).toBe("ENG-1: x");
   });
 
   test("several PRs get p, u, y...; no key clashes with the panel's own", () => {

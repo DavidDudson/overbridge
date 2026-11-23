@@ -9,6 +9,7 @@ import { readWorklist, WORKLIST_REFRESH_MS, type WorklistCache } from "./worklis
 export * from "./worklist-data";
 
 import { spawnCwd } from "./util";
+import { openBrowser } from "./apps";
 import { spinner } from "./anim";
 import { silencedTitle } from "./silence";
 import { mentionScanError, silencedSet, spawnMentionRefresh, toggleMessage } from "./silence-refresh";
@@ -18,6 +19,12 @@ import { bold, boxBottom, boxRow, boxTop, cell, colorize, decodeInput, dim, ENTE
 
 /** Rows the frame uses besides the item rows: top border, header, reasons, legend, bottom border. */
 const CHROME = 5;
+
+/** Width of the epic column. */
+const EPIC_WIDTH = 24;
+
+/** The epic column's text: the epic's title, else its key, else blank. */
+export const epicCell = (r: Pick<WorkRow, "epic" | "epicTitle">): string => stripControl(r.epicTitle || r.epic || "");
 
 type ClassOf = (row: WorkRow) => RowClass | undefined;
 
@@ -86,13 +93,13 @@ export function pickRepo(key: string, repos: readonly string[]): string | undefi
 export function renderWorklist(list: Ranked[], selected: number, offset: number, height: number, width: number, message = "", notes: string[] = [], filter = "", now = Date.now(), silenced: ReadonlySet<string> = new Set()): string[] {
   const inner = width - 4;
   const body = Math.max(1, height - CHROME);
-  const rows: string[] = [boxTop("Work", width), boxRow(dim(fit(`${"".padEnd(2)} ${"#".padEnd(3)} ${"ready".padEnd(5)} ${"stream".padEnd(6)} ${"item".padEnd(14)} title`, inner)))];
+  const rows: string[] = [boxTop("Work", width), boxRow(dim(fit(`${"".padEnd(2)} ${"#".padEnd(3)} ${"ready".padEnd(5)} ${"stream".padEnd(6)} ${"item".padEnd(14)} ${"epic".padEnd(EPIC_WIDTH)} title`, inner)))];
   const visible = list.slice(offset, offset + body);
 
   for (const [i, r] of visible.entries()) {
     const glyph = statusGlyph(r, now);
     const icon = cell(glyph.icon, 2);
-    const line = `${icon} ${String(r.rank).padEnd(3)} ${(r.ready ? "yes" : r.status === "in-progress" ? "wip" : "no").padEnd(5)} ${`s${r.stream}`.padEnd(6)} ${r.key.slice(0, 14).padEnd(14)} ${silencedTitle(stripControl(r.title), silenced.has(r.url))}`;
+    const line = `${icon} ${String(r.rank).padEnd(3)} ${(r.ready ? "yes" : r.status === "in-progress" ? "wip" : "no").padEnd(5)} ${`s${r.stream}`.padEnd(6)} ${r.key.slice(0, 14).padEnd(14)} ${fit(epicCell(r), EPIC_WIDTH)} ${silencedTitle(stripControl(r.title), silenced.has(r.url))}`;
     const text = fit(line, inner);
     rows.push(boxRow(offset + i === selected ? inverse(text) : silenced.has(r.url) ? dim(text) : colorize(text, glyph.color)));
   }
@@ -101,7 +108,7 @@ export function renderWorklist(list: Ranked[], selected: number, offset: number,
   const chosen = list[selected];
   rows.push(boxRow(fit(chosen ? `why: ${chosen.reasons.join(", ")}` : "", inner)));
   const shown = message || (notes[0] ? `error: ${notes[0]}${notes.length > 1 ? ` (+${notes.length - 1} more)` : ""}; showing the last good list` : "");
-  const status = shown.startsWith("error: ") ? colorize(fit(shown, inner), "red") : shown ? bold(fit(shown, inner)) : dim(fit("j/k move   enter detail   / filter   s start   x silence   r refresh   q quit", inner));
+  const status = shown.startsWith("error: ") ? colorize(fit(shown, inner), "red") : shown ? bold(fit(shown, inner)) : dim(fit("j/k move   enter detail   o open   / filter   s start   x silence   r refresh   q quit", inner));
   rows.push(boxRow(status));
   rows.push(boxBottom(width, filter ? `${list.length} match /${filter}` : `${list.length} open`));
 
@@ -114,7 +121,18 @@ export function renderDetail(item: Ranked, all: readonly Ranked[], height: numbe
   const body = Math.max(1, height - 3);
   const lines = detailLines(item, all).slice(0, body);
 
-  return [boxTop("Work item", width), ...lines.map((l) => boxRow(fit(l, inner))), ...Array.from({ length: body - lines.length }, () => boxRow(fit("", inner))), boxRow(dim(fit("esc back   s start in a workspace   q quit", inner))), boxBottom(width, item.key)];
+  return [boxTop("Work item", width), ...lines.map((l) => boxRow(fit(l, inner))), ...Array.from({ length: body - lines.length }, () => boxRow(fit("", inner))), boxRow(dim(fit("esc back   o open   s start in a workspace   q quit", inner))), boxBottom(width, item.key)];
+}
+
+/** Open `item` in the browser; the message to show, which explains an item with no link. */
+export function openItem(item: Pick<Ranked, "key" | "url">, open: (url: string) => void = openBrowser): string {
+  if (!item.url) {
+    return `${item.key} has no link: set project-management.url in overbridge.yml`;
+  }
+
+  open(item.url);
+
+  return "";
 }
 
 /** `overbridge worklist`: the @work tab's pane. */
@@ -216,7 +234,9 @@ export async function worklistPane() {
       if (detail) {
         if (input.key === "escape" || input.key === "enter" || input.key === "h" || input.key === "left") detail = undefined;
         else if (input.key === "q" || input.key === "ctrl-c") quit();
-        else if (input.key === "s") {
+        else if (input.key === "o") {
+          message = openItem(detail);
+        } else if (input.key === "s") {
           const item = detail;
           const repos = rowRepos(item);
           detail = undefined;
@@ -251,6 +271,9 @@ export async function worklistPane() {
       else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
       else if (input.key === "r") refresh(true);
       else if (input.key === "x" && chosen) message = toggleMessage(chosen, chosen.key);
+      else if (input.key === "o" && chosen) {
+        message = openItem(chosen);
+      }
       else if (input.key === "/") typing = true;
       else if (input.key === "escape" && filter) filter = "";
       else if ((input.key === "enter" || input.key === "l" || input.key === "right") && list[selected]) detail = list[selected];
