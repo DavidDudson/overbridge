@@ -487,7 +487,8 @@ describe("check queue", () => {
     expect(await second.exited).toBe(0);
     const waited = await new Response(second.stderr).text();
     expect(waited).toContain("waiting behind 1 in the queue (max-parallel 1)");
-    expect(waited).toContain("estimated start in ~");
+    // `a` has never finished before, so nothing estimates when `b` can start
+    expect(waited).not.toContain("estimated start");
     expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "end a", "start b", "end b"]);
   }, CHECK_TEST_MS);
 

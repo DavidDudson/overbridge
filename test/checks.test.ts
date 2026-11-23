@@ -180,7 +180,9 @@ describe("queue estimates", () => {
     expect(lines[2]).toMatch(/▶ 20s\s+~1m00s\s+done ~40s\s+just test/);
     expect(lines[3]).toMatch(/⧗ 40s\s+~1m00s\s+start ~40s\s+just test/);
     expect(lines[4]).toMatch(/⧗ 30s\s+\?\s+start ~1m40s\s+make lint/);
-    expect(lines.at(-1)).toContain("1 running · 2 waiting · clear ~2m40s");
-    expect(estimates.wsDoneMs.get("w3")).toBe(160_000);
+    expect(lines.at(-1)).toMatch(/1 running · 2 waiting$|1 running · 2 waiting ─/);
+    expect(lines.at(-1)).not.toContain("clear");
+    expect(estimates.wsDoneMs.get("w2")).toBe(100_000);
+    expect(estimates.wsDoneMs.has("w3")).toBe(false);
   });
 });

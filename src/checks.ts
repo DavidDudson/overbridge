@@ -1,6 +1,6 @@
 import { Outcome, outcomeOf, type QueueView, type Ticket, ticketKey, ticketName } from "./check-queue";
 import { type Move, movedIndex, type QueueOverrides, spreadKeys } from "./check-priority";
-import { type EstimateStore, type Eta, etaSlots, formatDuration, overallMs, queueEtas, workspaceDone } from "./check-estimate";
+import { type EstimateStore, type Eta, etaSlots, formatDuration, queueEtas, workspaceDone } from "./check-estimate";
 import type { CheckRecord, HistoryStore } from "./history";
 import { bold, boxBottom, type Color, boxRow, boxTop, cell, colorize, dim, fit, inverse, stripControl, textWidth } from "./term";
 
@@ -76,38 +76,41 @@ export interface ChecksView {
   now: number;
 }
 
-/** The queue view's estimates: each ticket's ETA by `ticketName`, and when each workspace's checks should be done. */
+/** The queue view's estimates: each ticket's ETA by `ticketName`, when each workspace's checks should be done, and when the whole queue should be empty (undefined when any check has no estimate). */
 export interface QueueEstimates {
   etas: ReadonlyMap<string, Eta>;
   wsDoneMs: ReadonlyMap<string, number>;
+  clearMs?: number;
 }
 
 const NO_ESTIMATES: QueueEstimates = { etas: new Map(), wsDoneMs: new Map() };
 
 /** Estimates for a live queue from past run times; `maxParallel` caps the lanes when known. */
 export function queueEstimates(queue: QueueView, store: EstimateStore, now: number, maxParallel?: number): QueueEstimates {
-  const etas = queueEtas(queue, store, etaSlots(queue.running.length, maxParallel), now, ticketName, overallMs(store));
+  const etas = queueEtas(queue, store, etaSlots(queue.running.length, maxParallel), now, ticketName);
+  const done = [...etas.values()].map((eta) => eta.doneMs);
+  const clearMs = done.every((ms) => ms !== undefined) ? Math.max(0, ...done) : undefined;
 
-  return { etas, wsDoneMs: workspaceDone(queue, etas, ticketName) };
+  return { etas, wsDoneMs: workspaceDone(queue, etas, ticketName), clearMs };
 }
 
 const EST_COLUMNS = 7;
 const ETA_COLUMNS = 13;
 
-/** `~3m05s`, or `?` when nothing like the check has run before. */
+/** `~3m05s`, or `?` when the exact command has never finished in its repo. */
 const estText = (eta: Eta | undefined) => (eta?.runMs === undefined ? "?" : `~${formatDuration(eta.runMs)}`);
 
-/** A running check's time left, or a waiting one's start. */
+/** A running check's time left, or a waiting one's start; blank when it cannot be known. */
 const etaText = (r: CheckRow, eta: Eta | undefined) => {
-  if (!eta) {
-    return "";
-  }
-
   if (r.running) {
+    if (eta?.doneMs === undefined) {
+      return "";
+    }
+
     return eta.doneMs > 0 ? `done ~${formatDuration(eta.doneMs)}` : "overdue";
   }
 
-  return `start ~${formatDuration(eta.startMs)}`;
+  return eta?.startMs === undefined ? "" : `start ~${formatDuration(eta.startMs)}`;
 };
 
 const iconCell = (icon: string | undefined) => {
@@ -125,11 +128,7 @@ const rowText = (r: CheckRow, now: number, estimates: QueueEstimates) => {
 };
 
 /** The bottom border's estimate: when the queue as a whole should be empty. */
-const queueDoneText = (estimates: QueueEstimates) => {
-  const doneMs = Math.max(0, ...estimates.wsDoneMs.values());
-
-  return doneMs > 0 ? ` · clear ~${formatDuration(doneMs)}` : "";
-};
+const queueDoneText = ({ clearMs }: QueueEstimates) => (clearMs !== undefined && clearMs > 0 ? ` · clear ~${formatDuration(clearMs)}` : "");
 
 /** The @checks panel as screen rows. Pure, so it is snapshot-tested. */
 export function renderChecks(rows: readonly CheckRow[], { selected, offset, height, width, message, now }: ChecksView, estimates: QueueEstimates = NO_ESTIMATES): string[] {

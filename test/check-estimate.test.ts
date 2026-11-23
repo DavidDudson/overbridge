@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type EstimateStore, estimateFor, estimateKeys, estimatesFile, etaSlots, formatDuration, KEPT_RUNS, overallMs, queueEtas, readEstimates, recordRunTime, seedEstimates, withRun, workspaceDone } from "../src/check-estimate";
+import { type EstimateStore, estimateFor, estimateKey, estimatesFile, etaSlots, formatDuration, KEPT_RUNS, queueEtas, readEstimates, recordRunTime, seedEstimates, withRun, workspaceDone } from "../src/check-estimate";
 import type { Ticket } from "../src/check-queue";
 
 const NOW_MS = 1_000_000;
@@ -19,23 +19,22 @@ describe("estimateFor", () => {
     expect(estimateFor(runs("just test", 10_000, 30_000), "app", "just test")).toEqual({ runMs: 20_000, runs: 2 });
   });
 
-  test("falls back to the command's group, and is undefined for another repo or a command never run", () => {
+  test("matches only the exact command in the same repo", () => {
     const store = runs("just test a.ts", 40_000);
-    expect(estimateFor(store, "app", "just test b.ts")).toEqual({ runMs: 40_000, runs: 1 });
+    expect(estimateFor(store, "app", "just test a.ts")).toEqual({ runMs: 40_000, runs: 1 });
+    expect(estimateFor(store, "app", "just test b.ts")).toBeUndefined();
+    expect(estimateFor(store, "app", "just test")).toBeUndefined();
+    expect(estimateFor(store, "app", "just test a.ts --watch")).toBeUndefined();
     expect(estimateFor(store, "web", "just test a.ts")).toBeUndefined();
     expect(estimateFor(store, "app", "just lint")).toBeUndefined();
   });
 
   test("keeps only the newest runs, so a repo that got faster is estimated by its new speed", () => {
     const store = runs("just test", ...Array.from({ length: KEPT_RUNS }, () => 90_000), ...Array.from({ length: KEPT_RUNS }, () => 10_000));
-    expect(store[estimateKeys("app", "just test")[0]]).toHaveLength(KEPT_RUNS);
+    expect(store[estimateKey("app", "just test")]).toHaveLength(KEPT_RUNS);
     expect(estimateFor(store, "app", "just test")?.runMs).toBe(10_000);
   });
 
-  test("the overall median stands in when nothing has finished", () => {
-    expect(overallMs({})).toBe(60_000);
-    expect(overallMs(runs("just test", 10_000, 50_000, 30_000))).toBe(30_000);
-  });
 });
 
 describe("queueEtas", () => {
@@ -43,7 +42,7 @@ describe("queueEtas", () => {
 
   test("a running check is done when its estimate runs out; one lane makes the waiting ones queue behind it", () => {
     const running = ticket(1, { runPid: 10, runningSinceMs: NOW_MS - 20_000 });
-    const etas = queueEtas({ running: [running], waiting: [ticket(2), ticket(3)] }, store, 1, NOW_MS, name, 1);
+    const etas = queueEtas({ running: [running], waiting: [ticket(2), ticket(3)] }, store, 1, NOW_MS, name);
     expect(etas.get("1")).toEqual({ startMs: 0, doneMs: 40_000, runMs: 60_000 });
     expect(etas.get("2")).toEqual({ startMs: 40_000, doneMs: 100_000, runMs: 60_000 });
     expect(etas.get("3")).toEqual({ startMs: 100_000, doneMs: 160_000, runMs: 60_000 });
@@ -52,22 +51,42 @@ describe("queueEtas", () => {
   test("two lanes start each waiting check on the lane that frees first", () => {
     const a = ticket(1, { runPid: 10, runningSinceMs: NOW_MS - 50_000 });
     const b = ticket(2, { runPid: 20, runningSinceMs: NOW_MS });
-    const etas = queueEtas({ running: [a, b], waiting: [ticket(3), ticket(4)] }, store, 2, NOW_MS, name, 1);
+    const etas = queueEtas({ running: [a, b], waiting: [ticket(3), ticket(4)] }, store, 2, NOW_MS, name);
     expect(etas.get("3")?.startMs).toBe(10_000);
     expect(etas.get("4")?.startMs).toBe(60_000);
   });
 
-  test("an overdue run counts as finishing now, and an unknown command takes the fallback", () => {
+  test("an overdue run counts as finishing now; a command never run gets a start but no run or finish", () => {
     const late = ticket(1, { runPid: 10, runningSinceMs: NOW_MS - 600_000 });
-    const etas = queueEtas({ running: [late], waiting: [ticket(2, { command: "make lint" })] }, store, 1, NOW_MS, name, 5_000);
+    const etas = queueEtas({ running: [late], waiting: [ticket(2, { command: "make lint" })] }, store, 1, NOW_MS, name);
     expect(etas.get("1")?.doneMs).toBe(0);
-    expect(etas.get("2")).toEqual({ startMs: 0, doneMs: 5_000, runMs: undefined });
+    expect(etas.get("2")).toEqual({ startMs: 0, doneMs: undefined, runMs: undefined });
+  });
+
+  test("a check with no estimate leaves every check behind it without a start", () => {
+    const unknown = ticket(1, { runPid: 10, runningSinceMs: NOW_MS, command: "make lint" });
+    const etas = queueEtas({ running: [unknown], waiting: [ticket(2), ticket(3)] }, store, 1, NOW_MS, name);
+    expect(etas.get("1")).toEqual({ startMs: 0, doneMs: undefined, runMs: undefined });
+    expect(etas.get("2")).toEqual({ startMs: undefined, doneMs: undefined, runMs: 60_000 });
+    expect(etas.get("3")).toEqual({ startMs: undefined, doneMs: undefined, runMs: 60_000 });
+  });
+
+  test("an unknown check waiting ahead blocks the start of those after it", () => {
+    const etas = queueEtas({ running: [], waiting: [ticket(1, { command: "make lint" }), ticket(2)] }, store, 1, NOW_MS, name);
+    expect(etas.get("1")).toEqual({ startMs: 0, doneMs: undefined, runMs: undefined });
+    expect(etas.get("2")?.startMs).toBeUndefined();
   });
 
   test("a workspace is done when its last check is", () => {
     const queue = { running: [ticket(1, { runPid: 10, runningSinceMs: NOW_MS, ws: "a" })], waiting: [ticket(2, { ws: "b" }), ticket(3, { ws: "a" })] };
-    const done = workspaceDone(queue, queueEtas(queue, store, 1, NOW_MS, name, 1), name);
+    const done = workspaceDone(queue, queueEtas(queue, store, 1, NOW_MS, name), name);
     expect(done).toEqual(new Map([["a", 180_000], ["b", 120_000]]));
+  });
+
+  test("a workspace with any check that cannot be estimated has no done time", () => {
+    const queue = { running: [ticket(1, { runPid: 10, runningSinceMs: NOW_MS, ws: "a" })], waiting: [ticket(2, { ws: "b", command: "make lint" })] };
+    const done = workspaceDone(queue, queueEtas(queue, store, 2, NOW_MS, name), name);
+    expect(done).toEqual(new Map([["a", 60_000]]));
   });
 
   test("lanes follow what runs now, at least one, at most max-parallel", () => {
@@ -90,8 +109,8 @@ describe("the store file", () => {
     expect(estimateFor(readEstimates(dir), "app", "just test")?.runMs).toBe(12_000);
     writeFileSync(estimatesFile(dir), "{oops");
     expect(readEstimates(dir)).toEqual({});
-    writeFileSync(estimatesFile(dir), JSON.stringify({ a: [1, "x"], b: [2] }));
-    expect(readEstimates(dir)).toEqual({ b: [2] });
+    writeFileSync(estimatesFile(dir), JSON.stringify({ "cmd app a": [1, "x"], "cmd app b": [2], "group app test": [3] }));
+    expect(readEstimates(dir)).toEqual({ "cmd app b": [2] });
   });
 
   test("seeding builds a missing store and never replaces one", () => {

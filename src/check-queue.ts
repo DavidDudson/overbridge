@@ -3,7 +3,7 @@ import { availableParallelism, constants, loadavg } from "node:os";
 import { dirname, join } from "node:path";
 import { defaultKey, type QueueOverrides, readOverrides } from "./check-priority";
 import { type CheckRecord, classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
-import { etaSlots, formatDuration, overallMs, queueEtas, readEstimates, recordRunTime } from "./check-estimate";
+import { etaSlots, formatDuration, queueEtas, readEstimates, recordRunTime } from "./check-estimate";
 import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidsAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
@@ -363,19 +363,18 @@ function appendCheck(me: Ticket, startedMs: number, endedMs: number | undefined,
 
 const label = (t: Ticket) => `${t.ws}/${t.repo}: ${t.command}`;
 
-/** `; estimated start in ~2m, run ~3m10s` from past run times, so the agent knows how long it waits. */
+/** `; estimated start in ~2m, run ~3m10s` from past runs of the exact same commands, so the agent knows how long it waits. */
 function etaLine(me: Ticket, live: Ticket[], settings: CheckQueue, now: number, dir: string): string {
   const store = readEstimates(dirname(dir));
   const queue = queueView(live);
-  const eta = queueEtas(queue, store, etaSlots(queue.running.length, settings.maxParallel), now, ticketName, overallMs(store)).get(ticketName(me));
+  const eta = queueEtas(queue, store, etaSlots(queue.running.length, settings.maxParallel), now, ticketName).get(ticketName(me));
 
-  if (!eta) {
-    return "";
-  }
+  const parts = [
+    ...(eta?.startMs === undefined ? [] : [`estimated start in ~${formatDuration(eta.startMs)}`]),
+    ...(eta?.runMs === undefined ? [] : [`run ~${formatDuration(eta.runMs)}`]),
+  ];
 
-  const run = eta.runMs === undefined ? "no past runs to estimate from" : `run ~${formatDuration(eta.runMs)}`;
-
-  return `; estimated start in ~${formatDuration(eta.startMs)}, ${run}`;
+  return parts.length ? `; ${parts.join(", ")}` : "";
 }
 
 /** Wait until `me` may start (see `gateFor`); false when `deadlineMs` passes first. */
