@@ -1,3 +1,4 @@
+import { isJsonObject, isJsonString } from "../json";
 import type { ProjectManagement } from "../project-config";
 import { fail, run, type RunResult } from "../util";
 import { ItemStatus, namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
@@ -72,6 +73,27 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
       }
 
       return r.stdout === "CLOSED" ? ItemStatus.Done : ItemStatus.Open;
+    },
+
+    lineage(id) {
+      const n = id.replace(/^#/, "");
+      const r = gh(["issue", "view", n, "-R", repo(), "--json", "title,state,url"]);
+
+      if (!r.ok || !r.stdout) {
+        return [];
+      }
+
+      try {
+        const v: unknown = JSON.parse(r.stdout);
+
+        if (!isJsonObject(v) || !isJsonString(v.title)) {
+          return [];
+        }
+
+        return [{ id: n, title: v.title, status: isJsonString(v.state) ? v.state.toLowerCase() : "", url: isJsonString(v.url) ? v.url : provider.link(n) }];
+      } catch {
+        return [];
+      }
     },
 
     assigned() {

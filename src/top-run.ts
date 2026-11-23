@@ -6,7 +6,10 @@ import { serverRefresh } from "./server-client";
 import { beginRemoval } from "./remove";
 import { togglePane } from "./panes";
 import { mergePr, setReady } from "./pr-actions";
-import { ALT_COMMANDS, type ActDeps, activate, applyOptimistic, type PaneKind, type PrChange, type Button, CLEANUP_ARM_MS, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopScope, type TopSnapshot } from "./top";
+import { ALT_COMMANDS, type ActDeps, activate, applyOptimistic, type PaneKind, type PrChange, type Button, CLEANUP_ARM_MS, hit, layoutTop, openTarget, paintTop, pressCleanup, refreshTop, snapshotTop, type TopApp, type TopScope, type TopSnapshot, topRowsNeeded } from "./top";
+import { afterStep, type FitState, planFit, settle } from "./top-fit";
+import { TOP_ROWS } from "./layout";
+import { defaultMux } from "./mux";
 import { ENTER_SCREEN, LEAVE_SCREEN } from "./term";
 import { errorMessage, log, spawnCwd } from "./util";
 import { subscribeEvents } from "./events-client";
@@ -15,6 +18,9 @@ import { createPainter, isFocused, readView, shouldPoll } from "./zellij-view";
 const POLL_MS = 2_000;
 const REFRESH_MS = 60_000;
 const READY_TIMEOUT_MS = 60_000;
+
+/** How long the pane waits after a resize step before it reads its new height. */
+const FIT_SETTLE_MS = 300;
 
 const ESC = "\x1b";
 
@@ -154,6 +160,49 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions): Promise<Pa
     return app.spec.ready?.kind === "http" ? app.spec.ready.url.replaceAll("{port}", String(port)) : "";
   };
 
+  const mux = defaultMux();
+  // a workspace's top pane grows to show every level of its work item; the @explore panel keeps its layout's height
+  const ownPaneId = panel ? undefined : mux.ownPaneId();
+  let fit: FitState = {};
+  let isFitStepping = false;
+
+  /** Take one resize step towards the height `shown` needs, then look again once the multiplexer has applied it. */
+  const fitHeight = (shown: TopSnapshot) => {
+    const rows = process.stdout.rows ?? 0;
+
+    // a hidden tab's pane may not resize, which would read as no room left
+    if (!ownPaneId || isFitStepping || !rows || !isFocused(ws, readView())) {
+      return;
+    }
+
+    const needed = Math.max(TOP_ROWS, topRowsNeeded(shown, process.stdout.columns ?? 80));
+    const step = planFit(rows, needed, fit);
+
+    if (!step) {
+      fit = settle(fit, needed);
+
+      return;
+    }
+
+    // with focus unknown (outside zellij) a step that changes nothing may be a hidden tab, not a full one
+    const record = (after: number) => {
+      fit = after === rows && readView().focused !== ws ? fit : afterStep(fit, rows, after, needed);
+    };
+
+    if (!mux.resizePane(ownPaneId, step)) {
+      record(rows);
+
+      return;
+    }
+
+    isFitStepping = true;
+    setTimeout(() => {
+      isFitStepping = false;
+      record(process.stdout.rows ?? rows);
+      draw();
+    }, FIT_SETTLE_MS);
+  };
+
   const painter = createPainter((text) => process.stdout.write(text));
 
   const draw = () => {
@@ -163,6 +212,7 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions): Promise<Pa
     if (note) shown.message = note;
     frame = layoutTop(shown, process.stdout.columns ?? 80, process.stdout.rows ?? 0);
     painter.paint(paintTop(frame, cursor));
+    fitHeight(shown);
   };
 
   let lastReloadAtMs = 0;

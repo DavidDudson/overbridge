@@ -1,13 +1,14 @@
-import type { NewItem, Provider, WorkItem } from "../../src/pm/provider";
+import type { ItemNode, NewItem, Provider, WorkItem } from "../../src/pm/provider";
 import { ItemStatus, slug } from "../../src/pm/provider";
 
 export type FakeCreated = NewItem & { id: string };
 
-/** In-memory provider for tests. `calls` counts `title` fetches; `created` records `createItem` calls. */
+/** In-memory provider for tests. `calls` counts `title` fetches; `created` records `createItem` calls; `parents` maps an item id to its parent's. */
 export function fakeProvider(
   items: WorkItem[] = [],
   name: "github" | "jira" = "github",
   done: readonly string[] = [],
+  parents: Readonly<Record<string, string>> = {},
 ): Provider & { calls: number; created: FakeCreated[]; bodies: Map<string, string> } {
   const byId = new Map(items.map((i) => [i.id, i]));
   const bodies = new Map<string, string>();
@@ -27,6 +28,22 @@ export function fakeProvider(
       return byId.get(id)?.title;
     },
     status: (id) => (done.includes(id) ? ItemStatus.Done : byId.has(id) ? ItemStatus.Open : undefined),
+    lineage(id) {
+      const climb = (key: string, seen: readonly string[]): ItemNode[] => {
+        const item = byId.get(key);
+
+        if (!item || seen.includes(key)) {
+          return [];
+        }
+
+        const parent = parents[key];
+        const node: ItemNode = { id: key, title: item.title, status: done.includes(key) ? "Done" : "Open", url: `https://fake.test/items/${key}` };
+
+        return [...(parent ? climb(parent, [...seen, key]) : []), node];
+      };
+
+      return climb(id, []);
+    },
     assigned: () => items,
     itemTypes: () => [],
     branchName: (item) => `feat/${item.id}-${slug(item.title)}`,

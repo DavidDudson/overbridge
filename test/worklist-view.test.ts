@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { rank, type WorkRow } from "../src/pm/worklist";
 import type { ProjectManagement } from "../src/project-config";
-import { boardSources, keepLastGood, pickRepo, readBoards, refreshInChild, renderWorklist, repoPrompt, showWorklist } from "../src/worklist-run";
+import { boardSources, keepLastGood, openItem, pickRepo, readBoards, refreshInChild, renderWorklist, repoPrompt, showWorklist } from "../src/worklist-run";
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
@@ -35,6 +35,27 @@ describe("renderWorklist", () => {
 
   test("says so when nothing is assigned", () => {
     expect(renderWorklist([], 0, 0, 12, 60).map(strip).join("\n")).toContain("nothing assigned to you");
+  });
+
+  test("shows each item's epic: its title, else its key", () => {
+    const rows = renderWorklist(rank([row("1", { epic: "ENG-9", epicTitle: "Dark mode" }), row("2", { epic: "ENG-8" }), row("3")]), 0, 0, 12, 100).map(strip);
+    expect(rows[1]).toMatch(/item\s+epic\s+title/);
+    expect(rows[2]).toMatch(/ob#1\s+Dark mode\s+title 1/);
+    expect(rows[3]).toMatch(/ob#2\s+ENG-8\s+title 2/);
+    expect(rows[4]).toMatch(/ob#3\s+title 3/);
+    expect(rows.join("\n")).toContain("o open");
+    expect(renderWorklist(list, 0, 0, 12, 70).map(strip)[1]).not.toContain("epic");
+    const withEpic = rank([row("1", { epic: "ENG-9", epicTitle: "Dark mode" })]);
+    expect(renderWorklist(withEpic, 0, 0, 12, 60).map(strip)[2]).toMatch(/ob#1\s+title 1/);
+    expect(renderWorklist(withEpic, 0, 0, 12, 84).map(strip)[2]).toMatch(/Dark mode\s+title 1/);
+  });
+
+  test("o opens the item's link, or says why it can't", () => {
+    const opened: string[] = [];
+    expect(openItem({ key: "ENG-1", url: "https://x/browse/ENG-1" }, (u) => opened.push(u))).toBe("");
+    expect(opened).toEqual(["https://x/browse/ENG-1"]);
+    expect(openItem({ key: "ENG-2", url: "" }, (u) => opened.push(u))).toContain("ENG-2 has no link");
+    expect(opened).toHaveLength(1);
   });
 
   test("scrolls with the offset", () => {

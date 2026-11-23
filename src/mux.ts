@@ -37,6 +37,11 @@ export const TabFocus = { Background: "background", Foreground: "foreground" } a
 
 export type TabFocus = (typeof TabFocus)[keyof typeof TabFocus];
 
+/** Which way `resizePane` moves a pane's bottom border. */
+export const PaneResize = { Grow: "grow", Shrink: "shrink" } as const;
+
+export type PaneResize = (typeof PaneResize)[keyof typeof PaneResize];
+
 export interface MuxResult {
   ok: boolean;
   error?: string;
@@ -69,6 +74,8 @@ export interface Mux {
   listPanes(): MuxPane[];
   focusPane(id: string): boolean;
   closePane(id: string): boolean;
+  /** Move pane `id`'s bottom border by one multiplexer step: down to grow the pane, up to shrink it. */
+  resizePane(id: string, change: PaneResize): boolean;
   /** Type `text` into pane `id` as one paste, then press Enter, as if the user had sent it. */
   sendText(id: string, text: string): boolean;
   newPane(req: NewPane): boolean;
@@ -202,6 +209,7 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
     // focusing a pane that already has focus exits 2, which callers treat as success
     focusPane: (id) => act("focus-pane-id", target(id)).ok,
     closePane: (id) => act("close-pane", "--pane-id", target(id)).ok,
+    resizePane: (id, change) => act("resize", change === PaneResize.Grow ? "increase" : "decrease", "down", "--pane-id", target(id)).ok,
     sendText: (id, text) => act("paste", "--pane-id", target(id), "--", text).ok && settle() && act("send-keys", "--pane-id", target(id), "Enter").ok,
     newPane(req) {
       act("focus-pane-id", target(req.anchor));
@@ -315,6 +323,7 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
     },
     focusPane: (id) => tmux("select-window", "-t", id).ok && tmux("select-pane", "-t", id).ok,
     closePane: (id) => tmux("kill-pane", "-t", id).ok,
+    resizePane: (id, change) => tmux("resize-pane", "-t", id, change === PaneResize.Grow ? "-D" : "-U", "1").ok,
     sendText: (id, text) => tmux("send-keys", "-t", id, "-l", "--", text).ok && settle() && tmux("send-keys", "-t", id, "Enter").ok,
     newPane(req) {
       const args = ["split-window", "-P", "-F", "#{pane_id}", "-t", req.anchor, req.direction === "right" ? "-h" : "-v", "-c", req.cwd];
