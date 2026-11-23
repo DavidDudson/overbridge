@@ -45,7 +45,7 @@ apps:
 commands:
   lint: npm run lint
   typecheck: npm run typecheck
-  test: npm test
+  test: npm test -- --changed origin/main   # overbridge check refuses a test run with no --changed, --related or spec path
   build: npm run build
   format: npm run format
 
@@ -71,7 +71,6 @@ check-queue:
   max-load-percent: 70       # beside a running check, start another only while the 1-minute load average is under this share of the cores
   # max-parallel: 4          # at most this many runs at once; unset leaves the load as the only limit
   timeout-seconds: 180       # kill the run after this long; `--timeout-seconds n` overrides it for one run
-  max-projects: 5            # refuse `nx run-many` with a -p list longer than this (see the README's Check queue)
   stall-seconds: 300         # kill the run once its processes have used no CPU for this long
   wait-seconds: 900          # give up (exit 75) when there is still no turn after this long
   # Checks start by the workspace's class (the root config.yml's priority-classes; default high, normal, low),

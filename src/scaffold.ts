@@ -284,8 +284,9 @@ access to other workspaces and direct branch switching. Do not try to work aroun
   goes over its time limit (exit 124) or stops using CPU (exit 137). If it cannot start in time, it gives up with exit 75.
 - Scope each check to what the branch changed: one file, one project, or an affected-only mode (\`nx affected -t <target> --base=origin/<base>\`,
   \`vitest run --changed origin/<base>\`, \`<base>\` being the PR's base branch). CI runs the full suite. \`overbridge check\` refuses an unscoped run:
-  \`nx run-many\` with no \`-p\` or a \`-p\` list over the repo's cap, a \`test\`/\`test:unit\` target or vitest run with no \`--changed\`,
-  \`--related\` or spec file path, and \`--skip-nx-cache\`, also inside \`sh -c\`, \`npx\` or \`pnpm exec\`. Do not work around a refusal; run the scoped command it suggests.
+  \`nx run-many\` with no \`-p\`, a \`-p\` list over the cap or a \`*\`/\`tag:\` pattern, \`nx affected --all\`, a \`test\`/\`test:unit\` target or vitest or jest run
+  with no \`--changed\`, \`--related\` or spec file path, and \`--skip-nx-cache\`, also inside \`sh -c\`, \`npx\` or \`pnpm exec\`. When it refuses the repo's
+  configured command, scope that command as the message says (add \`--changed origin/<base>\`, after \`--\` for a package script, or spec paths); do not work around the check.
 ${devShells}
 ## GitHub repos
 

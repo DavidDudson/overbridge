@@ -165,11 +165,6 @@
           "minimum": 1
         },
         "timeout-seconds": { "description": "Kill the run after this long. Default 180.", "type": "integer", "minimum": 1 },
-        "max-projects": {
-          "description": "`overbridge check` refuses `nx run-many` with a -p/--projects list longer than this; scope the run with `nx affected` instead. Default 5.",
-          "type": "integer",
-          "minimum": 1
-        },
         "stall-seconds": {
           "description": "Kill the run once its processes have used no CPU for this long. Default 300.",
           "type": "integer",

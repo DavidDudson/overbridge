@@ -125,8 +125,6 @@ export interface CheckQueue {
   maxParallel?: number;
   /** Kill the run after this long, busy or not. */
   timeoutSeconds: number;
-  /** `overbridge check` refuses `nx run-many` with a `-p` list longer than this. */
-  maxProjects: number;
   /** Kill the run once its process group has used no CPU for this long. */
   stallSeconds: number;
   /** Give up waiting for a turn after this long. */
@@ -139,10 +137,25 @@ export interface CheckQueue {
   classes: readonly PriorityClass[];
 }
 
+/** What `overbridge check` does with a command that runs more than the branch changed. */
+export const CheckScopeMode = { Enforce: "enforce", Warn: "warn", Off: "off" } as const;
+
+export type CheckScopeMode = (typeof CheckScopeMode)[keyof typeof CheckScopeMode];
+
+const CHECK_SCOPE_MODES: readonly CheckScopeMode[] = Object.values(CheckScopeMode);
+
+export interface CheckScope {
+  /** `enforce` refuses the command, `warn` prints why and runs it, `off` skips the check. */
+  mode: CheckScopeMode;
+  /** `nx run-many` with a longer `-p` list counts as unscoped. */
+  maxProjects: number;
+}
+
+export const defaultCheckScope = (): CheckScope => ({ mode: CheckScopeMode.Enforce, maxProjects: 5 });
+
 export const defaultCheckQueue = (): CheckQueue => ({
   maxLoadPercent: 70,
   timeoutSeconds: 180,
-  maxProjects: 5,
   stallSeconds: 300,
   waitSeconds: 900,
   priorityRules: [],
@@ -183,6 +196,8 @@ export interface ProjectConfig {
   /** The repo's dev shell, if it declares one. */
   shell?: ShellSpec;
   checkQueue: CheckQueue;
+  /** How `overbridge check` treats an unscoped command, from the root `config.yml` only. */
+  checkScope: CheckScope;
   icebox: IceboxConfig;
   /** Lifecycle hooks, from the root `config.yml` only. Present only when there are any. */
   hooks?: Hooks;
@@ -201,14 +216,16 @@ export const defaultConfig = (): ProjectConfig => ({
   commands: {},
   review: { exclude: [], localDir: DEFAULT_PERSONA_DIR, shipPr: true },
   checkQueue: defaultCheckQueue(),
+  checkScope: defaultCheckScope(),
   icebox: { prune: [] },
   buttons: [],
   mcpServers: [],
 });
 
-const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons", "mcp-servers"];
+const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "check-scope", "icebox", "hooks", "buttons", "mcp-servers"];
+const CHECK_SCOPE_KEYS = ["mode", "max-projects"];
 const SHELL_KEYS = ["enter", "env", "key"];
-const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "max-projects", "stall-seconds", "wait-seconds", "priority", "priority-rules"];
+const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds", "priority", "priority-rules"];
 const PRIORITY_RULE_KEYS = ["priority", "branch", "item", "type", "label"];
 const ICEBOX_KEYS = ["prune", "idle-days"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir", "ship-pr"];
@@ -588,6 +605,23 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
     }
   }
 
+  const checkScope = raw["check-scope"];
+
+  if (checkScope !== undefined && checkScope !== null) {
+    if (!root) {
+      p.add("check-scope", "only allowed in the root config.yml, so a checked-out branch can't loosen it");
+    } else if (!isRecord(checkScope)) {
+      p.add("check-scope", `expected a mapping with ${CHECK_SCOPE_KEYS.join(", ")}`);
+    } else {
+      p.unknownKeys(checkScope, CHECK_SCOPE_KEYS, "check-scope");
+      // YAML reads a bare `off` as false
+      const mode = checkScope.mode === false ? CheckScopeMode.Off : p.oneOf(p.string(checkScope, "mode", "check-scope", false), CHECK_SCOPE_MODES, "check-scope.mode");
+      const maxProjects = p.positiveInt(checkScope, "max-projects", "check-scope");
+
+      config.checkScope = { mode: mode ?? config.checkScope.mode, maxProjects: maxProjects ?? config.checkScope.maxProjects };
+    }
+  }
+
   const mcpServers = raw["mcp-servers"];
 
   if (mcpServers !== undefined && mcpServers !== null) {
@@ -737,7 +771,6 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
       set(p.positiveInt(checkQueue, "max-load-percent", "check-queue"), "maxLoadPercent");
       set(p.positiveInt(checkQueue, "max-parallel", "check-queue"), "maxParallel");
       set(p.positiveInt(checkQueue, "timeout-seconds", "check-queue"), "timeoutSeconds");
-      set(p.positiveInt(checkQueue, "max-projects", "check-queue"), "maxProjects");
       set(p.positiveInt(checkQueue, "stall-seconds", "check-queue"), "stallSeconds");
       set(p.positiveInt(checkQueue, "wait-seconds", "check-queue"), "waitSeconds");
       const priority = p.string(checkQueue, "priority", "check-queue", false);

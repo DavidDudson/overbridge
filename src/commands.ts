@@ -4,7 +4,7 @@ import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./c
 import * as git from "./git";
 import type { PrChecksTarget } from "./pr-checks";
 import { slugOfDir } from "./repo-slug";
-import { checkClassNames, configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, type ProjectConfig, rootConfigPath } from "./project-config";
+import { CheckScopeMode, checkClassNames, configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, type ProjectConfig, rootConfigPath } from "./project-config";
 import { aheadRows } from "./ahead";
 import { clearPhase, parseLayer, PHASES, writePhase } from "./task-status";
 import { agentDirOf, chooseLayout, userLayoutPath } from "./layout";
@@ -772,15 +772,21 @@ export async function check(repoArg: string | undefined, cmd: string[], wsOpt?: 
     fail(`name the repo to check in: overbridge check <repo> -- <cmd> (${ws} holds ${repos.join(", ") || "no repos"})`);
 
   const { config, inv } = inRepoShell(ws, repo, cmd);
-  const refusal = scopeRefusal(cmd, config.checkQueue.maxProjects);
+  const command = cmd.map(shellQuote).join(" ");
+  const scope = config.checkScope;
+  const refusal = scope.mode === CheckScopeMode.Off ? undefined : scopeRefusal(cmd, scope.maxProjects, process.env);
+
+  if (refusal && scope.mode === CheckScopeMode.Enforce) {
+    fail(refusalMessage(`overbridge check refused: ${command}`, refusal));
+  }
 
   if (refusal) {
-    fail(refusalMessage(cmd.map(shellQuote).join(" "), refusal));
+    log(refusalMessage(`overbridge check: unscoped, running it anyway (check-scope.mode: warn): ${command}`, refusal));
   }
 
   const settings = timeoutSeconds === undefined ? config.checkQueue : { ...config.checkQueue, timeoutSeconds };
   const cls = workspaceClass(claimContexts(ws, repo, config), worklistFacts);
-  const who: Parameters<typeof runCheck>[1] = { ws, repo, command: cmd.map(shellQuote).join(" ") };
+  const who: Parameters<typeof runCheck>[1] = { ws, repo, command };
 
   if (cls) {
     who.priority = cls.name;

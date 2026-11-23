@@ -13,14 +13,14 @@
     "defaults": {
       "description": "Applied under every repo's overbridge.yml.",
       "type": "object",
-      "properties": { "hooks": { "$ref": "#/$defs/hooks" }, "buttons": { "$ref": "#/$defs/buttons" }, "mcp-servers": { "$ref": "#/$defs/mcp-servers" } }
+      "properties": { "hooks": { "$ref": "#/$defs/hooks" }, "buttons": { "$ref": "#/$defs/buttons" }, "mcp-servers": { "$ref": "#/$defs/mcp-servers" }, "check-scope": { "$ref": "#/$defs/check-scope" } }
     },
     "owners": {
       "description": "Per GitHub owner (user or org, any case), matched against the remote URL of each repo in repos.toml: applied over defaults and under the repo's overbridge.yml.",
       "type": "object",
       "additionalProperties": {
         "type": ["object", "null"],
-        "properties": { "hooks": { "$ref": "#/$defs/hooks" }, "buttons": { "$ref": "#/$defs/buttons" }, "mcp-servers": { "$ref": "#/$defs/mcp-servers" } }
+        "properties": { "hooks": { "$ref": "#/$defs/hooks" }, "buttons": { "$ref": "#/$defs/buttons" }, "mcp-servers": { "$ref": "#/$defs/mcp-servers" }, "check-scope": { "$ref": "#/$defs/check-scope" } }
       }
     },
     "repos": {
@@ -28,7 +28,7 @@
       "type": "object",
       "additionalProperties": {
         "type": ["object", "null"],
-        "properties": { "hooks": { "$ref": "#/$defs/hooks" }, "buttons": { "$ref": "#/$defs/buttons" }, "mcp-servers": { "$ref": "#/$defs/mcp-servers" } }
+        "properties": { "hooks": { "$ref": "#/$defs/hooks" }, "buttons": { "$ref": "#/$defs/buttons" }, "mcp-servers": { "$ref": "#/$defs/mcp-servers" }, "check-scope": { "$ref": "#/$defs/check-scope" } }
       }
     },
     "skill-extensions": {
@@ -112,6 +112,15 @@
       "description": "Names of the repo's .mcp.json servers that Claude starts without asking. Only allowed in the root config.yml.",
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
+    },
+    "check-scope": {
+      "description": "How `overbridge check` treats a command that runs more than the branch changed: `nx run-many` with no -p or a -p list over max-projects, `nx affected --all`, a test or test:unit target or vitest/jest run with no --changed, --related or spec path, and --skip-nx-cache. Only allowed in the root config.yml, so a branch can't loosen it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "description": "enforce refuses the command (exit 1); warn prints why and runs it; off skips the check. Default enforce.", "enum": ["enforce", "warn", "off"] },
+        "max-projects": { "description": "`nx run-many` with a longer -p/--projects list counts as unscoped. Default 5.", "type": "integer", "minimum": 1 }
+      }
     },
     "buttons": {
       "description": "Top panel buttons. Only allowed in the root config.yml.",
