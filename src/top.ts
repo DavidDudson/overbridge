@@ -17,6 +17,7 @@ import { getWorkspace, isTaskClaim, readState } from "./state";
 import { boxBottom, boxRow, boxTop, type Color, colorize, fit, inverse, isColor, stripControl, textWidth } from "./term";
 import { parseUnresolved, REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses, threadsCommand } from "./reviewers";
 import { displayStacks, stackOf } from "./stack";
+import { restMergedHeads } from "./merge-rest";
 import { describeValue, errorMessage, run } from "./util";
 
 const safeStacks = (repo: string) => {
@@ -146,6 +147,8 @@ export interface TopCache {
   prActiveAt?: number;
   /** Set when every claimed branch's PR has merged: each repo's PR head commit, keyed by repo. */
   merged?: Record<string, string>;
+  /** When the REST merge check last ran and found no merge, so it waits `REST_MERGE_CHECK_MS` before spending the core budget again. */
+  restCheckedAt?: number;
   /** The branch each claimed repo was on when this was built, so `merged` and `prsOpen` are not trusted once a claim moves. */
   branches?: Record<string, string>;
   /** The workspace's check queue class and its icon (see `workspaceClass`). */
@@ -400,6 +403,7 @@ export function topCacheFault(raw: JsonValue | undefined): string | undefined {
     optional("draftOnly", isJsonBoolean(raw.draftOnly)) ??
     optional("prActiveAt", isJsonNumber(raw.prActiveAt)) ??
     optional("merged", isJsonObject(raw.merged)) ??
+    optional("restCheckedAt", isJsonNumber(raw.restCheckedAt)) ??
     optional("branches", isJsonObject(raw.branches)) ??
     optional("buttons", isJsonObject(raw.buttons)) ??
     optional("priority", isJsonString(raw.priority)) ??
@@ -470,14 +474,19 @@ function parsePrView(out: string | undefined): PrView | undefined {
 /** PR reads the server batched for one workspace, keyed by repo name then PR number: a view, or null for a PR GitHub did not return. */
 export type PrefetchedPrs = Record<string, { prs: Record<number, PrView | null | undefined>; /** The refetch failed; `prs` is the last reply. */ error?: string } | { error: string }>;
 
+/** How long a REST merge check that found no merge stands before the next one. */
+export const REST_MERGE_CHECK_MS = 5 * 60_000;
+
 export interface RefreshDeps {
   /** Read PRs from these instead of running `gh pr view` and the threads query per PR. */
   prefetched?: PrefetchedPrs;
   provider?: (pm: ProjectManagement, dir: string) => Provider;
   /** Run a command in `cwd`; returns trimmed stdout, or undefined on failure. */
   exec?: (cmd: string[], cwd: string) => string | undefined;
-  /** `gh` is paused (a GitHub rate limit): make no call, keep the last values and put this on the message row. */
+  /** `gh` is paused (a GitHub rate limit): read no PR through GraphQL, keep the last values and put this on the message row. */
   paused?: string;
+  /** REST is paused too (a secondary or REST limit): skip the REST merge check. */
+  restPaused?: string;
   /** Told the stderr of every failed command that `exec` ran by default, so a caller can see a rate limit that the `undefined` result hides. */
   onFailure?: (cmd: string[], stderr: string) => void;
   /** The clock for the button reuse age; `Date.now` by default. */
@@ -576,6 +585,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   let draftPrs = 0;
   let prActiveAt: number | undefined;
   const mergedHeads: Record<string, string> = {};
+  const unreadRepos = new Set<string>();
   let headline: string | undefined;
   let itemTitle: string | undefined;
   let itemLinks: TopLink[] = [];
@@ -684,6 +694,10 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
       if (claim.branch && view?.state === "MERGED" && view.headRefOid) {
         mergedHeads[repo] = view.headRefOid;
       }
+
+      if (claim.branch && !view) {
+        unreadRepos.add(repo);
+      }
     }
 
     if (config.buttons.length === 0) {
@@ -740,6 +754,23 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 
     // a claim with no PR, a closed PR or an unreadable one leaves this unset, so the workspace stays
     if (claimed > 0 && Object.keys(mergedHeads).length === claimed) cache.merged = mergedHeads;
+  }
+
+  // GraphQL could not say whether the PRs merged (rate limited, or gh paused): ask REST, whose budget is separate, so the sweep still sees a merge
+  const unread = deps.paused ? claimed > 0 : unreadRepos.size > 0;
+
+  if (!cache.merged && unread && !deps.restPaused) {
+    if (now - (old.restCheckedAt ?? 0) < REST_MERGE_CHECK_MS) {
+      cache.restCheckedAt = old.restCheckedAt;
+    } else {
+      const viaRest = restMergedHeads(getWorkspace(readState(), ws).repos, (repo) => worktreePath(ws, repo), exec);
+
+      if (viaRest) {
+        cache.merged = viaRest;
+      } else {
+        cache.restCheckedAt = now;
+      }
+    }
   }
 
   if (Object.keys(buttonStates).length) cache.buttons = buttonStates;

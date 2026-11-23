@@ -1,5 +1,6 @@
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { type AgentLaunch, launchFault } from "./agent-launch";
 import { AgentKind, isAgentKind } from "./agent-kind";
 import type { CleanupCause, CleanupRecord } from "./cleanup-log";
 import { metaDir } from "./paths";
@@ -45,6 +46,8 @@ export type WorkspaceState = {
   iceboxed?: Iceboxed;
   /** The agent the workspace runs; Claude when unset. Chosen when the workspace is created. */
   agent?: AgentKind;
+  /** Set by `overbridge relaunch`: env and args the agent starts with, over the root config's `agent-launch`. */
+  launch?: AgentLaunch;
 };
 
 export type State = {
@@ -114,6 +117,10 @@ export function workspaceFault(w: Json | undefined): string | undefined {
   }
 
   if (w.agent !== undefined && !isAgentKind(w.agent)) return `state record has agent as ${JSON.stringify(w.agent)}`;
+
+  const launch = w.launch === undefined ? undefined : launchFault(w.launch);
+
+  if (launch !== undefined) return `state record has a bad launch: ${launch}`;
 
   return undefined;
 }

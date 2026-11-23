@@ -6,7 +6,8 @@ import { queueDir, stopChecksFor, ticketName, type Ticket } from "../src/check-q
 import { groupAlive } from "../src/proc";
 import { handoffStamp, HandoffReason, renderHandoff } from "../src/handoff";
 import { zellijMux } from "../src/mux";
-import { icebox, type IceboxDeps, prunable, THAW_PROMPT, thaw, thawFirstMessage } from "../src/icebox";
+import { icebox, type IceboxDeps, prunable, thaw } from "../src/icebox";
+import { THAW_PROMPT, thawFirstMessage } from "../src/handoff";
 import { entries, icedRows } from "../src/sidebar";
 import { isJsonObject, parseJson } from "../src/json";
 import { isIceboxed, readState, withState } from "../src/state";

@@ -75,9 +75,16 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
       return r.stdout === "CLOSED" ? ItemStatus.Done : ItemStatus.Open;
     },
 
+    // REST, not GraphQL: lineage runs per workspace, and every workspace shares one GraphQL budget
     lineage(id) {
       const n = id.replace(/^#/, "");
-      const r = gh(["issue", "view", n, "-R", repo(), "--json", "title,state,url"]);
+
+      // the id goes into a URL path, so anything but a number could reach another endpoint
+      if (!NUMBER_RE.test(n)) {
+        return [];
+      }
+
+      const r = gh(["api", `repos/${repo()}/issues/${n}`]);
 
       if (!r.ok || !r.stdout) {
         return [];
@@ -86,11 +93,12 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
       try {
         const v: unknown = JSON.parse(r.stdout);
 
-        if (!isJsonObject(v) || !isJsonString(v.title)) {
+        // the issues endpoint also answers for a pull request, which is not a work item
+        if (!isJsonObject(v) || !isJsonString(v.title) || v.pull_request !== undefined) {
           return [];
         }
 
-        return [{ id: n, title: v.title, status: isJsonString(v.state) ? v.state.toLowerCase() : "", url: isJsonString(v.url) ? v.url : provider.link(n) }];
+        return [{ id: n, title: v.title, status: isJsonString(v.state) ? v.state.toLowerCase() : "", url: isJsonString(v.html_url) ? v.html_url : provider.link(n) }];
       } catch {
         return [];
       }
