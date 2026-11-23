@@ -37,7 +37,7 @@ export interface GatherDeps {
 export const PR_FACT_TTL_MS = 60_000;
 
 /** The `gh` reads that name a PR's state; nothing else is cached (git facts always come straight from git). */
-const isPrRead = (cmd: string[]) => cmd[0] === "gh" && ((cmd[1] === "pr" && (cmd[2] === "view" || cmd[2] === "list")) || (cmd[1] === "api" && /\/pulls\b|^search\/issues\?/.test(cmd[2] ?? "")));
+const isPrRead = (cmd: string[]) => cmd[0] === "gh" && ((cmd[1] === "pr" && (cmd[2] === "view" || cmd[2] === "list")) || (cmd[1] === "api" && /\/pulls(\/\d+|\?head=.*)?$|^search\/issues\?/.test(cmd[2] ?? "")));
 
 /**
  * `run`, with a PR read answered from memory while it is under the TTL. A failed read is never cached or served stale.
@@ -175,11 +175,16 @@ function readPrNumber(n: number, wt: string, deps: GatherDeps, provider: Provide
   return pr ? read(pr) : read(pr, `PR #${n} could not be read: ${r.stderr || "gh printed nothing usable"}`);
 }
 
-/** The PR from `branch`, an open one first, as `gh pr view <branch>` picks it. A branch with no PR is not a problem. */
+/** The PR from `branch`, an open one first. REST answers `[]` for a branch with no PR, so any other reply is a problem. */
 function readBranchPr(branch: string, wt: string, deps: GatherDeps, provider: Provider | undefined): Read<PrFact | undefined> {
   const r = deps.exec(["gh", "api", `${PULLS}?head={owner}:${encodeURIComponent(branch)}&state=all`], wt);
   const listed = r.ok ? parse(r.stdout) : undefined;
-  const prs = Array.isArray(listed) ? listed.flatMap((raw) => prFact(rawPr(raw), provider) ?? []) : [];
+
+  if (!Array.isArray(listed)) {
+    return read(undefined, `PRs from ${branch} could not be read: ${r.stderr || "gh printed nothing usable"}`);
+  }
+
+  const prs = listed.flatMap((raw) => prFact(rawPr(raw), provider) ?? []);
 
   return read(prs.find((pr) => pr.state === PrState.Open) ?? prs[0]);
 }
@@ -188,10 +193,7 @@ function readBranchPr(branch: string, wt: string, deps: GatherDeps, provider: Pr
 const readPr = (selector: string, wt: string, deps: GatherDeps, provider: Provider | undefined): Read<PrFact | undefined> =>
   /^\d+$/.test(selector) ? readPrNumber(Number(selector), wt, deps, provider) : readBranchPr(selector, wt, deps, provider);
 
-/**
- * Every PR whose branch or title names item `id`, whatever branch it came from. The search endpoint gives no head branch,
- * so each hit is read on its own.
- */
+/** Every PR whose branch or title names item `id`, whatever branch it came from. */
 function readItemPrs(id: string, wt: string, deps: GatherDeps, provider: Provider): Read<PrFact[]> {
   const query = `repo:{owner}/{repo}+is:pr+${encodeURIComponent(id)}`;
   const r = deps.exec(["gh", "api", `search/issues?q=${query}&per_page=${PR_SEARCH_LIMIT}`], wt);
@@ -199,15 +201,17 @@ function readItemPrs(id: string, wt: string, deps: GatherDeps, provider: Provide
   const items = isJsonObject(found) ? found.items : undefined;
 
   if (!Array.isArray(items)) {
-    return read([], `PRs for ${id} could not be listed: ${r.stderr || r.stdout || "gh printed nothing usable"}`);
+    return read([], `PRs for ${id} could not be listed: ${r.stderr || "the search reply had no items"}`);
   }
 
-  const hits = items.flatMap((item) => (isJsonObject(item) ? (numberField(item, "number") ?? []) : []));
-  const prs = hits.map((n) => readPrNumber(n, wt, deps, provider));
+  // Search hits carry no head branch, so each PR is read on its own. A failed read of a hit whose title does not name the
+  // item is dropped: it is most likely a PR that only mentions the id.
+  const hits = items.flatMap((item) => (isJsonObject(item) ? [{ n: numberField(item, "number"), title: stringField(item, "title") ?? "" }] : []));
+  const prs = hits.flatMap(({ n, title }) => (n === undefined ? [] : [{ pr: readPrNumber(n, wt, deps, provider), named: new RegExp(`\\b${escapeRegex(id)}\\b`).test(title) }]));
 
   return read(
-    prs.flatMap((pr) => (pr.value?.item === id ? [pr.value] : [])),
-    ...prs.flatMap((pr) => pr.problems),
+    prs.flatMap(({ pr }) => (pr.value?.item === id ? [pr.value] : [])),
+    ...prs.flatMap(({ pr, named }) => (named ? pr.problems : [])),
   );
 }
 

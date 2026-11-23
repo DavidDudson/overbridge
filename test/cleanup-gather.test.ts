@@ -63,7 +63,12 @@ const pullKey = (n: number) => `${PULLS}/${n}`;
 const pull = (n: number, state: PrState, ref: string, title = "") => ({ [pullKey(n)]: ok(JSON.stringify(prJson(n, state, ref, title))) });
 const branchKey = (branch: string) => `${PULLS}?head={owner}:${encodeURIComponent(branch)}&state=all`;
 const searchKey = (id: string) => `gh api search/issues?q=repo:{owner}/{repo}+is:pr+${id}&`;
-const searched = (id: string, ...numbers: number[]) => ({ [searchKey(id)]: ok(JSON.stringify({ items: numbers.map((number) => ({ number })) })) });
+
+/** A search reply listing these PRs, none titled for the item. */
+const searched = (id: string, ...numbers: number[]) => searchedHits(id, ...numbers.map((number) => ({ number, title: "" })));
+
+/** A search reply listing these hits. */
+const searchedHits = (id: string, ...hits: { number: number; title: string }[]) => ({ [searchKey(id)]: ok(JSON.stringify({ items: hits })) });
 
 const target = (ws: string, branch?: string, pr?: number): Target => {
   const claim: Claim = {};
@@ -161,7 +166,7 @@ describe("gatherFacts", () => {
   });
 
   test("a repo with no provider still gets its git and PR facts", () => {
-    const { deps } = fakeDeps({ ...cleanGit("task/spike"), [branchKey("task/spike")]: failed() }, { provider: () => undefined });
+    const { deps } = fakeDeps({ ...cleanGit("task/spike"), [branchKey("task/spike")]: ok("[]") }, { provider: () => undefined });
     const facts = gatherFacts(target("spike", "task/spike"), deps);
     expect(facts.item).toBeUndefined();
     expect(facts.repos[0]).toMatchObject({ task: true, ahead: 0, itemPrs: [] });
@@ -174,16 +179,51 @@ describe("gatherFacts", () => {
     expect(gatherFacts(target("ENG-1", "feat/ENG-1-x"), deps).repos[0]!.pr).toMatchObject({ number: 6, state: PrState.Open });
   });
 
-  test("a search hit that cannot be read keeps the workspace", () => {
-    const { deps } = fakeDeps({ ...cleanGit("feat/ENG-1-x"), [branchKey("feat/ENG-1-x")]: ok("[]"), ...searched("ENG-1", 9), [pullKey(9)]: failed("HTTP 502") });
+  test("a search hit titled for the item that cannot be read keeps the workspace", () => {
+    const { deps } = fakeDeps({ ...cleanGit("feat/ENG-1-x"), [branchKey("feat/ENG-1-x")]: ok("[]"), ...searchedHits("ENG-1", { number: 9, title: "ENG-1 fix it" }), [pullKey(9)]: failed("HTTP 502") });
     const found = classify(gatherFacts(target("ENG-1", "feat/ENG-1-x"), deps));
     expect(found.problems).toEqual(["PR #9 could not be read: HTTP 502"]);
     expect(found.reason).toBe(CleanupReason.Unreadable);
   });
 
-  test("a failed search keeps the workspace", () => {
-    const { deps } = fakeDeps({ ...cleanGit("feat/ENG-1-x"), [branchKey("feat/ENG-1-x")]: ok("[]"), [searchKey("ENG-1")]: failed("HTTP 403") });
-    expect(classify(gatherFacts(target("ENG-1", "feat/ENG-1-x"), deps)).problems).toEqual(["PRs for ENG-1 could not be listed: HTTP 403"]);
+  test("a search hit that only mentions the item and cannot be read is skipped", () => {
+    const { deps } = fakeDeps({ ...cleanGit("feat/ENG-1-x"), [branchKey("feat/ENG-1-x")]: ok("[]"), ...searched("ENG-1", 9, 10), ...pull(9, PrState.Merged, "fix/ENG-1-renamed"), [pullKey(10)]: failed("HTTP 502") });
+    const found = classify(gatherFacts(target("ENG-1", "feat/ENG-1-x"), deps));
+    expect(found.problems).toEqual([]);
+    expect(found.reason).toBe(CleanupReason.MergedByItem);
+  });
+
+  test.each([
+    ["a failed search", failed("HTTP 403"), "PRs for ENG-1 could not be listed: HTTP 403"],
+    ["a search reply with no items", ok("{}"), "PRs for ENG-1 could not be listed: the search reply had no items"],
+  ])("%s keeps the workspace", (_, reply, problem) => {
+    const { deps } = fakeDeps({ ...cleanGit("feat/ENG-1-x"), [branchKey("feat/ENG-1-x")]: ok("[]"), [searchKey("ENG-1")]: reply });
+    const found = classify(gatherFacts(target("ENG-1", "feat/ENG-1-x"), deps));
+    expect(found.problems).toEqual([problem]);
+    expect(found.reason).toBe(CleanupReason.Unreadable);
+  });
+
+  test("a branch whose PRs cannot be read keeps the workspace", () => {
+    const { deps } = fakeDeps({ ...cleanGit("task/spike"), [branchKey("task/spike")]: failed("HTTP 502") }, { provider: () => undefined });
+    const found = classify(gatherFacts(target("spike", "task/spike"), deps));
+    expect(found.problems).toEqual(["PRs from task/spike could not be read: HTTP 502"]);
+    expect(found).toMatchObject({ verdict: CleanupVerdict.Keep, reason: CleanupReason.Unreadable });
+  });
+
+  test.each([
+    ["open", null, PrState.Open],
+    ["closed", null, PrState.Closed],
+    ["closed", "2026-11-10T00:00:00Z", PrState.Merged],
+  ])("a REST pull that is %s with merged_at %p reads as %s", (state, mergedAt, expected) => {
+    const raw = { number: 7, state, merged_at: mergedAt, head: { ref: "feat/ENG-1-x" }, html_url: "https://gh.test/pull/7", title: "" };
+    const { deps } = fakeDeps({ ...cleanGit("feat/ENG-1-x"), [pullKey(7)]: ok(JSON.stringify(raw)), ...searched("ENG-1") });
+    expect(gatherFacts(target("ENG-1", "feat/ENG-1-x", 7), deps).repos[0]!.pr?.state).toBe(expected);
+  });
+
+  test("a REST pull in a state it does not know is a problem", () => {
+    const raw = { number: 7, state: "weird", merged_at: null, head: { ref: "feat/ENG-1-x" } };
+    const { deps } = fakeDeps({ ...cleanGit("feat/ENG-1-x"), [pullKey(7)]: ok(JSON.stringify(raw)), ...searched("ENG-1") });
+    expect(gatherFacts(target("ENG-1", "feat/ENG-1-x", 7), deps).problems).toEqual(["PR #7 could not be read: gh printed nothing usable"]);
   });
 
   test("an empty GraphQL budget leaves no workspace unreadable: every PR read goes through REST", () => {
@@ -204,7 +244,7 @@ describe("gatherFacts", () => {
   });
 
   test("a session mid-turn is not at rest", () => {
-    const { deps } = fakeDeps({ ...cleanGit("task/spike"), [branchKey("task/spike")]: failed() }, { provider: () => undefined, agent: () => "busy" });
+    const { deps } = fakeDeps({ ...cleanGit("task/spike"), [branchKey("task/spike")]: ok("[]") }, { provider: () => undefined, agent: () => "busy" });
     expect(gatherFacts(target("spike", "task/spike"), deps)).toMatchObject({ agent: "busy", agentAtRest: false });
   });
 });

@@ -223,6 +223,17 @@ describe("cachedExec", () => {
   const fail: RunResult = { ok: false, code: 1, stdout: "", stderr: "boom" };
   const view = ["gh", "pr", "view", "12", "--json", "state"];
 
+  test.each([
+    ["repos/{owner}/{repo}/pulls?head={owner}:feat%2Fx&state=all", 1],
+    ["repos/{owner}/{repo}/pulls/12/files", 2],
+  ])("gh api %s is read %d time(s) for two calls", (path, expected) => {
+    let calls = 0;
+    const exec = cachedExec(() => (calls++, ok("{}")), () => 0, new Map());
+    exec(["gh", "api", path], "/a");
+    exec(["gh", "api", path], "/a");
+    expect(calls).toBe(expected);
+  });
+
   test("a REST PR read is cached like a gh pr read", () => {
     let calls = 0;
     const exec = cachedExec(() => (calls++, ok("{}")), () => 0, new Map());
