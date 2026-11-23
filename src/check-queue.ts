@@ -3,7 +3,7 @@ import { availableParallelism, constants, cpus, loadavg } from "node:os";
 import { dirname, join } from "node:path";
 import { defaultKey, type QueueOverrides, readOverrides } from "./check-priority";
 import { type CheckRecord, classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
-import { type Estimate, etaSlots, exactEstimateFor, formatDuration, overallMs, queueEtas, readEstimates, recordRunTime } from "./check-estimate";
+import { type Estimate, estimateFor, etaSlots, etaSummary, queueEtas, readEstimates, recordRunTime } from "./check-estimate";
 import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidsAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
@@ -273,7 +273,7 @@ export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machin
 export const SKIP_MIN_RUNS = 3;
 
 /**
- * Whether a check this quick starts at once instead of queueing. `estimate` is the exact command's own (`exactEstimateFor`):
+ * Whether a check this quick starts at once instead of queueing. `estimate` is the exact command's own (`estimateFor`):
  * a command's group mixes in other arguments, so `vitest run` must not borrow the speed of `vitest run a.ts`.
  */
 export const skipsQueue = (estimate: Estimate | undefined, settings: Pick<CheckQueue, "skipQueueSeconds">) =>
@@ -429,19 +429,12 @@ function appendCheck(me: Ticket, startedMs: number, endedMs: number | undefined,
 
 const label = (t: Ticket) => `${t.ws}/${t.repo}: ${t.command}`;
 
-/** `; estimated start in ~2m, run ~3m10s` from past run times, so the agent knows how long it waits. */
+/** `; estimated start in ~2m, run ~3m10s` from past runs of the exact same commands, so the agent knows how long it waits. */
 function etaLine(me: Ticket, live: Ticket[], settings: CheckQueue, now: number, dir: string): string {
   const store = readEstimates(dirname(dir));
   const queue = queueView(live);
-  const eta = queueEtas(queue, store, etaSlots(queue.running.length, settings.maxParallel), now, ticketName, overallMs(store)).get(ticketName(me));
 
-  if (!eta) {
-    return "";
-  }
-
-  const run = eta.runMs === undefined ? "no past runs to estimate from" : `run ~${formatDuration(eta.runMs)}`;
-
-  return `; estimated start in ~${formatDuration(eta.startMs)}, ${run}`;
+  return etaSummary(queueEtas(queue, store, etaSlots(queue.running.length, settings.maxParallel), now, ticketName).get(ticketName(me)));
 }
 
 /** Wait until `me` may start (see `gateFor`); false when `deadlineMs` passes first. */
@@ -637,7 +630,7 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
   try {
     const deadlineMs = me.queuedAtMs + settings.waitSeconds * 1_000;
 
-    const quick = skipsQueue(exactEstimateFor(readEstimates(dirname(dir)), me.repo, me.command), settings);
+    const quick = skipsQueue(estimateFor(readEstimates(dirname(dir)), me.repo, me.command), settings);
 
     if (!quick && !(await waitForStart(me, dir, settings, deadlineMs))) {
       recordCheck(me, Date.now(), undefined, CheckExit.GaveUp);

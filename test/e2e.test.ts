@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { estimateKeys, estimatesFile } from "../src/check-estimate";
+import { estimateKey, estimatesFile } from "../src/check-estimate";
 import { HELD_ENV, readTickets, stopTicket } from "../src/check-queue";
 import { shellQuote } from "../src/util";
 
@@ -500,7 +500,8 @@ describe("check queue", () => {
     expect(await second.exited).toBe(0);
     const waited = await new Response(second.stderr).text();
     expect(waited).toContain("waiting behind 1 in the queue (max-parallel 1)");
-    expect(waited).toContain("estimated start in ~");
+    // `a` has never finished before, so nothing estimates when `b` can start
+    expect(waited).not.toContain("estimated start");
     expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["start a", "end a", "start b", "end b"]);
   }, CHECK_TEST_MS);
 
@@ -580,7 +581,7 @@ describe("check queue", () => {
     const log = join(tmp, "skip.log");
     const quick = script("skip-quick", `echo quick >> ${log}`);
     const command = quick.slice(1).map(shellQuote).join(" ");
-    writeFileSync(estimatesFile(join(root, ".overbridge")), JSON.stringify({ [estimateKeys("app", command)[0]]: [100, 100, 100] }));
+    writeFileSync(estimatesFile(join(root, ".overbridge")), JSON.stringify({ [estimateKey("app", command)]: [100, 100, 100] }));
     const slow = spawnCheck(script("skip-slow", `echo start >> ${log}; sleep 3; echo end >> ${log}`));
     await waitFor(() => existsSync(log));
     expect(check(quick).code).toBe(0);
