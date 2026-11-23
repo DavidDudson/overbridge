@@ -2,8 +2,9 @@ default: check
 
 check: lint typecheck test
 
+[positional-arguments]
 test *args:
-    bun test/run.ts {{args}}
+    bun test/run.ts "$@"
 
 lint:
     bunx oxlint

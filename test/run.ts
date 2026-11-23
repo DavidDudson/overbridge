@@ -23,6 +23,9 @@ const env = {
   [ISOLATED_ENV]: "1",
 };
 
+// Ctrl-C reaches the child through the terminal; outliving it lets `finally` remove the temp dirs.
+["SIGINT", "SIGTERM"].forEach((signal) => process.on(signal, () => undefined));
+
 try {
   const run = Bun.spawnSync({ cmd: [process.execPath, "test", ...Bun.argv.slice(2)], env, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
 
