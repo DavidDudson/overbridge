@@ -55,6 +55,10 @@ describe("test targets", () => {
     expect(ruleOf(["nx", "run-many", "-t", "lint", "test", "-p", "a,b"])).toBe(ScopeRule.UnscopedTest);
     expect(ruleOf(["vitest", "run", "./"])).toBe(ScopeRule.UnscopedTest);
     expect(ruleOf(["nx", "test", "portal", "."])).toBe(ScopeRule.UnscopedTest);
+    expect(ruleOf(["nx", "run", "@scope/portal:test"])).toBe(ScopeRule.UnscopedTest);
+    expect(ruleOf(["nx", "test", "@scope/portal"])).toBe(ScopeRule.UnscopedTest);
+    expect(ruleOf(["nx", "run-many", "-t", "test", "-p", "@scope/a", "@scope/b"])).toBe(ScopeRule.UnscopedTest);
+    expect(ruleOf(["vitest", "run", "--config", "apps/portal/vitest.config.ts"])).toBe(ScopeRule.UnscopedTest);
   });
 
   test("allows --changed, --related and spec paths", () => {
@@ -74,6 +78,8 @@ describe("test targets", () => {
     [["jest", "--onlyChanged"]],
     [["jest", "--testPathPattern=src/a"]],
     [["vitest", "run", "--root", "apps/portal", "src/a.spec.ts"]],
+    [["vitest", "--run", "src/feature/"]],
+    [["nx", "test", "@scope/portal", "--", "src/a.spec.ts"]],
   ])("allows the scoped form %p", (argv) => {
     expect(ruleOf(argv)).toBeUndefined();
   });

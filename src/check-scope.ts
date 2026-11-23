@@ -41,6 +41,9 @@ const PREFIXES = new Map<string, { valueFlags: ReadonlySet<string>; positionals:
   ["xargs", { valueFlags: new Set(["-I", "-n", "-P", "-L", "-d", "-E", "-s"]), positionals: 0 }],
 ]);
 
+/** Test runner and nx flags that take the next word as their value, so a path there is not a test filter. */
+const TEST_VALUE_FLAGS = new Set(["--config", "-c", "--reporter", "--outputFile", "--project", "--root", "-r", "--dir", "--base", "--head", "--environment", "--pool", "--shard", "--configuration", "--testNamePattern", "-t"]);
+
 const MAX_UNWRAP_DEPTH = 8;
 const SKIP_CACHE = /^--skip-?nx-?cache(?:=(?!false$).*)?$/i;
 const SKIP_CACHE_ENV = /^NX_SKIP_NX_CACHE=(?!false$|0$|$)/i;
@@ -210,18 +213,22 @@ function flagValues(args: readonly string[], flag: RegExp): string[] | undefined
   return lists.length ? lists.flat().flatMap((v) => v.split(",")).map((v) => v.trim()).filter(Boolean) : undefined;
 }
 
-/** A path that names a spec file or a folder below the project root; `.` and `./` are the whole project. */
+/**
+ * A path that names a spec file or a folder below the project root. `.` and `./` are the whole project, and a word
+ * starting with `@` or holding `:` is an nx project or target (`@scope/app`, `@scope/app:test`), not a path.
+ */
 function isNarrowPath(word: string): boolean {
   const trimmed = word.replace(/^\.\//, "").replace(/\/+$/, "");
+  const isProjectName = word.startsWith("@") || word.includes(":");
 
-  return SPEC_FILE.test(word) || (word.includes("/") && trimmed !== "" && trimmed !== ".");
+  return SPEC_FILE.test(word) || (word.includes("/") && !isProjectName && trimmed !== "" && trimmed !== ".");
 }
 
 /** A test run narrowed to changed files, related files, or named spec files or folders. */
 function testScoped(args: readonly string[]): boolean {
   return args.some((w, i) => {
     const previous = i > 0 ? args[i - 1] : undefined;
-    const isFlagValue = previous !== undefined && /^-[^=]*$/.test(previous) && !SPEC_FILE.test(w);
+    const isFlagValue = previous !== undefined && TEST_VALUE_FLAGS.has(previous) && !SPEC_FILE.test(w);
 
     return SCOPED_TEST_FLAG.test(w) || w === "related" || (!w.startsWith("-") && !isFlagValue && isNarrowPath(w));
   });
