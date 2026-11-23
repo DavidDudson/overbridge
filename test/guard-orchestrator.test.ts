@@ -17,7 +17,7 @@ describe("orchestrator: file and other tools", () => {
     expect(reason).toContain(START_HINT);
   });
 
-  test.each(["Read", "Glob", "Grep", "LS", "WebFetch", "Agent", "Skill", "AskUserQuestion", "ListAgents", "SendMessage"])("allows %s", (name) => {
+  test.each(["Read", "Glob", "Grep", "LS", "WebFetch", "Agent", "Skill", "AskUserQuestion", "ListAgents", "SendMessage", "REPL", "Poll"])("allows %s", (name) => {
     expect(checkOrchestrator(tool(name, { file_path: "/w/ws2/app/secret" }))).toBeUndefined();
   });
 
@@ -214,6 +214,9 @@ describe("orchestrator: bash", () => {
     "overbridge start app 12 --prompt 'file a ticket for X; then stop'",
     'overbridge start app --task file-x --prompt "file a ticket for X > Y"',
     "overbridge rm old-ws",
+    "overbridge tab gh-app-12",
+    "overbridge tab gh-app-12 --prompt 'carry on'",
+    "overbridge go next",
     "overbridge cleanup --json",
     "overbridge history",
     "overbridge history --by repo --hours 168 --json",

@@ -5,7 +5,7 @@ import { HELD_ENV } from "../src/check-queue";
 import { ISOLATED_ENV } from "./helpers/isolation";
 
 /** Variables a workspace, the check queue or a multiplexer sets that would point a test at real state. */
-const INHERITED = ["OVERBRIDGE_NAME", "OVERBRIDGE_SELF", "OVERBRIDGE_SESSION", "OVERBRIDGE_TAB", "OVERBRIDGE_MUX", HELD_ENV, "WS_ROOT", "WS_NAME", "WS_SELF", "WS_SESSION", "TMUX", "TMUX_PANE"];
+const INHERITED = ["OVERBRIDGE_NAME", "OVERBRIDGE_SELF", "OVERBRIDGE_TAB", "OVERBRIDGE_MUX", HELD_ENV, "WS_ROOT", "WS_NAME", "WS_SELF", "WS_SESSION", "TMUX", "TMUX_PANE", "ZELLIJ", "ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID"];
 
 const tempDir = (prefix: string) => mkdtempSync(join(tmpdir(), `overbridge-${prefix}-`));
 
@@ -20,6 +20,8 @@ const env = {
   OVERBRIDGE_ROOT: root,
   CLAUDE_CONFIG_DIR: claudeConfig,
   OVERBRIDGE_AGY_SETTINGS: join(agyConfig, "settings.json"),
+  // Outside a session `defaultMux` targets `sessionName()`, which is the live session by default.
+  OVERBRIDGE_SESSION: `overbridge-test-${process.pid}`,
   [ISOLATED_ENV]: "1",
 };
 

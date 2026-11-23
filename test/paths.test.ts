@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { currentWorkspace, envVar, metaDir, realPath, root, UNRESOLVABLE } from "../src/paths";
 
-const KEYS = ["OVERBRIDGE_ROOT", "WS_ROOT", "OVERBRIDGE_NAME", "WS_NAME"];
+const KEYS = ["OVERBRIDGE_ROOT", "WS_ROOT", "OVERBRIDGE_NAME", "WS_NAME", "OVERBRIDGE_SESSION", "WS_SESSION"];
 let saved: Record<string, string | undefined>;
 let tmp: string;
 

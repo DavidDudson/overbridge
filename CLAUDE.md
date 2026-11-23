@@ -145,7 +145,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   folders only: `createWorkspace` and `claude()` trust, `removeWorkspace` untrusts. Claude rewrites that file while
   it runs, so change only the one key and write it with an atomic rename. Tests run through `test/run.ts` (`just test [files]`,
   `bun run test [files]`), which starts `bun test` with a temp `OVERBRIDGE_ROOT`, Claude config and agy settings, and without
-  the workspace's `OVERBRIDGE_NAME`/`SELF`/`SESSION`/`TAB` or `$TMUX`. Bun builds a child's environment from the one it
+  the workspace's `OVERBRIDGE_NAME`/`SELF`/`TAB`, `$TMUX` or `$ZELLIJ*`, and with a per-run `OVERBRIDGE_SESSION`. Bun builds a child's environment from the one it
   started with, so only the runner reaches the CLIs a test spawns; the `bunfig.toml` preload (`test/helpers/isolate-env.ts`)
   refuses a plain `bun test`.
 - `src/state.ts`: all claim mutations go through `withState()` (lockfile + atomic rename; throw = no write).
