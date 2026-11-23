@@ -389,7 +389,7 @@ review:
   exclude: [pr-size]                   # skipped after selection
   local-dir: .overbridge/personas      # repo-local personas (this is the default)
   ship-pr: true                        # ship-pr runs mob-review before pushing and opening the PR (this is the default)
-ide: vscode           # vscode | zed | webstorm
+ide: vscode           # vscode | zed | webstorm | none; or { name, link, github }
 ```
 
 `overbridge config check [path]` validates a repo's file together with the root `config.yml`, or the root
@@ -571,11 +571,29 @@ out, so move it up if it has to run.
 | `review.exclude` | `[]` | personas to skip, applied after selection |
 | `review.local-dir` | `.overbridge/personas` | repo-local personas, relative to the repo root |
 | `review.ship-pr` | `true` | `ship-pr` runs `mob-review` on the committed branch and applies its fixes before it pushes and opens the PR. `false` skips that step |
-| `ide` | `$OVERBRIDGE_IDE`, then `$EDITOR` | `vscode`, `zed` or `webstorm`; the top panel's editor button opens the workspace folder. Unset, the button runs `$OVERBRIDGE_IDE` (an ide name or a command) or else `$EDITOR`; set those per user, not in the repo file. GUI editors only, as it is launched detached |
+| `ide` | `$OVERBRIDGE_IDE`, then `$EDITOR` | `vscode`, `zed`, `webstorm` or `none`; the top panel's editor button opens the workspace folder. Unset or `none`, the button runs `$OVERBRIDGE_IDE` (an ide name or a command) or else `$EDITOR`; set those per user, not in the repo file. GUI editors only, as it is launched detached. The ide also sets the links agents write for file references (see [File links](#file-links)) |
+| `ide.link` | per ide | the editor link for a file reference, with `{path}` (absolute), `{line}`, `{relpath}`, `{owner}`, `{repo}` and `{sha}`; it needs `{path}` or `{relpath}`. Defaults: `zed://file{path}:{line}`, `vscode://file{path}:{line}`, `webstorm://open?file={path}&line={line}`, none for `none`. `{path}` already starts with `/` |
+| `ide.github` | `true` | add a GitHub permalink, `[↗](https://github.com/{owner}/{repo}/blob/{sha}/{relpath}#L{line})`, after the editor link |
 
 Providers shell out to `gh` (GitHub) and `jira` ([jira-cli](https://github.com/ankitpokhrel/jira-cli), Jira), so there
 is no token to store in the config. A branch names its item when it contains the id: `123-title` or
 `feat/123-title` for GitHub, `feat/ENG-12-title` for Jira (only the configured project's key counts).
+
+### File links
+
+Every agent writes a file reference as a markdown link, with an absolute path and a line wherever the point is
+one spot in the file. The workspace `CLAUDE.md` (and agy's `AGENTS.md`) and the orchestrator's brief say how,
+from the `ide` of the workspace's first repo that sets one, else the root `defaults`, else `$OVERBRIDGE_IDE`
+when it names an ide. With none of those, the brief has no file links section. With `ide: zed`:
+
+```markdown
+[AGENTS.md:268](zed://file/<absolute path>:268) [↗](https://github.com/<owner>/<repo>/blob/<sha>/AGENTS.md#L268)
+```
+
+The name opens the file in the editor and the arrow opens the line on GitHub, pinned to `git rev-parse HEAD`.
+`ide: { name: zed, github: false }` drops the arrow. With `ide: none` the GitHub permalink is the only link, and
+`ide: { name: none, github: false }` turns file links off. A layer can set `ide: { github: false }` over a plain
+`ide: zed` below it; a layer that names another editor drops the `link` a lower layer set for the first one.
 
 ### Root config.yml
 

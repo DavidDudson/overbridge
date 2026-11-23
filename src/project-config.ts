@@ -7,6 +7,8 @@ import { repoOf, root, worktreePath } from "./paths";
 import { loadRepos } from "./config";
 import { slugFromUrl, WORKLIST_SCOPES, type WorklistScope } from "./pm/board-github";
 import type { WorkStatus } from "./pm/worklist";
+import { defaultIde, linkTemplateProblems } from "./file-links";
+import { IDES, type IdeConfig } from "./ide";
 import { errorMessage, fail, isBoolean, isNumber, isRecord, isString, type Json, type JsonObject } from "./util";
 
 /** Per-repo rules live in `overbridge.yml` at the repo (worktree) root. */
@@ -17,9 +19,6 @@ export const PM_NAMES = ["github", "jira"] as const;
 
 export type PmName = (typeof PM_NAMES)[number];
 
-export const IDES = ["vscode", "zed", "webstorm"] as const;
-
-export type Ide = (typeof IDES)[number];
 
 export interface ProjectManagement {
   name: PmName;
@@ -185,7 +184,7 @@ export interface ProjectConfig {
   apps: AppSpec[];
   commands: Commands;
   review: ReviewConfig;
-  ide?: Ide;
+  ide?: IdeConfig;
   /** The repo's dev shell, if it declares one. */
   shell?: ShellSpec;
   checkQueue: CheckQueue;
@@ -710,9 +709,11 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
     }
   }
 
-  const ide = p.oneOf(p.string(raw, "ide", "", false), IDES, "ide");
+  const ide = parseIde(p, raw.ide);
 
-  if (ide) config.ide = ide;
+  if (ide) {
+    config.ide = ide;
+  }
 
   const shell = raw.shell;
 
@@ -771,6 +772,47 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
   if (p.list.length) fail(`${file}:\n${p.list.map((line) => `  ${line}`).join("\n")}`);
 
   return config;
+}
+
+const IDE_KEYS = ["name", "link", "github"];
+
+/** `ide`: an ide name, or `{ name, link?, github? }`; undefined when unset or invalid. */
+function parseIde(p: Problems, raw: Json | undefined): IdeConfig | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+
+  if (isString(raw)) {
+    const name = p.oneOf(raw, IDES, "ide");
+
+    return name && defaultIde(name);
+  }
+
+  if (!isRecord(raw)) {
+    p.add("ide", `expected one of ${IDES.join(", ")}, or a mapping with ${IDE_KEYS.join(", ")}`);
+
+    return undefined;
+  }
+
+  p.unknownKeys(raw, IDE_KEYS, "ide");
+  const name = p.oneOf(p.string(raw, "name", "ide", true), IDES, "ide.name");
+  const link = p.string(raw, "link", "ide", false);
+
+  if (link !== undefined) {
+    linkTemplateProblems(link).forEach((problem) => p.add("ide.link", problem));
+  }
+
+  if (raw.github !== undefined && !isBoolean(raw.github)) {
+    p.add("ide.github", "expected true or false");
+  }
+
+  if (!name) {
+    return undefined;
+  }
+
+  const github = raw.github !== false;
+
+  return link === undefined ? { ...defaultIde(name), github } : { name, link, github };
 }
 
 /** A regex pattern, reported when it does not compile. */
@@ -1199,10 +1241,34 @@ export function resolveConfig(
 
   const label = sources.join(" + ") || file;
   // the repo file was checked for root-only keys above, so any left come from the root config
-  const config = validateConfig(overlay(overlay(overlay(layers.defaults, under?.layer), repoRaw), over), label, { root: true });
+  const [base, owned, own, top] = [layers.defaults, under?.layer, repoRaw, over].map(ideAsMapping);
+  const config = validateConfig(overlay(overlay(overlay(base, owned), own), top), label, { root: true });
 
   // an unknown class name falls back to the default class (`classInfo`), so a repo file naming a class this user's root lacks never blocks loading; `overbridge config check` reports it
   return { ...config, checkQueue: { ...config.checkQueue, classes: layers.checkClasses } };
+}
+
+/**
+ * A layer whose `ide` names an editor, written as a name or a mapping with `name` and no `link`, gets
+ * `{ name, link: null }`. A plain name then layers under a mapping that sets only `github`, and naming a
+ * different editor drops a lower layer's `link` for the other editor.
+ */
+function ideAsMapping(layer: Json | undefined): Json | undefined {
+  if (!isRecord(layer)) {
+    return layer;
+  }
+
+  const ide = layer.ide;
+
+  if (isString(ide) && IDES.some((name) => name === ide)) {
+    return { ...layer, ide: { name: ide, link: null } };
+  }
+
+  if (isRecord(ide) && ide.name !== undefined && ide.link === undefined) {
+    return { ...layer, ide: { ...ide, link: null } };
+  }
+
+  return layer;
 }
 
 /** Load a config file for `repo` with the root layers applied. A missing file means the root layers alone. */

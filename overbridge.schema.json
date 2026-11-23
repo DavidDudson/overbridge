@@ -115,7 +115,26 @@
         "ship-pr": { "type": "boolean", "description": "Run mob-review inside ship-pr, on the committed branch before it is pushed and the PR is opened. Default true." }
       }
     },
-    "ide": { "enum": ["vscode", "zed", "webstorm"] },
+    "ide": {
+      "description": "The editor: the top panel's editor button, and the links agents write for file references. A name, or a mapping with name, link and github.",
+      "oneOf": [
+        { "enum": ["vscode", "zed", "webstorm", "none"] },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": { "enum": ["vscode", "zed", "webstorm", "none"] },
+            "link": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Editor link template for a file reference. Placeholders: {path} (absolute), {line}, {relpath}, {owner}, {repo}, {sha}; needs {path} or {relpath}. Default: zed://file{path}:{line} (zed), vscode://file{path}:{line} (vscode), webstorm://open?file={path}&line={line} (webstorm), none for none."
+            },
+            "github": { "type": "boolean", "description": "Add a commit-pinned GitHub permalink ([↗]) after the editor link. Default true." }
+          }
+        }
+      ]
+    },
     "shell": {
       "oneOf": [
         { "type": "string", "minLength": 1 },

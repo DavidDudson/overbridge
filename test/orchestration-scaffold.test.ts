@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { orchestrationArgs } from "../src/commands";
@@ -63,6 +63,30 @@ describe("orchestration tab scaffolding", () => {
     expect(brief).toContain('overbridge thaw <workspace> --prompt "/pickup <pr-url>');
     expect(brief).toContain("never start a second workspace for a branch an iceboxed one claims");
     expect(brief.indexOf("overbridge thaw <workspace>")).toBeLessThan(brief.indexOf("overbridge item from-branch"));
+  });
+
+  test("its brief writes file references as links through the root defaults' ide, else $OVERBRIDGE_IDE", () => {
+    const savedIde = process.env.OVERBRIDGE_IDE;
+
+    try {
+      delete process.env.OVERBRIDGE_IDE;
+      expect(orchestratorPrompt()).not.toContain("## File references");
+      process.env.OVERBRIDGE_IDE = "vscode";
+      expect(orchestratorPrompt()).toContain("(vscode://file/abs/path/to/repo/AGENTS.md:268)");
+      writeFileSync(join(tmp, "config.yml"), "defaults:\n  ide: zed\n");
+      expect(orchestratorPrompt()).toContain("[AGENTS.md:268](zed://file/abs/path/to/repo/AGENTS.md:268) [↗](https://github.com/");
+      // a root config that does not load still leaves a brief
+      writeFileSync(join(tmp, "config.yml"), "defaults:\n  ide: emacs\n");
+      expect(orchestratorPrompt()).toContain("(vscode://file/");
+    } finally {
+      rmSync(join(tmp, "config.yml"), { force: true });
+
+      if (savedIde === undefined) {
+        delete process.env.OVERBRIDGE_IDE;
+      } else {
+        process.env.OVERBRIDGE_IDE = savedIde;
+      }
+    }
   });
 
   test("claude starts with the settings and the brief appended to the system prompt", () => {

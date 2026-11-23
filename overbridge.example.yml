@@ -94,4 +94,6 @@ icebox:
   prune: [node_modules, target]
   # idle-days: 14
 
-ide: vscode                  # vscode | zed | webstorm; default: $OVERBRIDGE_IDE, then $EDITOR (personal; usually leave unset)
+ide: vscode                  # vscode | zed | webstorm | none; default: $OVERBRIDGE_IDE, then $EDITOR (personal; usually leave unset)
+# or a mapping, for the links agents write for file references (see the README):
+# ide: { name: zed, link: "zed://file{path}:{line}", github: true }

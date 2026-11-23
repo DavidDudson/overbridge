@@ -38,7 +38,7 @@ ide: zed
     expect(c.projectManagement).toEqual({ name: "jira", project: "ENG", url: "https://example.atlassian.net" });
     expect(c.apps).toHaveLength(1);
     expect(c.apps[0]!.ports).toEqual([3000, 3001]);
-    expect(c.ide).toBe("zed");
+    expect(c.ide?.name).toBe("zed");
   });
 
   test("parses project-management.tech-debt", () => {
@@ -152,7 +152,7 @@ describe("loadRepoConfig", () => {
       expect(loadRepoConfig(dir)).toEqual(defaultConfig());
       mkdirSync(join(dir, "sub"));
       writeFileSync(join(dir, "overbridge.yml"), "ide: vscode\n");
-      expect(loadRepoConfig(dir).ide).toBe("vscode");
+      expect(loadRepoConfig(dir).ide?.name).toBe("vscode");
     } finally {
       saved === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = saved);
       rmSync(dir, { recursive: true, force: true });
