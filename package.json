@@ -30,7 +30,7 @@
     "access": "public"
   },
   "scripts": {
-    "test": "bun test",
+    "test": "bun test/run.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix"

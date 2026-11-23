@@ -2,8 +2,8 @@ default: check
 
 check: lint typecheck test
 
-test:
-    bun test
+test *args:
+    bun test/run.ts {{args}}
 
 lint:
     bunx oxlint
