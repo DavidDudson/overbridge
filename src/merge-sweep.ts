@@ -5,8 +5,10 @@ import { beginRemoval, Landing } from "./remove";
 import { isRemoving, RemovalBlock, readState, withState, type WorkspaceState } from "./state";
 import { MERGE_SWEEP_MS } from "./sweep-trigger";
 import { serverRefreshAll } from "./server-client";
+import { restMergedHeads } from "./merge-rest";
+import { worktreePath } from "./paths";
 import { claimedCache, noUnsavedWork, readTopCache, refreshTop, type TopCache } from "./top";
-import { errorMessage, log } from "./util";
+import { errorMessage, log, run } from "./util";
 
 /** What the merged-PR sweep does with one workspace. */
 export const Verdict = {
@@ -65,7 +67,38 @@ export interface SweepDeps {
   refresh: (ws: string) => void;
   /** Start removing `ws`; returns a refusal message, or undefined once under way. */
   remove: (ws: string) => string | undefined;
+  /** Each claimed repo's merged PR head read through REST, or undefined unless every claimed PR merged and every read worked. */
+  restMerged: (ws: string) => Record<string, string> | undefined;
   now: number;
+}
+
+/** `restMergedHeads` over `ws`'s current claims, run with `gh`. */
+export const restMergedOf = (ws: string): Record<string, string> | undefined => {
+  const workspace = readState().workspaces[ws];
+
+  if (!workspace) {
+    return undefined;
+  }
+
+  return restMergedHeads(workspace.repos, (repo) => worktreePath(ws, repo), (cmd, cwd) => {
+    const r = run(cmd, { cwd });
+
+    return r.ok && r.stdout ? r.stdout : undefined;
+  });
+};
+
+/**
+ * The cache the verdict reads. When the refresh could not read a claimed PR (GraphQL rate limited, `gh` paused) and so
+ * left `merged` unset, REST is asked instead; its own budget is separate. A REST failure leaves `merged` unset.
+ */
+export function mergedCache(cache: TopCache, ws: string, restMerged: SweepDeps["restMerged"]): TopCache {
+  if (cache.merged || !cache.prsUnread) {
+    return cache;
+  }
+
+  const merged = restMerged(ws);
+
+  return merged ? { ...cache, merged } : cache;
 }
 
 export const defaultSweepDeps = (): SweepDeps => ({
@@ -73,6 +106,7 @@ export const defaultSweepDeps = (): SweepDeps => ({
     refreshTop(ws);
   },
   remove: (ws) => beginRemoval(ws, { landing: Landing.IfFocused, cause: CleanupCause.Merged }),
+  restMerged: restMergedOf,
   now: Date.now(),
 });
 
@@ -119,7 +153,7 @@ function checkOne(ws: string, deps: SweepDeps): Verdict {
       return Verdict.Keep;
     }
 
-    const cache = claimedCache(ws);
+    const cache = mergedCache(claimedCache(ws), ws, deps.restMerged);
 
     return verdictFor({ ws, workspace, cache, agent: readAgentState(ws), clean: () => noUnsavedWork(ws, cache) });
   } catch (e) {

@@ -276,6 +276,14 @@ describe("refreshTop", () => {
     expect(claimedCache("w1", paused).merged).toBeUndefined();
   });
 
+  test("marks the PRs unread when a claimed PR could not be read or gh is paused, so the sweep can ask REST", () => {
+    expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", {}) }).prsUnread).toBeUndefined();
+    const failed = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => undefined });
+    expect(failed.prsUnread).toBe(true);
+    expect(failed.merged).toBeUndefined();
+    expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: () => undefined, paused: "paused" }).prsUnread).toBe(true);
+  });
+
   test("caches the headline, the item link and the PR link", () => {
     const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", { title: "" }) });
     expect(cache.headline).toBe("12 Add dark mode");

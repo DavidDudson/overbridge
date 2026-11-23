@@ -146,6 +146,8 @@ export interface TopCache {
   prActiveAt?: number;
   /** Set when every claimed branch's PR has merged: each repo's PR head commit, keyed by repo. */
   merged?: Record<string, string>;
+  /** A claimed PR could not be read this refresh (a failed or rate-limited GraphQL read, or `gh` paused), so `merged` may be missing only for that reason. */
+  prsUnread?: boolean;
   /** The branch each claimed repo was on when this was built, so `merged` and `prsOpen` are not trusted once a claim moves. */
   branches?: Record<string, string>;
   /** The workspace's check queue class and its icon (see `workspaceClass`). */
@@ -400,6 +402,7 @@ export function topCacheFault(raw: JsonValue | undefined): string | undefined {
     optional("draftOnly", isJsonBoolean(raw.draftOnly)) ??
     optional("prActiveAt", isJsonNumber(raw.prActiveAt)) ??
     optional("merged", isJsonObject(raw.merged)) ??
+    optional("prsUnread", isJsonBoolean(raw.prsUnread)) ??
     optional("branches", isJsonObject(raw.branches)) ??
     optional("buttons", isJsonObject(raw.buttons)) ??
     optional("priority", isJsonString(raw.priority)) ??
@@ -575,6 +578,7 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
   let mergedPrs = 0;
   let draftPrs = 0;
   let prActiveAt: number | undefined;
+  let prsUnread = false;
   const mergedHeads: Record<string, string> = {};
   let headline: string | undefined;
   let itemTitle: string | undefined;
@@ -677,6 +681,11 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
         if (view.isDraft === true) draftPrs++;
       }
       else if (view?.state === "MERGED") mergedPrs++;
+
+      if (!view) {
+        prsUnread = true;
+      }
+
       const updated = Date.parse(view?.updatedAt ?? "");
 
       if (Number.isFinite(updated)) prActiveAt = Math.max(prActiveAt ?? 0, updated);
@@ -729,6 +738,10 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
     if (old.prActiveAt !== undefined) cache.prActiveAt = old.prActiveAt;
 
     if (old.merged) cache.merged = old.merged;
+
+    if (claims.some(([, c]) => c.branch && c.pr !== undefined)) {
+      cache.prsUnread = true;
+    }
   } else {
     // released repos hold no branch, so only claimed branches need an open PR
     // an open PR somewhere, and every other claim already merged: a merged branch is finished, not a reason to keep the workspace
@@ -740,6 +753,10 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
 
     // a claim with no PR, a closed PR or an unreadable one leaves this unset, so the workspace stays
     if (claimed > 0 && Object.keys(mergedHeads).length === claimed) cache.merged = mergedHeads;
+
+    if (prsUnread) {
+      cache.prsUnread = true;
+    }
   }
 
   if (Object.keys(buttonStates).length) cache.buttons = buttonStates;

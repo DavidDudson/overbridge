@@ -98,7 +98,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   Once every claimed PR has merged (`TopCache.merged`, the PR head commits), `src/merge-sweep.ts` (`overbridge top sweep`) removes the workspace
   through `beginRemoval` with `Landing.IfFocused`, after `mergedClean` checks that each HEAD is its PR head. A squash merge
   leaves no remote branch holding those commits, so `hasUnpushed` cannot do that check. Unsaved work sets `removalBlocked`, which the sidebar card shows.
-  The sidebar starts the sweep; `claimSweep` (`src/sweep-trigger.ts`) lets one sidebar run it per `MERGE_SWEEP_MS`.
+  When the refresh could not read a claimed PR (`TopCache.prsUnread`: GraphQL rate limited or `gh` paused), the sweep reads the merge through REST
+  (`src/merge-rest.ts`, `mergedCache`), whose budget is separate; a failed REST read leaves `merged` unset.
+  The sweep starts from the sidebar; `claimSweep` (`src/sweep-trigger.ts`) lets one sidebar run it per `MERGE_SWEEP_MS`.
   Every removal is visible: `beginRemoval` stores its `CleanupCause` in `removing`, `finishRemoval` appends the outcome to
   `State.cleanups` (`src/cleanup-log.ts`), and the sidebar shows a countdown to the next sweep, the removals in flight and those finished since the last sweep (`cleanupRows`).
 - GitHub rate limit: every steady `gh` read is sized for 20+ sessions on one 5,000-point GraphQL budget.
