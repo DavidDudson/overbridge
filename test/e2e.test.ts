@@ -424,9 +424,17 @@ describe("check queue", () => {
   const queue = () => join(root, ".overbridge", "check-queue");
 
   const config = (extra = "") =>
-    writeFileSync(join(cq(), "app", "overbridge.yml"), `shell: env FOO=queued\ncheck-queue:\n  max-load-percent: 100000\n${extra}`);
+    writeFileSync(join(cq(), "app", "overbridge.yml"), `shell: env FOO=queued\ncheck-queue:\n  max-load-percent: 100000\n  max-cpu-percent: 100000\n  skip-queue-seconds: 0\n${extra}`);
 
   const check = (args: string[]) => ws(["check", ...args], cq());
+
+  /** A check runs one command, so a multi-step test command goes in a script file. */
+  const script = (name: string, body: string) => {
+    const file = join(tmp, `${name}.sh`);
+    writeFileSync(file, body);
+
+    return ["--", "sh", file];
+  };
 
   const spawnCheck = (args: string[]) =>
     Bun.spawn({ cmd: [process.execPath, CLI, "check", ...args], cwd: cq(), env: env(), stdout: "pipe", stderr: "pipe" });
@@ -449,7 +457,7 @@ describe("check queue", () => {
   test("runs in the repo's dev shell, passes the exit code through and leaves no ticket", () => {
     expect(ws(["new", "cq", "-r", "app"]).code).toBe(0);
     config();
-    const r = check(["--", "sh", "-c", 'echo "$FOO $OVERBRIDGE_CHECK_HELD"; exit 3']);
+    const r = check(script("exit3", 'echo "$FOO $OVERBRIDGE_CHECK_HELD"; exit 3'));
     expect(r.code).toBe(3);
     expect(r.out.trim()).toBe("queued 1");
     expect(tickets()).toEqual([]);
@@ -457,12 +465,15 @@ describe("check queue", () => {
     expect(check(["nope", "--", "true"]).err).toContain("nope is not in cq");
     expect(check(["app"]).code).toBe(1);
     expect(check(["--timeout-seconds", "x", "--", "true"]).err).toContain("--timeout-seconds expects a whole number");
+    const chained = check(["--", "sh", "-c", "true && true"]);
+    expect(chained.code).toBe(1);
+    expect(chained.err).toContain("overbridge check runs one command, but this script chains 2");
   }, CHECK_TEST_MS);
 
   test("two runs overlap while the load allows", async () => {
     config();
     const log = join(tmp, "overlap.log");
-    const step = (name: string) => ["--", "sh", "-c", `echo start ${name} >> ${log}; sleep 2; echo end ${name} >> ${log}`];
+    const step = (name: string) => script(`overlap-${name}`, `echo start ${name} >> ${log}; sleep 2; echo end ${name} >> ${log}`);
     const first = spawnCheck(step("a"));
     await waitFor(() => existsSync(log));
     const second = spawnCheck(step("b"));
@@ -478,7 +489,7 @@ describe("check queue", () => {
   test("with max-parallel 1, two runs take turns instead of overlapping", async () => {
     config("  max-parallel: 1\n");
     const log = join(tmp, "turns.log");
-    const step = (name: string) => ["--", "sh", "-c", `echo start ${name} >> ${log}; sleep 1; echo end ${name} >> ${log}`];
+    const step = (name: string) => script(`turns-${name}`, `echo start ${name} >> ${log}; sleep 1; echo end ${name} >> ${log}`);
     const first = spawnCheck(step("a"));
     await waitFor(() => existsSync(log));
     const second = spawnCheck(step("b"));
@@ -500,7 +511,7 @@ describe("check queue", () => {
   test("a waiting check moved in order.state starts before the one queued ahead of it", async () => {
     config("  max-parallel: 1\n");
     const log = join(tmp, "moved.log");
-    const step = (name: string, secs: number) => ["--", "sh", "-c", `echo ${name} >> ${log}; sleep ${secs}`];
+    const step = (name: string, secs: number) => script(`moved-${name}`, `echo ${name} >> ${log}; sleep ${secs}`);
     const first = spawnCheck(step("a", 2));
     await waitFor(() => existsSync(log));
     const second = spawnCheck(step("b", 0));
@@ -517,7 +528,7 @@ describe("check queue", () => {
   test("stopTicket kills a running check, and history records it as killed", async () => {
     config();
     const marker = join(tmp, "killed.started");
-    const run = spawnCheck(["--", "sh", "-c", `touch ${marker}; sleep 30`]);
+    const run = spawnCheck(script("killed", `touch ${marker}; sleep 30`));
     await waitFor(() => existsSync(marker) && readTickets(queue()).some((t) => t.runPid !== undefined));
     readTickets(queue()).forEach((t) => stopTicket(t, queue()));
     expect(await run.exited).toBe(143);
@@ -530,7 +541,7 @@ describe("check queue", () => {
   test("a killed check that ignores TERM keeps its ticket until KILL ends its group", async () => {
     config();
     const marker = join(tmp, "stubborn.started");
-    const run = spawnCheck(["--", "sh", "-c", `trap "" TERM; touch ${marker}; sleep 30`]);
+    const run = spawnCheck(script("stubborn", `trap "" TERM; touch ${marker}; sleep 30`));
     await waitFor(() => existsSync(marker) && readTickets(queue()).some((t) => t.runPid !== undefined));
     readTickets(queue()).forEach((t) => stopTicket(t, queue()));
     await Bun.sleep(1_000);

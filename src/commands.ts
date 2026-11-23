@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { chainRefusal, withLocalBin } from "./check-command";
 import { appendRepo, getRepo, initReposFile, loadRepos, REPO_NAME_RE } from "./config";
 import * as git from "./git";
 import type { PrChecksTarget } from "./pr-checks";
@@ -644,7 +645,15 @@ export async function check(repoArg: string | undefined, cmd: string[], wsOpt?: 
     (repos.length === 1 ? repos[0] : undefined) ??
     fail(`name the repo to check in: overbridge check <repo> -- <cmd> (${ws} holds ${repos.join(", ") || "no repos"})`);
 
-  const { config, inv } = inRepoShell(ws, repo, cmd);
+  const refusal = chainRefusal(cmd, repo);
+
+  if (refusal) {
+    fail(refusal);
+  }
+
+  const dir = worktreePath(ws, repo);
+  const cwd = process.cwd();
+  const { config, inv } = inRepoShell(ws, repo, withLocalBin(cmd, isInside(cwd, dir) ? cwd : dir, dir));
   const settings = timeoutSeconds === undefined ? config.checkQueue : { ...config.checkQueue, timeoutSeconds };
   const cls = workspaceClass(claimContexts(ws, repo, config), worklistFacts);
   const who: Parameters<typeof runCheck>[1] = { ws, repo, command: cmd.map(shellQuote).join(" ") };

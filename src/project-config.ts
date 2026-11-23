@@ -120,6 +120,8 @@ export interface ShellSpec {
 export interface CheckQueue {
   /** Beside a running check, start another only while the 1-minute load average is under this share of the cores. */
   maxLoadPercent: number;
+  /** Beside a running check, start another only while the CPU, measured over the last second, is less busy than this; over 100 never holds one back. */
+  maxCpuPercent: number;
   /** At most this many runs at once; unset leaves the load as the only limit. */
   maxParallel?: number;
   /** Kill the run after this long, busy or not. */
@@ -128,6 +130,8 @@ export interface CheckQueue {
   stallSeconds: number;
   /** Give up waiting for a turn after this long. */
   waitSeconds: number;
+  /** A check whose past runs took under this long starts at once, past the queue and the load gate; 0 queues every check. */
+  skipQueueSeconds: number;
   /** The class a claim's checks queue at; higher classes start first. */
   priority?: string;
   /** Tried in order before `priority`; the first whose patterns match the claim names its class. */
@@ -137,10 +141,12 @@ export interface CheckQueue {
 }
 
 export const defaultCheckQueue = (): CheckQueue => ({
-  maxLoadPercent: 70,
+  maxLoadPercent: 300,
+  maxCpuPercent: 75,
   timeoutSeconds: 180,
   stallSeconds: 300,
   waitSeconds: 900,
+  skipQueueSeconds: 10,
   priorityRules: [],
   classes: DEFAULT_CLASSES,
 });
@@ -204,7 +210,7 @@ export const defaultConfig = (): ProjectConfig => ({
 
 const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons", "mcp-servers"];
 const SHELL_KEYS = ["enter", "env", "key"];
-const CHECK_QUEUE_KEYS = ["max-load-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds", "priority", "priority-rules"];
+const CHECK_QUEUE_KEYS = ["max-load-percent", "max-cpu-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds", "skip-queue-seconds", "priority", "priority-rules"];
 const PRIORITY_RULE_KEYS = ["priority", "branch", "item", "type", "label"];
 const ICEBOX_KEYS = ["prune", "idle-days"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir", "ship-pr"];
@@ -312,6 +318,22 @@ class Problems {
 
     if (!isNumber(v) || !Number.isInteger(v) || v < 1 || v > max) {
       this.add(at, `expected a whole number from 1${max === Number.MAX_SAFE_INTEGER ? " up" : ` to ${max}`} (got ${JSON.stringify(v)})`);
+
+      return;
+    }
+
+    return v;
+  }
+  /** A whole number from 0 up, or undefined when the key is absent. */
+  wholeInt(obj: JsonObject, key: string, path: string): number | undefined {
+    const v = obj[key];
+
+    if (v === undefined || v === null) {
+      return;
+    }
+
+    if (!isNumber(v) || !Number.isInteger(v) || v < 0) {
+      this.add(`${path}.${key}`, `expected a whole number from 0 up (got ${JSON.stringify(v)})`);
 
       return;
     }
@@ -731,10 +753,12 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
       };
 
       set(p.positiveInt(checkQueue, "max-load-percent", "check-queue"), "maxLoadPercent");
+      set(p.positiveInt(checkQueue, "max-cpu-percent", "check-queue"), "maxCpuPercent");
       set(p.positiveInt(checkQueue, "max-parallel", "check-queue"), "maxParallel");
       set(p.positiveInt(checkQueue, "timeout-seconds", "check-queue"), "timeoutSeconds");
       set(p.positiveInt(checkQueue, "stall-seconds", "check-queue"), "stallSeconds");
       set(p.positiveInt(checkQueue, "wait-seconds", "check-queue"), "waitSeconds");
+      set(p.wholeInt(checkQueue, "skip-queue-seconds", "check-queue"), "skipQueueSeconds");
       const priority = p.string(checkQueue, "priority", "check-queue", false);
       const rules = parsePriorityRules(p, checkQueue);
 

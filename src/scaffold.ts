@@ -282,6 +282,9 @@ access to other workspaces and direct branch switching. Do not try to work aroun
 - Run lint, typecheck, test, and build commands through \`overbridge check <repo> -- <cmd>\`. It queues them
   across all workspaces and runs several at once, in the repo's dev shell, while the machine's load allows. overbridge kills a run that
   goes over its time limit (exit 124) or stops using CPU (exit 137). If it cannot start in time, it gives up with exit 75.
+- One check is one command: never chain commands inside it (\`sh -c 'a; b'\`, \`a && b\`). Queue each as its own
+  \`overbridge check\`, \`cd\` before the call, and pipe the check's output (\`overbridge check <repo> -- vitest run a.ts | tail\`).
+  Run package bins by name (\`nx\`, \`vitest\`, \`eslint\`, \`tsc\`): they run from \`node_modules/.bin\` with no \`npx\` or \`sh -c\`.
 - Scope each check to what the branch changed: one file, one project, or an affected-only mode (\`nx affected -t <target> --base=origin/<base>\`,
   \`vitest run --changed origin/<base>\`, \`<base>\` being the PR's base branch). Do not run every project (\`nx run-many\` with no \`-p\`) or turn off the build cache: CI runs the full suite.
 ${devShells}

@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { availableParallelism, constants, loadavg } from "node:os";
+import { availableParallelism, constants, cpus, loadavg } from "node:os";
 import { dirname, join } from "node:path";
 import { defaultKey, type QueueOverrides, readOverrides } from "./check-priority";
 import { type CheckRecord, classifyCommand, commandGroup, commandLabel, redactCommand, type HistoryStore, historyStore } from "./history";
-import { etaSlots, formatDuration, overallMs, queueEtas, readEstimates, recordRunTime } from "./check-estimate";
+import { type Estimate, estimateFor, etaSlots, formatDuration, overallMs, queueEtas, readEstimates, recordRunTime } from "./check-estimate";
 import { metaDir } from "./paths";
 import { groupAlive, groupCpuSeconds, pidsAlive } from "./proc";
 import type { CheckQueue } from "./project-config";
@@ -149,6 +149,29 @@ export function splitLive(tickets: Ticket[]): SplitQueue {
 /** Whether the 1-minute load leaves room to start: under `percent` of `cores`. */
 export const loadAllows = (load1: number, cores: number, percent: number) => load1 < (cores * percent) / 100;
 
+/** Whether the measured CPU use, plus the runs it does not show yet, leaves room to start: under `percent` busy. */
+export const cpuAllows = (cpuPercent: number | undefined, unsettled: number, cores: number, percent: number) =>
+  cpuPercent !== undefined && cpuPercent + (unsettled * 100) / cores < percent;
+
+/** Every core's idle and total time so far, summed; two of them give the share the CPU was busy in between. */
+export interface CpuTimes {
+  idleMs: number;
+  totalMs: number;
+}
+
+export const cpuTimes = (): CpuTimes =>
+  cpus().reduce(
+    (acc, c) => ({ idleMs: acc.idleMs + c.times.idle, totalMs: acc.totalMs + c.times.user + c.times.nice + c.times.sys + c.times.irq + c.times.idle }),
+    { idleMs: 0, totalMs: 0 },
+  );
+
+/** How busy every core was, in percent, between two samples; undefined when no time passed between them. */
+export function cpuBusyPercent(prev: CpuTimes, next: CpuTimes): number | undefined {
+  const totalMs = next.totalMs - prev.totalMs;
+
+  return totalMs > 0 ? 100 * (1 - (next.idleMs - prev.idleMs) / totalMs) : undefined;
+}
+
 /** When the process group's CPU time last moved. */
 export interface CpuSample {
   cpuSeconds: number;
@@ -183,6 +206,8 @@ export const Gate = {
   /** `max-parallel` runs are already going. */
   Parallel: "parallel",
   Load: "load",
+  /** The CPU is busier than `max-cpu-percent`, or has not been sampled yet. */
+  Cpu: "cpu",
 } as const;
 
 export type Gate = (typeof Gate)[keyof typeof Gate];
@@ -190,6 +215,8 @@ export type Gate = (typeof Gate)[keyof typeof Gate];
 export interface Machine {
   load1: number;
   cores: number;
+  /** How busy the CPU was over the last poll; undefined before a second sample. */
+  cpuPercent?: number;
 }
 
 /** Whether `me` may start now, given the live queue, or what holds it back. */
@@ -210,8 +237,19 @@ export function gateFor(me: Ticket, live: Ticket[], settings: CheckQueue, machin
     return Gate.Start;
   }
 
-  return loadAllows(machine.load1 + unsettledLoad(running, nowMs), machine.cores, settings.maxLoadPercent) ? Gate.Start : Gate.Load;
+  // the load average counts threads waiting on more than the CPU, so it only backs up the measured CPU use
+  const unsettled = unsettledLoad(running, nowMs);
+
+  if (!loadAllows(machine.load1 + unsettled, machine.cores, settings.maxLoadPercent)) {
+    return Gate.Load;
+  }
+
+  return cpuAllows(machine.cpuPercent, unsettled, machine.cores, settings.maxCpuPercent) ? Gate.Start : Gate.Cpu;
 }
+
+/** Whether a check this quick (by its past runs) starts at once instead of queueing; with no past runs it queues. */
+export const skipsQueue = (estimate: Estimate | undefined, settings: Pick<CheckQueue, "skipQueueSeconds">) =>
+  estimate !== undefined && estimate.runMs < settings.skipQueueSeconds * 1_000;
 
 export interface QueueView {
   running: Ticket[];
@@ -383,6 +421,7 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
   const cores = availableParallelism();
   const limit = (cores * settings.maxLoadPercent) / 100;
   let announced: string | undefined;
+  let cpuSample = cpuTimes();
 
   for (;;) {
     const overrides = readOverrides(dir);
@@ -391,7 +430,10 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
     const now = Date.now();
     const ahead = aheadOf(me, live, comparatorFor(live, overrides));
     const load1 = loadavg()[0] ?? 0;
-    const gate = gateFor(me, live, settings, { load1, cores }, now, overrides);
+    const cpuNow = cpuTimes();
+    const cpuPercent = cpuBusyPercent(cpuSample, cpuNow);
+    cpuSample = cpuNow;
+    const gate = gateFor(me, live, settings, { load1, cores, cpuPercent }, now, overrides);
 
     if (gate === Gate.Start) {
       return true;
@@ -400,11 +442,14 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
     const running = live.filter(isRunning);
     const runningNow = running.length ? `running: ${running.map(label).join("; ")}` : "nothing running yet";
     const overLoad = `load ${(load1 + unsettledLoad(running, now)).toFixed(2)} is over ${limit.toFixed(1)} (${settings.maxLoadPercent}% of ${cores} cores)`;
+    const busy = cpuPercent === undefined ? "CPU not sampled yet" : `CPU ${Math.round(cpuPercent + (unsettledLoad(running, now) * 100) / cores)}% busy`;
+    const overCpu = `${busy}, max-cpu-percent ${settings.maxCpuPercent}`;
+    const overMachine = gate === Gate.Cpu ? overCpu : overLoad;
 
     if (now >= deadlineMs) {
       log(
-        gate === Gate.Load
-          ? `overbridge check: ${overLoad} for ${settings.waitSeconds}s (wait-seconds); giving up`
+        gate === Gate.Load || gate === Gate.Cpu
+          ? `overbridge check: ${overMachine} for ${settings.waitSeconds}s (wait-seconds); giving up`
           : `overbridge check: the queue was still busy after ${settings.waitSeconds}s (wait-seconds); ${runningNow}`,
       );
 
@@ -417,7 +462,7 @@ async function waitForStart(me: Ticket, dir: string, settings: CheckQueue, deadl
       announced = key;
       const cap = gate === Gate.Parallel ? ` (max-parallel ${settings.maxParallel})` : "";
       const eta = etaLine(me, live, settings, now, dir);
-      log(gate === Gate.Load ? `overbridge check: ${overLoad}, waiting; ${runningNow}${eta}` : `overbridge check: waiting behind ${ahead.length} in the queue${cap}; ${runningNow}${eta}`);
+      log(gate === Gate.Load || gate === Gate.Cpu ? `overbridge check: ${overMachine}, waiting; ${runningNow}${eta}` : `overbridge check: waiting behind ${ahead.length} in the queue${cap}; ${runningNow}${eta}`);
     }
 
     await Bun.sleep(Math.min(TURN_POLL_MS, Math.max(0, deadlineMs - now)));
@@ -565,7 +610,9 @@ export async function runCheck(inv: ShellInvocation, who: Pick<Ticket, "ws" | "r
   try {
     const deadlineMs = me.queuedAtMs + settings.waitSeconds * 1_000;
 
-    if (!(await waitForStart(me, dir, settings, deadlineMs))) {
+    const quick = skipsQueue(estimateFor(readEstimates(dirname(dir)), me.repo, me.command), settings);
+
+    if (!quick && !(await waitForStart(me, dir, settings, deadlineMs))) {
       recordCheck(me, Date.now(), undefined, CheckExit.GaveUp);
 
       return CheckExit.GaveUp;

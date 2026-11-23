@@ -603,7 +603,7 @@ function checkQueueRows(inner: number): string[] {
   return queueRows(queue, inner, now, queueEstimates(queue, readEstimates(dirname(queueDir())), now).wsDoneMs);
 }
 
-/** The check queue under the divider: a row per running command, then how many wait; none when it is empty. */
+/** The check queue under the divider: how many run and wait, a row per running command, then who waits; none when it is empty. */
 export function queueRows(queue: { running: Ticket[]; waiting: Ticket[] }, inner: number, now = Date.now(), wsDoneMs: ReadonlyMap<string, number> = new Map()): string[] {
   const done = (ws: string) => {
     const ms = wsDoneMs.get(ws);
@@ -613,9 +613,15 @@ export function queueRows(queue: { running: Ticket[]; waiting: Ticket[] }, inner
 
   const running = queue.running.map((t) => colorize(fit(`▶ ${t.ws} ${elapsed(t.runningSinceMs ?? now, now)}${done(t.ws)} ${t.command}`, inner), "blue"));
   const waitingWs = [...new Set(queue.waiting.map((t) => t.ws))];
-  const waiting = queue.waiting.length ? [dim(fit(`⧗ ${queue.waiting.length} waiting: ${waitingWs.map((ws) => `${ws}${done(ws)}`).join(" ")}`, inner))] : [];
+  const waiting = queue.waiting.length ? [dim(fit(`⧗ ${waitingWs.map((ws) => `${ws}${done(ws)}`).join(" ")}`, inner))] : [];
 
-  return [...running, ...waiting];
+  if (!running.length && !waiting.length) {
+    return [];
+  }
+
+  const summary = fit(`checks: ${queue.running.length} running · ${queue.waiting.length} queued`, inner);
+
+  return [summary, ...running, ...waiting];
 }
 
 /** ` · dropped` when an iceboxed workspace gave back its worktrees. */
