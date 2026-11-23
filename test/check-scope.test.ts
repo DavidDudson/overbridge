@@ -59,6 +59,11 @@ describe("test targets", () => {
     expect(ruleOf(["nx", "test", "@scope/portal"])).toBe(ScopeRule.UnscopedTest);
     expect(ruleOf(["nx", "run-many", "-t", "test", "-p", "@scope/a", "@scope/b"])).toBe(ScopeRule.UnscopedTest);
     expect(ruleOf(["vitest", "run", "--config", "apps/portal/vitest.config.ts"])).toBe(ScopeRule.UnscopedTest);
+    expect(ruleOf(["vitest", "run", "--config", "custom.test.ts"])).toBe(ScopeRule.UnscopedTest);
+    expect(ruleOf(["nx", "run-many", "-t", "test", "-p", "apps/portal"])).toBe(ScopeRule.UnscopedTest);
+    expect(ruleOf(["nx", "run-many", "-t", "test", "--projects", "apps/a", "apps/b"])).toBe(ScopeRule.UnscopedTest);
+    expect(ruleOf(["nx", "test", "apps/portal"])).toBe(ScopeRule.UnscopedTest);
+    expect(ruleOf(["nx", "run", "apps/portal:test"])).toBe(ScopeRule.UnscopedTest);
   });
 
   test("allows --changed, --related and spec paths", () => {
@@ -111,6 +116,9 @@ describe("--skip-nx-cache", () => {
     expect(scopeRefusal(lint, CAP, { NX_SKIP_NX_CACHE: "true" })?.rule).toBe(ScopeRule.SkipCache);
     expect(scopeRefusal(lint, CAP, { NX_SKIP_NX_CACHE: "false" })).toBeUndefined();
     expect(scopeRefusal(lint, CAP, {})).toBeUndefined();
+    expect(scopeRefusal(["env", "NX_SKIP_NX_CACHE=false", ...lint], CAP, { NX_SKIP_NX_CACHE: "true" })).toBeUndefined();
+    expect(scopeRefusal(["NX_SKIP_NX_CACHE=0", ...lint], CAP, { NX_SKIP_NX_CACHE: "true" })).toBeUndefined();
+    expect(scopeRefusal(["NX_SKIP_NX_CACHE=true", ...lint], CAP, { NX_SKIP_NX_CACHE: "false" })?.rule).toBe(ScopeRule.SkipCache);
   });
 
   test("is reported before a missing -p", () => {

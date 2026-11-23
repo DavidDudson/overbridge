@@ -624,10 +624,11 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
 
   const checkScope = raw["check-scope"];
 
-  if (checkScope !== undefined && checkScope !== null) {
-    if (!root) {
-      p.add("check-scope", "only allowed in the root config.yml, so a checked-out branch can't loosen it");
-    } else if (!isRecord(checkScope)) {
+  // a repo file's `check-scope: null` would drop a root layer's check-scope in the overlay, so it is refused too
+  if (!root && checkScope !== undefined) {
+    p.add("check-scope", "only allowed in the root config.yml, so a checked-out branch can't loosen it");
+  } else if (checkScope !== undefined && checkScope !== null) {
+    if (!isRecord(checkScope)) {
       p.add("check-scope", `expected a mapping with ${CHECK_SCOPE_KEYS.join(", ")}`);
     } else {
       p.unknownKeys(checkScope, CHECK_SCOPE_KEYS, "check-scope");

@@ -568,6 +568,9 @@ describe("check-scope", () => {
   test("a repo's own overbridge.yml can't loosen it", () => {
     const dir = worktree("ws1", "app", "check-scope:\n  mode: off\n");
     expect(thrown(() => loadRepoConfig(dir))).toContain("check-scope: only allowed in the root config.yml, so a checked-out branch can't loosen it");
+    writeRoot("defaults:\n  check-scope:\n    max-projects: 2\n");
+    const cleared = worktree("ws1", "nulled", "check-scope:\n");
+    expect(thrown(() => loadRepoConfig(cleared))).toContain("check-scope: only allowed in the root config.yml");
   });
 
   test("bad values name their key", () => {

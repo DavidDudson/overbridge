@@ -228,7 +228,7 @@ function isNarrowPath(word: string): boolean {
 function testScoped(args: readonly string[]): boolean {
   return args.some((w, i) => {
     const previous = i > 0 ? args[i - 1] : undefined;
-    const isFlagValue = previous !== undefined && TEST_VALUE_FLAGS.has(previous) && !SPEC_FILE.test(w);
+    const isFlagValue = previous !== undefined && TEST_VALUE_FLAGS.has(previous);
 
     return SCOPED_TEST_FLAG.test(w) || w === "related" || (!w.startsWith("-") && !isFlagValue && isNarrowPath(w));
   });
@@ -260,7 +260,16 @@ function runManyRefusal(args: readonly string[], maxProjects: number, targets: r
 
   const test = targets.find((t) => TEST_TARGETS.has(t));
 
-  return test && !testScoped(args) ? unscopedTestRefusal(`nx run-many -t ${test}`, test) : undefined;
+  return test && !testScoped(withoutProjects(args)) ? unscopedTestRefusal(`nx run-many -t ${test}`, test) : undefined;
+}
+
+/** `args` without `-p`/`--projects` and their values, which pick projects and narrow no test. */
+function withoutProjects(args: readonly string[]): string[] {
+  return args.filter((w, i) => {
+    const owner = args.slice(0, i + 1).findLast((x) => x.startsWith("-"));
+
+    return !PROJECTS_FLAG.test(w) && !(owner !== undefined && owner !== w && PROJECTS_FLAG.test(owner) && !owner.includes("="));
+  });
 }
 
 function nxRefusal(args: readonly string[], maxProjects: number): ScopeRefusal | undefined {
@@ -278,15 +287,32 @@ function nxRefusal(args: readonly string[], maxProjects: number): ScopeRefusal |
     return args.includes("--all") ? { rule: ScopeRule.AffectedAll, reason: "nx affected --all runs every project", target } : undefined;
   }
 
-  // `nx run app:test` and `nx test app`
-  const runTarget = sub === "run" ? args[firstPositional(args, args.indexOf("run") + 1, new Set())] : undefined;
+  // `nx run app:test` and `nx test app`: the word after the subcommand names the project, not a test path
+  const subAt = args.indexOf(sub ?? "");
+  const projectAt = firstPositional(args, subAt + 1, new Set());
+  const runTarget = sub === "run" ? args[projectAt] : undefined;
   const named = runTarget === undefined ? sub : runTarget.split(":").slice(1).join(":");
+  const filters = args.filter((_, i) => i !== subAt && i !== projectAt);
 
-  return named && TEST_TARGETS.has(named) && !testScoped(args) ? unscopedTestRefusal(`nx ${named}`, named) : undefined;
+  return named && TEST_TARGETS.has(named) && !testScoped(filters) ? unscopedTestRefusal(`nx ${named}`, named) : undefined;
 }
 
-function callRefusal(call: Invocation, maxProjects: number): ScopeRefusal | undefined {
-  const skip = call.args.find((w) => SKIP_CACHE.test(w)) ?? call.env.find((w) => SKIP_CACHE_ENV.test(w));
+type Env = Readonly<Record<string, string | undefined>>;
+
+/** The `NX_SKIP_NX_CACHE=…` a call runs with: its own last assignment, else the inherited value; undefined when the cache stays on. */
+function skipCacheEnv(call: Invocation, inherited: Env): string | undefined {
+  const own = call.env.findLast((w) => w.startsWith("NX_SKIP_NX_CACHE="));
+  const effective = own ?? (inherited.NX_SKIP_NX_CACHE === undefined ? undefined : `NX_SKIP_NX_CACHE=${inherited.NX_SKIP_NX_CACHE}`);
+
+  if (effective === undefined || !SKIP_CACHE_ENV.test(effective)) {
+    return undefined;
+  }
+
+  return own ?? `${effective} in the environment`;
+}
+
+function callRefusal(call: Invocation, maxProjects: number, inherited: Env): ScopeRefusal | undefined {
+  const skip = call.args.find((w) => SKIP_CACHE.test(w)) ?? skipCacheEnv(call, inherited);
 
   if (skip) {
     return { rule: ScopeRule.SkipCache, reason: `${skip} turns off the nx cache, so every project runs again` };
@@ -311,15 +337,9 @@ function callRefusal(call: Invocation, maxProjects: number): ScopeRefusal | unde
  * Why `argv` is not scoped to the branch's changes, or undefined when it is. `inherited` is the environment the
  * command starts with, read for `NX_SKIP_NX_CACHE`. Best effort: it reads common forms, not every shell construct.
  */
-export function scopeRefusal(argv: readonly string[], maxProjects: number, inherited: Readonly<Record<string, string | undefined>> = {}): ScopeRefusal | undefined {
-  const skip = inherited.NX_SKIP_NX_CACHE;
-
-  if (skip !== undefined && SKIP_CACHE_ENV.test(`NX_SKIP_NX_CACHE=${skip}`)) {
-    return { rule: ScopeRule.SkipCache, reason: `NX_SKIP_NX_CACHE=${skip} in the environment turns off the nx cache, so every project runs again` };
-  }
-
+export function scopeRefusal(argv: readonly string[], maxProjects: number, inherited: Env = {}): ScopeRefusal | undefined {
   return invocations(argv)
-    .map((call) => callRefusal(call, maxProjects))
+    .map((call) => callRefusal(call, maxProjects, inherited))
     .find((r) => r !== undefined);
 }
 
@@ -334,6 +354,6 @@ export function refusalMessage(headline: string, refusal: ScopeRefusal): string 
     `  nx affected -t ${target} --base=origin/<base>`,
     "  vitest run --changed origin/<base>",
     "  the same test command with --changed origin/<base> (after -- for a package script), --related <file> or spec file paths",
-    "where <base> is the PR's base branch (the stack base on a stacked layer, else the default branch).",
+    "where origin/<base> is the PR's base branch (the stack base on a stacked layer, else the default branch); for a layer below that is not pushed yet, use its local branch name.",
   ].join("\n");
 }
