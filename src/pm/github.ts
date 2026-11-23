@@ -75,9 +75,10 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
       return r.stdout === "CLOSED" ? ItemStatus.Done : ItemStatus.Open;
     },
 
+    // REST, not `gh issue view`: the top panel reads this for every workspace, and the GraphQL budget is shared by all of them
     lineage(id) {
       const n = id.replace(/^#/, "");
-      const r = gh(["issue", "view", n, "-R", repo(), "--json", "title,state,url"]);
+      const r = gh(["api", `repos/${repo()}/issues/${n}`]);
 
       if (!r.ok || !r.stdout) {
         return [];
@@ -90,7 +91,7 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
           return [];
         }
 
-        return [{ id: n, title: v.title, status: isJsonString(v.state) ? v.state.toLowerCase() : "", url: isJsonString(v.url) ? v.url : provider.link(n) }];
+        return [{ id: n, title: v.title, status: isJsonString(v.state) ? v.state.toLowerCase() : "", url: isJsonString(v.html_url) ? v.html_url : provider.link(n) }];
       } catch {
         return [];
       }
