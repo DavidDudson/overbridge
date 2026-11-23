@@ -3,7 +3,9 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cachedValue, ghAccountStamp } from "../src/value-cache";
-import { refreshTitle } from "../src/pm/cache";
+import { refreshLineage, refreshTitle } from "../src/pm/cache";
+import { cachedTicket, PARENT_TTL_MS, type RawIssue } from "../src/pm/board-jira";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { mergePr } from "../src/pr-actions";
 import { fakeProvider } from "./helpers/fake-provider";
 import type { RunResult } from "../src/util";
@@ -51,6 +53,65 @@ describe("refreshTitle with a TTL", () => {
     refreshTitle(p, "o/r", "7");
     refreshTitle(p, "o/r", "7");
     expect(p.calls).toBe(2);
+  });
+});
+
+describe("refreshLineage with a TTL", () => {
+  const items = [{ id: "1", title: "Epic", url: "u" }, { id: "7", title: "Task", url: "u" }];
+  const parents = { "7": "1" };
+
+  test("fetches once per TTL and refetches at it", () => {
+    let calls = 0;
+    const p = fakeProvider(items, "github", [], parents);
+    const counted = { ...p, lineage: (id: string) => (calls++, p.lineage(id)) };
+
+    for (const at of [0, 5, 9]) expect(refreshLineage(counted, "o/r", "7", { ttlMs: 10, now: at }).map((n) => n.id)).toEqual(["1", "7"]);
+    expect(calls).toBe(1);
+    refreshLineage(counted, "o/r", "7", { ttlMs: 10, now: 10 });
+    expect(calls).toBe(2);
+  });
+
+  test("an empty fetch keeps the stored lineage", () => {
+    refreshLineage(fakeProvider(items, "github", [], parents), "o/r", "7", { now: 0 });
+    const offline = { ...fakeProvider(items), lineage: () => [] };
+    expect(refreshLineage(offline, "o/r", "7", { ttlMs: 10, now: 100 }).map((n) => n.id)).toEqual(["1", "7"]);
+    expect(refreshLineage(offline, "o/r", "8", { now: 100 })).toEqual([]);
+  });
+
+  test("a misshapen store entry is refetched, never returned", () => {
+    mkdirSync(join(tmp, ".overbridge"), { recursive: true });
+    writeFileSync(join(tmp, ".overbridge", "lineage.json"), JSON.stringify({ "github:o/r:7": { at: 0, nodes: [{ id: "7", title: "x", status: "" }] } }));
+    let calls = 0;
+    const p = fakeProvider(items, "github", [], parents);
+    const counted = { ...p, lineage: (id: string) => (calls++, p.lineage(id)) };
+    expect(refreshLineage(counted, "o/r", "7", { ttlMs: 1000, now: 1 }).map((n) => n.url)).toEqual(["https://fake.test/items/1", "https://fake.test/items/7"]);
+    expect(calls).toBe(1);
+  });
+});
+
+describe("cachedTicket", () => {
+  const ticket = (key: string): RawIssue => ({ key, fields: { summary: `s${key}`, issuetype: { name: "Epic" }, parent: null } });
+
+  test("reads each key once per TTL, keeps keys apart, and serves the last good read when a read fails", () => {
+    const reads: string[] = [];
+    let up = true;
+    const now = Date.now();
+    const realNow = Date.now;
+    const read = cachedTicket((key) => (reads.push(key), up ? ticket(key) : undefined));
+
+    try {
+      expect(read("A-1")).toEqual(ticket("A-1"));
+      expect(read("A-1")).toEqual(ticket("A-1"));
+      expect(read("A-2")).toEqual(ticket("A-2"));
+      expect(reads).toEqual(["A-1", "A-2"]);
+      up = false;
+      Date.now = () => now + PARENT_TTL_MS;
+      expect(read("A-1")).toEqual(ticket("A-1"));
+      expect(read("A-9")).toBeUndefined();
+      expect(reads).toEqual(["A-1", "A-2", "A-1", "A-9"]);
+    } finally {
+      Date.now = realNow;
+    }
   });
 });
 

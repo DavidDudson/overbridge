@@ -35,6 +35,22 @@ describe("idFromBranch", () => {
   });
 });
 
+describe("lineage", () => {
+  test("is the issue alone: its number, title, lowercased state and url", () => {
+    const { runner, calls } = stub({ "issue view": { stdout: JSON.stringify({ title: "T", state: "OPEN", url: "u" }) } });
+    expect(githubProvider(repoCfg, "/w", runner).lineage("#12")).toEqual([{ id: "12", title: "T", status: "open", url: "u" }]);
+    expect(calls[0]).toEqual(["gh", "issue", "view", "12", "-R", "acme/app", "--json", "title,state,url"]);
+  });
+
+  test("falls back to the issue link with no url, and gives nothing on a failure or a bad reply", () => {
+    const p = (reply: { ok?: boolean; stdout?: string }) => githubProvider(repoCfg, "/w", stub({ "issue view": reply }).runner);
+    expect(p({ stdout: JSON.stringify({ title: "T", state: "CLOSED" }) }).lineage("12")).toEqual([{ id: "12", title: "T", status: "closed", url: "https://github.com/acme/app/issues/12" }]);
+    expect(p({ ok: false }).lineage("12")).toEqual([]);
+    expect(p({ stdout: "not json" }).lineage("12")).toEqual([]);
+    expect(p({ stdout: "{}" }).lineage("12")).toEqual([]);
+  });
+});
+
 describe("owner/repo project", () => {
   test("link and branchName need no network", () => {
     const { runner, calls } = stub({});

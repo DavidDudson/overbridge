@@ -1,4 +1,6 @@
 import { run, type RunResult } from "../util";
+import { cachedValue } from "../value-cache";
+import { isJsonObject, isJsonString, type JsonValue } from "../json";
 import { statusFromColumn, type WorkRow } from "./worklist";
 
 type Runner = (cmd: string[]) => RunResult;
@@ -130,35 +132,76 @@ export const worklistJql = (project: string, filter = DEFAULT_WORKLIST_JQL) =>
   `project = ${project} AND assignee = currentUser() AND statusCategory != Done AND issuetype != Epic${filter.trim() ? ` AND (${filter.trim()})` : ""}`;
 
 /** Open tickets assigned to the signed-in user in Jira project `project`, one row per ticket. */
-export function jiraRows(project: string, repos: string[], opts: { filter?: string; site?: string } = {}, runner: Runner = run): WorkRow[] {
+export function jiraRows(project: string, repos: string[], opts: { filter?: string; site?: string } = {}, runner: Runner = run, read: TicketReader = cachedTicket(viewTicket(runner))): WorkRow[] {
   const r = runner(["jira", "issue", "list", "--jql", worklistJql(project, opts.filter), "--raw"]);
 
   if (!r.ok) {
     throw new Error(`jira: reading ${project} failed: ${(r.stderr || r.stdout).trim()}. Check \`jira me\` works and project-management.worklist-jql is valid JQL`);
   }
 
-  return rowsFromJiraRaw(r.stdout, project, repos, opts.site, ancestorsOf(parseIssues(r.stdout), runner));
+  return rowsFromJiraRaw(r.stdout, project, repos, opts.site, ancestorsOf(parseIssues(r.stdout), read));
 }
 
+/** Reads one ticket by key; undefined when it can't be read. */
+export type TicketReader = (key: string) => RawIssue | undefined;
+
+/** How long a parent ticket's type, summary and parent stay cached: they change rarely, and the list refreshes every minute. */
+export const PARENT_TTL_MS = 10 * 60_000;
+
+/** One ticket from `jira issue view --raw` (or the cache), cut to what `epicOf` reads; undefined when it is not a ticket. */
+export function parseTicket(text: string): RawIssue | undefined {
+  try {
+    const parsed: JsonValue = JSON.parse(text);
+
+    if (!isJsonObject(parsed) || !isJsonString(parsed.key)) {
+      return undefined;
+    }
+
+    const fields = isJsonObject(parsed.fields) ? parsed.fields : {};
+    const nameOf = (v: JsonValue | undefined) => (isJsonObject(v) && isJsonString(v.name) ? v.name : "");
+    const parent = isJsonObject(fields.parent) && isJsonString(fields.parent.key) ? { key: fields.parent.key } : null;
+
+    return { key: parsed.key, fields: { summary: isJsonString(fields.summary) ? fields.summary : "", issuetype: { name: nameOf(fields.issuetype) || nameOf(fields.issueType) }, parent } };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Reads a ticket with `jira issue view --raw`, which has no project filter, so a parent in another project is found too. */
+export const viewTicket =
+  (runner: Runner = run): TicketReader =>
+  (key) => {
+    const r = runner(["jira", "issue", "view", key, "--raw"]);
+
+    return r.ok ? parseTicket(r.stdout) : undefined;
+  };
+
+/** `read` with each ticket kept in `<meta>/values.json` for `PARENT_TTL_MS`; a failed read serves the last one. */
+export const cachedTicket =
+  (read: TicketReader): TicketReader =>
+  (key) => {
+    const stored = cachedValue(`jira:ticket:${key}`, PARENT_TTL_MS, () => {
+      const issue = read(key);
+
+      return issue ? JSON.stringify(issue) : undefined;
+    });
+
+    return stored ? parseTicket(stored) : undefined;
+  };
+
 /**
- * The tickets above `issues` up to their epics, one `jira issue list` per level. `jira issue list --raw` gives a
- * parent's key but not its type or summary, so each level is read. A failed read stops the climb: rows then show no epic.
+ * The tickets above `issues` up to their epics, one level at a time. `--raw` lists give a parent's key but not its type or
+ * summary, so each parent is read on its own: one that can't be read costs only its own rows their epic.
  */
-export function ancestorsOf(issues: readonly RawIssue[], runner: Runner = run, known: ReadonlyMap<string, RawIssue> = new Map(issues.map((i) => [i.key, i] as const)), level = 0): RawIssue[] {
+export function ancestorsOf(issues: readonly RawIssue[], read: TicketReader, known: ReadonlyMap<string, RawIssue> = new Map(issues.map((i) => [i.key, i] as const)), level = 0): RawIssue[] {
   const missing = [...new Set(issues.filter((i) => !isEpic(i)).flatMap((i) => (i.fields?.parent?.key ? [i.fields.parent.key] : [])))].filter((k) => !known.has(k));
 
   if (!missing.length || level >= EPIC_LOOKUPS) {
     return [];
   }
 
-  const r = runner(["jira", "issue", "list", "--jql", `key in (${missing.join(", ")})`, "--raw"]);
-
-  if (!r.ok) {
-    return [];
-  }
-
-  const found = parseIssues(r.stdout);
+  const found = missing.flatMap((k) => read(k) ?? []);
   const next = new Map([...known, ...found.map((i) => [i.key, i] as const)]);
 
-  return [...found, ...ancestorsOf(found, runner, next, level + 1)];
+  return [...found, ...ancestorsOf(found, read, next, level + 1)];
 }

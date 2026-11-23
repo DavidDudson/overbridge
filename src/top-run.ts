@@ -162,16 +162,16 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions): Promise<Pa
 
   const mux = defaultMux();
   // a workspace's top pane grows to show every level of its work item; the @explore panel keeps its layout's height
-  const ownPane = panel ? undefined : mux.ownPaneId();
+  const ownPaneId = panel ? undefined : mux.ownPaneId();
   let fit: FitState = {};
-  let fitStepping = false;
+  let isFitStepping = false;
 
   /** Take one resize step towards the height `shown` needs, then look again once the multiplexer has applied it. */
   const fitHeight = (shown: TopSnapshot) => {
     const rows = process.stdout.rows ?? 0;
 
     // a hidden tab's pane may not resize, which would read as no room left
-    if (!ownPane || fitStepping || !rows || !isFocused(ws, readView())) {
+    if (!ownPaneId || isFitStepping || !rows || !isFocused(ws, readView())) {
       return;
     }
 
@@ -184,15 +184,15 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions): Promise<Pa
       return;
     }
 
-    if (!mux.resizePane(ownPane, step)) {
+    if (!mux.resizePane(ownPaneId, step)) {
       fit = afterStep(fit, rows, rows, needed);
 
       return;
     }
 
-    fitStepping = true;
+    isFitStepping = true;
     setTimeout(() => {
-      fitStepping = false;
+      isFitStepping = false;
       fit = afterStep(fit, rows, process.stdout.rows ?? rows, needed);
       draw();
     }, FIT_SETTLE_MS);

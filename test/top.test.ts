@@ -301,6 +301,24 @@ describe("refreshTop", () => {
     ]);
   });
 
+  test("a forced refresh rereads the hierarchy, so a status change shows at once", () => {
+    let status = "Open";
+    let calls = 0;
+    const p = () => ({ ...fakeProvider(items), lineage: (id: string) => (calls++, [{ id, title: "Add dark mode", status, url: "u" }]) });
+    refreshTop("w1", { provider: p, exec: () => prJson() });
+    status = "Done";
+    expect(refreshTop("w1", { provider: p, exec: () => prJson() }).links[0]!.item!.status).toBe("Open");
+    expect(calls).toBe(1);
+    expect(refreshTop("w1", { provider: p, exec: () => prJson(), force: true }).links[0]!.item!.status).toBe("Done");
+    expect(calls).toBe(2);
+  });
+
+  test("with no lineage the claimed item still gets its link, with its title and no status", () => {
+    const cache = refreshTop("w1", { provider: () => ({ ...fakeProvider(items), lineage: () => [] }), exec: () => prJson("OPEN", { title: "" }) });
+    expect(cache.links[0]).toEqual({ label: "12", url: "https://fake.test/items/12", item: { id: "12", title: "Add dark mode", status: "" } });
+    expect(buttons(snap({ links: cache.links }))[0]!.key).toBe("i");
+  });
+
   test("a stacked claim caches every layer, bottom first, and counts only the claimed PR", () => {
     const layer = (branch: string, pr: number) => ({ branch, pullRequest: { number: pr } });
     mkdirSync(join(tmp, ".bare", "r.git"), { recursive: true });
@@ -598,9 +616,16 @@ describe("button keys", () => {
     expect(topRowsNeeded(s, 200)).toBe(f.rows.length);
   });
 
-  test("an item label leaves out an unknown status and title", () => {
+  test("an item label leaves out an unknown status and title, and strips control bytes", () => {
     expect(itemLabel({ id: "ENG-1", title: "", status: "" })).toBe("ENG-1");
     expect(itemLabel({ id: "ENG-1", title: "x", status: "" })).toBe("ENG-1: x");
+    expect(itemLabel({ id: "ENG-1", title: "a\x1b[2Jb", status: "Do\x07ne" })).toBe("ENG-1 (Done): a[2Jb");
+  });
+
+  test("item rows with no PR keep the launchers on the button row, with no actions divider", () => {
+    const f = layoutTop(snap({ links: [{ label: "ENG-1", url: "u", item: { id: "ENG-1", title: "Task", status: "To Do" } }] }), 200);
+    expect(f.rules).toEqual([]);
+    expect(new Set(f.placed.slice(1).map((p) => p.row))).toEqual(new Set([2]));
   });
 
   test("several PRs get p, u, y...; no key clashes with the panel's own", () => {

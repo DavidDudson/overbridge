@@ -27,7 +27,7 @@ describe("renderWorklist", () => {
   });
 
   test("lists items in rank order with readiness, and explains the selected one", () => {
-    const rows = renderWorklist(list, 0, 0, 12, 100).map(strip);
+    const rows = renderWorklist(list, 0, 0, 12, 70).map(strip);
     expect(rows[2]).toMatch(/1\s+yes\s+s1\s+ob#1\s+title 1/);
     expect(rows[3]).toMatch(/2\s+no\s+s1\s+ob#2/);
     expect(rows.find((r) => r.includes("why:"))).toContain("ready, priority p0, unblocks 1");
@@ -44,6 +44,7 @@ describe("renderWorklist", () => {
     expect(rows[3]).toMatch(/ob#2\s+ENG-8\s+title 2/);
     expect(rows[4]).toMatch(/ob#3\s+title 3/);
     expect(rows.join("\n")).toContain("o open");
+    expect(renderWorklist(list, 0, 0, 12, 70).map(strip)[1]).not.toContain("epic");
   });
 
   test("o opens the item's link, or says why it can't", () => {

@@ -16,7 +16,9 @@ type Entry = { title: string; at: number };
 type LineageEntry = { nodes: ItemNode[]; at: number };
 
 function readStore<T>(path: string): Record<string, T> {
-  if (!existsSync(path)) return {};
+  if (!existsSync(path)) {
+    return {};
+  }
 
   try {
     return JSON.parse(readFileSync(path, "utf8"));
@@ -76,10 +78,7 @@ function storedLineage(key: string): LineageEntry | undefined {
   return nodes.length && nodes.length === raw.nodes.length ? { nodes, at: raw.at } : undefined;
 }
 
-/**
- * Fetch `id`'s lineage (`Provider.lineage`) and store it, unless the stored one is under `ttlMs` old. Keeps the old
- * lineage when the fetch yields nothing, so an outage never empties the panel.
- */
+/** `id`'s lineage, refetched once the stored one is `ttlMs` old; an empty fetch keeps the stored one, so an outage never empties the panel. */
 export function refreshLineage(provider: Provider, project: string, id: string, o: { ttlMs?: number; now?: number } = {}): ItemNode[] {
   const now = o.now ?? Date.now();
   const key = keyOf(provider, project, id);
@@ -96,7 +95,7 @@ export function refreshLineage(provider: Provider, project: string, id: string, 
     return storedNodes;
   }
 
-  writeStore(lineageFile(), { ...readStore<LineageEntry>(lineageFile()), [key]: { nodes, at: now } });
+  writeStore(lineageFile(), { ...readStore<JsonValue>(lineageFile()), [key]: { nodes, at: now } });
 
   return nodes;
 }

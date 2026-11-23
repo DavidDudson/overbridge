@@ -14,7 +14,7 @@ import { itemIdOf, providerFor, refreshLineage, refreshTitle, TITLE_TTL_MS } fro
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type ButtonSpec, type Ide, loadRepoConfig, type ProjectManagement } from "./project-config";
 import { getWorkspace, isTaskClaim, readState } from "./state";
-import { boxBottom, boxRow, boxTop, type Color, colorize, fit, inverse, isColor, textWidth } from "./term";
+import { boxBottom, boxRow, boxTop, type Color, colorize, fit, inverse, isColor, stripControl, textWidth } from "./term";
 import { parseUnresolved, REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses, threadsCommand } from "./reviewers";
 import { displayStacks, stackOf } from "./stack";
 import { describeValue, errorMessage, run } from "./util";
@@ -72,7 +72,12 @@ export interface TopItem {
 }
 
 /** A work item button's text: the id, then the status in brackets and the title when known. */
-export const itemLabel = (item: TopItem): string => `${item.id}${item.status ? ` (${item.status})` : ""}${item.title ? `: ${item.title}` : ""}`;
+export function itemLabel(item: TopItem): string {
+  // titles and statuses come from the tracker, so control bytes are stripped before they reach the tty
+  const [id, status, title] = [item.id, item.status, item.title].map((s) => stripControl(s));
+
+  return `${id}${status ? ` (${status})` : ""}${title ? `: ${title}` : ""}`;
+}
 
 export const PR_STATUSES = ["merged", "mergeable", "failing", "conflict", "pending", "blocked", "closed", "unknown"] as const;
 
@@ -602,7 +607,8 @@ export function refreshTop(ws: string, deps: RefreshDeps = {}): TopCache {
           const title = refreshTitle(p, pm.project, id, { ttlMs: TITLE_TTL_MS });
           headline = title ? `${id} ${title}` : id;
           itemTitle = title || undefined;
-          const nodes = refreshLineage(p, pm.project, id, { ttlMs: TITLE_TTL_MS });
+          // a forced refresh (`r`) rereads the hierarchy, so a status change shows at once
+          const nodes = refreshLineage(p, pm.project, id, deps.force ? {} : { ttlMs: TITLE_TTL_MS });
           itemLinks = nodes.length
             ? nodes.map((n): TopLink => ({ label: n.id, url: n.url || p.link(n.id), item: { id: n.id, title: n.title, status: n.status } }))
             : [{ label: id, url: p.link(id), item: { id, title: title ?? "", status: "" } }];
@@ -1035,11 +1041,18 @@ export function buttons(snap: TopSnapshot): Button[] {
   let prRow = 0;
   let itemRow = 0;
   // only the claimed item, the deepest level, gets the issue key
-  const claimedItem = snap.links.findLastIndex((l) => l.item !== undefined);
+  const claimedItemIndex = snap.links.findLastIndex((l) => l.item !== undefined);
+
+  const keyFor = (l: TopLink, index: number): string | undefined => {
+    if (l.item) {
+      return index === claimedItemIndex ? issueKeys.shift() : undefined;
+    }
+
+    return l.status !== undefined || l.label.includes("#") ? prKeys.shift() : issueKeys.shift();
+  };
 
   for (const [index, l] of snap.links.entries()) {
-    const isPr = l.status !== undefined || l.label.includes("#");
-    const key = l.item ? (index === claimedItem ? issueKeys.shift() : undefined) : isPr ? prKeys.shift() : issueKeys.shift();
+    const key = keyFor(l, index);
     const look = l.status ? PR_LOOK[l.status] : undefined;
     const pr = l.pr;
     const name = pr ? `${pr.repo} #${pr.number}${pr.layer ? ` ${pr.layer.n}/${pr.layer.of}` : ""}${pr.title ? ` ${pr.title}` : ""}` : l.item ? itemLabel(l.item) : l.label;
@@ -1139,10 +1152,11 @@ const clip = (s: string, width: number) => fit(s, width).trimEnd();
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 /**
- * Lay the panel out for `width` columns inside a rounded frame titled with the task name: a row per level
- * of the work item hierarchy, a row per PR, then one row of buttons with the left group at the left edge and the right group against the right edge (the right
- * group drops to its own row when both do not fit; either group wraps when it is too wide alone),
- * padded to `height` rows, with the message set into the bottom border.
+ * Lay the panel out for `width` columns inside a rounded frame titled with the task name. A row per level
+ * of the work item hierarchy comes first, then a row per PR, then one row of buttons with the left group at
+ * the left edge and the right group against the right edge (the right group drops to its own row when both
+ * do not fit; either group wraps when it is too wide alone), padded to `height` rows, with the message set
+ * into the bottom border.
  * Pure, so resizing is just calling it again.
  */
 export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
@@ -1185,8 +1199,11 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
 
   let base = 0;
 
+  const itemButtons = all.filter((b) => b.itemRow !== undefined);
+  const itemRows = itemButtons.length;
+
   // one row per level of the work item hierarchy, top level first
-  for (const button of all.filter((b) => b.itemRow !== undefined)) {
+  for (const button of itemButtons) {
     const text = clip(cell(button), inner);
     placed.push({ button, row: base, col: 0, width: textWidth(text) });
     base++;
@@ -1215,7 +1232,7 @@ export function layoutTop(snap: TopSnapshot, width: number, height = 0): Frame {
   const right = cells("right");
   const rules: Rule[] = [];
 
-  if (base > 0 && right.length) {
+  if (base > itemRows && right.length) {
     // PR rows above: the launchers get their own section under a divider, so they never read as PR actions
     const next = flow(left, "left");
     rules.push({ row: next, text: actionsRule(inner) });

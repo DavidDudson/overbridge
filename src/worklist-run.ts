@@ -93,13 +93,16 @@ export function pickRepo(key: string, repos: readonly string[]): string | undefi
 export function renderWorklist(list: Ranked[], selected: number, offset: number, height: number, width: number, message = "", notes: string[] = [], filter = "", now = Date.now(), silenced: ReadonlySet<string> = new Set()): string[] {
   const inner = width - 4;
   const body = Math.max(1, height - CHROME);
-  const rows: string[] = [boxTop("Work", width), boxRow(dim(fit(`${"".padEnd(2)} ${"#".padEnd(3)} ${"ready".padEnd(5)} ${"stream".padEnd(6)} ${"item".padEnd(14)} ${"epic".padEnd(EPIC_WIDTH)} title`, inner)))];
+  // only Jira sets an epic, so a list without one keeps the width for titles
+  const hasEpic = list.some((r) => r.epic);
+  const epicColumn = (text: string) => (hasEpic ? `${fit(text, EPIC_WIDTH)} ` : "");
+  const rows: string[] = [boxTop("Work", width), boxRow(dim(fit(`${"".padEnd(2)} ${"#".padEnd(3)} ${"ready".padEnd(5)} ${"stream".padEnd(6)} ${"item".padEnd(14)} ${epicColumn("epic")}title`, inner)))];
   const visible = list.slice(offset, offset + body);
 
   for (const [i, r] of visible.entries()) {
     const glyph = statusGlyph(r, now);
     const icon = cell(glyph.icon, 2);
-    const line = `${icon} ${String(r.rank).padEnd(3)} ${(r.ready ? "yes" : r.status === "in-progress" ? "wip" : "no").padEnd(5)} ${`s${r.stream}`.padEnd(6)} ${r.key.slice(0, 14).padEnd(14)} ${fit(epicCell(r), EPIC_WIDTH)} ${silencedTitle(stripControl(r.title), silenced.has(r.url))}`;
+    const line = `${icon} ${String(r.rank).padEnd(3)} ${(r.ready ? "yes" : r.status === "in-progress" ? "wip" : "no").padEnd(5)} ${`s${r.stream}`.padEnd(6)} ${r.key.slice(0, 14).padEnd(14)} ${epicColumn(epicCell(r))}${silencedTitle(stripControl(r.title), silenced.has(r.url))}`;
     const text = fit(line, inner);
     rows.push(boxRow(offset + i === selected ? inverse(text) : silenced.has(r.url) ? dim(text) : colorize(text, glyph.color)));
   }
