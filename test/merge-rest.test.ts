@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { mergedHead, restMergedHeads, restPrCommand } from "../src/merge-rest";
+import { budgetOf, RateBudget } from "../src/rate-limit";
 
 const reply = (mergedAt: string | null, head = "abc") => JSON.stringify({ merged_at: mergedAt, head });
 const MERGED_AT = "2026-11-01T00:00:00Z";
@@ -20,6 +21,10 @@ function fakeExec(replies: Record<number, string | undefined>) {
 describe("restPrCommand", () => {
   test("reads the PR through REST with the repo taken from the worktree", () => {
     expect(restPrCommand(7)).toEqual(["gh", "api", "repos/{owner}/{repo}/pulls/7", "--jq", "{merged_at, head: .head.sha}"]);
+  });
+
+  test("the gate counts it against REST's budget, not GraphQL's", () => {
+    expect(budgetOf(restPrCommand(7))).toBe(RateBudget.Core);
   });
 });
 

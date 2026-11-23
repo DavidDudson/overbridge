@@ -1,4 +1,4 @@
-import { budgetOf, isRateLimited, type RateBudget } from "./rate-limit";
+import { budgetOf, isRateLimited, RateBudget } from "./rate-limit";
 import { errorText } from "./server-cache";
 import { type PrefetchedPrs, type RefreshDeps, refreshTop, type TopCache } from "./top";
 
@@ -20,7 +20,8 @@ self.onmessage = (event: MessageEvent<{ ws: string; prefetched?: PrefetchedPrs; 
     const deps: RefreshDeps = {
       prefetched,
       onFailure: (cmd, stderr) => {
-        if (!limited && cmd[0] === "gh" && isRateLimited(stderr)) {
+        // a later limit outside GraphQL replaces a GraphQL one, so the gate learns that REST is limited too
+        if (cmd[0] === "gh" && isRateLimited(stderr) && (!limited || (budget === RateBudget.GraphQl && budgetOf(cmd) !== RateBudget.GraphQl))) {
           limited = stderr.trim().split("\n")[0];
           budget = budgetOf(cmd);
         }
