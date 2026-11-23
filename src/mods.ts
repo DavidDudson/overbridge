@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { isJsonObject, isJsonString } from "./json";
 import { NAME_RE, root } from "./paths";
+import type { PluginSettings } from "./plugins";
 import { loadRootLayers } from "./project-config";
 import { errorMessage, OverbridgeError, run, type RunResult } from "./util";
 
@@ -28,8 +29,13 @@ export interface Mod {
   source: ModSource;
 }
 
+/** Why an agent may not run a mods command that changes what loads, or undefined when it may. */
+export function agentModsRefusal(env: Record<string, string | undefined>): string | undefined {
+  return env.CLAUDECODE ? "mods change what every workspace Claude loads, which is for the user: ask them to run it" : undefined;
+}
+
 /** The mods folder: the root config's `mods-dir` (absolute, `~/` or root-relative), else `mods` in Claude's config folder. */
-export function modsDir(configured = loadRootLayers().modsDir, home = homedir()): string {
+export function modsDir(configured: string | undefined, home = homedir()): string {
   if (configured === undefined) {
     return join(process.env.CLAUDE_CONFIG_DIR || join(home, ".claude"), "mods");
   }
@@ -40,6 +46,9 @@ export function modsDir(configured = loadRootLayers().modsDir, home = homedir())
 
   return isAbsolute(configured) ? configured : resolve(root(), configured);
 }
+
+/** The mods folder the root config names. */
+export const configuredModsDir = () => modsDir(loadRootLayers().modsDir);
 
 /** The fields of a mod's plugin.json that overbridge reads. */
 interface Manifest {
@@ -69,7 +78,8 @@ const isLink = (p: string) => {
   }
 };
 
-const exists = (p: string) => isLink(p) || existsSync(p);
+/** True for a dangling symlink too, which `existsSync` reports as missing. */
+const existsOrIsLink = (p: string) => isLink(p) || existsSync(p);
 
 /** Every mod in `dir`, by folder name. A missing folder holds none; dot folders (`.claude-plugin`) are not mods. */
 export function listMods(dir: string): Mod[] {
@@ -103,45 +113,59 @@ export function modsMarketplace(mods: readonly Mod[]) {
   };
 }
 
+/** The folders marketplace.json in `dir` lists now, which are the mods that passed `checkMod`. */
+const listedFolders = (dir: string) => marketplaceEntries(dir).map((p) => p.source.replace(/^\.\//, ""));
+
 /**
- * (Re)write `<dir>/.claude-plugin/marketplace.json` from the mods in `dir`, only when it changed, so launches
- * that run it at once never see a half-written file. Returns the marketplace written.
+ * Rewrite marketplace.json to the folders it lists, plus `add` and minus `drop`, so it only ever holds mods that
+ * passed `checkMod`. An atomic rename keeps tabs launching at once from reading a half-written file.
  */
-export function writeModsMarketplace(dir: string) {
-  const marketplace = modsMarketplace(listMods(dir));
+export function writeModsMarketplace(dir: string, change: { add?: readonly string[]; drop?: readonly string[] } = {}) {
+  const keep = new Set([...listedFolders(dir), ...(change.add ?? [])].filter((f) => !(change.drop ?? []).includes(f)));
   const file = join(dir, MARKETPLACE_FILE);
-  const text = JSON.stringify(marketplace, null, 2) + "\n";
-  const current = existsSync(file) ? readFileSync(file, "utf8") : undefined;
-
-  if (current !== text) {
-    mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, text);
-    renameSync(tmp, file);
-  }
-
-  return marketplace;
+  mkdirSync(join(dir, ".claude-plugin"), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(modsMarketplace(listMods(dir).filter((mod) => keep.has(mod.folder))), null, 2) + "\n");
+  renameSync(tmp, file);
 }
 
-/**
- * Claude settings that register the mods folder as a directory marketplace and enable every mod in it, after
- * syncing its marketplace.json. Empty with no mods. A mods folder that can't be read is skipped with a warning
- * from `warn`: the generated files never block a launch.
- */
-export function modsSettings(dir = modsDir(), warn: (msg: string) => void = () => {}) {
+/** The plugins marketplace.json in `dir` lists; only the mods commands write it, so a launch loads only checked mods. */
+function marketplaceEntries(dir: string): { name: string; source: string }[] {
+  const file = join(dir, MARKETPLACE_FILE);
+
+  if (!existsSync(file)) {
+    return [];
+  }
+
+  let parsed: unknown;
+
   try {
-    if (!listMods(dir).length) {
+    parsed = JSON.parse(readFileSync(file, "utf8"));
+  } catch (e) {
+    throw new OverbridgeError(`${file} is not valid JSON (${errorMessage(e)}); delete it and run 'overbridge mods update' to rebuild it`);
+  }
+
+  const plugins = isJsonObject(parsed) && Array.isArray(parsed.plugins) ? parsed.plugins : [];
+
+  return plugins.flatMap((p) => (isJsonObject(p) && isJsonString(p.name) && isJsonString(p.source) ? [{ name: p.name, source: p.source }] : []));
+}
+
+/** Claude settings that register the mods folder as a directory marketplace and enable each mod; a failure warns and loads none. */
+export function modsSettings(dir?: string, warn: (msg: string) => void = () => {}): PluginSettings {
+  try {
+    const at = dir ?? configuredModsDir();
+    const plugins = marketplaceEntries(at).map((p) => p.name);
+
+    if (!plugins.length) {
       return {};
     }
 
-    const marketplace = writeModsMarketplace(dir);
-
     return {
-      extraKnownMarketplaces: { [MODS_MARKETPLACE]: { source: { source: "directory", path: dir } } },
-      enabledPlugins: Object.fromEntries(marketplace.plugins.map((p) => [`${p.name}@${MODS_MARKETPLACE}`, true])),
+      extraKnownMarketplaces: { [MODS_MARKETPLACE]: { source: { source: "directory", path: at } } },
+      enabledPlugins: Object.fromEntries(plugins.map((p) => [`${p}@${MODS_MARKETPLACE}`, true])),
     };
   } catch (e) {
-    warn(`warning: could not load the mods in ${dir}: ${errorMessage(e)}`);
+    warn(`warning: could not load the Claude Code mods: ${errorMessage(e)}`);
 
     return {};
   }
@@ -161,15 +185,24 @@ export interface ModsDeps {
   out: (line: string) => void;
 }
 
-const defaultDeps = (): ModsDeps => ({ dir: modsDir(), run, out: (line) => console.log(line) });
+/** `run`, with a program that cannot start (not on PATH) reported as a failed run instead of a throw. */
+const safeRun: Runner = (cmd, opts) => {
+  try {
+    return run(cmd, opts);
+  } catch (e) {
+    return { ok: false, code: 127, stdout: "", stderr: `${cmd[0]} could not be started: ${errorMessage(e)}` };
+  }
+};
+
+const defaultDeps = (): ModsDeps => ({ dir: configuredModsDir(), run: safeRun, out: (line) => console.log(line) });
 
 function validate(deps: ModsDeps, dir: string): RunResult {
   return deps.run(["claude", "plugin", "validate", dir]);
 }
 
-const output = (r: RunResult) => [r.stdout, r.stderr].flatMap((s) => (s.trim() ? [s.trim()] : [])).join("\n");
+const combinedOutput = (r: RunResult) => [r.stdout, r.stderr].flatMap((s) => (s.trim() ? [s.trim()] : [])).join("\n");
 
-function removeMod(path: string) {
+function removeModFolder(path: string) {
   if (isLink(path)) {
     unlinkSync(path);
   } else {
@@ -177,7 +210,39 @@ function removeMod(path: string) {
   }
 }
 
-/** `overbridge mods install <git-url|path> [--name x]`: clone or link a mod, validate it, and add it to the marketplace. */
+/** Why the mod in `dir` may not load (no plugin name, a rejected validation, a plugin name another mod has), or undefined. */
+function checkMod(deps: ModsDeps, dir: string, folder: string): string | undefined {
+  const { name: plugin } = readManifest(dir);
+
+  if (plugin === undefined) {
+    return `it has no ${MANIFEST} with a name, so it is not a Claude Code plugin`;
+  }
+
+  const validation = validate(deps, dir);
+
+  if (!validation.ok) {
+    return `claude plugin validate rejects it:\n${combinedOutput(validation)}`;
+  }
+
+  const clash = listMods(deps.dir).find((m) => m.folder !== folder && m.plugin === plugin);
+
+  return clash ? `the mod in ${clash.dir} already has the plugin name '${plugin}'; remove one with 'overbridge mods rm ${clash.folder}'` : undefined;
+}
+
+/** Clone or link `source` to `dest`, or say why it could not. */
+function fetchMod(source: string, dest: string, deps: ModsDeps): string | undefined {
+  if (!isGitUrl(source)) {
+    symlinkSync(resolve(source), dest);
+
+    return undefined;
+  }
+
+  const clone = deps.run(["git", "clone", source, dest]);
+
+  return clone.ok ? undefined : `git clone ${source} failed:\n${combinedOutput(clone)}`;
+}
+
+/** `overbridge mods install <git-url|path> [--name x]`: clone or link a mod, check it, and add it to the marketplace. */
 export function installMod(source: string, name: string | undefined, deps: ModsDeps = defaultDeps()): Mod {
   const folder = name ?? defaultModName(source);
 
@@ -187,68 +252,48 @@ export function installMod(source: string, name: string | undefined, deps: ModsD
 
   const dest = join(deps.dir, folder);
 
-  if (exists(dest)) {
+  if (existsOrIsLink(dest)) {
     throw new OverbridgeError(`a mod named '${folder}' is already installed at ${dest}. Remove it with 'overbridge mods rm ${folder}' or pick another --name.`);
   }
 
-  const git = isGitUrl(source);
-  const target = git ? source : resolve(source);
-
-  if (!git && !existsSync(target)) {
-    throw new OverbridgeError(`${target} does not exist: pass a git URL or a folder holding ${MANIFEST}`);
+  if (!isGitUrl(source) && !existsSync(resolve(source))) {
+    throw new OverbridgeError(`${resolve(source)} does not exist: pass a git URL or a folder holding ${MANIFEST}`);
   }
 
   mkdirSync(deps.dir, { recursive: true });
 
-  if (git) {
-    const r = deps.run(["git", "clone", source, dest]);
+  try {
+    const problem = fetchMod(source, dest, deps) ?? checkMod(deps, dest, folder);
 
-    if (!r.ok) {
-      removeMod(dest);
-      throw new OverbridgeError(`git clone ${source} failed:\n${output(r)}`);
+    if (problem) {
+      throw new OverbridgeError(`${source} was not installed: ${problem}`);
     }
-  } else {
-    symlinkSync(target, dest);
+  } catch (e) {
+    removeModFolder(dest);
+
+    try {
+      writeModsMarketplace(deps.dir, { drop: [folder] });
+    } catch (cleanup) {
+      deps.out(`warning: could not update the marketplace after removing ${dest}: ${errorMessage(cleanup)}`);
+    }
+
+    throw e;
   }
 
-  const refuse = (msg: string): never => {
-    removeMod(dest);
-    writeModsMarketplace(deps.dir);
-    throw new OverbridgeError(msg);
-  };
-
-  const { name: plugin } = readManifest(dest);
-
-  if (plugin === undefined) {
-    refuse(`${source} has no ${MANIFEST} with a name, so it is not a Claude Code plugin. Nothing was installed.`);
-  }
-
-  const v = validate(deps, dest);
-
-  if (!v.ok) {
-    refuse(`claude plugin validate rejected ${source}, so nothing was installed:\n${output(v)}`);
-  }
-
-  const clash = listMods(deps.dir).find((m) => m.folder !== folder && m.plugin === plugin);
-
-  if (clash) {
-    refuse(`the mod in ${clash.dir} already has the plugin name '${plugin}'. Remove one with 'overbridge mods rm ${clash.folder}'.`);
-  }
-
-  writeModsMarketplace(deps.dir);
+  writeModsMarketplace(deps.dir, { add: [folder] });
   const mod = listMods(deps.dir).find((m) => m.folder === folder);
 
   if (!mod) {
     throw new OverbridgeError(`${dest} vanished while it was being installed`);
   }
 
-  deps.out(`installed ${folder} (${plugin}@${MODS_MARKETPLACE}) from ${source}; start a workspace Claude, or run /reload-plugins in one, to load it`);
+  deps.out(`installed ${folder} (${mod.plugin}@${MODS_MARKETPLACE}) from ${source}; start a workspace Claude, or run /reload-plugins in one, to load it`);
 
   return mod;
 }
 
-/** The outcome of updating one mod. */
-export const UpdateOutcome = { Updated: "updated", Skipped: "skipped", Failed: "failed" } as const;
+/** The outcome of updating one mod. `Kept` failed but was reset to the version that passed; `Failed` no longer loads. */
+export const UpdateOutcome = { Updated: "updated", Skipped: "skipped", Kept: "kept", Failed: "failed" } as const;
 
 export type UpdateOutcome = (typeof UpdateOutcome)[keyof typeof UpdateOutcome];
 
@@ -258,31 +303,52 @@ interface UpdateResult {
   detail: string;
 }
 
+/** Check a mod that has no git history to pull (a link or a plain folder), so the marketplace can list it. */
+function recheck(mod: Mod, deps: ModsDeps): UpdateResult {
+  const why = mod.source === ModSource.Link ? `linked to ${readlinkSync(mod.dir)}; edit it there` : "not a git checkout";
+  const problem = checkMod(deps, mod.dir, mod.folder);
+
+  return problem === undefined ? { outcome: UpdateOutcome.Skipped, detail: why } : { outcome: UpdateOutcome.Failed, detail: `${why}, and ${problem}` };
+}
+
+/** Pull a git mod and check it again; a pull that fails the checks is reset to the commit that passed. */
 function updateOne(mod: Mod, deps: ModsDeps): UpdateResult {
-  if (mod.source === ModSource.Link) {
-    return { outcome: UpdateOutcome.Skipped, detail: `linked to ${readlinkSync(mod.dir)}; edit it there` };
+  if (mod.source !== ModSource.Git) {
+    return recheck(mod, deps);
   }
 
-  if (mod.source === ModSource.Folder) {
-    return { outcome: UpdateOutcome.Skipped, detail: "not a git checkout" };
-  }
-
+  const before = deps.run(["git", "rev-parse", "HEAD"], { cwd: mod.dir });
   const pull = deps.run(["git", "pull", "--ff-only"], { cwd: mod.dir });
 
   if (!pull.ok) {
-    return { outcome: UpdateOutcome.Failed, detail: `git pull --ff-only failed: ${output(pull)}` };
+    return { outcome: UpdateOutcome.Failed, detail: `git pull --ff-only failed: ${combinedOutput(pull)}` };
   }
 
-  const v = validate(deps, mod.dir);
+  const problem = checkMod(deps, mod.dir, mod.folder);
 
-  if (!v.ok) {
-    return { outcome: UpdateOutcome.Failed, detail: `pulled, but claude plugin validate rejects it:\n${output(v)}` };
+  if (problem === undefined) {
+    return { outcome: UpdateOutcome.Updated, detail: pull.stdout.trim().split("\n").at(-1) ?? "" };
   }
 
-  return { outcome: UpdateOutcome.Updated, detail: pull.stdout.trim().split("\n").at(-1) ?? "" };
+  const head = before.stdout.trim();
+  const after = deps.run(["git", "rev-parse", "HEAD"], { cwd: mod.dir }).stdout.trim();
+  const moved = before.ok && head !== "" && head !== after;
+
+  if (!moved) {
+    return { outcome: UpdateOutcome.Failed, detail: `${problem}; it no longer loads` };
+  }
+
+  // --keep moves HEAD back but keeps local edits to the clone, and refuses when they would conflict
+  const reset = deps.run(["git", "reset", "--keep", head], { cwd: mod.dir });
+
+  if (reset.ok) {
+    return { outcome: UpdateOutcome.Kept, detail: `pulled, but ${problem}; reset to ${head}, the last commit that passed` };
+  }
+
+  return { outcome: UpdateOutcome.Failed, detail: `pulled, but ${problem}; could not reset it, so it no longer loads` };
 }
 
-/** `overbridge mods update [name]`: fast-forward each git mod (or only `name`) and validate it again. Returns the failures. */
+/** `overbridge mods update [name]`: fast-forward each git mod (or only `name`) and check it again. Returns the failures. */
 export function updateMods(name: string | undefined, deps: ModsDeps = defaultDeps()): number {
   const mods = listMods(deps.dir).filter((m) => name === undefined || m.folder === name);
 
@@ -292,13 +358,17 @@ export function updateMods(name: string | undefined, deps: ModsDeps = defaultDep
 
   const results = mods.map((m) => ({ mod: m, ...updateOne(m, deps) }));
   results.forEach((r) => deps.out(`${r.mod.folder}: ${r.outcome}${r.detail ? ` (${r.detail})` : ""}`));
-  writeModsMarketplace(deps.dir);
 
-  if (!mods.length) {
+  const passed = results.filter((r) => r.outcome === UpdateOutcome.Updated || r.outcome === UpdateOutcome.Skipped).map((r) => r.mod.folder);
+  const failed = results.filter((r) => r.outcome === UpdateOutcome.Failed).map((r) => r.mod.folder);
+
+  if (mods.length) {
+    writeModsMarketplace(deps.dir, { add: passed, drop: failed });
+  } else {
     deps.out(`no mods installed in ${deps.dir}`);
   }
 
-  return results.filter((r) => r.outcome === UpdateOutcome.Failed).length;
+  return results.filter((r) => r.outcome === UpdateOutcome.Failed || r.outcome === UpdateOutcome.Kept).length;
 }
 
 function sourceOf(mod: Mod, deps: ModsDeps): string {
@@ -307,34 +377,37 @@ function sourceOf(mod: Mod, deps: ModsDeps): string {
   }
 
   if (mod.source === ModSource.Git) {
-    const r = deps.run(["git", "remote", "get-url", "origin"], { cwd: mod.dir });
+    const remote = deps.run(["git", "remote", "get-url", "origin"], { cwd: mod.dir });
 
-    return r.ok ? `git ${r.stdout.trim()}` : "git (no origin)";
+    return remote.ok ? `git ${remote.stdout.trim()}` : "git (no origin)";
   }
 
   return "folder";
 }
 
-/** `overbridge mods ls`: one tab-separated line per mod: folder, version, source, valid or the reason it is not. */
+/** `overbridge mods ls`: one tab-separated line per mod: folder, version, source, and valid, invalid or not loaded. */
 export function listModLines(deps: ModsDeps = defaultDeps()): string[] {
-  return listMods(deps.dir).map((m) => {
-    const v = validate(deps, m.dir);
-    const valid = v.ok ? "valid" : `invalid: ${output(v).split("\n")[0] ?? ""}`;
+  const loaded = new Set(marketplaceEntries(deps.dir).map((p) => p.source));
 
-    return [m.folder, m.version ?? "-", sourceOf(m, deps), valid].join("\t");
+  return listMods(deps.dir).map((m) => {
+    const validation = validate(deps, m.dir);
+    const loadState = loaded.has(`./${m.folder}`) ? "valid" : "valid, not loaded: 'overbridge mods update' adds it unless another mod has its plugin name";
+    const state = validation.ok ? loadState : `invalid: ${combinedOutput(validation).split("\n")[0] ?? ""}`;
+
+    return [m.folder, m.version ?? "-", sourceOf(m, deps), state].join("\t");
   });
 }
 
 /** `overbridge mods rm <name>`: remove a mod's folder, or only the link to a linked one, and drop it from the marketplace. */
-export function removeModNamed(name: string, deps: ModsDeps = defaultDeps()) {
+export function removeMod(name: string, deps: ModsDeps = defaultDeps()) {
   const path = join(deps.dir, name);
 
-  if (!NAME_RE.test(name) || !exists(path)) {
+  if (!NAME_RE.test(name) || !existsOrIsLink(path)) {
     throw new OverbridgeError(`no mod named '${name}' in ${deps.dir}; 'overbridge mods ls' lists them`);
   }
 
   const linked = isLink(path);
-  removeMod(path);
-  writeModsMarketplace(deps.dir);
+  removeModFolder(path);
+  writeModsMarketplace(deps.dir, { drop: [name] });
   deps.out(linked ? `removed the link ${path} (its target is untouched)` : `removed ${path}`);
 }

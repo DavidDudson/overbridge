@@ -69,10 +69,12 @@ overbridge up <name>                              # inside the session: open (or
 overbridge layout                                 # print the layout `up` would use (stderr says where from); a tmux script under OVERBRIDGE_MUX=tmux
 overbridge claude <name|@root>                    # run a bound Claude, or the root Claude, outside zellij
 
-overbridge mods install <git-url|path> [--name x] # clone or link a Claude Code mod into the mods folder (mods-dir in
-                                          # config.yml, default ~/.claude/mods); runs claude plugin validate and removes
-                                          # it again on failure. Every workspace Claude loads each mod (/reload-plugins)
-overbridge mods update [name]                     # git pull --ff-only each cloned mod, then validate it again; skips linked ones
+overbridge mods install <git-url|path> [--name x] # clone or link a Claude Code mod into the mods folder (root-only mods-dir in
+                                          # config.yml, else mods in $CLAUDE_CONFIG_DIR or ~/.claude); runs claude plugin
+                                          # validate and removes it again on failure. Every workspace Claude loads each mod
+                                          # (/reload-plugins). install, update and rm refuse inside Claude: ask the user
+                                          # to run them (with ! in front)
+overbridge mods update [name]                     # git pull --ff-only each cloned mod, then validate it again (a failure is reset); skips linked ones
 overbridge mods ls                                # name, version, source (git remote or link target), valid or not
 overbridge mods rm <name>                         # remove a mod; a linked mod's target is never deleted
 ```

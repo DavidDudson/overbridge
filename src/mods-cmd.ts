@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { installMod, listModLines, modsDir, removeModNamed, updateMods } from "./mods";
+import { agentModsRefusal, configuredModsDir, installMod, listModLines, removeMod, updateMods } from "./mods";
 import { OverbridgeError } from "./util";
 
 const USAGE = "usage: overbridge mods install <git-url|path> [--name x] | update [name] | ls | rm <name>";
@@ -11,6 +11,12 @@ export function modsCommand(args: string[]): number {
 
   if (extra.length || (values.name !== undefined && sub !== "install")) {
     throw new OverbridgeError(USAGE);
+  }
+
+  const refusal = sub === "ls" ? undefined : agentModsRefusal(process.env);
+
+  if (refusal) {
+    throw new OverbridgeError(refusal);
   }
 
   if (sub === "install" && arg !== undefined) {
@@ -25,13 +31,13 @@ export function modsCommand(args: string[]): number {
 
   if (sub === "ls" && arg === undefined) {
     const lines = listModLines();
-    console.log(lines.length ? lines.join("\n") : `no mods installed in ${modsDir()}`);
+    console.log(lines.length ? lines.join("\n") : `no mods installed in ${configuredModsDir()}`);
 
     return 0;
   }
 
   if (sub === "rm" && arg !== undefined) {
-    removeModNamed(arg);
+    removeMod(arg);
 
     return 0;
   }

@@ -166,12 +166,14 @@ Session (zellij by default; OVERBRIDGE_MUX=tmux for tmux)
   overbridge layout                             print the generated layout (zellij KDL, or a tmux script)
   overbridge claude <name|@tab> [-- args]       run Claude bound to a workspace, or an orchestration tab's Claude
 
-Claude Code mods (every workspace Claude loads each one; mods-dir in config.yml, default ~/.claude/mods)
+Claude Code mods (every workspace Claude loads each one; mods-dir in config.yml, default mods in $CLAUDE_CONFIG_DIR
+or ~/.claude; install, update and rm refuse to run inside Claude)
   overbridge mods install <git-url|path> [--name x]
                                         clone a git URL, or link a local folder, into the mods folder, then
                                         run claude plugin validate; a mod that fails is removed again
-  overbridge mods update [name]                 git pull --ff-only each cloned mod and validate it again;
-                                        linked mods are skipped (edit them in place, then /reload-plugins)
+  overbridge mods update [name]                 git pull --ff-only each cloned mod and validate it again (a pull
+                                        that fails is reset); linked mods are skipped (edit them in place,
+                                        then /reload-plugins); also adds folders placed by hand
   overbridge mods ls                            name, version, source (git remote or link target), valid or not
   overbridge mods rm <name>                     remove a mod (a linked one's target is never deleted)
 

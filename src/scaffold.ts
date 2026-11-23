@@ -3,8 +3,7 @@ import { dirname, join } from "node:path";
 import { agentDirOf } from "./layout";
 import { excludeInRepo } from "./git";
 import { ghReposCache, metaDir, ORCHESTRATION_ENV, orchestrationPlansDir, PLANS_DIR, root, selfCommand, worktreePath, wsDir } from "./paths";
-import { pluginSettings } from "./plugins";
-import { modsSettings } from "./mods";
+import { pluginSettings, workspacePluginSettings } from "./plugins";
 import { defaultIde, fileLinkSection } from "./file-links";
 import { type IdeConfig, ideFromEnv } from "./ide";
 import { loadRepoConfig, resolveConfig, rootConfigPath, rootMcpServers } from "./project-config";
@@ -57,7 +56,7 @@ export const workspaceSettingsPath = (ws: string) => join(metaDir(), "workspaces
 
 const workspaceSettings = (ws: string, mcp: McpServerSettings) => ({
   env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
-  ...allPluginSettings(),
+  ...workspacePluginSettings(),
   // relative, so plans land in the folder the agent starts in, which the guard lets it write
   plansDirectory: PLANS_DIR,
   permissions: { allow: ALLOWED_COMMANDS },
@@ -138,7 +137,7 @@ export function scaffoldOrchestration(tab: string): string {
   const settings = {
     env: { [ORCHESTRATION_ENV]: tab, OVERBRIDGE_ROOT: root(), OVERBRIDGE_NAME: "" },
     hooks: agentStateHooks(),
-    ...allPluginSettings(),
+    ...pluginSettings(),
     plansDirectory: orchestrationPlansDir(),
   };
 
@@ -146,24 +145,6 @@ export function scaffoldOrchestration(tab: string): string {
   writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
 
   return file;
-}
-
-/** The overbridge plugins and the user's mods (`overbridge mods`), as one set of marketplace and enable settings. */
-export function allPluginSettings(base: PluginSettings = pluginSettings(), mods: PluginSettings = modsSettings(undefined, log)): PluginSettings {
-  if (!mods.extraKnownMarketplaces) {
-    return base;
-  }
-
-  return {
-    extraKnownMarketplaces: { ...base.extraKnownMarketplaces, ...mods.extraKnownMarketplaces },
-    enabledPlugins: { ...base.enabledPlugins, ...mods.enabledPlugins },
-  };
-}
-
-/** The marketplace and enable settings Claude reads from settings.json or `--settings`. */
-interface PluginSettings {
-  extraKnownMarketplaces?: Record<string, { source: { source: string; path: string } }>;
-  enabledPlugins?: Record<string, boolean>;
 }
 
 /** The plugin settings a workspace Claude loads with `--settings`, kept in the meta dir like the orchestration ones. */
@@ -179,7 +160,7 @@ export function scaffoldPlugins(): string {
   mkdirSync(dirname(file), { recursive: true });
   // every tab's Claude launches at once when the session starts, so none may read a half-written file
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(allPluginSettings(), null, 2) + "\n");
+  writeFileSync(tmp, JSON.stringify(workspacePluginSettings(), null, 2) + "\n");
   renameSync(tmp, file);
 
   return file;
