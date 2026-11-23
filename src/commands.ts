@@ -18,6 +18,7 @@ import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, w
 import { defaultMux, layoutPath, type Mux, MuxKind, tmuxConfPath } from "./mux";
 import { requireTab, TabFocus } from "./tab";
 import { runCheck } from "./check-queue";
+import { refusalMessage, scopeRefusal } from "./check-scope";
 import { type ClaimContext, workspaceClass } from "./workspace-class";
 import { worklistFacts } from "./worklist-class";
 import { trustFolder, untrustFolder } from "./claude-trust";
@@ -771,6 +772,12 @@ export async function check(repoArg: string | undefined, cmd: string[], wsOpt?: 
     fail(`name the repo to check in: overbridge check <repo> -- <cmd> (${ws} holds ${repos.join(", ") || "no repos"})`);
 
   const { config, inv } = inRepoShell(ws, repo, cmd);
+  const refusal = scopeRefusal(cmd, config.checkQueue.maxProjects);
+
+  if (refusal) {
+    fail(refusalMessage(cmd.map(shellQuote).join(" "), refusal));
+  }
+
   const settings = timeoutSeconds === undefined ? config.checkQueue : { ...config.checkQueue, timeoutSeconds };
   const cls = workspaceClass(claimContexts(ws, repo, config), worklistFacts);
   const who: Parameters<typeof runCheck>[1] = { ws, repo, command: cmd.map(shellQuote).join(" ") };

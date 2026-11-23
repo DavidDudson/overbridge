@@ -283,7 +283,9 @@ access to other workspaces and direct branch switching. Do not try to work aroun
   across all workspaces and runs several at once, in the repo's dev shell, while the machine's load allows. overbridge kills a run that
   goes over its time limit (exit 124) or stops using CPU (exit 137). If it cannot start in time, it gives up with exit 75.
 - Scope each check to what the branch changed: one file, one project, or an affected-only mode (\`nx affected -t <target> --base=origin/<base>\`,
-  \`vitest run --changed origin/<base>\`, \`<base>\` being the PR's base branch). Do not run every project (\`nx run-many\` with no \`-p\`) or turn off the build cache: CI runs the full suite.
+  \`vitest run --changed origin/<base>\`, \`<base>\` being the PR's base branch). CI runs the full suite. \`overbridge check\` refuses an unscoped run:
+  \`nx run-many\` with no \`-p\` or a \`-p\` list over the repo's cap, a \`test\`/\`test:unit\` target or vitest run with no \`--changed\`,
+  \`--related\` or spec file path, and \`--skip-nx-cache\`, also inside \`sh -c\`, \`npx\` or \`pnpm exec\`. Do not work around a refusal; run the scoped command it suggests.
 ${devShells}
 ## GitHub repos
 

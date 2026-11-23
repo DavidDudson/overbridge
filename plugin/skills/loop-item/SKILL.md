@@ -51,7 +51,7 @@ Run `overbridge phase implement` (`overbridge phase implement --stack <n>/<m>` f
   overbridge config get commands.lint
   overbridge config get commands.format
   ```
-  Scope every run to what the branch changed: one file, one project, or the repo's affected-only mode (such as `nx affected -t <target> --base=origin/<base>` or `vitest run --changed origin/<base>`, where `<base>` is the PR's base: the stack base on a stacked layer, else the default branch). Do not run every project (such as `nx run-many` with no `-p`) or turn off the build cache (such as `--skip-nx-cache`): CI runs the full suite.
+  Scope every run to what the branch changed: one file, one project, or the repo's affected-only mode (such as `nx affected -t <target> --base=origin/<base>` or `vitest run --changed origin/<base>`, where `<base>` is the PR's base: the stack base on a stacked layer, else the default branch). CI runs the full suite, and `overbridge check` refuses an unscoped run: `nx run-many` with no `-p` or a `-p` list over the repo's cap, a `test`/`test:unit` target or vitest run with no `--changed`, `--related` or spec file path, and `--skip-nx-cache`. Do not work around a refusal; run the scoped command it suggests.
   Run `test`, `typecheck` and `lint` through the check queue: `overbridge check <repo> -- <command>`. It queues them
   across workspaces and runs several at once while the load allows, in the repo's dev shell. Run `format` through `overbridge shell <repo> -- <command>`.
   Exit 124 means a check went over its time limit, 137 that it stopped using CPU, and 75 that it could not start in time: report
