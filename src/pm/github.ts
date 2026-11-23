@@ -75,9 +75,15 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
       return r.stdout === "CLOSED" ? ItemStatus.Done : ItemStatus.Open;
     },
 
-    // REST, not `gh issue view`: the top panel reads this for every workspace, and the GraphQL budget is shared by all of them
+    // REST, not GraphQL: lineage runs per workspace, and every workspace shares one GraphQL budget
     lineage(id) {
       const n = id.replace(/^#/, "");
+
+      // the id goes into a URL path, so anything but a number could reach another endpoint
+      if (!NUMBER_RE.test(n)) {
+        return [];
+      }
+
       const r = gh(["api", `repos/${repo()}/issues/${n}`]);
 
       if (!r.ok || !r.stdout) {
@@ -87,7 +93,8 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
       try {
         const v: unknown = JSON.parse(r.stdout);
 
-        if (!isJsonObject(v) || !isJsonString(v.title)) {
+        // the issues endpoint also answers for a pull request, which is not a work item
+        if (!isJsonObject(v) || !isJsonString(v.title) || v.pull_request !== undefined) {
           return [];
         }
 

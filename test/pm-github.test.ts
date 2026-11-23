@@ -42,10 +42,19 @@ describe("lineage", () => {
     expect(calls[0]).toEqual(["gh", "api", "repos/acme/app/issues/12"]);
   });
 
+  test("reads nothing for an id that is not a number", () => {
+    const { runner, calls } = stub({});
+    expect(githubProvider(repoCfg, "/w", runner).lineage("../pulls/3")).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
   test("falls back to the issue link with no url, and gives nothing on a failure or a bad reply", () => {
     const p = (reply: { ok?: boolean; stdout?: string }) => githubProvider(repoCfg, "/w", stub({ "api repos/acme/app/issues/12": reply }).runner);
     expect(p({ stdout: JSON.stringify({ title: "T", state: "closed" }) }).lineage("12")).toEqual([{ id: "12", title: "T", status: "closed", url: "https://github.com/acme/app/issues/12" }]);
+    expect(p({ stdout: JSON.stringify({ title: "T", state: "OPEN", html_url: "u" }) }).lineage("12")[0]!.status).toBe("open");
     expect(p({ ok: false }).lineage("12")).toEqual([]);
+    expect(p({ ok: false, stdout: JSON.stringify({ message: "Not Found" }) }).lineage("12")).toEqual([]);
+    expect(p({ stdout: JSON.stringify({ title: "T", state: "open", pull_request: { url: "x" } }) }).lineage("12")).toEqual([]);
     expect(p({ stdout: "not json" }).lineage("12")).toEqual([]);
     expect(p({ stdout: "{}" }).lineage("12")).toEqual([]);
   });
