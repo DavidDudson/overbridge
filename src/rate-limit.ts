@@ -11,6 +11,30 @@ const LIMITED = /api rate limit|secondary rate limit|rate limit exceeded|abuse d
 
 export const isRateLimited = (text: string): boolean => LIMITED.test(text);
 
+/** Secondary and abuse limits apply to every GitHub API, whichever budget the call spent. */
+const EVERY_API = /secondary rate limit|abuse detection/i;
+
+/** Which budget a call that hit a limit spent: GraphQL's points, REST's core requests, or one the caller cannot tell. */
+export const RateBudget = { GraphQl: "graphql", Core: "core", Unknown: "unknown" } as const;
+
+export type RateBudget = (typeof RateBudget)[keyof typeof RateBudget];
+
+/** The budget a `gh` command spends: `gh api graphql` and `gh pr view` use GraphQL, `gh api repos/...` uses REST. */
+export function budgetOf(cmd: readonly string[]): RateBudget {
+  if (cmd[0] !== "gh") {
+    return RateBudget.Unknown;
+  }
+
+  if (cmd[1] === "pr" || (cmd[1] === "api" && cmd[2] === "graphql")) {
+    return RateBudget.GraphQl;
+  }
+
+  return cmd[1] === "api" && cmd[2]?.startsWith("repos/") ? RateBudget.Core : RateBudget.Unknown;
+}
+
+/** Whether a limit hit on `budget` with this reply leaves REST usable: only a primary GraphQL limit does. */
+const graphQlOnly = (text: string, budget: RateBudget): boolean => budget === RateBudget.GraphQl && !EVERY_API.test(text);
+
 /** Pause used until the reset time is known (or when it cannot be read). */
 export const DEFAULT_PAUSE_MS = 5 * 60_000;
 
@@ -41,6 +65,8 @@ export class RateGate {
   private trips = 0;
   /** The pause (its trip number) a forced refresh has already been let through. */
   private forcedIn = 0;
+  /** The current pause came only from GraphQL's primary limit, so REST reads may go on. */
+  private restOpen = false;
   private readonly now: () => number;
   private readonly lookupReset: () => Promise<number | undefined>;
   private readonly log: (msg: string) => void;
@@ -56,6 +82,11 @@ export class RateGate {
     const now = this.now();
 
     return now < this.untilMs ? `GitHub rate limit reached: gh calls paused until ${clock(this.untilMs)}, showing cached data` : undefined;
+  }
+
+  /** Why REST reads are paused too, worded as `message`; undefined when there is no pause or only GraphQL's budget ran out. */
+  restMessage(): string | undefined {
+    return this.restOpen ? undefined : this.message();
   }
 
   /**
@@ -76,12 +107,18 @@ export class RateGate {
    * Look at a failure's text. A rate-limit reply pauses `gh` (not shortened if already paused longer) and returns true; the
    * pause is the default at first and is moved to the real reset as soon as that is read.
    */
-  observe(text: string): boolean {
+  observe(text: string, budget: RateBudget = RateBudget.Unknown): boolean {
     if (!isRateLimited(text)) return false;
     const now = this.now();
 
-    // a failure from a call that started before the pause says nothing new
-    if (now < this.untilMs) return true;
+    // a failure from a call that started before the pause says nothing new about when it ends, but it can show REST is limited too
+    if (now < this.untilMs) {
+      this.restOpen = this.restOpen && graphQlOnly(text, budget);
+
+      return true;
+    }
+
+    this.restOpen = graphQlOnly(text, budget);
     this.trips++;
     this.untilMs = now + DEFAULT_PAUSE_MS;
     this.log(`GitHub rate limit hit: pausing gh until ${clock(this.untilMs)}`);
@@ -116,12 +153,40 @@ export class RateGate {
   }
 }
 
-/** The earliest reset among the `gh api rate_limit` resources that are used up (that endpoint is not itself limited). */
-export async function ghResetLookup(): Promise<number | undefined> {
-  const p = Bun.spawn(["gh", "api", "rate_limit", "--jq", "[.resources[] | select(.remaining == 0) | .reset] | min // empty"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+/** Runs `gh` with these arguments and resolves its trimmed stdout. */
+export type GhOutput = (args: string[]) => Promise<string>;
+
+const ghOutput: GhOutput = async (args) => {
+  const p = Bun.spawn(["gh", ...args], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
   const out = (await new Response(p.stdout).text()).trim();
   await p.exited;
-  const seconds = Number(out);
+
+  return out;
+};
+
+const RATE_LIMIT_QUERY = "query{rateLimit{remaining resetAt}}";
+
+/** GraphQL's own `rateLimit` reading; undefined when the reply cannot be read. */
+async function graphqlReset(gh: GhOutput): Promise<number | undefined> {
+  const [remaining, resetAt] = (await gh(["api", "graphql", "-f", `query=${RATE_LIMIT_QUERY}`, "--jq", ".data.rateLimit | \"\\(.remaining) \\(.resetAt)\""])).split(" ");
+  const ms = Date.parse(resetAt ?? "");
+
+  return remaining === "0" && Number.isFinite(ms) ? ms : undefined;
+}
+
+/** The earliest reset among the used-up `gh api rate_limit` resources other than GraphQL. */
+async function restReset(gh: GhOutput): Promise<number | undefined> {
+  const seconds = Number(await gh(["api", "rate_limit", "--jq", '[.resources | to_entries[] | select(.key != "graphql" and .value.remaining == 0) | .value.reset] | min // empty']));
 
   return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
+}
+
+/**
+ * When the used-up budget resets: the earlier of GraphQL's and REST's. GraphQL's comes from its own `rateLimit` field,
+ * because `gh api rate_limit` can show GraphQL points left while GraphQL refuses every call.
+ */
+export async function ghResetLookup(gh: GhOutput = ghOutput): Promise<number | undefined> {
+  const resets = (await Promise.all([graphqlReset(gh), restReset(gh)])).flatMap((ms) => ms ?? []);
+
+  return resets.length > 0 ? Math.min(...resets) : undefined;
 }

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sessionName } from "../src/paths";
 import { layoutSpecs, workspaceTabSpec } from "../src/layout";
-import { defaultMux, type MuxExec, MuxKind, muxKind, TabFocus, tmuxMux, zellijMux } from "../src/mux";
+import { defaultMux, type MuxExec, MuxKind, muxKind, PaneResize, TabFocus, tmuxMux, zellijMux } from "../src/mux";
 import { layoutScript, tmuxConf, tmuxQuote } from "../src/tmux-layout";
 
 const self = ["ob"];
@@ -67,6 +67,17 @@ describe("zellijMux", () => {
       { id: "3", title: "w · terminal", tab: "w", exited: true },
     ]);
     expect(zellijMux(recorder(() => ok("{nope")).exec).listPanes()).toEqual([]);
+  });
+
+  test("resizes a pane at its bottom border", () => {
+    const r = recorder();
+    const mux = zellijMux(r.exec);
+    expect(mux.resizePane("4", PaneResize.Grow)).toBe(true);
+    expect(mux.resizePane("4", PaneResize.Shrink)).toBe(true);
+    expect(r.calls).toEqual([
+      ["zellij", "action", "resize", "increase", "down", "--pane-id", "terminal_4"],
+      ["zellij", "action", "resize", "decrease", "down", "--pane-id", "terminal_4"],
+    ]);
   });
 
   test("opens a pane after focusing its anchor, with the command after `--`", () => {
@@ -210,6 +221,14 @@ describe("tmuxMux argv", () => {
     expect(tmuxMux(recorder().exec, { env: { TMUX: "x", TMUX_PANE: "%2" } }).inSession()).toBe(true);
     expect(tmuxMux(recorder().exec, { env: { TMUX: "x", TMUX_PANE: "%2" } }).ownPaneId()).toBe("%2");
     expect(tmuxMux(recorder().exec, { env: {} }).inSession()).toBe(false);
+  });
+
+  test("resizes a pane one row at a time: -D grows a top pane, -U shrinks it", () => {
+    const t = mux();
+    expect(t.mux.resizePane("%2", PaneResize.Grow)).toBe(true);
+    expect(t.calls.at(-1)?.slice(-4)).toEqual(["-t", "%2", "-D", "1"]);
+    t.mux.resizePane("%2", PaneResize.Shrink);
+    expect(t.calls.at(-1)?.slice(-5)).toEqual(["resize-pane", "-t", "%2", "-U", "1"]);
   });
 });
 

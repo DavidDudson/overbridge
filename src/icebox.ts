@@ -3,7 +3,7 @@ import { dirname, join, sep } from "node:path";
 import { stopChecksFor } from "./check-queue";
 import { getRepo } from "./config";
 import * as git from "./git";
-import { HandoffReason, writeHandoff } from "./handoff";
+import { HandoffReason, handoffRows, thawFirstMessage, writeHandoff } from "./handoff";
 import type { Mux } from "./mux";
 import { landingTab } from "./next";
 import { isOrchestrationTab } from "./orchestration";
@@ -17,11 +17,6 @@ import { type HookContext, runHooks } from "./hooks";
 import { requireTab, TabFocus } from "./tab";
 import { errorMessage, fail, log, run } from "./util";
 
-/** The first message of a thawed agent: its resumed conversation reads the handoff `icebox` wrote. */
-export const THAW_PROMPT = "/read-handoff";
-
-/** `thaw`'s first message: read the handoff, then carry out `prompt` in place of the handoff's Next line when one is given. */
-export const thawFirstMessage = (prompt?: string): string => (prompt ? `${THAW_PROMPT} --then ${prompt}` : THAW_PROMPT);
 
 export interface IceboxDeps extends Pick<RemovalDeps, "mux"> {
   stopApps: (ws: string) => Promise<void>;
@@ -182,13 +177,7 @@ export async function icebox(ws: string, opts: IceboxOptions = {}, deps: IceboxD
   await deps.stopApps(ws);
   await deps.stopChecks(ws);
 
-  const rows = Object.entries(w.repos).map(([repo, c]) => {
-    const wt = worktreePath(ws, repo);
-
-    return { repo, branch: c.branch ?? "", head: git.headSha(wt)?.slice(0, 7) ?? "", pr: c.pr };
-  });
-
-  const handoff = writeHandoff({ ws, reason: HandoffReason.Icebox, next: `\`overbridge thaw ${ws}\` was run${opts.dropWorktree ? " and recreated the worktrees" : ""}; check each PR and branch, then carry on`, rows });
+  const handoff = writeHandoff({ ws, reason: HandoffReason.Icebox, next: `\`overbridge thaw ${ws}\` was run${opts.dropWorktree ? " and recreated the worktrees" : ""}; check each PR and branch, then carry on`, rows: handoffRows(ws) });
   withState((s) => {
     const current = getWorkspace(s, ws);
     s.workspaces[ws] = { ...current, iceboxed: { since: new Date().toISOString(), handoff } };

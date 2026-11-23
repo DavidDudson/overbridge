@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
-import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, claimedCache, hit, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, snapshotTop, type PrInfo, type PrView, type TopApp, type TopLink, type TopSnapshot } from "../src/top";
+import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, claimedCache, hit, itemLabel, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, REST_MERGE_CHECK_MS, snapshotTop, type PrInfo, type PrView, type TopApp, type TopLink, type TopSnapshot, topRowsNeeded } from "../src/top";
 import { textWidth } from "../src/term";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -258,7 +258,7 @@ describe("refreshTop", () => {
     const notice = "GitHub rate limit reached: gh calls paused until 14:32:10, showing cached data";
     const reads: string[][] = [];
     const paused = refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => (reads.push(cmd), undefined), paused: notice });
-    expect(reads.filter((c) => c[0] === "gh")).toEqual([]);
+    expect(reads.filter((c) => c[0] === "gh" && c[1] === "pr")).toEqual([]);
     expect(paused.message).toBe(notice);
     expect(paused.links).toEqual(first.links);
     expect(paused.prsOpen).toBe(first.prsOpen);
@@ -276,14 +276,104 @@ describe("refreshTop", () => {
     expect(claimedCache("w1", paused).merged).toBeUndefined();
   });
 
+  describe("REST merge check while GraphQL cannot answer", () => {
+    const isRest = (cmd: string[]) => cmd[1] === "api" && cmd[2]?.startsWith("repos/") === true;
+    const restReply = (mergedAt: string | null) => JSON.stringify({ merged_at: mergedAt, head: "resthead" });
+
+    /** GraphQL reads fail; REST answers with `rest` and every call is recorded. */
+    function restOnly(rest: string | undefined) {
+      const calls: string[][] = [];
+
+      const exec = (cmd: string[]) => {
+        calls.push(cmd);
+
+        return isRest(cmd) ? rest : undefined;
+      };
+
+      return { exec, restCalls: () => calls.filter(isRest) };
+    }
+
+    test("a PR GraphQL could not read is found merged through REST", () => {
+      const { exec, restCalls } = restOnly(restReply("2026-11-01T00:00:00Z"));
+      expect(refreshTop("w1", { provider: () => fakeProvider(items), exec }).merged).toEqual({ r: "resthead" });
+      expect(restCalls()).toEqual([["gh", "api", "repos/{owner}/{repo}/pulls/3", "--jq", "{merged_at, head: .head.sha}"]]);
+    });
+
+    test("while gh is paused for GraphQL only, REST still finds the merge", () => {
+      refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", {}) });
+      const { exec } = restOnly(restReply("2026-11-01T00:00:00Z"));
+      expect(refreshTop("w1", { provider: () => fakeProvider(items), exec, paused: "paused" }).merged).toEqual({ r: "resthead" });
+    });
+
+    test("while REST is paused too, no REST call is made", () => {
+      const { exec, restCalls } = restOnly(restReply("2026-11-01T00:00:00Z"));
+      expect(refreshTop("w1", { provider: () => fakeProvider(items), exec, paused: "paused", restPaused: "paused" }).merged).toBeUndefined();
+      expect(restCalls()).toEqual([]);
+    });
+
+    test.each([
+      ["fails", undefined],
+      ["says the PR is open", restReply(null)],
+    ])("a REST read that %s leaves merged unset, and waits before asking again", (_, rest) => {
+      const start = 1_000_000;
+      const first = restOnly(rest);
+      const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: first.exec, now: () => start });
+      expect(cache.merged).toBeUndefined();
+      expect(cache.restCheckedAt).toBe(start);
+      const soon = restOnly(restReply("2026-11-01T00:00:00Z"));
+      expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: soon.exec, now: () => start + REST_MERGE_CHECK_MS - 1 }).merged).toBeUndefined();
+      expect(soon.restCalls()).toEqual([]);
+      expect(refreshTop("w1", { provider: () => fakeProvider(items), exec: soon.exec, now: () => start + REST_MERGE_CHECK_MS }).merged).toEqual({ r: "resthead" });
+    });
+
+    test("a PR GraphQL read makes no REST call", () => {
+      const calls: string[][] = [];
+      refreshTop("w1", { provider: () => fakeProvider(items), exec: (cmd) => (calls.push(cmd), prJson("OPEN", {})) });
+      expect(calls.filter(isRest)).toEqual([]);
+    });
+  });
+
   test("caches the headline, the item link and the PR link", () => {
     const cache = refreshTop("w1", { provider: () => fakeProvider(items), exec: () => prJson("OPEN", { title: "" }) });
     expect(cache.headline).toBe("12 Add dark mode");
     expect(cache.links).toEqual([
-      { label: "12", url: "https://fake.test/items/12" },
+      { label: "12", url: "https://fake.test/items/12", item: { id: "12", title: "Add dark mode", status: "Open" } },
       { label: "PR #3", url: "https://host/o/r/pull/3", status: "mergeable", pr: { repo: "r", number: 3, title: "", draft: false, dir: join(tmp, "w1", "r"), stack: [], reviewers: [{ name: "Copilot", state: "none", url: "https://host/o/r/pull/3" }] } },
     ]);
     expect(readTopCache("w1")).toEqual(cache);
+  });
+
+  test("caches one item link per level of the item's hierarchy, top first", () => {
+    const tree = [
+      { id: "1", title: "Speed", url: "x" },
+      { id: "5", title: "Dashboard", url: "x" },
+      ...items,
+    ];
+
+    const cache = refreshTop("w1", { provider: () => fakeProvider(tree, "github", ["1"], { "12": "5", "5": "1" }), exec: () => prJson("OPEN", { title: "" }) });
+    expect(cache.links.filter((l) => l.item).map((l) => [l.url, l.item])).toEqual([
+      ["https://fake.test/items/1", { id: "1", title: "Speed", status: "Done" }],
+      ["https://fake.test/items/5", { id: "5", title: "Dashboard", status: "Open" }],
+      ["https://fake.test/items/12", { id: "12", title: "Add dark mode", status: "Open" }],
+    ]);
+  });
+
+  test("a forced refresh rereads the hierarchy, so a status change shows at once", () => {
+    let status = "Open";
+    let calls = 0;
+    const p = () => ({ ...fakeProvider(items), lineage: (id: string) => (calls++, [{ id, title: "Add dark mode", status, url: "u" }]) });
+    refreshTop("w1", { provider: p, exec: () => prJson() });
+    status = "Done";
+    expect(refreshTop("w1", { provider: p, exec: () => prJson() }).links[0]!.item!.status).toBe("Open");
+    expect(calls).toBe(1);
+    expect(refreshTop("w1", { provider: p, exec: () => prJson(), force: true }).links[0]!.item!.status).toBe("Done");
+    expect(calls).toBe(2);
+  });
+
+  test("with no lineage the claimed item still gets its link, with its title and no status", () => {
+    const cache = refreshTop("w1", { provider: () => ({ ...fakeProvider(items), lineage: () => [] }), exec: () => prJson("OPEN", { title: "" }) });
+    expect(cache.links[0]).toEqual({ label: "12", url: "https://fake.test/items/12", item: { id: "12", title: "Add dark mode", status: "" } });
+    expect(buttons(snap({ links: cache.links }))[0]!.key).toBe("i");
   });
 
   test("a stacked claim caches every layer, bottom first, and counts only the claimed PR", () => {
@@ -566,6 +656,33 @@ describe("button keys", () => {
       "🔀 diff": "d",
     });
     expect(cell(buttons(s)[1]!)).toBe("[ 🟢 PR #3 · p ]");
+  });
+
+  test("item links read ENG-12 (status): title, each on its own row, and only the claimed item gets i", () => {
+    const item = (id: string, title: string) => ({ label: id, url: id, item: { id, title, status: "In Progress" } });
+    const s = snap({ links: [item("ENG-1", "Initiative"), item("ENG-2", "Epic"), item("ENG-3", "Task"), { label: "PR #3", url: "up", status: "mergeable" }] });
+    const b = buttons(s);
+    expect(b.slice(0, 3).map((x) => [x.label, x.key, x.itemRow])).toEqual([
+      ["📋 ENG-1 (In Progress): Initiative", undefined, 0],
+      ["📋 ENG-2 (In Progress): Epic", undefined, 1],
+      ["📋 ENG-3 (In Progress): Task", "i", 2],
+    ]);
+    const f = layoutTop(s, 200);
+    expect(f.placed.slice(0, 3).map((p) => [p.row, p.col])).toEqual([[1, 2], [2, 2], [3, 2]]);
+    expect(f.placed.find((p) => p.button.label.includes("PR #3"))!.row).toBe(4);
+    expect(topRowsNeeded(s, 200)).toBe(f.rows.length);
+  });
+
+  test("an item label leaves out an unknown status and title, and strips control bytes", () => {
+    expect(itemLabel({ id: "ENG-1", title: "", status: "" })).toBe("ENG-1");
+    expect(itemLabel({ id: "ENG-1", title: "x", status: "" })).toBe("ENG-1: x");
+    expect(itemLabel({ id: "ENG-1", title: "a\x1b[2Jb", status: "Do\x07ne" })).toBe("ENG-1 (Done): a[2Jb");
+  });
+
+  test("item rows with no PR keep the launchers on the button row, with no actions divider", () => {
+    const f = layoutTop(snap({ links: [{ label: "ENG-1", url: "u", item: { id: "ENG-1", title: "Task", status: "To Do" } }] }), 200);
+    expect(f.rules).toEqual([]);
+    expect(new Set(f.placed.slice(1).map((p) => p.row))).toEqual(new Set([2]));
   });
 
   test("several PRs get p, u, y...; no key clashes with the panel's own", () => {

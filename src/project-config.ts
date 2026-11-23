@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type AgentLaunch, envNameFault } from "./agent-launch";
 import { AGENT_KINDS, AgentKind } from "./agent-kind";
 import { DEFAULT_CLASSES, MAX_NICE, MIN_WORKSPACE_NICE, type PriorityClass, type PriorityRule } from "./check-priority";
 import { repoOf, root, worktreePath } from "./paths";
@@ -927,7 +928,7 @@ export const configPath = (repoDir: string) => join(repoDir, CONFIG_FILE);
 /** The root config, `<root>/config.yml`: settings that live outside the repos. */
 export const ROOT_CONFIG_FILE = "config.yml";
 export const rootConfigPath = () => join(root(), ROOT_CONFIG_FILE);
-const ROOT_KEYS = ["version", "defaults", "owners", "repos", "skill-extensions", "guard", "github-orgs", "priority-classes", "agent", "cpu-priority"];
+const ROOT_KEYS = ["version", "defaults", "owners", "repos", "skill-extensions", "guard", "github-orgs", "priority-classes", "agent", "agent-launch", "cpu-priority"];
 const GUARD_KEYS = ["read-paths", "deny"];
 
 /**
@@ -962,6 +963,63 @@ export interface RootLayers {
   agent: AgentKind;
   /** Whether each workspace's processes get its class's CPU priority (`cpu-priority: false` turns it off). */
   cpuPriority: boolean;
+  /** Env and args each kind of agent starts with (`agent-launch.<kind>`); root-only, so a branch cannot change how agents start. */
+  agentLaunch: Partial<Record<AgentKind, AgentLaunch>>;
+}
+
+/** `agent-launch`: per agent kind, an `env` mapping (scalar values read as strings) and an `args` list. */
+function parseAgentLaunch(p: Problems, raw: Json | undefined): Partial<Record<AgentKind, AgentLaunch>> {
+  if (raw === undefined || raw === null) return {};
+
+  if (!isRecord(raw)) {
+    p.add("agent-launch", `expected a mapping of agent (${AGENT_KINDS.join(", ")}) to env and args`);
+
+    return {};
+  }
+
+  p.unknownKeys(raw, AGENT_KINDS, "agent-launch");
+
+  return Object.fromEntries(
+    AGENT_KINDS.flatMap((kind): [AgentKind, AgentLaunch][] => {
+      const layer = raw[kind];
+      const at = `agent-launch.${kind}`;
+
+      if (layer === undefined || layer === null) return [];
+
+      if (!isRecord(layer)) {
+        p.add(at, "expected a mapping with env and args");
+
+        return [];
+      }
+
+      p.unknownKeys(layer, ["env", "args"], at);
+      const env = layer.env;
+
+      if (env !== undefined && env !== null && !isRecord(env)) p.add(`${at}.env`, "expected a mapping of variable name to value");
+
+      const pairs = isRecord(env)
+        ? Object.entries(env).flatMap(([name, value]): [string, string][] => {
+            const fault = envNameFault(name);
+
+            if (fault !== undefined) {
+              p.add(`${at}.env.${name}`, fault);
+
+              return [];
+            }
+
+            if (!isString(value) && !isNumber(value) && !isBoolean(value)) {
+              p.add(`${at}.env.${name}`, "expected a string, number or boolean");
+
+              return [];
+            }
+
+            return [[name, String(value)]];
+          })
+        : [];
+
+      return [[kind, { env: Object.fromEntries(pairs), args: p.stringList(layer, "args", at) ?? [] }]];
+    }),
+  );
 }
 
 /** Read and check `<root>/config.yml`. A missing or empty file has no layers. */
@@ -971,7 +1029,7 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
 
 /** Check parsed root config YAML (`file` names it in errors), validating every layer with `validateConfig`. */
 export function rootLayersFrom(raw: Json | undefined, file: string): RootLayers {
-  const layers: RootLayers = { file, owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: AgentKind.Claude, cpuPriority: true };
+  const layers: RootLayers = { file, owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: AgentKind.Claude, cpuPriority: true, agentLaunch: {} };
 
   if (raw === null || raw === undefined) return layers;
 
@@ -1017,6 +1075,7 @@ export function rootLayersFrom(raw: Json | undefined, file: string): RootLayers 
   }
 
   layers.cpuPriority = raw["cpu-priority"] !== false;
+  layers.agentLaunch = parseAgentLaunch(p, raw["agent-launch"]);
 
   if (classes?.length) layers.checkClasses = classes;
 

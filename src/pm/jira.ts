@@ -2,7 +2,7 @@ import { isJsonObject, isJsonString, type JsonValue } from "../json";
 import type { ProjectManagement } from "../project-config";
 import { fail, run } from "../util";
 import type { Runner } from "./github";
-import { ItemStatus, namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
+import { type ItemNode, ItemStatus, namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
 
 const KEY_RE = /^[A-Z][A-Z0-9_]*$/;
 
@@ -17,6 +17,9 @@ const textAt = (root: JsonValue | undefined, path: string[]): string | undefined
 
   return isJsonString(node) ? node : undefined;
 };
+
+/** How many levels `lineage` climbs at most: Initiative, Epic, Task and Subtask, plus one spare level. */
+const MAX_LINEAGE = 5;
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -45,7 +48,7 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
   };
 
   /** The fields of a ticket as `jira issue view --raw` prints it that the provider reads. */
-  type Raw = { summary?: string; issueType?: string; statusCategory?: string };
+  type Raw = { summary?: string; issueType?: string; statusCategory?: string; status?: string; parent?: string };
 
   /** The ticket, or undefined when it can't be read. */
   const view = (id: string): Raw | undefined => {
@@ -60,6 +63,8 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
       const summary = textAt(root, ["fields", "summary"]);
       const issueType = textAt(root, ["fields", "issuetype", "name"]);
       const statusCategory = textAt(root, ["fields", "status", "statusCategory", "key"]);
+      const status = textAt(root, ["fields", "status", "name"]);
+      const parent = textAt(root, ["fields", "parent", "key"]);
 
       if (summary !== undefined) raw.summary = summary;
 
@@ -67,10 +72,35 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
 
       if (statusCategory !== undefined) raw.statusCategory = statusCategory;
 
+      if (status !== undefined) {
+        raw.status = status;
+      }
+
+      if (parent !== undefined) {
+        raw.parent = parent;
+      }
+
       return raw;
     } catch {
       return undefined;
     }
+  };
+
+  /** `key` and its parents, top first; stops at a ticket it can't read, a loop or `MAX_LINEAGE` levels. */
+  const climb = (key: string, seen: readonly string[]): ItemNode[] => {
+    if (seen.length >= MAX_LINEAGE || seen.includes(key)) {
+      return [];
+    }
+
+    const raw = view(key);
+
+    if (!raw) {
+      return [];
+    }
+
+    const node: ItemNode = { id: key, title: raw.summary ?? "", status: raw.status ?? "", url: base ? `${base}/browse/${key}` : "" };
+
+    return [...(raw.parent ? climb(raw.parent, [...seen, key]) : []), node];
   };
 
   const names = namer(config, { branch: "feat/{id}-{slug}", workspace: "{id}" }, normalize, (id) => provider.itemTypes(id));
@@ -108,6 +138,8 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
 
       return category === "done" ? ItemStatus.Done : ItemStatus.Open;
     },
+
+    lineage: (id) => climb(normalize(id), []),
 
     assigned() {
       const jql = `project = ${key} AND assignee = currentUser() AND statusCategory != Done AND issuetype != Epic`;

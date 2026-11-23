@@ -51,6 +51,17 @@ describe("detail", () => {
     expect(rows).toHaveLength(14);
     expect(rows.every((r) => strip(r).length <= 60)).toBe(true);
   });
+  test("the footer shows a message in place of the legend, such as why o could not open the item", () => {
+    const rows = renderDetail(list[0]!, list, 14, 80, "ENG-1 has no link").map(strip);
+    expect(rows.at(-2)).toContain("ENG-1 has no link");
+    expect(renderDetail(list[0]!, list, 14, 80).map(strip).at(-2)).toContain("o open");
+  });
+
+  test("the epic line strips control bytes from the epic's title", () => {
+    const item = rank([row("6", { epic: "ENG-9", epicTitle: "Dark\nmode" })])[0]!;
+    expect(detailLines(item, [item])).toContain("epic: ENG-9 Darkmode");
+  });
+
   test("the list view names the filter, and an empty match says so", () => {
     const text = renderWorklist([], 0, 0, 12, 70, "", [], "zzz").map(strip).join("\n");
     expect(text).toContain("nothing matches /zzz");

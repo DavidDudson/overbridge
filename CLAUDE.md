@@ -25,6 +25,10 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   `src/server-client.ts` is `serverRefresh` for the panel and sweep. A caller that gets `undefined` runs its old path, so keep every
   new caller falling back, and keep panes reading cache files. Tests that call a client pass `start: false` so none starts a real server.
 - Work items: `src/pm/` (`Provider` interface, `github.ts`, `jira.ts`, title cache); `src/item.ts` is `overbridge item`.
+  `Provider.lineage` returns an item and its parents, top first (Initiative, Epic, Task, Subtask). `refreshLineage` in `src/pm/cache.ts`
+  keeps it in `<meta>/lineage.json` for `TITLE_TTL_MS`, and the top panel shows one link row per level, with `i` on the claimed item.
+  `jira issue list --raw` gives a parent's key only, so `ancestorsOf` in `src/pm/board-jira.ts` reads the tickets above the listed
+  ones, one `jira issue list` per level, and each work row can name its epic.
   Providers and apps take injectable runners so tests never need `gh`, `jira` or real processes.
 - Apps: `src/apps.ts` (launch, teardown, port pool, status) and `src/app-command.ts` (`overbridge app`).
 - Panes: `src/top.ts` (pure model, layout, cache) + `src/top-run.ts` (tty loop); `src/sidebar.ts`; shared terminal
@@ -32,6 +36,8 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   (`readView`: one shared file, refreshed by one pane per second), do their full poll only on the focused tab
   (`shouldPoll`, every `HIDDEN_POLL_MS` when hidden), and write a frame only when it changed (`createPainter`); the sidebar's bottom border shows `src/version.ts`'s version (package.json's when real,
   else `OVERBRIDGE_VERSION`, which the flake sets to the git rev, else `dev`), read once when the pane starts; `src/agent-state.ts` reads what `src/agent-hook.ts` writes; `src/panes.ts` is the terminal/diff/claude pane toggles and `overbridge diff`; `src/pr-actions.ts` is the top panel's Ready/Draft and Merge (PR or `gh stack`); `src/next.ts` picks the next tab needing attention; `src/go.ts` is `overbridge go` (tab by sidebar number, name, next/prev; `sessionExec` in `src/tab.ts` reaches the session by name from outside zellij); `src/limits.ts` reads the usage limits Claude's statusline writes. `src/gauge.ts` reads the per-card context gauge (`<meta>/context/<ws>.json`, statusline) and the selected card's last-turn receipt (`<meta>/agent/<ws>.turn.json`, kept by `recordTurn` in `src/agent-state.ts`) through `cachedRead`, an mtime cache. Pure parts are unit-tested.
+  `src/top-fit.ts` fits the top pane's height to its buttons: `topRowsNeeded` in `src/top.ts` gives the rows, `planFit` picks a
+  `Mux.resizePane` step, and the pane steps only while its tab is focused and only when that height changes, so a resize by hand stays.
   `src/card-look.ts` is the pure card look (elapsed-time tint, glyph pulse, title tone, PR state as `HealthInput`); it reuses `pr-look.ts`/`anim.ts`/`tab-badge.ts` from the PR tabs, so colours and icons mean the same everywhere.
 - `src/shell.ts` resolves a repo's dev shell (`shell` key): prefix or cached env (`$XDG_CACHE_HOME/overbridge/shell`); used by `overbridge shell`, `claude()` (one repo: agent starts inside it, marker `<meta>/agent/<ws>.shell`), the terminal pane and the generated CLAUDE.md. Keep it tool-agnostic.
 - `src/check-queue.ts` is `overbridge check`: tickets in `<meta>/check-queue/`, no lock. `gateFor` starts a ticket once every live
@@ -92,6 +98,8 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   Once every claimed PR has merged (`TopCache.merged`, the PR head commits), `src/merge-sweep.ts` (`overbridge top sweep`) removes the workspace
   through `beginRemoval` with `Landing.IfFocused`, after `mergedClean` checks that each HEAD is its PR head. A squash merge
   leaves no remote branch holding those commits, so `hasUnpushed` cannot do that check. Unsaved work sets `removalBlocked`, which the sidebar card shows.
+  When GraphQL could not read a claimed PR (rate limited, or `gh` paused), `refreshTop` asks REST (`restMergedHeads` in `src/merge-rest.ts`),
+  whose budget is separate, at most every `REST_MERGE_CHECK_MS`; a failed REST read leaves `merged` unset. The gate skips it only when REST is limited too (`RateGate.restMessage`).
   The sidebar starts the sweep; `claimSweep` (`src/sweep-trigger.ts`) lets one sidebar run it per `MERGE_SWEEP_MS`.
   Every removal is visible: `beginRemoval` stores its `CleanupCause` in `removing`, `finishRemoval` appends the outcome to
   `State.cleanups` (`src/cleanup-log.ts`), and the sidebar shows a countdown to the next sweep, the removals in flight and those finished since the last sweep (`cleanupRows`).
@@ -114,6 +122,13 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   `up`/`layout`. Any new code that lists workspaces for tabs must skip `isIceboxed`.
   `f` in a sidebar runs `icebox` on its own workspace in a child (`runFreeze`); the `@frozen` tab (`src/frozen.ts` pure rows and
   render, `src/frozen-run.ts` pane) lists iceboxed workspaces from state and `t` runs `thaw` in a child (`runThaw`).
+- `src/relaunch.ts` is `overbridge relaunch`: a handoff, the workspace's `WorkspaceState.launch`, then a restart. `claude()` in
+  `src/commands.ts` supervises the agent (async spawn, one `RELAUNCH_SIGNAL` handler for its life, `<meta>/agent/<ws>.launcher.json`)
+  and restarts it when that signal arrives with a request file; it stops the agent's whole process tree, since a dev-shell
+  `enter` prefix makes the child a wrapper. `OVERBRIDGE_NO_SUPERVISOR` runs the agent plainly. `src/agent-launch.ts` is the pure
+  launch settings (state and config import it); `src/agent-supervisor.ts` is the supervisor protocol (files, signal, process tree).
+  Launch settings are the root-only `agent-launch.<kind>` under the workspace's own (`agentLaunchOf`), so `up`, `tab`, and `thaw` keep them.
+  An agent (under a supervisor, or `CLAUDECODE=1`) may relaunch only its own workspace and only with `onlyShorthands`; both guards block `--env` and `--` args.
 - `src/explore.ts` is the `@explore` tab (`overbridge explore`, pane in `src/explore-run.ts`): a repo picker, then the top
   panel (`topPanel` with `PanelOptions`: its own `TopScope`, only the terminal pane, a `back` button) over a detached
   checkout of the default branch at `<root>/@explore/<repo>`. `syncPlan` moves that checkout only while it is clean and on

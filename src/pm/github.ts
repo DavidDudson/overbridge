@@ -1,3 +1,4 @@
+import { isJsonObject, isJsonString } from "../json";
 import type { ProjectManagement } from "../project-config";
 import { fail, run, type RunResult } from "../util";
 import { ItemStatus, namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
@@ -72,6 +73,35 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
       }
 
       return r.stdout === "CLOSED" ? ItemStatus.Done : ItemStatus.Open;
+    },
+
+    // REST, not GraphQL: lineage runs per workspace, and every workspace shares one GraphQL budget
+    lineage(id) {
+      const n = id.replace(/^#/, "");
+
+      // the id goes into a URL path, so anything but a number could reach another endpoint
+      if (!NUMBER_RE.test(n)) {
+        return [];
+      }
+
+      const r = gh(["api", `repos/${repo()}/issues/${n}`]);
+
+      if (!r.ok || !r.stdout) {
+        return [];
+      }
+
+      try {
+        const v: unknown = JSON.parse(r.stdout);
+
+        // the issues endpoint also answers for a pull request, which is not a work item
+        if (!isJsonObject(v) || !isJsonString(v.title) || v.pull_request !== undefined) {
+          return [];
+        }
+
+        return [{ id: n, title: v.title, status: isJsonString(v.state) ? v.state.toLowerCase() : "", url: isJsonString(v.html_url) ? v.html_url : provider.link(n) }];
+      } catch {
+        return [];
+      }
     },
 
     assigned() {

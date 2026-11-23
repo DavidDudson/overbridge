@@ -19,6 +19,10 @@ export interface WorkRow {
   blockedBy: string[];
   /** Key of the parent item, if any. */
   parent?: string;
+  /** Key of the epic the item sits under (its parent, or its parent's), if any. */
+  epic?: string;
+  /** The epic's title, when known. */
+  epicTitle?: string;
   /** 0 (most urgent) to 3, from a provider's own priority field. Unset falls back to the labels. */
   priority?: number;
   /** The provider's item type, such as Jira's `Story` or `Bug`. Unset when the provider has none. */

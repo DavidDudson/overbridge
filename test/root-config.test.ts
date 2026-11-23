@@ -69,9 +69,9 @@ describe("overlay", () => {
 
 describe("loadRootLayers", () => {
   test("a missing or empty file has no layers", () => {
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude", cpuPriority: true });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude", cpuPriority: true, agentLaunch: {} });
     writeRoot("");
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude", cpuPriority: true });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude", cpuPriority: true, agentLaunch: {} });
   });
 
   test("reads defaults and per-repo layers", () => {
@@ -87,6 +87,7 @@ describe("loadRootLayers", () => {
       checkClasses: DEFAULT_CLASSES,
       agent: "claude",
       cpuPriority: true,
+      agentLaunch: {},
     });
   });
 
@@ -118,6 +119,19 @@ describe("loadRootLayers", () => {
     expect(thrown(() => loadRootLayers())).toContain("priority-classes: expected a non-empty list");
     writeRoot("priority-classes:\n  - { name: a, icon: x, default: 'yes' }\n");
     expect(thrown(() => loadRootLayers())).toContain("priority-classes[0].default: expected true or false");
+  });
+
+  test("agent-launch reads env and args per agent, values as strings", () => {
+    writeRoot("agent-launch:\n  claude:\n    env: { CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: 0, NAME: x }\n    args: [--chrome]\n");
+    expect(loadRootLayers().agentLaunch).toEqual({ claude: { env: { CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: "0", NAME: "x" }, args: ["--chrome"] } });
+    writeRoot("agent-launch:\n  codex: {}\n");
+    expect(thrown(() => loadRootLayers())).toContain("agent-launch.codex: unknown key");
+    writeRoot("agent-launch:\n  claude:\n    env: { 1BAD: x }\n");
+    expect(thrown(() => loadRootLayers())).toContain("agent-launch.claude.env.1BAD: expected a name");
+    writeRoot("agent-launch:\n  claude:\n    env: { OVERBRIDGE_ROOT: /x }\n");
+    expect(thrown(() => loadRootLayers())).toContain("agent-launch.claude.env.OVERBRIDGE_ROOT: OVERBRIDGE_* variables are set by overbridge");
+    writeRoot("agent-launch:\n  claude:\n    args: --chrome\n");
+    expect(thrown(() => loadRootLayers())).toContain("agent-launch.claude.args: expected a list of strings");
   });
 
   test("cpu-priority is on unless set to false", () => {

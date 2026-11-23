@@ -7,6 +7,15 @@ export interface WorkItem {
   url: string;
 }
 
+/** One level of an item's hierarchy, such as an Initiative, Epic, Task or Subtask. */
+export interface ItemNode {
+  id: string;
+  title: string;
+  /** The provider's own status name, such as Jira's `In Progress` or GitHub's `open`. Empty when unknown. */
+  status: string;
+  url: string;
+}
+
 /** Whether an item still needs work. */
 export const ItemStatus = { Open: "open", Done: "done" } as const;
 
@@ -36,6 +45,8 @@ export interface Provider {
   title(id: string): string | undefined;
   /** Whether the item is finished (a closed issue, a ticket in a Done status); undefined when it can't be read. Hits the network. */
   status(id: string): ItemStatus | undefined;
+  /** The item and its parents, top first (Initiative, Epic, Task, Subtask); empty when the item can't be read. Hits the network. */
+  lineage(id: string): ItemNode[];
   /** Open items assigned to me. */
   assigned(): WorkItem[];
   /**
