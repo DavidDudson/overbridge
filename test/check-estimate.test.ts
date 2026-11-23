@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type EstimateStore, estimateFor, estimateKeys, estimatesFile, etaSlots, formatDuration, KEPT_RUNS, overallMs, queueEtas, readEstimates, recordRunTime, seedEstimates, withRun, workspaceDone } from "../src/check-estimate";
+import { type EstimateStore, estimateFor, exactEstimateFor, estimateKeys, estimatesFile, etaSlots, formatDuration, KEPT_RUNS, overallMs, queueEtas, readEstimates, recordRunTime, seedEstimates, withRun, workspaceDone } from "../src/check-estimate";
 import type { Ticket } from "../src/check-queue";
 
 const NOW_MS = 1_000_000;
@@ -12,6 +12,22 @@ const ticket = (pid: number, extra: Partial<Ticket> = {}): Ticket => ({ pid, ws:
 const name = (t: Ticket) => String(t.pid);
 
 const runs = (command: string, ...ms: number[]): EstimateStore => ms.reduce<EstimateStore>((store, runMs) => withRun(store, "app", command, runMs), {});
+
+describe("exactEstimateFor", () => {
+  test("only the exact command's own runs, never its group's", () => {
+    const store = withRun(withRun({}, "app", "just test a.ts", 3_000), "app", "just test a.ts", 5_000);
+    expect(exactEstimateFor(store, "app", "just test a.ts")).toEqual({ runMs: 4_000, runs: 2 });
+    expect(exactEstimateFor(store, "app", "just test")).toBeUndefined();
+    expect(estimateFor(store, "app", "just test")).toEqual({ runMs: 4_000, runs: 2 });
+  });
+
+  test("none for a command too long for its key to tell apart", () => {
+    const prefix = `just test ${"a".repeat(600)}`;
+    const store = withRun({}, "app", `${prefix} one`, 1_000);
+    expect(exactEstimateFor(store, "app", `${prefix} one`)).toBeUndefined();
+    expect(exactEstimateFor(store, "app", `${prefix} two`)).toBeUndefined();
+  });
+});
 
 describe("estimateFor", () => {
   test("is the median of the exact command's runs", () => {

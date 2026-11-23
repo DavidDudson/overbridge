@@ -1,7 +1,7 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ticket } from "./check-queue";
-import { commandGroup, redactCommand } from "./history";
+import { commandGroup, REDACTED_MAX_CHARS, redactCommand } from "./history";
 import { isRecord } from "./util";
 
 /**
@@ -54,6 +54,20 @@ export function estimateFor(store: EstimateStore, repo: string, command: string)
     .find((r) => r.length > 0);
 
   return runs ? { runMs: median(runs), runs: runs.length } : undefined;
+}
+
+/**
+ * The usual run time of exactly `command` in `repo`, from its own runs only; undefined before its first, and for a
+ * command too long for its key to tell it from another that starts the same way.
+ */
+export function exactEstimateFor(store: EstimateStore, repo: string, command: string): Estimate | undefined {
+  if (redactCommand(command).length >= REDACTED_MAX_CHARS) {
+    return undefined;
+  }
+
+  const runs = store[estimateKeys(repo, command)[0]] ?? [];
+
+  return runs.length ? { runMs: median(runs), runs: runs.length } : undefined;
 }
 
 const isRuns = (v: unknown): v is number[] => Array.isArray(v) && v.every((n) => Number.isFinite(n) && n >= 0);
