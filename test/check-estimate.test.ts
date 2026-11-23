@@ -14,6 +14,15 @@ const name = (t: Ticket) => String(t.pid);
 
 const runs = (command: string, ...ms: number[]): EstimateStore => ms.reduce<EstimateStore>((store, runMs) => withRun(store, "app", command, runMs), {});
 
+describe("estimateFor on long commands", () => {
+  test("none for a command too long for its key to tell apart", () => {
+    const prefix = `just test ${"a".repeat(600)}`;
+    const store = withRun({}, "app", `${prefix} one`, 1_000);
+    expect(estimateFor(store, "app", `${prefix} one`)).toBeUndefined();
+    expect(estimateFor(store, "app", `${prefix} two`)).toBeUndefined();
+  });
+});
+
 describe("estimateFor", () => {
   test("is the median of the exact command's runs", () => {
     expect(estimateFor(runs("just test", 10_000, 30_000, 20_000), "app", "just test")).toEqual({ runMs: 20_000, runs: 3 });

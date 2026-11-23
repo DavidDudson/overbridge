@@ -84,7 +84,7 @@ describe("queue order by class", () => {
 
   test("a higher class queued later starts ahead of a waiting lower one, unless an override moves it", () => {
     const settings = defaultCheckQueue();
-    const machine = { load1: 0, cores: 8 };
+    const machine = { load1: 0, cores: 8, cpuPercent: 0 };
     const debt = ranked(1, 1, 2);
     const feature = ranked(2, 2, 0);
     expect(gateFor(feature, [debt, feature], settings, machine, 10)).toBe(Gate.Start);
@@ -94,7 +94,7 @@ describe("queue order by class", () => {
 
   test("while a ticket from an older build is live, the gate uses time order and ignores overrides", () => {
     const settings = defaultCheckQueue();
-    const machine = { load1: 0, cores: 8 };
+    const machine = { load1: 0, cores: 8, cpuPercent: 0 };
     const legacy = ticket(1, 1);
     const debt = ranked(2, 2, 2);
     const feature = ranked(3, 3, 0);
@@ -109,16 +109,17 @@ describe("queue order by class", () => {
     const fresh = ticket(1, 1, { rank: 2, runPid: 10, runningSinceMs: NOW_MS });
     const settled = { ...fresh, runningSinceMs: 0 };
     const feature = ranked(5, 5, 0);
-    const nearLimit = { load1: 5, cores: 8 };
-    expect(gateFor(feature, [fresh, feature], defaultCheckQueue(), nearLimit, NOW_MS)).toBe(Gate.Load);
-    expect(gateFor(feature, [settled, feature], defaultCheckQueue(), nearLimit, NOW_MS)).toBe(Gate.Start);
+    const nearLimit = { load1: 5, cores: 8, cpuPercent: 0 };
+    const settings = { ...defaultCheckQueue(), maxLoadPercent: 70 };
+    expect(gateFor(feature, [fresh, feature], settings, nearLimit, NOW_MS)).toBe(Gate.Load);
+    expect(gateFor(feature, [settled, feature], settings, nearLimit, NOW_MS)).toBe(Gate.Start);
   });
 
   test("max-parallel counts runs that sort behind the waiting ticket", () => {
     const settings = { ...defaultCheckQueue(), maxParallel: 2 };
     const running = (pid: number) => ticket(pid, pid, { rank: 2, runPid: pid * 10, runningSinceMs: 0 });
     const feature = ranked(9, 9, 0);
-    expect(gateFor(feature, [running(1), running(2), feature], settings, { load1: 0, cores: 8 }, 10_000_000)).toBe(Gate.Parallel);
+    expect(gateFor(feature, [running(1), running(2), feature], settings, { load1: 0, cores: 8, cpuPercent: 0 }, 10_000_000)).toBe(Gate.Parallel);
   });
 });
 

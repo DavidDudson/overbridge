@@ -1,7 +1,7 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Ticket } from "./check-queue";
-import { type CheckRecord, redactCommand } from "./history";
+import { type CheckRecord, REDACTED_MAX_CHARS, redactCommand } from "./history";
 import { isRecord } from "./util";
 
 /**
@@ -45,8 +45,15 @@ export function withRun(store: EstimateStore, repo: string, command: string, run
   return Object.fromEntries([...Object.entries(store), [key, [...(store[key] ?? []), runMs].slice(-KEPT_RUNS)] as const]);
 }
 
-/** The usual run time of exactly `command` in `repo`, or undefined when that command has never finished there. */
+/**
+ * The usual run time of exactly `command` in `repo`; undefined before its first run, and for a command too long for
+ * its key to tell it from another that starts the same way.
+ */
 export function estimateFor(store: EstimateStore, repo: string, command: string): Estimate | undefined {
+  if (redactCommand(command).length >= REDACTED_MAX_CHARS) {
+    return undefined;
+  }
+
   const runs = store[estimateKey(repo, command)] ?? [];
 
   return runs.length ? { runMs: median(runs), runs: runs.length } : undefined;

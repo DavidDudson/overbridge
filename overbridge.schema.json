@@ -155,7 +155,12 @@
       "additionalProperties": false,
       "properties": {
         "max-load-percent": {
-          "description": "Beside a running check, start another only while the 1-minute load average is under this share of the cores; with none running, the first in line always starts. Over 100 allows more load than there are cores. Default 70.",
+          "description": "Beside a running check, start another only while the 1-minute load average is under this share of the cores; with none running, the first in line always starts. Over 100 allows more load than there are cores. The load average counts threads waiting on disk and locks too, so it is a backstop to max-cpu-percent. Default 300.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "max-cpu-percent": {
+          "description": "Beside a running check, start another only while the CPU, measured over the last second, is less busy than this (a run started in the last minute counts as one more busy core). Over 100 turns this gate off. Default 75.",
           "type": "integer",
           "minimum": 1
         },
@@ -171,6 +176,16 @@
           "minimum": 1
         },
         "wait-seconds": { "description": "Give up waiting for a turn after this long. Default 900.", "type": "integer", "minimum": 1 },
+        "bin-dirs": {
+          "description": "Repo-relative folders a bare program in a check is looked up in, nearest the current directory first, ahead of the dev shell's PATH. An empty list turns the lookup off. Default [\"node_modules/.bin\"].",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "skip-queue-seconds": {
+          "description": "A check whose last passing runs (at least 3 of the exact command) took under this long (the median) starts at once, skipping the queue and the CPU and load gates. 0 queues every check. Default 10.",
+          "type": "integer",
+          "minimum": 0
+        },
         "priority": {
           "description": "The class this repo's claims get when no priority-rules entry matches: a name from the root config.yml's priority-classes. Default: the class marked default there, else the first.",
           "type": "string",

@@ -431,7 +431,7 @@ Where it applies:
 ### Check queue
 
 `overbridge check [repo] [--ws name] [--timeout-seconds n] -- <cmd>` runs a heavy command, such as lint, typecheck,
-test or build, in queue order across every workspace. Several run at once while the machine's load leaves room. The skills send the repo's `commands.lint`,
+test or build, in queue order across every workspace. Several run at once while the machine's CPU and load leave room. The skills send the repo's `commands.lint`,
 `typecheck`, `test`, and `build` through it. The repo defaults to the one the current directory is in, then to the
 workspace's only repo.
 
@@ -442,18 +442,29 @@ workspace's only repo.
    up every owner with one `ps` per poll.
 2. **Load.** With nothing running, the first ticket in line starts at once, whatever the load: load from outside
    the queue (agents, panes, dev servers) can stay over the limit for hours, and a queue that runs nothing only adds
-   waiting. Beside a running check, the next ticket in line starts once the 1-minute load average is under
-   `max-load-percent` of the cores. The average takes about a minute to show a new run, so each run that
-   started in the last minute counts as up to one extra core of load. Set `max-parallel` to cap how many run at once;
+   waiting. Beside a running check, the next ticket in line starts once the CPU, measured over the last second, is
+   less busy than `max-cpu-percent` and the 1-minute load average is under `max-load-percent` of the cores. The load
+   average also counts threads waiting on disk and locks, so on a busy Mac it runs at about twice the CPU use; it
+   is only a backstop. Neither measure shows a new run at once, so each run that started in the last minute counts
+   as up to one extra busy core. Set `max-parallel` to cap how many run at once;
    `max-parallel: 1` runs them one at a time.
 3. **Run.** The command runs in the repo's dev shell, as with `overbridge shell`, in a process group of its own. A
    command started inside a held run, such as a git hook, runs straight away instead of queueing behind its parent.
 4. **Stop.** The command is killed (TERM, then KILL after 10 seconds) when it runs past `timeout-seconds` (exit 124),
    or when its process group uses no CPU for `stall-seconds` (exit 137). If a call cannot start within `wait-seconds`, it
    gives up with exit 75. Otherwise it exits with the command's own code.
+5. **Quick checks.** A check whose own passing runs took under `skip-queue-seconds` (the median of its last runs,
+   default 10) starts at once, past the queue and the CPU and load gates. It needs at least 3 passing runs of the exact
+   command: a failed run is not timed, and a command never borrows the time of others in its group.
+6. **One command.** A check is one command. `overbridge check` refuses a `sh -c` script that chains several with `;`,
+   `&&`, `||`, `&` or a newline (quotes, `$(...)`, backticks, `[[ ]]` and comments do not count), so queue each as
+   its own check, `cd` before the call and pipe its output with `pipefail` on, so a failed check still fails (`set -o pipefail; overbridge check -- vitest run a.ts | tail`). A bare
+   program found in one of `bin-dirs` (`node_modules/.bin` by default), such as `nx`, `vitest`, `eslint` or `tsc`,
+   runs from the nearest one between the current directory and the repo root, as `npx` picks it, ahead of the dev
+   shell's PATH. `bin-dirs: []` leaves every program to PATH.
 
 `--timeout-seconds` raises or lowers the time limit for one run. The tab sidebar shows each running command, how long
-it has run, and who is waiting.
+it has run, and who is waiting, under a count of the checks running and queued.
 
 **Priority.** Each workspace has a class, and checks start by class, then by queue time. The root `config.yml`
 lists the classes, highest first, under `priority-classes`; every repo shares one queue, so the list lives there
@@ -543,11 +554,14 @@ out, so move it up if it has to run.
 | `board.columns` | none | GitHub Projects v2 only: maps a `Status` column name (any case) to `todo`, `in-progress`, `blocked` or `done`. Unlisted names fall back to common ones (done, in progress, blocked), then to labels. Needs `gh auth refresh -s read:project` |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
 | `commands.lint`, `typecheck`, `test`, `build`, `format` | none | shell commands the skills run to check a change; a missing one means the repo has none |
-| `check-queue.max-load-percent` | `70` | beside a running check, start another only while the 1-minute load average is under this share of the cores (with none running, the first in line always starts); over 100 allows more load than cores. See [Check queue](#check-queue) |
+| `check-queue.max-load-percent` | `300` | beside a running check, start another only while the 1-minute load average is under this share of the cores (with none running, the first in line always starts); over 100 allows more load than cores. See [Check queue](#check-queue) |
+| `check-queue.max-cpu-percent` | `75` | beside a running check, start another only while the CPU, measured over the last second, is less busy than this; over 100 turns the gate off |
 | `check-queue.max-parallel` | none | run at most this many commands at once; unset leaves the load as the only limit |
 | `check-queue.timeout-seconds` | `180` | kill a queued run after this long; `--timeout-seconds` overrides it for one run |
 | `check-queue.stall-seconds` | `300` | kill a queued run once its processes have used no CPU for this long |
 | `check-queue.wait-seconds` | `900` | give up (exit 75) when a run cannot start for this long, because of the queue ahead, `max-parallel`, or the load |
+| `check-queue.skip-queue-seconds` | `10` | a check whose last passing runs (at least 3) took under this long starts at once, skipping the queue and the CPU and load gates; `0` queues every check |
+| `check-queue.bin-dirs` | `[node_modules/.bin]` | repo-relative folders a bare program in a check is looked up in, nearest the current directory first, before the dev shell's PATH; `[]` turns the lookup off |
 | `check-queue.priority` | the default class | the class this repo's claims get when no rule matches: a name from the root `priority-classes` |
 | `check-queue.priority-rules` | none | list of `{ priority, branch?, item?, type?, label? }`; the first rule whose regexes all match the claim or work item sets the class, for the check queue and the `@work` list |
 | `icebox.idle-days` | none | suggest iceboxing a workspace whose claimed PRs are all drafts and idle this many days (last commit, PR update and agent activity, whichever is latest). The sidebar card shows `draft PRs idle <n>d · icebox?`; nothing is iceboxed automatically. Unset turns it off. Set it for every repo in the root `config.yml` under `defaults.icebox` |
@@ -926,7 +940,7 @@ by URL. The next toggle drops every entry whose item has left all three lists. o
 `overbridge silence` lists what is silenced now, and `overbridge silence toggle <url>` flips one item from a shell.
 
 Under the list, up to three rows show workspaces being removed or removed in the last hour (see **Seeing what was
-removed** above). Below them, while the [check queue](#check-queue) is busy, a `▶` row for each running command shows its
+removed** above). Below them, while the [check queue](#check-queue) is busy, a `checks: n running · n queued` row, then a `▶` row for each running command shows its
 workspace and how long it has run, and a `⧗` row lists the workspaces waiting.
 
 The width (default 60) comes from the global config:
