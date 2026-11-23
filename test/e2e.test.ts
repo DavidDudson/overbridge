@@ -17,6 +17,7 @@ const env = () => ({
   OVERBRIDGE_ROOT: root,
   ZELLIJ_CONFIG_DIR: join(root, "zellij-config"), // keep a real user layout out of the tests
   OVERBRIDGE_NAME: "",
+  CLAUDECODE: "", // the suite may run inside Claude Code; this marks a caller as an agent
   XDG_CACHE_HOME: join(tmp, "cache"),
   GIT_AUTHOR_NAME: "t",
   GIT_AUTHOR_EMAIL: "t@t",
@@ -634,40 +635,127 @@ describe("thaw --prompt", () => {
 });
 
 describe("relaunch", () => {
+  const bin = () => join(tmp, "rl-bin");
+  const lines = (file: string) => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : []);
+  const launcherFile = (name: string) => join(root, ".overbridge", "agent", `${name}.launcher.json`);
+  const launcherChild = (name: string): number | undefined => (existsSync(launcherFile(name)) ? JSON.parse(readFileSync(launcherFile(name), "utf8")).child : undefined);
+
+  const until = async (done: () => boolean) => {
+    const deadline = Date.now() + 10_000;
+
+    while (!done() && Date.now() < deadline) await Bun.sleep(50);
+  };
+
+  /** A fake claude that logs each start to `runs`, runs `overbridge <ACTION>` once when ACTION is set, then idles. */
+  beforeAll(() => {
+    mkdirSync(bin(), { recursive: true });
+    writeFileSync(
+      join(bin(), "claude"),
+      [
+        "#!/bin/sh",
+        'echo "CM=${CLAUDE_CODE_EXPERIMENTAL_CODE_MODE-unset} NAME=$OVERBRIDGE_NAME ARGS=$*" >> "$RUNS"',
+        'if [ -n "$ACTION" ] && [ ! -e "$RUNS.acted" ]; then touch "$RUNS.acted"; "$BUN" "$CLI" $ACTION > "$RUNS.out" 2>&1; echo "exit=$?" >> "$RUNS.out"; fi',
+        'if [ -n "$WRAP" ]; then sleep 30 & echo $! >> "$RUNS.pids"; wait; else exec sleep 30; fi',
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+  });
+
+  const supervise = (name: string, extra: Record<string, string> = {}) => {
+    const runs = join(tmp, `${name}-runs`);
+
+    const p = Bun.spawn({
+      cmd: [process.execPath, CLI, "claude", name],
+      cwd: tmp,
+      env: { ...env(), CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: "1", PATH: `${bin()}:${process.env.PATH}`, RUNS: runs, BUN: process.execPath, CLI, ...extra },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    return { p, runs };
+  };
+
+  const stop = async (name: string, p: Bun.Subprocess) => {
+    p.kill("SIGTERM");
+    await p.exited;
+    expect(existsSync(launcherFile(name))).toBe(false);
+  };
+
   test("restarts the agent in place with the new env and args, resuming on /read-handoff", async () => {
     expect(ws(["new", "rl"]).code).toBe(0);
-    const bin = join(tmp, "rl-bin");
-    const out = join(tmp, "rl-runs");
-    mkdirSync(bin, { recursive: true });
-    writeFileSync(join(bin, "claude"), `#!/bin/sh\necho "CM=${"$"}{CLAUDE_CODE_EXPERIMENTAL_CODE_MODE-unset} ARGS=$*" >> ${out}\nexec sleep 30\n`, { mode: 0o755 });
+    const { p, runs } = supervise("rl");
+    await until(() => lines(runs).length === 1 && launcherChild("rl") !== undefined);
+    const first = launcherChild("rl");
 
-    const runs = () => (existsSync(out) ? readFileSync(out, "utf8").split("\n").filter(Boolean) : []);
-
-    const until = async (done: () => boolean) => {
-      const deadline = Date.now() + 10_000;
-
-      while (!done() && Date.now() < deadline) await Bun.sleep(50);
-    };
-
-    const launcherFile = join(root, ".overbridge", "agent", "rl.launcher.json");
-    const supervisor = Bun.spawn({ cmd: [process.execPath, CLI, "claude", "rl"], cwd: tmp, env: { ...env(), CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: "1", PATH: `${bin}:${process.env.PATH}` }, stdout: "pipe", stderr: "pipe" });
-    await until(() => runs().length === 1 && existsSync(launcherFile));
-    const first = JSON.parse(readFileSync(launcherFile, "utf8"));
-
-    const r = ws(["relaunch", "rl", "--no-code-mode", "--chrome", "--", "--model", "m"]);
+    writeFileSync(join(root, "config.yml"), "agent-launch:\n  claude:\n    args: [--model, m]\n");
+    // a piped caller is not a terminal, so it may set only the shorthands
+    expect(ws(["relaunch", "rl", "--", "--model", "m"]).err).toContain("in a terminal");
+    const r = ws(["relaunch", "rl", "--no-code-mode", "--chrome"]);
     expect(r.err).toBe("");
     expect(r.out).toContain("handoff at");
-    await until(() => runs().length === 2 && existsSync(launcherFile) && JSON.parse(readFileSync(launcherFile, "utf8")).child !== first.child);
+    await until(() => lines(runs).length === 2 && launcherChild("rl") !== undefined && launcherChild("rl") !== first);
 
-    const [before, after] = runs();
+    const [before, after] = lines(runs);
     // the caller's env reaches the agent, and the relaunch's own setting wins over it
-    expect(before).toStartWith("CM=1 ARGS=--settings");
-    expect(after).toStartWith("CM=0 ARGS=--settings");
-    expect(after).toEndWith("--chrome --model m --continue -- /read-handoff");
+    expect(before).toStartWith("CM=1 NAME=rl ARGS=--settings");
+    expect(after).toStartWith("CM=0 NAME=rl ARGS=--settings");
+    // root config args first, then the workspace's own
+    expect(after).toEndWith("--model m --chrome --continue -- /read-handoff");
     expect(readdirSync(join(root, "rl", ".overbridge", "handoffs")).some((f) => f.endsWith("-relaunch.md"))).toBe(true);
 
-    process.kill(JSON.parse(readFileSync(launcherFile, "utf8")).child, "SIGTERM");
-    await supervisor.exited;
-    expect(existsSync(launcherFile)).toBe(false);
-  }, 20_000);
+    rmSync(join(root, "config.yml"));
+    const fresh = ws(["relaunch", "rl", "--fresh", "--prompt", "x"]);
+    expect(fresh.code).toBe(0);
+    await until(() => lines(runs).length === 3);
+    expect(lines(runs)[2]).toStartWith("CM=1 NAME=rl");
+    expect(lines(runs)[2]).toEndWith("--name rl -- /read-handoff --then x");
+
+    expect(ws(["relaunch", "rl", "--env", "OVERBRIDGE_NAME=other"]).err).toContain("OVERBRIDGE_* variables are set by overbridge");
+    await stop("rl", p);
+  }, 30_000);
+
+  test("an agent may relaunch its own workspace with the shorthands, but not another workspace", async () => {
+    expect(ws(["new", "rl2"]).code).toBe(0);
+    expect(ws(["new", "rl3"]).code).toBe(0);
+    const target = supervise("rl3");
+    await until(() => launcherChild("rl3") !== undefined);
+    const other = supervise("rl2", { ACTION: "relaunch rl3 --chrome" });
+    await until(() => lines(`${other.runs}.out`).some((l) => l.startsWith("exit=")));
+    expect(lines(`${other.runs}.out`).join("\n")).toContain("an agent can relaunch only its own workspace (rl2), not rl3");
+    expect(lines(target.runs)).toHaveLength(1);
+
+    expect(ws(["new", "rl4"]).code).toBe(0);
+    const self = supervise("rl4", { ACTION: "relaunch rl4 --chrome" });
+    await until(() => lines(self.runs).length === 2);
+    expect(lines(self.runs)[1]).toContain("--chrome --continue -- /read-handoff");
+
+    await Promise.all([stop("rl2", other.p), stop("rl3", target.p), stop("rl4", self.p)]);
+  }, 30_000);
+  test("a relaunch stops the whole process tree under a wrapper before starting again", async () => {
+    expect(ws(["new", "rl5"]).code).toBe(0);
+    const { p, runs } = supervise("rl5", { WRAP: "1" });
+    await until(() => lines(`${runs}.pids`).length === 1);
+    const [grandchild] = lines(`${runs}.pids`).map(Number);
+
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    expect(alive(grandchild!)).toBe(true);
+    expect(ws(["relaunch", "rl5", "--chrome"]).code).toBe(0);
+    await until(() => lines(runs).length === 2);
+    expect(alive(grandchild!)).toBe(false);
+
+    const [, second] = lines(`${runs}.pids`).map(Number);
+    await stop("rl5", p);
+    await until(() => !alive(second!));
+    expect(alive(second!)).toBe(false);
+  }, 30_000);
 });

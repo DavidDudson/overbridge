@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { launchFromFlags, RELAUNCH_SIGNAL, relaunchRequestPath, SessionMode, takeRelaunchRequest } from "../src/agent-launch";
+import { launchFromFlags } from "../src/agent-launch";
+import { RELAUNCH_SIGNAL, relaunchRequestPath, SessionMode, takeRelaunchRequest } from "../src/agent-supervisor";
 import { AgentKind } from "../src/agent-kind";
 import type { AgentState } from "../src/agent-state";
 import { zellijMux } from "../src/mux";
-import { relaunch, type RelaunchDeps, type RelaunchOptions } from "../src/relaunch";
+import { type Caller, currentCaller, relaunch, type RelaunchDeps, type RelaunchOptions } from "../src/relaunch";
 import { readState, withState, type WorkspaceState } from "../src/state";
 import type { RunResult } from "../src/util";
 
@@ -38,7 +39,7 @@ interface Fake {
   zellij: string[][];
 }
 
-function fake(o: { launcher?: boolean; caller?: string; state?: AgentState; tabs?: string } = {}): Fake {
+function fake(o: { launcher?: boolean; caller?: Caller; state?: AgentState; tabs?: string; signalFails?: boolean } = {}): Fake {
   const signals: Fake["signals"] = [];
   const opened: Fake["opened"] = [];
   const zellij: Fake["zellij"] = [];
@@ -53,8 +54,14 @@ function fake(o: { launcher?: boolean; caller?: string; state?: AgentState; tabs
       { env: { ZELLIJ: "0" } },
     ),
     launcher: () => (o.launcher ? { pid: 100, child: 101 } : undefined),
-    callerWorkspace: () => o.caller,
-    signal: (pid, sig) => void signals.push([pid, sig]),
+    caller: () => o.caller ?? { agent: false, interactive: true },
+    signal: (pid, sig) => {
+      if (o.signalFails) {
+        throw new Error("ESRCH");
+      }
+
+      signals.push([pid, sig]);
+    },
     agentState: () => o.state,
     open: (ws, prompt, session) => void opened.push([ws, prompt, session]),
   };
@@ -106,29 +113,90 @@ describe("relaunch", () => {
   test("an agent may relaunch its own workspace mid-turn, but no other", () => {
     addWorkspace("ws1");
     addWorkspace("ws2");
-    const self = fake({ launcher: true, caller: "ws1", state: "busy" });
+    const self = fake({ launcher: true, caller: { ws: "ws1", agent: true, interactive: false }, state: "busy" });
     relaunch("ws1", opts(), self.deps);
     expect(self.signals).toHaveLength(1);
 
-    const other = fake({ launcher: true, caller: "ws2", state: "idle" });
+    const other = fake({ launcher: true, caller: { ws: "ws2", agent: true, interactive: false }, state: "idle" });
     expect(() => relaunch("ws1", opts(), other.deps)).toThrow("only its own workspace (ws2)");
     expect(other.signals).toEqual([]);
   });
 
   test("a self-relaunch with no supervisor refuses rather than closing its own tab", () => {
     addWorkspace("ws1");
-    const f = fake({ caller: "ws1", tabs: "ws1" });
-    expect(() => relaunch("ws1", opts(), f.deps)).toThrow("older overbridge");
+    const f = fake({ caller: { ws: "ws1", agent: false, interactive: true }, tabs: "ws1" });
+    expect(() => relaunch("ws1", opts(), f.deps)).toThrow("from another tab");
     expect(f.zellij.some((c) => c.includes("close-tab-by-id") || c.includes("close-tab"))).toBe(false);
   });
 
-  test("refuses iceboxed, agy with Claude-only flags, and orchestration tabs", () => {
+  test("an agent may set only the shorthands; the user may set env and agent arguments", () => {
+    addWorkspace("ws1");
+    const wide = launchFromFlags({ env: ["A=1"], args: ["--permission-mode", "bypassPermissions"] });
+    const asAgent = fake({ launcher: true, caller: { ws: "ws1", agent: true, interactive: false } });
+    expect(() => relaunch("ws1", opts({ launch: wide }), asAgent.deps)).toThrow("for the user");
+    expect(() => relaunch("ws1", opts({ launch: wide }), fake({ launcher: true, caller: { agent: true, interactive: false } }).deps)).toThrow("for the user");
+    expect(readState().workspaces.ws1?.launch).toBeUndefined();
+
+    const piped = fake({ launcher: true, caller: { agent: false, interactive: false } });
+    expect(() => relaunch("ws1", opts({ launch: wide }), piped.deps)).toThrow("in a terminal");
+
+    const asUser = fake({ launcher: true, caller: { ws: "other", agent: false, interactive: true } });
+    relaunch("ws1", opts({ launch: wide }), asUser.deps);
+    expect(readState().workspaces.ws1?.launch).toEqual(wide);
+  });
+
+  test("a supervisor that is gone falls back to reopening the tab, leaving no request behind", () => {
+    addWorkspace("ws1");
+    const f = fake({ launcher: true, signalFails: true, tabs: "ws1" });
+    relaunch("ws1", opts(), f.deps);
+    expect(f.opened).toEqual([["ws1", "/read-handoff", SessionMode.Continue]]);
+    expect(existsSync(relaunchRequestPath("ws1"))).toBe(false);
+  });
+
+  test("refuses iceboxed, removing, agy with Claude-only flags, and orchestration tabs", () => {
     addWorkspace("cold", { iceboxed: { since: "2026-01-01T00:00:00.000Z" } });
+    addWorkspace("going", { removing: { since: new Date().toISOString(), pid: process.pid } });
+    expect(() => relaunch("going", opts(), fake({ launcher: true }).deps)).toThrow("being removed");
     addWorkspace("agy1", { agent: AgentKind.Agy });
     const f = fake({ launcher: true });
     expect(() => relaunch("cold", opts(), f.deps)).toThrow("overbridge thaw cold");
     expect(() => relaunch("agy1", opts(), f.deps)).toThrow("Claude Code settings");
     relaunch("agy1", opts({ launch: launchFromFlags({ env: ["X=1"] }) }), f.deps);
     expect(() => relaunch("@root", opts(), f.deps)).toThrow("orchestration tab");
+  });
+
+  test("with its supervisor gone, a relaunch from the workspace's own tab refuses rather than close that tab", () => {
+    addWorkspace("ws1");
+    const f = fake({ launcher: true, signalFails: true, caller: { ws: "ws1", agent: true, interactive: false }, tabs: "ws1" });
+    expect(() => relaunch("ws1", opts(), f.deps)).toThrow("supervisor is gone");
+    expect(f.zellij.some((c) => c.some((w) => w.startsWith("close-tab")))).toBe(false);
+    expect(f.opened).toEqual([]);
+    expect(existsSync(relaunchRequestPath("ws1"))).toBe(false);
+  });
+
+  test.each([
+    ["the agent in its own tab", { ws: "ws1", agent: true, interactive: false }, false, true],
+    ["the user in the workspace's terminal", { ws: "ws1", agent: false, interactive: true }, false, false],
+    ["the orchestrator", { agent: true, interactive: false }, false, false],
+    ["the user with --force", { ws: "ws1", agent: false, interactive: true }, true, true],
+  ])("a busy agent: %s", (_, caller: Caller, force, signals) => {
+    addWorkspace("ws1");
+    const f = fake({ launcher: true, caller, state: "busy" });
+    const run = () => relaunch("ws1", opts({ force }), f.deps);
+
+    if (signals) {
+      run();
+      expect(f.signals).toHaveLength(1);
+    } else {
+      expect(run).toThrow("--force");
+    }
+  });
+});
+
+describe("currentCaller", () => {
+  test("with no supervisor above, CLAUDECODE marks an agent and OVERBRIDGE_NAME names its workspace", () => {
+    addWorkspace("ws1");
+    expect(currentCaller({ CLAUDECODE: "1", OVERBRIDGE_NAME: "ws1" })).toMatchObject({ ws: "ws1", agent: true });
+    expect(currentCaller({ OVERBRIDGE_NAME: "" })).toMatchObject({ ws: undefined, agent: false });
   });
 });

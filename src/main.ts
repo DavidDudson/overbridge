@@ -9,7 +9,8 @@ import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
 import { agentRefusal, configSet } from "./config-set";
 import { icebox, thaw } from "./icebox";
-import { launchFromFlags, SessionMode } from "./agent-launch";
+import { launchFromFlags } from "./agent-launch";
+import { SessionMode } from "./agent-supervisor";
 import { relaunch } from "./relaunch";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
@@ -556,29 +557,38 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case "relaunch": {
-      // everything after `--` goes to the agent: never parse its flags
-      const cut = rest.indexOf("--");
-
-      const { values, positionals } = opts(cut < 0 ? rest : rest.slice(0, cut), {
-        "no-code-mode": { type: "boolean" },
-        chrome: { type: "boolean" },
-        env: { type: "string", multiple: true },
-        prompt: { type: "string" },
-        fresh: { type: "boolean" },
-        force: { type: "boolean" },
+      // everything after the `--` terminator goes to the agent; parseArgs finds it, so a `--` given as an option's value never splits the command
+      const parsed = parseArgs({
+        args: rest,
+        options: {
+          "no-code-mode": { type: "boolean" },
+          chrome: { type: "boolean" },
+          env: { type: "string", multiple: true },
+          prompt: { type: "string" },
+          fresh: { type: "boolean" },
+          force: { type: "boolean" },
+        },
+        allowPositionals: true,
+        strict: true,
+        tokens: true,
       });
 
-      if (positionals.length !== 1) throw new OverbridgeError(RELAUNCH_USAGE);
-      const launch = launchFromFlags({ noCodeMode: values["no-code-mode"], chrome: values.chrome, env: values.env, args: cut < 0 ? [] : rest.slice(cut + 1) });
+      const terminator = parsed.tokens.find((t) => t.kind === "option-terminator");
+      const agentArgs = terminator ? rest.slice(terminator.index + 1) : [];
+      const names = parsed.positionals.slice(0, parsed.positionals.length - agentArgs.length);
+      const { values } = parsed;
 
-      const handoff = relaunch(cmd.requireWs(positionals[0]!), {
+      if (names.length !== 1) throw new OverbridgeError(RELAUNCH_USAGE);
+      const launch = launchFromFlags({ noCodeMode: values["no-code-mode"], chrome: values.chrome, env: values.env, args: agentArgs });
+
+      const handoff = relaunch(cmd.requireWs(names[0]!), {
         launch,
         prompt: values.prompt,
         session: values.fresh ? SessionMode.Fresh : SessionMode.Continue,
         force: values.force,
       });
 
-      console.log(`relaunching ${positionals[0]}; handoff at ${handoff}`);
+      console.log(`relaunching ${names[0]}; handoff at ${handoff}`);
       break;
     }
 

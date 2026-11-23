@@ -115,10 +115,12 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   `f` in a sidebar runs `icebox` on its own workspace in a child (`runFreeze`); the `@frozen` tab (`src/frozen.ts` pure rows and
   render, `src/frozen-run.ts` pane) lists iceboxed workspaces from state and `t` runs `thaw` in a child (`runThaw`).
 - `src/relaunch.ts` is `overbridge relaunch`: a handoff, the workspace's `WorkspaceState.launch`, then a restart. `claude()` in
-  `src/commands.ts` supervises the agent (async spawn, `<meta>/agent/<ws>.launcher.json`) and restarts it when
-  `RELAUNCH_SIGNAL` arrives with a request file (`src/agent-launch.ts`: pure merge, request, and ancestry parts). Launch
-  settings are the root-only `agent-launch.<kind>` under the workspace's own (`agentLaunchOf`), so `up`, `tab`, and `thaw` keep them.
-  An agent may relaunch only its own workspace (`workspaceAbove` over the caller's process ancestry).
+  `src/commands.ts` supervises the agent (async spawn, one `RELAUNCH_SIGNAL` handler for its life, `<meta>/agent/<ws>.launcher.json`)
+  and restarts it when that signal arrives with a request file; it stops the agent's whole process tree, since a dev-shell
+  `enter` prefix makes the child a wrapper. `OVERBRIDGE_NO_SUPERVISOR` runs the agent plainly. `src/agent-launch.ts` is the pure
+  launch settings (state and config import it); `src/agent-supervisor.ts` is the supervisor protocol (files, signal, process tree).
+  Launch settings are the root-only `agent-launch.<kind>` under the workspace's own (`agentLaunchOf`), so `up`, `tab`, and `thaw` keep them.
+  An agent (under a supervisor, or `CLAUDECODE=1`) may relaunch only its own workspace and only with `onlyShorthands`; both guards block `--env` and `--` args.
 - `src/explore.ts` is the `@explore` tab (`overbridge explore`, pane in `src/explore-run.ts`): a repo picker, then the top
   panel (`topPanel` with `PanelOptions`: its own `TopScope`, only the terminal pane, a `back` button) over a detached
   checkout of the default branch at `<root>/@explore/<repo>`. `syncPlan` moves that checkout only while it is clean and on

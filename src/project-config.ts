@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type AgentLaunch, ENV_NAME_RE } from "./agent-launch";
+import { type AgentLaunch, envNameFault } from "./agent-launch";
 import { AGENT_KINDS, AgentKind } from "./agent-kind";
 import { DEFAULT_CLASSES, MAX_NICE, MIN_WORKSPACE_NICE, type PriorityClass, type PriorityRule } from "./check-priority";
 import { repoOf, root, worktreePath } from "./paths";
@@ -956,7 +956,7 @@ function parseAgentLaunch(p: Problems, raw: Json | undefined): Partial<Record<Ag
   p.unknownKeys(raw, AGENT_KINDS, "agent-launch");
 
   return Object.fromEntries(
-    AGENT_KINDS.flatMap((kind) => {
+    AGENT_KINDS.flatMap((kind): [AgentKind, AgentLaunch][] => {
       const layer = raw[kind];
       const at = `agent-launch.${kind}`;
 
@@ -975,8 +975,10 @@ function parseAgentLaunch(p: Problems, raw: Json | undefined): Partial<Record<Ag
 
       const pairs = isRecord(env)
         ? Object.entries(env).flatMap(([name, value]): [string, string][] => {
-            if (!ENV_NAME_RE.test(name)) {
-              p.add(`${at}.env.${name}`, "expected a name made of letters, digits and _, not starting with a digit");
+            const fault = envNameFault(name);
+
+            if (fault !== undefined) {
+              p.add(`${at}.env.${name}`, fault);
 
               return [];
             }

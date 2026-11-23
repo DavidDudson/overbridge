@@ -239,6 +239,12 @@ describe("orchestrator: bash", () => {
   });
 });
 
+describe("orchestrator: relaunch", () => {
+  test.each(["overbridge relaunch ws1 -- --dangerously-skip-permissions", "overbridge relaunch ws1 --env NODE_OPTIONS=x", "overbridge relaunch ws1 --env=A=1"])("blocks: %s", (cmd) => {
+    expect(checkOrchestrator(bash(cmd))).toContain("--env and agent arguments are for the user");
+  });
+});
+
 describe("splitCommand", () => {
   test("keeps separators inside quotes", () => {
     expect(splitCommand(`rg 'a;b|c' && echo "x && y"`)).toEqual({ segments: [["rg", "a;b|c"], ["echo", "x && y"]] });

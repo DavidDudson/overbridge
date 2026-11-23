@@ -27,7 +27,11 @@ import { agentOf, type Claim, claimOwner, type ReboundFrom, getWorkspace, isIceb
 import { AgentKind } from "./agent-kind";
 import { agyArgs, agyTrust, agyUntrust } from "./agy";
 import { errorMessage, exec, fail, isRecord, log, must, naturalSort, run, shellQuote, spawnCwd } from "./util";
-import { type AgentLaunch, clearLauncher, mergeLaunch, RELAUNCH_SIGNAL, relaunchExtra, takeRelaunchRequest, writeLauncher } from "./agent-launch";
+import { type AgentLaunch, mergeLaunch } from "./agent-launch";
+import { clearLauncher, descendants, RELAUNCH_SIGNAL, relaunchExtra, takeRelaunchRequest, writeLauncher } from "./agent-supervisor";
+import { listProcs, pidsAlive } from "./proc";
+import { constants } from "node:os";
+import type { Subprocess } from "bun";
 
 /** What a workspace really holds in `repo`: its claim, its worktree head, and the stacks of either. */
 export const holdings = (repo: string, stacks: Stack[]) => (ws: string, c: Claim) =>
@@ -544,11 +548,27 @@ export const workspaceClaudeArgs = (ws: string, settings: string, extra: readonl
  * `--settings`, because Claude reads `.claude/settings.json` only from its own folder (CLAUDE.md it finds upward).
  */
 export async function claude(ws: string, extra: string[]): Promise<never> {
+  if (process.env[NO_SUPERVISOR_ENV]) {
+    const inv = agentInvocation(ws, extra);
+    process.exit(exec(inv.cmd, { cwd: inv.cwd, env: inv.env }));
+  }
+
+  const agent: RunningAgent = { tree: [] };
   // Ctrl-C belongs to the agent; without a handler it would also kill this supervisor
   process.on("SIGINT", () => {});
+  // one handler for the supervisor's whole life: an unhandled SIGUSR2 would end it
+  process.on(RELAUNCH_SIGNAL, () => stopAgent(agent));
+
+  for (const signal of ["SIGTERM", "SIGHUP"] as const) {
+    process.on(signal, () => {
+      signalTree(agent, signal);
+      clearLauncher(ws, process.pid);
+      process.exit(128 + constants.signals[signal]);
+    });
+  }
 
   const session = async (args: string[]): Promise<never> => {
-    const code = await runAgent(ws, args);
+    const code = await runAgent(ws, args, agent);
     const request = takeRelaunchRequest(ws);
 
     if (!request) {
@@ -563,30 +583,82 @@ export async function claude(ws: string, extra: string[]): Promise<never> {
   return session(extra);
 }
 
+/** Set to run the agent the old way, as a plain child with no supervisor; `relaunch` then reopens the tab instead. */
+export const NO_SUPERVISOR_ENV = "OVERBRIDGE_NO_SUPERVISOR";
+
 /** Root config's `agent-launch` for the workspace's agent kind, then the workspace's own (set by `relaunch`). */
 export const agentLaunchOf = (w: WorkspaceState, layers = loadRootLayers()): AgentLaunch => mergeLaunch(layers.agentLaunch[agentOf(w)], w.launch);
 
 /** How long a relaunch waits for the agent to exit on SIGTERM before it sends SIGKILL. */
 const RELAUNCH_KILL_MS = 10_000;
 
+/** The supervisor's current agent, and the processes a relaunch signalled, which must be gone before the next start. */
+interface RunningAgent {
+  child?: Subprocess;
+  tree: number[];
+}
+
+/**
+ * Signal the agent and everything under it. With a dev-shell `enter` prefix the child is a shell wrapper, so
+ * signalling only the child would leave the real agent running beside the next one.
+ */
+function signalTree(agent: RunningAgent, signal: NodeJS.Signals) {
+  if (!agent.child) {
+    return;
+  }
+
+  const tree = [agent.child.pid, ...descendants(agent.child.pid, listProcs())];
+  agent.tree = [...new Set([...agent.tree, ...tree])];
+  tree.forEach((pid) => {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // already gone
+    }
+  });
+}
+
+function stopAgent(agent: RunningAgent) {
+  const target = agent.child;
+  signalTree(agent, "SIGTERM");
+  // the restarted agent is a new child: the timer must never reach it
+  setTimeout(() => {
+    if (agent.child === target) {
+      signalTree(agent, "SIGKILL");
+    }
+  }, RELAUNCH_KILL_MS).unref();
+}
+
+/** Wait until every signalled process has exited, killing what is left after `RELAUNCH_KILL_MS`. */
+async function waitTreeGone(agent: RunningAgent) {
+  const deadline = Date.now() + RELAUNCH_KILL_MS;
+
+  while (agent.tree.length && pidsAlive(agent.tree).size && Date.now() < deadline) {
+    await Bun.sleep(100);
+  }
+
+  pidsAlive(agent.tree).forEach((pid) => {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
+  });
+  agent.tree = [];
+}
+
 /** Run the agent once, recording this supervisor and its child so `overbridge relaunch` can restart it. */
-async function runAgent(ws: string, extra: string[]): Promise<number> {
+async function runAgent(ws: string, extra: string[], agent: RunningAgent): Promise<number> {
   const inv = agentInvocation(ws, extra);
   const child = Bun.spawn({ cmd: inv.cmd, cwd: spawnCwd(inv.cwd), env: { ...process.env, ...inv.env }, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
-
-  const onRelaunch = () => {
-    child.kill("SIGTERM");
-    const timer = setTimeout(() => child.kill("SIGKILL"), RELAUNCH_KILL_MS);
-    void child.exited.then(() => clearTimeout(timer));
-  };
-
+  agent.child = child;
   writeLauncher(ws, { pid: process.pid, child: child.pid });
-  process.on(RELAUNCH_SIGNAL, onRelaunch);
 
   try {
     await child.exited;
+    await waitTreeGone(agent);
   } finally {
-    process.off(RELAUNCH_SIGNAL, onRelaunch);
+    agent.child = undefined;
     clearLauncher(ws, process.pid);
   }
 

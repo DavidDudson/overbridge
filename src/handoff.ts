@@ -1,6 +1,14 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { wsDir } from "./paths";
+import * as git from "./git";
+import { worktreePath, wsDir } from "./paths";
+import { getWorkspace, readState } from "./state";
+
+/** The first message of an agent that starts from a handoff (`thaw`, `relaunch`). */
+export const THAW_PROMPT = "/read-handoff";
+
+/** Read the handoff, then carry out `prompt` in place of the handoff's Next line when one is given. */
+export const thawFirstMessage = (prompt?: string): string => (prompt ? `${THAW_PROMPT} --then ${prompt}` : THAW_PROMPT);
 
 export const HandoffReason = { Context: "context", Manual: "manual", Icebox: "icebox", Relaunch: "relaunch" } as const;
 
@@ -46,6 +54,16 @@ export function renderHandoff(h: HandoffInput): string {
 export const handoffStamp = (d: Date) => d.toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-");
 
 export const handoffDir = (ws: string) => join(wsDir(ws), ".overbridge", "handoffs");
+
+/** Each claim of `ws` with its worktree's HEAD, as a handoff's State table lists them. */
+export function handoffRows(ws: string): HandoffRow[] {
+  return Object.entries(getWorkspace(readState(), ws).repos).map(([repo, c]) => ({
+    repo,
+    branch: c.branch ?? "",
+    head: git.headSha(worktreePath(ws, repo))?.slice(0, 7) ?? "",
+    pr: c.pr,
+  }));
+}
 
 /** Write the handoff and return its path. */
 export function writeHandoff(h: HandoffInput, now = new Date()): string {

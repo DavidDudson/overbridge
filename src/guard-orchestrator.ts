@@ -387,8 +387,16 @@ function ghReason(args: readonly string[]): string | undefined {
   return undefined;
 }
 
+/** What an agent may not pass to `overbridge relaunch`: env and agent arguments could loosen the agent's permissions. */
+const RELAUNCH_USER_ONLY = (arg: string) => arg === "--" || arg === "--env" || arg.startsWith("--env=");
+
 function overbridgeReason(args: readonly string[]): string | undefined {
   const [sub, action] = args;
+
+  if (sub === "relaunch" && args.some(RELAUNCH_USER_ONLY)) {
+    return "an agent can relaunch only with --no-code-mode and --chrome; --env and agent arguments are for the user";
+  }
+
   const actions = sub === undefined ? undefined : OVERBRIDGE_ALLOWED.get(sub);
 
   if (!actions || (actions.length && !actions.includes(action ?? ""))) {

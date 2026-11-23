@@ -128,6 +128,8 @@ describe("loadRootLayers", () => {
     expect(thrown(() => loadRootLayers())).toContain("agent-launch.codex: unknown key");
     writeRoot("agent-launch:\n  claude:\n    env: { 1BAD: x }\n");
     expect(thrown(() => loadRootLayers())).toContain("agent-launch.claude.env.1BAD: expected a name");
+    writeRoot("agent-launch:\n  claude:\n    env: { OVERBRIDGE_ROOT: /x }\n");
+    expect(thrown(() => loadRootLayers())).toContain("agent-launch.claude.env.OVERBRIDGE_ROOT: OVERBRIDGE_* variables are set by overbridge");
     writeRoot("agent-launch:\n  claude:\n    args: --chrome\n");
     expect(thrown(() => loadRootLayers())).toContain("agent-launch.claude.args: expected a list of strings");
   });

@@ -37,7 +37,7 @@
       "items": { "type": "string", "minLength": 1 }
     },
     "agent-launch": {
-      "description": "Extra environment and arguments each kind of agent starts with, in every workspace. `overbridge relaunch` stores a workspace's own settings, applied over these. Root-only, so a branch cannot change how agents start.",
+      "description": "Extra environment and arguments each kind of agent starts with, in every workspace. `overbridge relaunch` stores a workspace's own settings, applied over these. Root-only, so a branch cannot change how agents start. Builds older than the one that added it reject this key: remove it before downgrading.",
       "type": "object",
       "additionalProperties": false,
       "properties": { "claude": { "$ref": "#/$defs/agent-launch" }, "agy": { "$ref": "#/$defs/agent-launch" } }
@@ -102,7 +102,7 @@
         "env": {
           "description": "Environment variables set for the agent, such as CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: 0.",
           "type": "object",
-          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "not": { "pattern": "^OVERBRIDGE_" } },
           "additionalProperties": { "type": ["string", "number", "boolean"] }
         },
         "args": { "description": "Arguments added to the agent's command line, such as --chrome.", "type": "array", "items": { "type": "string", "minLength": 1 } }

@@ -3,7 +3,7 @@ import { dirname, join, sep } from "node:path";
 import { stopChecksFor } from "./check-queue";
 import { getRepo } from "./config";
 import * as git from "./git";
-import { HandoffReason, type HandoffRow, writeHandoff } from "./handoff";
+import { HandoffReason, handoffRows, thawFirstMessage, writeHandoff } from "./handoff";
 import type { Mux } from "./mux";
 import { landingTab } from "./next";
 import { isOrchestrationTab } from "./orchestration";
@@ -17,11 +17,6 @@ import { type HookContext, runHooks } from "./hooks";
 import { requireTab, TabFocus } from "./tab";
 import { errorMessage, fail, log, run } from "./util";
 
-/** The first message of a thawed agent: its resumed conversation reads the handoff `icebox` wrote. */
-export const THAW_PROMPT = "/read-handoff";
-
-/** `thaw`'s first message: read the handoff, then carry out `prompt` in place of the handoff's Next line when one is given. */
-export const thawFirstMessage = (prompt?: string): string => (prompt ? `${THAW_PROMPT} --then ${prompt}` : THAW_PROMPT);
 
 export interface IceboxDeps extends Pick<RemovalDeps, "mux"> {
   stopApps: (ws: string) => Promise<void>;
@@ -41,16 +36,6 @@ export function unsavedRepos(ws: string): string[] {
 
     return existsSync(wt) && (git.isDirty(wt) || git.hasUnpushed(wt));
   });
-}
-
-/** Each claim of `ws` with its worktree's HEAD, as a handoff's State table lists them. */
-export function handoffRows(ws: string): HandoffRow[] {
-  return Object.entries(getWorkspace(readState(), ws).repos).map(([repo, c]) => ({
-    repo,
-    branch: c.branch ?? "",
-    head: git.headSha(worktreePath(ws, repo))?.slice(0, 7) ?? "",
-    pr: c.pr,
-  }));
 }
 
 /** Reclaim `icebox` does only when asked: nothing is removed unless its flag is set. */

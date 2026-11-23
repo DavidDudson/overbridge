@@ -53,8 +53,8 @@ overbridge icebox <name> [--prune] [--drop-worktree]  # pause: stop apps and che
 overbridge thaw <name> [--prompt text]            # reopen an iceboxed workspace; its agent resumes, reads the handoff, then does --prompt (else the handoff's Next); recreates dropped worktrees
 overbridge relaunch <name> [--no-code-mode] [--chrome] [--env NAME=VALUE]... [--prompt text] [--fresh] [--force] [-- args]
                                                   # write a handoff and restart the agent in its tab on /read-handoff, resuming its conversation (--fresh starts a new one)
-                                                  # the flags replace the workspace's launch settings, which up and thaw keep; no flags go back to config.yml's agent-launch
-                                                  # refuses a mid-turn agent unless --force; an agent can relaunch its own workspace, never another
+                                                  # the flags replace the workspace's launch settings, which up, tab and thaw keep; no flags go back to config.yml's agent-launch
+                                                  # refuses a mid-turn agent unless --force; an agent can relaunch its own workspace, never another; an agent may not pass --env or agent args after --
 overbridge checks                                 # the @checks tab's pane: the check queue; K/J move a waiting check, t/b to top/bottom
 overbridge frozen                                 # the @frozen tab's pane: lists iceboxed workspaces, t thaws one (f in a sidebar iceboxes its workspace)
 overbridge explore [sync <repo>|shell <repo>]     # the @explore tab's pane: pick a repo, run its apps and editor on a default-branch checkout; sync fast-forwards it when clean
