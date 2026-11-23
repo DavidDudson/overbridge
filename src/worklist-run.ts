@@ -23,6 +23,12 @@ const CHROME = 5;
 /** Width of the epic column. */
 const EPIC_WIDTH = 24;
 
+/** Columns a row uses before the epic column: glyph, rank, ready, stream and item, with their gaps. */
+const ROW_PREFIX_WIDTH = 35;
+
+/** The narrowest title the epic column may leave. */
+const MIN_TITLE_WIDTH = 20;
+
 /** The epic column's text: the epic's title, else its key, else blank. */
 export const epicCell = (r: Pick<WorkRow, "epic" | "epicTitle">): string => stripControl(r.epicTitle || r.epic || "");
 
@@ -94,7 +100,8 @@ export function renderWorklist(list: Ranked[], selected: number, offset: number,
   const inner = width - 4;
   const body = Math.max(1, height - CHROME);
   // only Jira sets an epic, so a list without one keeps the width for titles
-  const hasEpic = list.some((r) => r.epic);
+  // the epic column shows only when the title still gets MIN_TITLE_WIDTH columns beside it
+  const hasEpic = list.some((r) => r.epic) && inner >= ROW_PREFIX_WIDTH + EPIC_WIDTH + 1 + MIN_TITLE_WIDTH;
   const epicColumn = (text: string) => (hasEpic ? `${fit(text, EPIC_WIDTH)} ` : "");
   const rows: string[] = [boxTop("Work", width), boxRow(dim(fit(`${"".padEnd(2)} ${"#".padEnd(3)} ${"ready".padEnd(5)} ${"stream".padEnd(6)} ${"item".padEnd(14)} ${epicColumn("epic")}title`, inner)))];
   const visible = list.slice(offset, offset + body);
@@ -119,12 +126,12 @@ export function renderWorklist(list: Ranked[], selected: number, offset: number,
 }
 
 /** The detail view as screen rows: the item's facts, then a legend. Pure, so it is tested. */
-export function renderDetail(item: Ranked, all: readonly Ranked[], height: number, width: number): string[] {
+export function renderDetail(item: Ranked, all: readonly Ranked[], height: number, width: number, message = ""): string[] {
   const inner = width - 4;
   const body = Math.max(1, height - 3);
   const lines = detailLines(item, all).slice(0, body);
 
-  return [boxTop("Work item", width), ...lines.map((l) => boxRow(fit(l, inner))), ...Array.from({ length: body - lines.length }, () => boxRow(fit("", inner))), boxRow(dim(fit("esc back   o open   s start in a workspace   q quit", inner))), boxBottom(width, item.key)];
+  return [boxTop("Work item", width), ...lines.map((l) => boxRow(fit(l, inner))), ...Array.from({ length: body - lines.length }, () => boxRow(fit("", inner))), boxRow(message ? bold(fit(message, inner)) : dim(fit("esc back   o open   s start in a workspace   q quit", inner))), boxBottom(width, item.key)];
 }
 
 /** Open `item` in the browser; the message to show, which explains an item with no link. */
@@ -177,7 +184,7 @@ export async function worklistPane() {
     if (selected >= offset + body) offset = selected - body + 1;
     const width = process.stdout.columns ?? 80;
     const shown = typing ? `/${filter}▏` : "";
-    const rows = detail ? renderDetail(detail, everything(), height, width) : renderWorklist(list, selected, offset, height, width, typing ? shown : busy ? `${spinner(Date.now())} ${message}` : message, cache.notes, filter, Date.now(), silencedSet(list));
+    const rows = detail ? renderDetail(detail, everything(), height, width, message) : renderWorklist(list, selected, offset, height, width, typing ? shown : busy ? `${spinner(Date.now())} ${message}` : message, cache.notes, filter, Date.now(), silencedSet(list));
     process.stdout.write(frame(rows, height, width));
   };
 
@@ -279,7 +286,10 @@ export async function worklistPane() {
       }
       else if (input.key === "/") typing = true;
       else if (input.key === "escape" && filter) filter = "";
-      else if ((input.key === "enter" || input.key === "l" || input.key === "right") && list[selected]) detail = list[selected];
+      else if ((input.key === "enter" || input.key === "l" || input.key === "right") && list[selected]) {
+        detail = list[selected];
+        message = "";
+      }
       else if (input.key === "s" && list[selected]) {
         const item = list[selected]!;
         const repos = rowRepos(item);

@@ -184,8 +184,13 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions): Promise<Pa
       return;
     }
 
+    // with focus unknown (outside zellij) a step that changes nothing may be a hidden tab, not a full one
+    const record = (after: number) => {
+      fit = after === rows && readView().focused !== ws ? fit : afterStep(fit, rows, after, needed);
+    };
+
     if (!mux.resizePane(ownPaneId, step)) {
-      fit = afterStep(fit, rows, rows, needed);
+      record(rows);
 
       return;
     }
@@ -193,7 +198,7 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions): Promise<Pa
     isFitStepping = true;
     setTimeout(() => {
       isFitStepping = false;
-      fit = afterStep(fit, rows, process.stdout.rows ?? rows, needed);
+      record(process.stdout.rows ?? rows);
       draw();
     }, FIT_SETTLE_MS);
   };

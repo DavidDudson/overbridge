@@ -21,7 +21,10 @@ function readStore<T>(path: string): Record<string, T> {
   }
 
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    const parsed: JsonValue = JSON.parse(readFileSync(path, "utf8"));
+
+    // SAFETY: a JSON object is a string-keyed record; each caller checks or overwrites the entries it reads
+    return isJsonObject(parsed) ? (parsed as Record<string, T>) : {};
   } catch {
     return {};
   }
@@ -37,6 +40,15 @@ function writeStore<T>(path: string, entries: Record<string, T>) {
 const read = () => readStore<Entry>(file());
 
 const keyOf = (provider: Provider, project: string, id: string) => `${provider.name}:${project}:${id}`;
+
+/** The item's link, or "" when the provider can't build one (a Jira repo with no `project-management.url`). */
+function linkOf(provider: Provider, id: string): string {
+  try {
+    return provider.link(id);
+  } catch {
+    return "";
+  }
+}
 
 /** The last title fetched for `id`, or undefined. Never hits the network. */
 export function cachedTitle(provider: Provider, project: string, id: string): string | undefined {
@@ -81,7 +93,8 @@ function storedLineage(key: string): LineageEntry | undefined {
 /** `id`'s lineage, refetched once the stored one is `ttlMs` old; an empty fetch keeps the stored one, so an outage never empties the panel. */
 export function refreshLineage(provider: Provider, project: string, id: string, o: { ttlMs?: number; now?: number } = {}): ItemNode[] {
   const now = o.now ?? Date.now();
-  const key = keyOf(provider, project, id);
+  // a GitHub project number is shared by every repo in it, so the item's link keeps two repos' issue 12 apart
+  const key = `${keyOf(provider, project, id)}:${linkOf(provider, id)}`;
   const stored = storedLineage(key);
   const storedNodes = stored?.nodes ?? [];
 

@@ -78,9 +78,21 @@ describe("refreshLineage with a TTL", () => {
     expect(refreshLineage(offline, "o/r", "8", { now: 100 })).toEqual([]);
   });
 
+  test("a store whose root is not an object reads as empty, so the next fetch replaces it", () => {
+    mkdirSync(join(tmp, ".overbridge"), { recursive: true });
+    writeFileSync(join(tmp, ".overbridge", "lineage.json"), "null");
+    expect(refreshLineage(fakeProvider(items, "github", [], parents), "o/r", "7", { ttlMs: 10, now: 0 }).map((n) => n.id)).toEqual(["1", "7"]);
+  });
+
+  test("two repos sharing a project keep their issue 12 apart", () => {
+    const repo = (name: string) => ({ ...fakeProvider([{ id: "12", title: name, url: "u" }]), link: (id: string) => `https://github.com/o/${name}/issues/${id}` });
+    expect(refreshLineage(repo("a"), "4", "12", { ttlMs: 1000, now: 0 })[0]!.title).toBe("a");
+    expect(refreshLineage(repo("b"), "4", "12", { ttlMs: 1000, now: 1 })[0]!.title).toBe("b");
+  });
+
   test("a misshapen store entry is refetched, never returned", () => {
     mkdirSync(join(tmp, ".overbridge"), { recursive: true });
-    writeFileSync(join(tmp, ".overbridge", "lineage.json"), JSON.stringify({ "github:o/r:7": { at: 0, nodes: [{ id: "7", title: "x", status: "" }] } }));
+    writeFileSync(join(tmp, ".overbridge", "lineage.json"), JSON.stringify({ "github:o/r:7:https://fake.test/items/7": { at: 0, nodes: [{ id: "7", title: "x", status: "" }] } }));
     let calls = 0;
     const p = fakeProvider(items, "github", [], parents);
     const counted = { ...p, lineage: (id: string) => (calls++, p.lineage(id)) };
@@ -98,6 +110,7 @@ describe("cachedTicket", () => {
     const now = Date.now();
     const realNow = Date.now;
     const read = cachedTicket((key) => (reads.push(key), up ? ticket(key) : undefined));
+    Date.now = () => now;
 
     try {
       expect(read("A-1")).toEqual(ticket("A-1"));

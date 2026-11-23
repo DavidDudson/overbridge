@@ -45,6 +45,9 @@ describe("renderWorklist", () => {
     expect(rows[4]).toMatch(/ob#3\s+title 3/);
     expect(rows.join("\n")).toContain("o open");
     expect(renderWorklist(list, 0, 0, 12, 70).map(strip)[1]).not.toContain("epic");
+    const withEpic = rank([row("1", { epic: "ENG-9", epicTitle: "Dark mode" })]);
+    expect(renderWorklist(withEpic, 0, 0, 12, 60).map(strip)[2]).toMatch(/ob#1\s+title 1/);
+    expect(renderWorklist(withEpic, 0, 0, 12, 84).map(strip)[2]).toMatch(/Dark mode\s+title 1/);
   });
 
   test("o opens the item's link, or says why it can't", () => {

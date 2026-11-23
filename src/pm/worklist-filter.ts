@@ -1,3 +1,4 @@
+import { stripControl } from "../term";
 import type { Ranked } from "./worklist";
 
 /**
@@ -43,7 +44,7 @@ export function detailLines(item: Ranked, all: readonly Ranked[]): string[] {
     `status: ${item.status}   rank: ${item.rank}   stream: s${item.stream}${item.ready ? "   ready" : ""}`,
     `why: ${item.reasons.join(", ")}`,
     `labels: ${item.labels.length ? item.labels.join(", ") : "none"}`,
-    ...(item.epic ? [`epic: ${item.epic}${item.epicTitle ? ` ${item.epicTitle}` : ""}`] : []),
+    ...(item.epic ? [`epic: ${item.epic}${item.epicTitle ? ` ${stripControl(item.epicTitle)}` : ""}`] : []),
     ...(item.parent && item.parent !== item.epic ? [`parent: ${item.parent}`] : []),
     blockers.length ? "blocked by:" : "blocked by: nothing",
     ...blockers.map((b) => `  ${b}`),

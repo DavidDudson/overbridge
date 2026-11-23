@@ -24,6 +24,14 @@ describe("planFit", () => {
     expect(planFit(5, 9, state)).toBe(PaneResize.Grow);
   });
 
+  test("a stuck height is forgotten once the pane moves or the needed height changes", () => {
+    const stuck = afterStep({}, 5, 5, 8);
+    expect(afterStep(stuck, 5, 6, 6).stuckRows).toBeUndefined();
+    expect(settle(stuck, 7).stuckRows).toBeUndefined();
+    expect(settle(stuck, 8).stuckRows).toBe(8);
+    expect(planFit(6, 8, settle(stuck, 7))).toBe(PaneResize.Grow);
+  });
+
   test("a step that changed nothing stops further steps at that height", () => {
     const stuck = afterStep({}, 5, 5, 8);
     expect(stuck.stuckRows).toBe(8);

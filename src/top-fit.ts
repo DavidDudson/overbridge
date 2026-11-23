@@ -29,8 +29,8 @@ export function planFit(rows: number, needed: number, state: FitState): PaneResi
 
 /** The state after a step at `needed` took the pane from `before` to `after` rows. */
 export function afterStep(state: FitState, before: number, after: number, needed: number): FitState {
-  return after === before ? { ...state, stuckRows: needed } : { ...state, stepRows: Math.abs(after - before) };
+  return after === before ? { ...state, stuckRows: needed } : { ...state, stepRows: Math.abs(after - before), stuckRows: undefined };
 }
 
 /** The state once no step is left to take at `needed`. */
-export const settle = (state: FitState, needed: number): FitState => ({ ...state, settledRows: needed });
+export const settle = (state: FitState, needed: number): FitState => ({ ...state, settledRows: needed, stuckRows: state.stuckRows === needed ? needed : undefined });
