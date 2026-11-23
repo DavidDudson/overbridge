@@ -183,5 +183,10 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   section and the README's phase table.
 - Neither `plugin.json` has a `version`, on purpose. Claude Code then versions each plugin by its git commit, so
   `claude plugin update` picks up every push to `main`. A fixed version makes it skip new commits until someone bumps it.
+- `src/mods.ts` is `overbridge mods` (thin arg parsing in `src/mods-cmd.ts`): Claude Code mods in the mods folder (root-only `mods-dir`, else
+  `$CLAUDE_CONFIG_DIR/mods` or `~/.claude/mods`). Every command rewrites `<mods>/.claude-plugin/marketplace.json` (`writeModsMarketplace`,
+  only when it changed), and `modsSettings` registers that folder as the `overbridge-mods` directory marketplace; `allPluginSettings` in
+  `src/scaffold.ts` merges it with `pluginSettings`. git and `claude plugin validate` go through an injectable `Runner`. `rm` unlinks a linked
+  mod and never deletes its target.
 - Review panel is a second plugin, `plugin-review/` (`overbridge-review`): `mob-review`, `review-pr`, `update-personas`,
   `persona-*`. A new persona needs a row in `mob-review`'s panel table; keep its README list in sync.

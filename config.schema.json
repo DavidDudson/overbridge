@@ -42,6 +42,11 @@
       "additionalProperties": false,
       "properties": { "claude": { "$ref": "#/$defs/agent-launch" }, "agy": { "$ref": "#/$defs/agent-launch" } }
     },
+    "mods-dir": {
+      "description": "The folder `overbridge mods` installs Claude Code mods into; every workspace Claude loads each mod in it. Absolute, ~/-relative or relative to the root. Root-only. Default: mods in Claude's config folder (~/.claude/mods).",
+      "type": "string",
+      "minLength": 1
+    },
     "cpu-priority": {
       "description": "Whether each workspace's processes get its priority class's nice value and, on macOS, Darwin background. false stops every pass and takes processes out of background; a nice already set stays until the process restarts. Default: true.",
       "type": "boolean"
