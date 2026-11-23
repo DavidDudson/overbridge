@@ -556,6 +556,7 @@ describe("check queue", () => {
   test("a bare program runs from the nearest bin-dirs folder, and history keeps its name", () => {
     config();
     const app = join(cq(), "app");
+
     const bin = (dir: string, text: string) => {
       mkdirSync(join(dir, "node_modules", ".bin"), { recursive: true });
       writeFileSync(join(dir, "node_modules", ".bin", "hello"), `#!/bin/sh\necho ${text}\n`, { mode: 0o755 });

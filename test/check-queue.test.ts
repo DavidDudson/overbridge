@@ -238,6 +238,7 @@ describe("CPU gate", () => {
       { idleMs: 500, totalMs: 1_000 },
       { idleMs: 1_500, totalMs: 2_000 },
     ];
+
     const next = () => samples.shift() ?? { idleMs: 0, totalMs: 0 };
     const read = cpuMeter(1, next, 500);
     expect(read()).toBeUndefined();
