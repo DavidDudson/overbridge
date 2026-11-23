@@ -4,7 +4,8 @@ import { agentDirOf } from "./layout";
 import { excludeInRepo } from "./git";
 import { ghReposCache, metaDir, ORCHESTRATION_ENV, orchestrationPlansDir, PLANS_DIR, root, selfCommand, worktreePath, wsDir } from "./paths";
 import { pluginSettings } from "./plugins";
-import { type IdeConfig, fileLinkSection } from "./file-links";
+import { defaultIde, fileLinkSection } from "./file-links";
+import { type IdeConfig, ideFromEnv } from "./ide";
 import { loadRepoConfig, resolveConfig, rootConfigPath, rootMcpServers } from "./project-config";
 import { agentOf, getWorkspace, readState } from "./state";
 import { AgentKind } from "./agent-kind";
@@ -166,14 +167,17 @@ export function scaffoldPlugins(): string {
 }
 
 /**
- * The `ide` a workspace's file links follow: the first repo whose config sets one, else the root `defaults`.
- * A config that does not load is skipped: the generated files must never block a launch.
+ * The `ide` a workspace's file links follow: the first repo whose config sets one, else the root `defaults`,
+ * else `$OVERBRIDGE_IDE`, as the top panel's editor button does. A config that does not load is skipped with a
+ * warning: the generated files must never block a launch.
  */
 function workspaceIde(ws: string): IdeConfig | undefined {
   const fromRepos = Object.keys(getWorkspace(readState(), ws).repos).flatMap((repo) => {
     try {
       return [loadRepoConfig(worktreePath(ws, repo), repo).ide];
-    } catch {
+    } catch (e) {
+      log(`warning: ${errorMessage(e)}\n${repo}'s ide is left out of the file links in CLAUDE.md`);
+
       return [];
     }
   });
@@ -181,13 +185,21 @@ function workspaceIde(ws: string): IdeConfig | undefined {
   return fromRepos.find((ide) => ide !== undefined) ?? rootIde();
 }
 
-/** The root `defaults` layer's `ide`, or undefined when unset or the root config does not load. */
-function rootIde(): IdeConfig | undefined {
+/** The root `defaults` layer's `ide`, else `$OVERBRIDGE_IDE`; undefined when neither names one. */
+function rootIde(env: NodeJS.ProcessEnv = process.env): IdeConfig | undefined {
   try {
-    return resolveConfig(undefined, undefined, rootConfigPath()).ide;
-  } catch {
-    return undefined;
+    const ide = resolveConfig(undefined, undefined, rootConfigPath()).ide;
+
+    if (ide) {
+      return ide;
+    }
+  } catch (e) {
+    log(`warning: ${errorMessage(e)}\nfile links follow $OVERBRIDGE_IDE alone`);
   }
+
+  const name = ideFromEnv(env.OVERBRIDGE_IDE);
+
+  return name && defaultIde(name);
 }
 
 /** The orchestrator's brief, appended to its system prompt: it coordinates and starts workspaces for all work. */

@@ -65,14 +65,27 @@ describe("orchestration tab scaffolding", () => {
     expect(brief.indexOf("overbridge thaw <workspace>")).toBeLessThan(brief.indexOf("overbridge item from-branch"));
   });
 
-  test("its brief writes file references as links through the root defaults' ide", () => {
-    expect(orchestratorPrompt()).toContain("(https://github.com/<owner>/<repo>/blob/<sha>/AGENTS.md#L268)\n");
-    writeFileSync(join(tmp, "config.yml"), "defaults:\n  ide: zed\n");
+  test("its brief writes file references as links through the root defaults' ide, else $OVERBRIDGE_IDE", () => {
+    const savedIde = process.env.OVERBRIDGE_IDE;
 
     try {
-      expect(orchestratorPrompt()).toContain("[AGENTS.md:268](zed://file//abs/path/to/repo/AGENTS.md:268) [↗](https://github.com/");
+      delete process.env.OVERBRIDGE_IDE;
+      expect(orchestratorPrompt()).not.toContain("## File references");
+      process.env.OVERBRIDGE_IDE = "vscode";
+      expect(orchestratorPrompt()).toContain("(vscode://file/abs/path/to/repo/AGENTS.md:268)");
+      writeFileSync(join(tmp, "config.yml"), "defaults:\n  ide: zed\n");
+      expect(orchestratorPrompt()).toContain("[AGENTS.md:268](zed://file/abs/path/to/repo/AGENTS.md:268) [↗](https://github.com/");
+      // a root config that does not load still leaves a brief
+      writeFileSync(join(tmp, "config.yml"), "defaults:\n  ide: emacs\n");
+      expect(orchestratorPrompt()).toContain("(vscode://file/");
     } finally {
-      rmSync(join(tmp, "config.yml"));
+      rmSync(join(tmp, "config.yml"), { force: true });
+
+      if (savedIde === undefined) {
+        delete process.env.OVERBRIDGE_IDE;
+      } else {
+        process.env.OVERBRIDGE_IDE = savedIde;
+      }
     }
   });
 

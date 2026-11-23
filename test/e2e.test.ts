@@ -17,6 +17,7 @@ const env = () => ({
   OVERBRIDGE_ROOT: root,
   ZELLIJ_CONFIG_DIR: join(root, "zellij-config"), // keep a real user layout out of the tests
   OVERBRIDGE_NAME: "",
+  OVERBRIDGE_IDE: "", // file links follow it when no ide is configured
   CLAUDECODE: "", // the suite may run inside Claude Code; this marks a caller as an agent
   XDG_CACHE_HOME: join(tmp, "cache"),
   GIT_AUTHOR_NAME: "t",
@@ -66,7 +67,7 @@ describe("workflow", () => {
   test("new workspaces get worktrees and claude scaffolding", () => {
     expect(ws(["new", "ws1", "-r", "app"]).out.trim()).toBe("ws1");
     expect(readFileSync(join(root, "ws1", "CLAUDE.md"), "utf8")).toContain("No cache yet");
-    expect(readFileSync(join(root, "ws1", "CLAUDE.md"), "utf8")).toContain("## File references");
+    expect(readFileSync(join(root, "ws1", "CLAUDE.md"), "utf8")).not.toContain("## File references");
 
     const repos = [
       { name: "zeta", url: "https://github.com/u/zeta", isFork: true },
@@ -102,6 +103,26 @@ describe("workflow", () => {
 
     for (const event of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "PermissionRequest", "SubagentStart", "SubagentStop", "PreCompact", "Stop", "SessionEnd"]) {
       expect(settings.hooks[event][0].hooks[0].command).toMatch(/ hook$/);
+    }
+  });
+
+  test("CLAUDE.md's file links follow the repo's ide over the root defaults, and a bad repo layer never blocks a launch", () => {
+    const config = join(root, "config.yml");
+
+    try {
+      writeFileSync(config, "defaults:\n  ide: zed\nrepos:\n  app:\n    ide: { name: vscode, github: false }\n");
+      expect(ws(["new", "links", "-r", "app"]).code).toBe(0);
+      const md = readFileSync(join(root, "links", "CLAUDE.md"), "utf8");
+      expect(md).toContain("(vscode://file/");
+      expect(md).not.toContain("zed://");
+      expect(md).not.toContain("↗");
+      expect(ws(["rm", "links"]).code).toBe(0);
+      writeFileSync(config, "defaults:\n  ide: zed\n");
+      expect(ws(["new", "links", "-r", "app"]).code).toBe(0);
+      expect(readFileSync(join(root, "links", "CLAUDE.md"), "utf8")).toContain("(zed://file/abs/path/to/repo/AGENTS.md:268) [↗](");
+      expect(ws(["rm", "links"]).code).toBe(0);
+    } finally {
+      rmSync(config, { force: true });
     }
   });
 

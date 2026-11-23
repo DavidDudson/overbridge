@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { AppStatus } from "../src/apps";
 import type { AppSpec } from "../src/project-config";
 import { withState } from "../src/state";
-import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, claimedCache, hit, itemLabel, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, REST_MERGE_CHECK_MS, snapshotTop, type PrInfo, type PrView, type TopApp, type TopLink, type TopSnapshot, topRowsNeeded } from "../src/top";
+import { type ActDeps, activate, applyOptimistic, buttons, CLEANUP_ARM_MS, cell, classifyPr, cleanable, claimedCache, editorIde, hit, itemLabel, layoutTop, openTarget, pressCleanup, readTopCache, refreshTop, REST_MERGE_CHECK_MS, snapshotTop, type PrInfo, type PrView, type TopApp, type TopLink, type TopSnapshot, topRowsNeeded } from "../src/top";
+import { IdeName } from "../src/ide";
 import { textWidth } from "../src/term";
 import { fakeProvider } from "./helpers/fake-provider";
 
@@ -198,6 +199,16 @@ describe("activate", () => {
   test("an ide name in the env maps to its command", () => {
     const b = editorButton(snap({ editor: "webstorm" }));
     expect(b!.action).toEqual({ kind: "editor", cmd: ["webstorm"], dir: "/w/w1" });
+  });
+
+  test("ide none, or no ide, leaves the editor button to the env", () => {
+    expect(editorIde(undefined)).toBeUndefined();
+    expect(editorIde({ name: IdeName.None, github: true })).toBeUndefined();
+    expect(editorIde({ name: IdeName.Zed, github: true })).toBe("zed");
+  });
+
+  test("OVERBRIDGE_IDE=none means no editor button", () => {
+    expect(editorButton(snap({ editor: "none" }))).toBeUndefined();
   });
 
   test("a configured ide wins over $EDITOR; neither means no editor button", () => {

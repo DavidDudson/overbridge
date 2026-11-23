@@ -128,7 +128,7 @@
             "link": {
               "type": "string",
               "minLength": 1,
-              "description": "Editor link template for a file reference. Placeholders: {path} (absolute), {line}, {relpath}, {owner}, {repo}, {sha}; needs {path} or {relpath}. Default: zed://file/{path}:{line} (zed), vscode://file/{path}:{line} (vscode), webstorm://open?file={path}&line={line} (webstorm), none for none."
+              "description": "Editor link template for a file reference. Placeholders: {path} (absolute), {line}, {relpath}, {owner}, {repo}, {sha}; needs {path} or {relpath}. Default: zed://file{path}:{line} (zed), vscode://file{path}:{line} (vscode), webstorm://open?file={path}&line={line} (webstorm), none for none."
             },
             "github": { "type": "boolean", "description": "Add a commit-pinned GitHub permalink ([↗]) after the editor link. Default true." }
           }

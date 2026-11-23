@@ -13,7 +13,7 @@ import { worklistFacts } from "./worklist-class";
 import { itemIdOf, providerFor, refreshLineage, refreshTitle, TITLE_TTL_MS } from "./pm";
 import type { Provider } from "./pm/provider";
 import { type AppSpec, type ButtonSpec, loadRepoConfig, type ProjectManagement } from "./project-config";
-import { type IdeConfig, IdeName } from "./file-links";
+import { type IdeConfig, IdeName } from "./ide";
 import { getWorkspace, isTaskClaim, readState } from "./state";
 import { boxBottom, boxRow, boxTop, type Color, colorize, fit, inverse, isColor, stripControl, textWidth } from "./term";
 import { parseUnresolved, REVIEWER_LOOK, type ReviewerStatus, type ReviewerView, reviewerLabel, reviewerStatuses, threadsCommand } from "./reviewers";
@@ -1016,6 +1016,10 @@ function editorFromEnv(editor: string | undefined): { label: string; cmd: string
 
   if (!cmd?.length) return undefined;
   const name = cmd[0]!;
+
+  if (cmd.length === 1 && name === IdeName.None) {
+    return undefined;
+  }
 
   if (cmd.length === 1 && isIde(name)) return { label: name, cmd: [IDE_COMMANDS[name]] };
 
