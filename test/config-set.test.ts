@@ -15,6 +15,8 @@ const problem = (key: string) => unknownKeyProblem(key.split("."), ROOT, LAYER);
 describe("unknownKeyProblem", () => {
   test.each([
     "defaults.ide",
+    "defaults.ide.name",
+    "defaults.ide.github",
     "defaults.commands.test",
     "defaults.hooks.post-add",
     "defaults.check-queue.max-parallel",
@@ -38,7 +40,7 @@ describe("unknownKeyProblem", () => {
   });
 
   test("refuses a key under a scalar", () => {
-    expect(problem("defaults.ide.name")).toBe("unknown key 'name' under defaults.ide");
+    expect(problem("defaults.review.ship-pr.name")).toBe("unknown key 'name' under defaults.review.ship-pr");
   });
 
   test("refuses an extension key at the root, where the schema allows none", () => {

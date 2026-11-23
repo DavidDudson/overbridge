@@ -7,6 +7,7 @@ import { repoOf, root, worktreePath } from "./paths";
 import { loadRepos } from "./config";
 import { slugFromUrl, WORKLIST_SCOPES, type WorklistScope } from "./pm/board-github";
 import type { WorkStatus } from "./pm/worklist";
+import { DEFAULT_LINKS, IDES, type IdeConfig, linkTemplateProblems } from "./file-links";
 import { errorMessage, fail, isBoolean, isNumber, isRecord, isString, type Json, type JsonObject } from "./util";
 
 /** Per-repo rules live in `overbridge.yml` at the repo (worktree) root. */
@@ -17,9 +18,6 @@ export const PM_NAMES = ["github", "jira"] as const;
 
 export type PmName = (typeof PM_NAMES)[number];
 
-export const IDES = ["vscode", "zed", "webstorm"] as const;
-
-export type Ide = (typeof IDES)[number];
 
 export interface ProjectManagement {
   name: PmName;
@@ -176,7 +174,7 @@ export interface ProjectConfig {
   apps: AppSpec[];
   commands: Commands;
   review: ReviewConfig;
-  ide?: Ide;
+  ide?: IdeConfig;
   /** The repo's dev shell, if it declares one. */
   shell?: ShellSpec;
   checkQueue: CheckQueue;
@@ -692,9 +690,11 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
     }
   }
 
-  const ide = p.oneOf(p.string(raw, "ide", "", false), IDES, "ide");
+  const ide = parseIde(p, raw.ide);
 
-  if (ide) config.ide = ide;
+  if (ide) {
+    config.ide = ide;
+  }
 
   const shell = raw.shell;
 
@@ -749,6 +749,53 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
 
   return config;
 }
+
+const IDE_KEYS = ["name", "link", "github"];
+
+/** `ide`: an ide name, or `{ name, link?, github? }`; undefined when unset or invalid. */
+function parseIde(p: Problems, raw: Json | undefined): IdeConfig | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+
+  if (isString(raw)) {
+    const name = p.oneOf(raw, IDES, "ide");
+
+    return name && withDefaultLink({ name, github: true });
+  }
+
+  if (!isRecord(raw)) {
+    p.add("ide", `expected one of ${IDES.join(", ")}, or a mapping with ${IDE_KEYS.join(", ")}`);
+
+    return undefined;
+  }
+
+  p.unknownKeys(raw, IDE_KEYS, "ide");
+  const name = p.oneOf(p.string(raw, "name", "ide", true), IDES, "ide.name");
+  const link = p.string(raw, "link", "ide", false);
+
+  if (link !== undefined) {
+    linkTemplateProblems(link).forEach((problem) => p.add("ide.link", problem));
+  }
+
+  if (raw.github !== undefined && !isBoolean(raw.github)) {
+    p.add("ide.github", "expected true or false");
+  }
+
+  if (!name) {
+    return undefined;
+  }
+
+  const ide: IdeConfig = { name, github: raw.github !== false };
+
+  return link === undefined ? withDefaultLink(ide) : { ...ide, link };
+}
+
+const withDefaultLink = (ide: IdeConfig): IdeConfig => {
+  const link = DEFAULT_LINKS[ide.name];
+
+  return link === undefined ? ide : { ...ide, link };
+};
 
 /** A regex pattern, reported when it does not compile. */
 const pattern = (p: Problems, obj: JsonObject, key: string, at: string): string | undefined => {

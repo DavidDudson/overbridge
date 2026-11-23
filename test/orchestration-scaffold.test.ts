@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { orchestrationArgs } from "../src/commands";
@@ -63,6 +63,17 @@ describe("orchestration tab scaffolding", () => {
     expect(brief).toContain('overbridge thaw <workspace> --prompt "/pickup <pr-url>');
     expect(brief).toContain("never start a second workspace for a branch an iceboxed one claims");
     expect(brief.indexOf("overbridge thaw <workspace>")).toBeLessThan(brief.indexOf("overbridge item from-branch"));
+  });
+
+  test("its brief writes file references as links through the root defaults' ide", () => {
+    expect(orchestratorPrompt()).toContain("(https://github.com/<owner>/<repo>/blob/<sha>/AGENTS.md#L268)\n");
+    writeFileSync(join(tmp, "config.yml"), "defaults:\n  ide: zed\n");
+
+    try {
+      expect(orchestratorPrompt()).toContain("[AGENTS.md:268](zed://file//abs/path/to/repo/AGENTS.md:268) [↗](https://github.com/");
+    } finally {
+      rmSync(join(tmp, "config.yml"));
+    }
   });
 
   test("claude starts with the settings and the brief appended to the system prompt", () => {

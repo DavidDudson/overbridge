@@ -66,6 +66,7 @@ describe("workflow", () => {
   test("new workspaces get worktrees and claude scaffolding", () => {
     expect(ws(["new", "ws1", "-r", "app"]).out.trim()).toBe("ws1");
     expect(readFileSync(join(root, "ws1", "CLAUDE.md"), "utf8")).toContain("No cache yet");
+    expect(readFileSync(join(root, "ws1", "CLAUDE.md"), "utf8")).toContain("## File references");
 
     const repos = [
       { name: "zeta", url: "https://github.com/u/zeta", isFork: true },

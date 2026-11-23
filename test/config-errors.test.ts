@@ -24,7 +24,14 @@ const app = (extra: string) => `apps:\n  - id: a\n    start: x\n${extra}`;
 describe("config validation messages", () => {
   test("each problem names its key path", () => {
     expect(problems("version: 2\n")).toEqual(["version: unsupported version 2 (this overbridge reads version 1)"]);
-    expect(problems("ide: emacs\n")).toEqual(['ide: expected one of vscode, zed, webstorm (got "emacs")']);
+    expect(problems("ide: emacs\n")).toEqual(['ide: expected one of vscode, zed, webstorm, none (got "emacs")']);
+    expect(problems("ide: 3\n")).toEqual(["ide: expected one of vscode, zed, webstorm, none, or a mapping with name, link, github"]);
+    expect(problems("ide:\n  link: x://{path}\n")).toEqual(["ide.name: required"]);
+    expect(problems("ide:\n  name: zed\n  github: yes please\n  lnk: x\n")).toEqual(["ide.lnk: unknown key, did you mean 'link'?", "ide.github: expected true or false"]);
+    expect(problems('ide:\n  name: zed\n  link: "x://{file}"\n')).toEqual([
+      "ide.link: unknown placeholder {file} (allowed: {path}, {line}, {relpath}, {owner}, {repo}, {sha})",
+      "ide.link: needs {path} or {relpath}, so the link names a file",
+    ]);
     expect(problems("project-management:\n  name: trello\n  project: x\n")).toEqual([
       'project-management.name: expected one of github, jira (got "trello")',
     ]);
@@ -103,7 +110,7 @@ describe("shipped example", () => {
     expect(config.projectManagement?.name).toBe("github");
     expect(config.apps.map((a) => a.id)).toEqual(["web"]);
     expect(Object.keys(config.commands).sort()).toEqual(["build", "format", "lint", "test", "typecheck"]);
-    expect(config.ide).toBe("vscode");
+    expect(config.ide?.name).toBe("vscode");
     expect(config.shell).toEqual({ enter: "direnv exec .", key: [] });
   });
 
