@@ -212,6 +212,8 @@ describe("orchestrator: bash", () => {
     "overbridge start app 12 --agent agy",
     'overbridge send gh-app-12 "/pickup #3"',
     "overbridge relaunch gh-app-12 --no-code-mode --chrome",
+    "overbridge model gh-app-12 opus",
+    "overbridge model gh-app-12 default --force",
     "overbridge start app 12 --prompt 'file a ticket for X; then stop'",
     'overbridge start app --task file-x --prompt "file a ticket for X > Y"',
     "overbridge rm old-ws",

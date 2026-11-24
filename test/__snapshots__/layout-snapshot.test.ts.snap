@@ -107,7 +107,7 @@ exports[`generated layout two workspaces, one resuming 1`] = `
           args "top" "--ws" "ws2"
         }
         pane name="ws2 · claude" command="overbridge" cwd="/ws-root/ws2" {
-          args "claude" "ws2" "--continue"
+          args "claude" "ws2" "--" "--continue"
         }
       }
     }

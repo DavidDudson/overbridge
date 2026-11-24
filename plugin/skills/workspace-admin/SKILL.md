@@ -55,6 +55,9 @@ overbridge relaunch <name> [--no-code-mode] [--chrome] [--env NAME=VALUE]... [--
                                                   # write a handoff and restart the agent in its tab on /read-handoff, resuming its conversation (--fresh starts a new one)
                                                   # the flags replace the workspace's launch settings, which up, tab and thaw keep; no flags go back to config.yml's agent-launch
                                                   # refuses a mid-turn agent unless --force; an agent can relaunch its own workspace, never another; an agent may not pass --env or agent args after --
+overbridge model <name> [<model>|default] [--fresh] [--force]
+                                                  # relaunch the agent on <model>, keeping its other launch settings; sticks for up, tab and thaw; default drops it
+                                                  # no model: print the one it starts on. Agents may run it (the orchestrator for any workspace, an agent for its own)
 overbridge checks                                 # the @checks tab's pane: the check queue; K/J move a waiting check, t/b to top/bottom
 overbridge frozen                                 # the @frozen tab's pane: lists iceboxed workspaces, t thaws one (f in a sidebar iceboxes its workspace)
 overbridge explore [sync <repo>|shell <repo>]     # the @explore tab's pane: pick a repo, run its apps and editor on a default-branch checkout; sync fast-forwards it when clean

@@ -1,5 +1,5 @@
 import { rmSync } from "node:fs";
-import { type AgentLaunch, isEmptyLaunch, onlyShorthands, usesClaudeOnly } from "./agent-launch";
+import { type AgentLaunch, DEFAULT_MODEL, EMPTY_LAUNCH, isEmptyLaunch, modelFault, onlyModelChanged, onlyShorthands, usesClaudeOnly, withModel } from "./agent-launch";
 import { AgentKind } from "./agent-kind";
 import { AT_REST, type AgentState, readAgentState } from "./agent-state";
 import { ancestry, type Launcher, readLauncher, RELAUNCH_SIGNAL, relaunchRequestPath, SessionMode, workspaceAbove, writeRelaunchRequest } from "./agent-supervisor";
@@ -12,9 +12,18 @@ import { agentOf, getWorkspace, isIceboxed, isRemoving, readState, withState } f
 import { requireTab, TabFocus } from "./tab";
 import { errorMessage, fail, log } from "./util";
 
+/** What a relaunch changes, which decides what an agent may pass: any launch built from the shorthands, or only a new model. */
+export const LaunchChange = { Settings: "settings", Model: "model" } as const;
+
+export type LaunchChange = (typeof LaunchChange)[keyof typeof LaunchChange];
+
 export interface RelaunchOptions {
   /** Replaces the workspace's launch settings; empty goes back to the root config's `agent-launch`. */
   launch: AgentLaunch;
+  /** Unset means `LaunchChange.Settings`. */
+  change?: LaunchChange | undefined;
+  /** The handoff's Next line; unset says `overbridge relaunch` restarted the agent. */
+  next?: string | undefined;
   /** Carried out after the handoff, in place of its Next line. */
   prompt?: string | undefined;
   session: SessionMode;
@@ -76,8 +85,8 @@ export const relaunchDeps = (mux: Mux = defaultMux()): RelaunchDeps => ({
 
 /**
  * Refuse a relaunch that must not happen, before anything is written. An agent may relaunch only its own workspace
- * (the orchestrator, in no workspace, any), and may set only the `--no-code-mode`/`--chrome` settings, so it cannot
- * start itself with arguments or env that loosen its permissions.
+ * (the orchestrator, in no workspace, any), and may set only the `--no-code-mode`/`--chrome` settings, or through
+ * `overbridge model` only a new model, so it cannot start itself with arguments or env that loosen its permissions.
  */
 /** What `assertRelaunchable` learned: whether the caller runs in `ws`'s own tab, and `ws`'s live supervisor. */
 interface Relaunchable {
@@ -110,8 +119,10 @@ function assertRelaunchable(ws: string, opts: RelaunchOptions, deps: RelaunchDep
     fail(`an agent can relaunch only its own workspace (${caller.ws}), not ${ws}`);
   }
 
-  if (!onlyShorthands(opts.launch) && (caller.agent || !caller.interactive)) {
-    fail("--env and agent arguments are for the user: run overbridge relaunch yourself, in a terminal; an agent can set only --no-code-mode and --chrome");
+  const agentMay = opts.change === LaunchChange.Model ? onlyModelChanged(opts.launch, w.launch ?? EMPTY_LAUNCH) : onlyShorthands(opts.launch);
+
+  if (!agentMay && (caller.agent || !caller.interactive)) {
+    fail("--env and agent arguments are for the user: run overbridge relaunch yourself, in a terminal; an agent can set only --no-code-mode, --chrome and the model (overbridge model)");
   }
 
   const inOwnTab = caller.ws === ws;
@@ -153,7 +164,7 @@ export function relaunch(ws: string, opts: RelaunchOptions, deps: RelaunchDeps =
   const handoff = writeHandoff({
     ws,
     reason: HandoffReason.Relaunch,
-    next: `\`overbridge relaunch ${ws}\` restarted the agent; carry on with the task in progress`,
+    next: opts.next ?? `\`overbridge relaunch ${ws}\` restarted the agent; carry on with the task in progress`,
     rows: handoffRows(ws),
   });
 
@@ -178,4 +189,28 @@ export function relaunch(ws: string, opts: RelaunchOptions, deps: RelaunchDeps =
   deps.open(ws, prompt, opts.session);
 
   return handoff;
+}
+
+/** How `switchModel` restarts the agent: same conversation or a new one, and whether to stop one mid-turn. */
+export interface SwitchModelOptions {
+  session: SessionMode;
+  force?: boolean | undefined;
+}
+
+/**
+ * Restart `ws`'s agent on `model` (`DEFAULT_MODEL` drops the workspace's model), keeping its other launch settings,
+ * so the model sticks for `up`, `tab` and `thaw`; returns the handoff path.
+ */
+export function switchModel(ws: string, model: string, opts: SwitchModelOptions, deps: RelaunchDeps = relaunchDeps()): string {
+  const chosen = model === DEFAULT_MODEL ? undefined : model;
+  const fault = chosen === undefined ? undefined : modelFault(chosen);
+
+  if (fault !== undefined) {
+    fail(`model '${model}': ${fault}`);
+  }
+
+  const current = getWorkspace(readState(), ws).launch ?? EMPTY_LAUNCH;
+  const next = `\`overbridge model ${ws} ${model}\` restarted the agent on ${chosen ?? "its default model"}; carry on with the task in progress`;
+
+  return relaunch(ws, { launch: withModel(current, chosen), change: LaunchChange.Model, next, session: opts.session, force: opts.force }, deps);
 }

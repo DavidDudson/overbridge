@@ -110,6 +110,8 @@ overbridge relaunch "$OVERBRIDGE_NAME" --no-code-mode --chrome   # either flag a
 It writes a handoff and restarts you in this tab on `/read-handoff`, continuing this conversation. It works only on your
 own workspace. `--env` and agent arguments after `--` are for the user; every other flag is yours. Finish or commit what is in hand first: the restart stops the current turn.
 
+When the user asks you to switch model, run `overbridge model "$OVERBRIDGE_NAME" <model>` (`opus`, `sonnet`, a full model id, or `default` to drop it). It restarts you the same way, keeps your other settings, and the model sticks when the tab reopens. `/model` lasts only this session.
+
 ## Branch naming
 
 New branches: short kebab-case with a type prefix, e.g. `feat/zellij-layout`,

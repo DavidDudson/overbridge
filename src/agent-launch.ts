@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { isJsonObject, isJsonString, type JsonValue } from "./json";
 
 /** Extra environment and arguments a workspace's agent starts with. */
@@ -74,6 +75,57 @@ export const usesClaudeOnly = (l: AgentLaunch): boolean => CODE_MODE_ENV in l.en
 /** Whether `l` holds only what `--no-code-mode` and `--chrome` set: all an agent may choose for itself. */
 export const onlyShorthands = (l: AgentLaunch): boolean =>
   Object.entries(l.env).every(([k, v]) => k === CODE_MODE_ENV && v === "0") && l.args.every((a) => a === CHROME_ARG);
+
+/** The agent flag that picks its model; Claude Code and agy both take it. */
+export const MODEL_ARG = "--model";
+
+/** As a model name, clears the workspace's model, so the agent starts on the root config's or its own default. */
+export const DEFAULT_MODEL = "default";
+
+const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/[\]-]*$/;
+
+/** Why `name` cannot be a model name, or undefined when it can; a leading `-` would read as another agent flag. */
+export function modelFault(name: string): string | undefined {
+  return MODEL_RE.test(name) ? undefined : "expected a model name or alias such as opus or claude-opus-5-5: letters, digits and . _ : / [ ] -, starting with a letter or digit";
+}
+
+const MODEL_PREFIX = `${MODEL_ARG}=`;
+
+/** `args` split at the first `--`: the agent's flags, and the separator with what follows it (prompt text, never a flag). */
+function splitFlags(args: readonly string[]): [string[], string[]] {
+  const cut = args.indexOf("--");
+
+  return cut < 0 ? [[...args], []] : [args.slice(0, cut), args.slice(cut)];
+}
+
+/** The model `l` sets, if any; the last setting wins. */
+export function launchModel(l: AgentLaunch): string | undefined {
+  const [flags] = splitFlags(l.args);
+
+  return flags.flatMap((a, i) => (a === MODEL_ARG ? flags.slice(i + 1, i + 2) : a.startsWith(MODEL_PREFIX) ? [a.slice(MODEL_PREFIX.length)] : [])).at(-1);
+}
+
+/** `l` with its model set to `model`, or with no model when `model` is undefined; every other setting stays, and the model goes before any `--`. */
+export function withModel(l: AgentLaunch, model: string | undefined): AgentLaunch {
+  const [flags, tail] = splitFlags(l.args);
+  const rest = flags.filter((a, i) => a !== MODEL_ARG && !a.startsWith(MODEL_PREFIX) && flags[i - 1] !== MODEL_ARG);
+
+  return { env: l.env, args: [...rest, ...(model === undefined ? [] : [MODEL_ARG, model]), ...tail] };
+}
+
+/** Whether `next` is exactly what `overbridge model` builds from `current`: the same settings, with a valid model or none. */
+export function onlyModelChanged(next: AgentLaunch, current: AgentLaunch): boolean {
+  const model = launchModel(next);
+
+  return (model === undefined || modelFault(model) === undefined) && isDeepStrictEqual(next, withModel(current, model));
+}
+
+/** The root config's launch layer under the workspace's own; a workspace model replaces the root's, so the agent never gets two. */
+export function layerLaunch(root: AgentLaunch | undefined, ws: AgentLaunch | undefined): AgentLaunch {
+  const base = root && ws && launchModel(ws) !== undefined ? withModel(root, undefined) : root;
+
+  return mergeLaunch(base, ws);
+}
 
 /** Why `v` is not an `AgentLaunch` (stored in state), or undefined when it is one. */
 export function launchFault(v: JsonValue | undefined): string | undefined {

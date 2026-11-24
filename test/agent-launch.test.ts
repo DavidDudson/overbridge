@@ -2,7 +2,21 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHROME_ARG, CODE_MODE_ENV, envNameFault, launchFault, launchFromFlags, mergeLaunch, onlyShorthands, parseEnvPairs, usesClaudeOnly } from "../src/agent-launch";
+import {
+  CHROME_ARG,
+  CODE_MODE_ENV,
+  envNameFault,
+  launchFault,
+  launchFromFlags,
+  launchModel,
+  mergeLaunch,
+  modelFault,
+  onlyModelChanged,
+  onlyShorthands,
+  parseEnvPairs,
+  usesClaudeOnly,
+  withModel,
+} from "../src/agent-launch";
 import {
   ancestry,
   clearLauncher,
@@ -69,6 +83,42 @@ describe("launch settings", () => {
   });
 });
 
+describe("model", () => {
+  const launch = { env: { A: "1" }, args: ["--chrome", "--model", "sonnet", "--x"] };
+
+  test("launchModel reads the last --model, in either form", () => {
+    expect(launchModel(launch)).toBe("sonnet");
+    expect(launchModel({ env: {}, args: ["--model=opus", "--model", "haiku"] })).toBe("haiku");
+    expect(launchModel({ env: {}, args: ["--model=opus"] })).toBe("opus");
+    expect(launchModel({ env: {}, args: ["--chrome"] })).toBeUndefined();
+  });
+
+  test("withModel replaces the model and keeps every other setting", () => {
+    expect(withModel(launch, "opus")).toEqual({ env: { A: "1" }, args: ["--chrome", "--x", "--model", "opus"] });
+    expect(withModel({ env: {}, args: ["--model=opus"] }, undefined)).toEqual({ env: {}, args: [] });
+    // after a `--` the agent would read it as prompt text
+    expect(withModel({ env: {}, args: ["--x", "--", "hi"] }, "opus")).toEqual({ env: {}, args: ["--x", "--model", "opus", "--", "hi"] });
+    expect(withModel({ env: {}, args: ["--", "--model", "note"] }, undefined)).toEqual({ env: {}, args: ["--", "--model", "note"] });
+    expect(launchModel({ env: {}, args: ["--", "--model", "note"] })).toBeUndefined();
+  });
+
+  test("modelFault accepts aliases and full ids, never a flag", () => {
+    ["opus", "claude-opus-5-5", "sonnet[1m]", "us.anthropic.claude-opus-5-5-v1:0"].forEach((m) => expect(modelFault(m)).toBeUndefined());
+    ["--dangerously-skip-permissions", "", "a b", "-x"].forEach((m) => expect(modelFault(m)).toBeDefined());
+  });
+
+  test("onlyModelChanged: true when only a valid model differs", () => {
+    expect(onlyModelChanged(withModel(launch, "opus"), launch)).toBe(true);
+    expect(onlyModelChanged(withModel(launch, undefined), launch)).toBe(true);
+    expect(onlyModelChanged({ ...launch, env: { A: "2" } }, launch)).toBe(false);
+    expect(onlyModelChanged({ env: { A: "1" }, args: ["--chrome", "--x", "--y"] }, launch)).toBe(false);
+    expect(onlyModelChanged(withModel(launch, "--dangerously-skip-permissions"), launch)).toBe(false);
+    // an extra --model can carry an unchecked agent argument as its value
+    expect(onlyModelChanged({ env: {}, args: ["--model", "--permission-mode=plan", "--model", "opus"] }, { env: {}, args: [] })).toBe(false);
+    expect(onlyModelChanged({ env: {}, args: ["--model"] }, { env: {}, args: [] })).toBe(false);
+  });
+});
+
 describe("agentLaunchOf", () => {
   const layers = (agentLaunch: RootLayers["agentLaunch"]): RootLayers => ({ ...rootLayersFrom(undefined, "config.yml"), agentLaunch });
 
@@ -89,6 +139,13 @@ describe("agentLaunchOf", () => {
   ])("%s", (_, w, expected) => {
     const root = layers({ claude: { env: { A: "1", B: "1" }, args: ["--r"] }, agy: { env: {}, args: ["--agy"] } });
     expect(agentLaunchOf(w, root)).toEqual(expected);
+  });
+
+  test("a workspace model replaces a model in the root's agent-launch", () => {
+    const root = layers({ claude: { env: {}, args: ["--r", "--model", "haiku"] } });
+    expect(agentLaunchOf(ws(undefined, { env: {}, args: ["--model", "opus"] }), root)).toEqual({ env: {}, args: ["--r", "--model", "opus"] });
+    expect(agentLaunchOf(ws(), root)).toEqual({ env: {}, args: ["--r", "--model", "haiku"] });
+    expect(agentLaunchOf(ws(undefined, { env: {}, args: ["--chrome"] }), root)).toEqual({ env: {}, args: ["--r", "--model", "haiku", "--chrome"] });
   });
 });
 

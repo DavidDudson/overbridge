@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { launchFromFlags } from "../src/agent-launch";
@@ -7,7 +7,7 @@ import { RELAUNCH_SIGNAL, relaunchRequestPath, SessionMode, takeRelaunchRequest 
 import { AgentKind } from "../src/agent-kind";
 import type { AgentState } from "../src/agent-state";
 import { zellijMux } from "../src/mux";
-import { type Caller, currentCaller, relaunch, type RelaunchDeps, type RelaunchOptions } from "../src/relaunch";
+import { type Caller, currentCaller, relaunch, type RelaunchDeps, type RelaunchOptions, switchModel } from "../src/relaunch";
 import { readState, withState, type WorkspaceState } from "../src/state";
 import type { RunResult } from "../src/util";
 
@@ -198,5 +198,57 @@ describe("currentCaller", () => {
     addWorkspace("ws1");
     expect(currentCaller({ CLAUDECODE: "1", OVERBRIDGE_NAME: "ws1" })).toMatchObject({ ws: "ws1", agent: true });
     expect(currentCaller({ OVERBRIDGE_NAME: "" })).toMatchObject({ ws: undefined, agent: false });
+  });
+});
+
+describe("switchModel", () => {
+  const cont = { session: SessionMode.Continue };
+
+  test("sets the model, keeps the other launch settings, and restarts the agent", () => {
+    addWorkspace("ws1", { launch: { env: { A: "1" }, args: ["--chrome", "--model", "haiku"] } });
+    const f = fake({ launcher: true, state: "idle" });
+    switchModel("ws1", "opus", cont, f.deps);
+
+    expect(readState().workspaces.ws1?.launch).toEqual({ env: { A: "1" }, args: ["--chrome", "--model", "opus"] });
+    expect(f.signals).toEqual([[100, RELAUNCH_SIGNAL]]);
+  });
+
+  test("default drops the model, and with nothing else left the launch settings", () => {
+    addWorkspace("ws1", { launch: { env: {}, args: ["--model", "opus"] } });
+    switchModel("ws1", "default", cont, fake({ launcher: true }).deps);
+    expect(readState().workspaces.ws1?.launch).toBeUndefined();
+  });
+
+  test("an agent may switch the model even when the user set env and agent arguments", () => {
+    addWorkspace("ws1", { launch: { env: { A: "1" }, args: ["--permission-mode", "plan"] } });
+    const orchestrator = fake({ launcher: true, caller: { agent: true, interactive: false }, state: "idle" });
+    switchModel("ws1", "sonnet", cont, orchestrator.deps);
+    expect(readState().workspaces.ws1?.launch).toEqual({ env: { A: "1" }, args: ["--permission-mode", "plan", "--model", "sonnet"] });
+  });
+
+  test("refuses a model that reads as a flag, before anything is written", () => {
+    addWorkspace("ws1");
+    const f = fake({ launcher: true, caller: { agent: true, interactive: false } });
+    expect(() => switchModel("ws1", "--dangerously-skip-permissions", cont, f.deps)).toThrow("model '--dangerously-skip-permissions'");
+    expect(readState().workspaces.ws1?.launch).toBeUndefined();
+    expect(f.signals).toEqual([]);
+  });
+
+  test("relaunch itself still refuses a model passed by an agent as an agent argument", () => {
+    addWorkspace("ws1");
+    const agent = fake({ launcher: true, caller: { ws: "ws1", agent: true, interactive: false } });
+    expect(() => relaunch("ws1", opts({ launch: launchFromFlags({ args: ["--model", "opus"] }) }), agent.deps)).toThrow("for the user");
+  });
+
+  test("the handoff names the model switch", () => {
+    addWorkspace("ws1");
+    const handoff = switchModel("ws1", "opus", cont, fake({ launcher: true }).deps);
+    expect(readFileSync(handoff, "utf8")).toContain("`overbridge model ws1 opus` restarted the agent on opus");
+  });
+
+  test("an agent still may not switch another workspace's model", () => {
+    addWorkspace("ws1");
+    const other = fake({ launcher: true, caller: { ws: "ws2", agent: true, interactive: false } });
+    expect(() => switchModel("ws1", "opus", cont, other.deps)).toThrow("only its own workspace");
   });
 });
