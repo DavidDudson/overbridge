@@ -764,6 +764,8 @@ describe("relaunch", () => {
     writeFileSync(join(root, "config.yml"), "agent-launch:\n  claude:\n    args: [--model, m]\n");
     // a piped caller is not a terminal, so it may set only the shorthands
     expect(ws(["relaunch", "rl", "--", "--permission-mode", "plan"]).err).toContain("in a terminal");
+    // a model goes through `overbridge model`; relaunch's agent arguments stay the user's
+    expect(ws(["relaunch", "rl", "--", "--model", "m"]).err).toContain("in a terminal");
     const r = ws(["relaunch", "rl", "--no-code-mode", "--chrome"]);
     expect(r.err).toBe("");
     expect(r.out).toContain("handoff at");
@@ -795,7 +797,7 @@ describe("relaunch", () => {
     expect(lines(runs)[1]).toContain("--model opus --continue -- /read-handoff");
     expect(ws(["model", "md"]).out.trim()).toBe("opus");
 
-    expect(ws(["model", "md", "--x"]).code).not.toBe(0);
+    expect(ws(["model", "md", "a b"]).err).toContain("model 'a b'");
     await stop("md", p);
   }, 30_000);
 

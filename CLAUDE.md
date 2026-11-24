@@ -131,6 +131,7 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   launch settings (state and config import it); `src/agent-supervisor.ts` is the supervisor protocol (files, signal, process tree).
   Launch settings are the root-only `agent-launch.<kind>` under the workspace's own (`agentLaunchOf`), so `up`, `tab`, and `thaw` keep them.
   An agent (under a supervisor, or `CLAUDECODE=1`) may relaunch only its own workspace and only with `onlyShorthands`; both guards block `--env` and `--` args.
+  `overbridge model` (`switchModel`) relaunches with `LaunchChange.Model`, where an agent may pass only the launch `onlyModelChanged` accepts: the stored one with a new valid model (`withModel`). A workspace model replaces the root's (`layerLaunch`).
 - `src/explore.ts` is the `@explore` tab (`overbridge explore`, pane in `src/explore-run.ts`): a repo picker, then the top
   panel (`topPanel` with `PanelOptions`: its own `TopScope`, only the terminal pane, a `back` button) over a detached
   checkout of the default branch at `<root>/@explore/<repo>`. `syncPlan` moves that checkout only while it is clean and on

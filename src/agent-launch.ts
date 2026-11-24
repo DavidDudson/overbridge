@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { isJsonObject, isJsonString, type JsonValue } from "./json";
 
 /** Extra environment and arguments a workspace's agent starts with. */
@@ -90,29 +91,40 @@ export function modelFault(name: string): string | undefined {
 
 const MODEL_PREFIX = `${MODEL_ARG}=`;
 
+/** `args` split at the first `--`: the agent's flags, and the separator with what follows it (prompt text, never a flag). */
+function splitFlags(args: readonly string[]): [string[], string[]] {
+  const cut = args.indexOf("--");
+
+  return cut < 0 ? [[...args], []] : [args.slice(0, cut), args.slice(cut)];
+}
+
 /** The model `l` sets, if any; the last setting wins. */
 export function launchModel(l: AgentLaunch): string | undefined {
-  return l.args.flatMap((a, i) => (a === MODEL_ARG ? l.args.slice(i + 1, i + 2) : a.startsWith(MODEL_PREFIX) ? [a.slice(MODEL_PREFIX.length)] : [])).at(-1);
+  const [flags] = splitFlags(l.args);
+
+  return flags.flatMap((a, i) => (a === MODEL_ARG ? flags.slice(i + 1, i + 2) : a.startsWith(MODEL_PREFIX) ? [a.slice(MODEL_PREFIX.length)] : [])).at(-1);
 }
 
-/** `l` with its model set to `model`, or with no model when `model` is undefined; every other setting stays. */
+/** `l` with its model set to `model`, or with no model when `model` is undefined; every other setting stays, and the model goes before any `--`. */
 export function withModel(l: AgentLaunch, model: string | undefined): AgentLaunch {
-  const rest = l.args.filter((a, i) => a !== MODEL_ARG && !a.startsWith(MODEL_PREFIX) && l.args[i - 1] !== MODEL_ARG);
+  const [flags, tail] = splitFlags(l.args);
+  const rest = flags.filter((a, i) => a !== MODEL_ARG && !a.startsWith(MODEL_PREFIX) && flags[i - 1] !== MODEL_ARG);
 
-  return { env: l.env, args: [...rest, ...(model === undefined ? [] : [MODEL_ARG, model])] };
+  return { env: l.env, args: [...rest, ...(model === undefined ? [] : [MODEL_ARG, model]), ...tail] };
 }
 
-const sameLaunch = (a: AgentLaunch, b: AgentLaunch): boolean =>
-  a.args.length === b.args.length &&
-  a.args.every((arg, i) => arg === b.args[i]) &&
-  Object.keys(a.env).length === Object.keys(b.env).length &&
-  Object.entries(a.env).every(([k, v]) => b.env[k] === v);
-
-/** Whether `next` differs from `current` only in a valid model, which is all `overbridge model` changes. */
+/** Whether `next` is exactly what `overbridge model` builds from `current`: the same settings, with a valid model or none. */
 export function onlyModelChanged(next: AgentLaunch, current: AgentLaunch): boolean {
   const model = launchModel(next);
 
-  return (model === undefined || modelFault(model) === undefined) && sameLaunch(withModel(next, undefined), withModel(current, undefined));
+  return (model === undefined || modelFault(model) === undefined) && isDeepStrictEqual(next, withModel(current, model));
+}
+
+/** The root config's launch layer under the workspace's own; a workspace model replaces the root's, so the agent never gets two. */
+export function layerLaunch(root: AgentLaunch | undefined, ws: AgentLaunch | undefined): AgentLaunch {
+  const base = root && ws && launchModel(ws) !== undefined ? withModel(root, undefined) : root;
+
+  return mergeLaunch(base, ws);
 }
 
 /** Why `v` is not an `AgentLaunch` (stored in state), or undefined when it is one. */

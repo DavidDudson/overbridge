@@ -96,6 +96,10 @@ describe("model", () => {
   test("withModel replaces the model and keeps every other setting", () => {
     expect(withModel(launch, "opus")).toEqual({ env: { A: "1" }, args: ["--chrome", "--x", "--model", "opus"] });
     expect(withModel({ env: {}, args: ["--model=opus"] }, undefined)).toEqual({ env: {}, args: [] });
+    // after a `--` the agent would read it as prompt text
+    expect(withModel({ env: {}, args: ["--x", "--", "hi"] }, "opus")).toEqual({ env: {}, args: ["--x", "--model", "opus", "--", "hi"] });
+    expect(withModel({ env: {}, args: ["--", "--model", "note"] }, undefined)).toEqual({ env: {}, args: ["--", "--model", "note"] });
+    expect(launchModel({ env: {}, args: ["--", "--model", "note"] })).toBeUndefined();
   });
 
   test("modelFault accepts aliases and full ids, never a flag", () => {
@@ -109,6 +113,9 @@ describe("model", () => {
     expect(onlyModelChanged({ ...launch, env: { A: "2" } }, launch)).toBe(false);
     expect(onlyModelChanged({ env: { A: "1" }, args: ["--chrome", "--x", "--y"] }, launch)).toBe(false);
     expect(onlyModelChanged(withModel(launch, "--dangerously-skip-permissions"), launch)).toBe(false);
+    // an extra --model can carry an unchecked agent argument as its value
+    expect(onlyModelChanged({ env: {}, args: ["--model", "--permission-mode=plan", "--model", "opus"] }, { env: {}, args: [] })).toBe(false);
+    expect(onlyModelChanged({ env: {}, args: ["--model"] }, { env: {}, args: [] })).toBe(false);
   });
 });
 
@@ -138,6 +145,7 @@ describe("agentLaunchOf", () => {
     const root = layers({ claude: { env: {}, args: ["--r", "--model", "haiku"] } });
     expect(agentLaunchOf(ws(undefined, { env: {}, args: ["--model", "opus"] }), root)).toEqual({ env: {}, args: ["--r", "--model", "opus"] });
     expect(agentLaunchOf(ws(), root)).toEqual({ env: {}, args: ["--r", "--model", "haiku"] });
+    expect(agentLaunchOf(ws(undefined, { env: {}, args: ["--chrome"] }), root)).toEqual({ env: {}, args: ["--r", "--model", "haiku", "--chrome"] });
   });
 });
 

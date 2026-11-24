@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { launchFromFlags } from "../src/agent-launch";
@@ -232,6 +232,18 @@ describe("switchModel", () => {
     expect(() => switchModel("ws1", "--dangerously-skip-permissions", cont, f.deps)).toThrow("model '--dangerously-skip-permissions'");
     expect(readState().workspaces.ws1?.launch).toBeUndefined();
     expect(f.signals).toEqual([]);
+  });
+
+  test("relaunch itself still refuses a model passed by an agent as an agent argument", () => {
+    addWorkspace("ws1");
+    const agent = fake({ launcher: true, caller: { ws: "ws1", agent: true, interactive: false } });
+    expect(() => relaunch("ws1", opts({ launch: launchFromFlags({ args: ["--model", "opus"] }) }), agent.deps)).toThrow("for the user");
+  });
+
+  test("the handoff names the model switch", () => {
+    addWorkspace("ws1");
+    const handoff = switchModel("ws1", "opus", cont, fake({ launcher: true }).deps);
+    expect(readFileSync(handoff, "utf8")).toContain("`overbridge model ws1 opus` restarted the agent on opus");
   });
 
   test("an agent still may not switch another workspace's model", () => {

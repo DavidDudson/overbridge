@@ -28,7 +28,7 @@ import { agentOf, type Claim, claimOwner, type ReboundFrom, getWorkspace, isIceb
 import { AgentKind } from "./agent-kind";
 import { agyArgs, agyTrust, agyUntrust } from "./agy";
 import { errorMessage, exec, fail, isRecord, log, must, naturalSort, run, shellQuote, spawnCwd } from "./util";
-import { type AgentLaunch, launchModel, mergeLaunch, withModel } from "./agent-launch";
+import { type AgentLaunch, layerLaunch } from "./agent-launch";
 import { clearLauncher, descendants, RELAUNCH_SIGNAL, relaunchExtra, takeRelaunchRequest, writeLauncher } from "./agent-supervisor";
 import { listProcs, pidsAlive } from "./proc";
 import { constants } from "node:os";
@@ -588,13 +588,7 @@ export async function claude(ws: string, extra: string[]): Promise<never> {
 export const NO_SUPERVISOR_ENV = "OVERBRIDGE_NO_SUPERVISOR";
 
 /** Root config's `agent-launch` for the workspace's agent kind, then the workspace's own (set by `relaunch`). */
-export function agentLaunchOf(w: WorkspaceState, layers = loadRootLayers()): AgentLaunch {
-  const base = layers.agentLaunch[agentOf(w)];
-  // the agent would get two --model flags otherwise, and which one wins is up to its own parser
-  const root = base && w.launch && launchModel(w.launch) !== undefined ? withModel(base, undefined) : base;
-
-  return mergeLaunch(root, w.launch);
-}
+export const agentLaunchOf = (w: WorkspaceState, layers = loadRootLayers()): AgentLaunch => layerLaunch(layers.agentLaunch[agentOf(w)], w.launch);
 
 /** How long a relaunch waits for the agent to exit on SIGTERM before it sends SIGKILL. */
 const RELAUNCH_KILL_MS = 10_000;
