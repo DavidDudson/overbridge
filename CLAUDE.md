@@ -53,6 +53,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   its `v` view lists finished runs from history (`recentChecks`, `renderRecent`). `src/check-estimate.ts` keeps the last run times per repo and command (`<meta>/check-estimates.json`, written as each run ends) and simulates the queue into ETAs (`queueEtas`) for the tab, the sidebar and the wait message. A ticket with no `rank` is from an older build: `comparatorFor`
   then sorts everyone by time, as that build does. The caps in `gateFor` count every running ticket, not only those
   ahead. `refreshTop` stores the workspace class in `TopCache.priority`/`priorityIcon` for the sidebar card.
+- `src/check-scope.ts` is the pure refusal rules `check()` runs before queueing (`scopeRefusal`, `invocations`, which unwraps
+  `sh -c`, `npx`, `pnpm exec`, env prefixes and the like). Its settings, `check-scope` (`mode`, `max-projects`), are root-only like
+  `hooks` and `buttons`, so a checked-out branch can't loosen the check; add any new scope rule there, not in `check()`.
 - CPU priority: `src/cpu-priority.ts` is the pure pass (`planPriority`): a process belongs to the workspace whose
   `OVERBRIDGE_NAME` it set (not inherited), descendants follow, and the multiplexer, its ancestors and the server are
   never touched, so they stay at nice 0 above every workspace. Each class has a `nice` (`classTargets` in `src/check-priority.ts`, 1 + 4 × rank

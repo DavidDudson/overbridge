@@ -142,6 +142,22 @@ export interface CheckQueue {
   classes: readonly PriorityClass[];
 }
 
+/** What `overbridge check` does with a command that runs more than the branch changed. */
+export const CheckScopeMode = { Enforce: "enforce", Warn: "warn", Off: "off" } as const;
+
+export type CheckScopeMode = (typeof CheckScopeMode)[keyof typeof CheckScopeMode];
+
+const CHECK_SCOPE_MODES: readonly CheckScopeMode[] = Object.values(CheckScopeMode);
+
+export interface CheckScope {
+  /** `enforce` refuses the command, `warn` prints why and runs it, `off` skips the check. */
+  mode: CheckScopeMode;
+  /** `nx run-many` with a longer `-p` list counts as unscoped. */
+  maxProjects: number;
+}
+
+export const defaultCheckScope = (): CheckScope => ({ mode: CheckScopeMode.Enforce, maxProjects: 5 });
+
 export const defaultCheckQueue = (): CheckQueue => ({
   maxLoadPercent: 300,
   maxCpuPercent: 75,
@@ -188,6 +204,8 @@ export interface ProjectConfig {
   /** The repo's dev shell, if it declares one. */
   shell?: ShellSpec;
   checkQueue: CheckQueue;
+  /** How `overbridge check` treats an unscoped command, from the root `config.yml` only. */
+  checkScope: CheckScope;
   icebox: IceboxConfig;
   /** Lifecycle hooks, from the root `config.yml` only. Present only when there are any. */
   hooks?: Hooks;
@@ -206,12 +224,14 @@ export const defaultConfig = (): ProjectConfig => ({
   commands: {},
   review: { exclude: [], localDir: DEFAULT_PERSONA_DIR, shipPr: true },
   checkQueue: defaultCheckQueue(),
+  checkScope: defaultCheckScope(),
   icebox: { prune: [] },
   buttons: [],
   mcpServers: [],
 });
 
-const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "icebox", "hooks", "buttons", "mcp-servers"];
+const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "check-scope", "icebox", "hooks", "buttons", "mcp-servers"];
+const CHECK_SCOPE_KEYS = ["mode", "max-projects"];
 const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "max-cpu-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds", "skip-queue-seconds", "bin-dirs", "priority", "priority-rules"];
 const PRIORITY_RULE_KEYS = ["priority", "branch", "item", "type", "label"];
@@ -599,6 +619,24 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
       }
 
       if (Object.keys(out).length) config.hooks = out;
+    }
+  }
+
+  const checkScope = raw["check-scope"];
+
+  // a repo file's `check-scope: null` would drop a root layer's check-scope in the overlay, so it is refused too
+  if (!root && checkScope !== undefined) {
+    p.add("check-scope", "only allowed in the root config.yml, so a checked-out branch can't loosen it");
+  } else if (checkScope !== undefined && checkScope !== null) {
+    if (!isRecord(checkScope)) {
+      p.add("check-scope", `expected a mapping with ${CHECK_SCOPE_KEYS.join(", ")}`);
+    } else {
+      p.unknownKeys(checkScope, CHECK_SCOPE_KEYS, "check-scope");
+      // YAML reads a bare `off` as false
+      const mode = checkScope.mode === false ? CheckScopeMode.Off : p.oneOf(p.string(checkScope, "mode", "check-scope", false), CHECK_SCOPE_MODES, "check-scope.mode");
+      const maxProjects = p.positiveInt(checkScope, "max-projects", "check-scope");
+
+      config.checkScope = { mode: mode ?? config.checkScope.mode, maxProjects: maxProjects ?? config.checkScope.maxProjects };
     }
   }
 

@@ -325,7 +325,10 @@ access to other workspaces and direct branch switching. Do not try to work aroun
   \`overbridge check\`, \`cd\` before the call, and pipe the check's output with \`pipefail\` on, so a failed check still fails (\`set -o pipefail; overbridge check <repo> -- vitest run a.ts | tail\`).
   Run package bins by name (\`nx\`, \`vitest\`, \`eslint\`, \`tsc\`): they run from \`node_modules/.bin\` with no \`npx\` or \`sh -c\`.
 - Scope each check to what the branch changed: one file, one project, or an affected-only mode (\`nx affected -t <target> --base=origin/<base>\`,
-  \`vitest run --changed origin/<base>\`, \`<base>\` being the PR's base branch). Do not run every project (\`nx run-many\` with no \`-p\`) or turn off the build cache: CI runs the full suite.
+  \`vitest run --changed origin/<base>\`, \`<base>\` being the PR's base branch). CI runs the full suite. \`overbridge check\` refuses an unscoped run:
+  \`nx run-many\` with no \`-p\`, a \`-p\` list over the cap or a \`*\`/\`tag:\` pattern, \`nx affected --all\`, a \`test\`/\`test:unit\` target or vitest or jest run
+  with no \`--changed\`, \`--related\` or spec file path, and \`--skip-nx-cache\`, also inside \`sh -c\`, \`npx\` or \`pnpm exec\`. When it refuses the repo's
+  configured command, scope that command as the message says (add \`--changed origin/<base>\`, after \`--\` for a package script, or spec paths); do not work around the check.
 ${devShells}
 ## GitHub repos
 

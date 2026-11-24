@@ -45,7 +45,7 @@ apps:
 commands:
   lint: npm run lint
   typecheck: npm run typecheck
-  test: npm test
+  test: npm test -- --changed origin/main   # overbridge check refuses a test run with no --changed, --related or spec path
   build: npm run build
   format: npm run format
 

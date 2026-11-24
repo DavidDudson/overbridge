@@ -555,3 +555,28 @@ describe("mcp-servers in the root config", () => {
     expect(thrown(() => loadRepoConfig(worktree("ws1", "app", "version: 1\nmcp-servers: [evil]\n")))).toContain("mcp-servers: only allowed in the root config.yml");
   });
 });
+
+describe("check-scope", () => {
+  test("defaults to enforce with a cap of 5, and the root layers set it per repo", () => {
+    expect(resolveConfig(undefined, "app", "overbridge.yml").checkScope).toEqual({ mode: "enforce", maxProjects: 5 });
+    writeRoot("defaults:\n  check-scope:\n    max-projects: 8\nrepos:\n  app:\n    check-scope:\n      mode: warn\n  quiet:\n    check-scope:\n      mode: off\n");
+    expect(resolveConfig(undefined, "app", "overbridge.yml").checkScope).toEqual({ mode: "warn", maxProjects: 8 });
+    expect(resolveConfig(undefined, "other", "overbridge.yml").checkScope).toEqual({ mode: "enforce", maxProjects: 8 });
+    expect(resolveConfig(undefined, "quiet", "overbridge.yml").checkScope).toEqual({ mode: "off", maxProjects: 8 });
+  });
+
+  test("a repo's own overbridge.yml can't loosen it", () => {
+    const dir = worktree("ws1", "app", "check-scope:\n  mode: off\n");
+    expect(thrown(() => loadRepoConfig(dir))).toContain("check-scope: only allowed in the root config.yml, so a checked-out branch can't loosen it");
+    writeRoot("defaults:\n  check-scope:\n    max-projects: 2\n");
+    const cleared = worktree("ws1", "nulled", "check-scope:\n");
+    expect(thrown(() => loadRepoConfig(cleared))).toContain("check-scope: only allowed in the root config.yml");
+  });
+
+  test("bad values name their key", () => {
+    writeRoot("defaults:\n  check-scope:\n    mode: loose\n    max-projects: 0\n");
+    const message = thrown(() => loadRootLayers());
+    expect(message).toContain('check-scope.mode: expected one of enforce, warn, off (got "loose")');
+    expect(message).toContain("check-scope.max-projects: expected a whole number from 1 up (got 0)");
+  });
+});

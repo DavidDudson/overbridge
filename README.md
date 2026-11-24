@@ -485,6 +485,24 @@ test or build, in queue order across every workspace. Several run at once while 
 `typecheck`, `test`, and `build` through it. The repo defaults to the one the current directory is in, then to the
 workspace's only repo.
 
+**Scope.** CI runs the full suite, so a check runs only what the branch changed. `overbridge check` refuses (exit 1)
+`nx run-many` with no `-p`/`--projects`, with more than `max-projects` of them, or with a `*` or `tag:` pattern;
+`nx affected --all`; a `test` or `test:unit` target (an nx target or a package script) or a vitest or jest run with
+no `--changed`, `--related` or spec file path; and `--skip-nx-cache` or `NX_SKIP_NX_CACHE`. It reads through env
+prefixes, `sh -c`/`bash -c`, `npx`, `pnpm exec`, `pnpm dlx`, `pnpm nx`, `timeout` and `nice`. The message names the
+rule and a scoped form: `nx affected -t <target> --base=origin/<base>`, `vitest run --changed origin/<base>`, or the
+refused test command with `--changed origin/<base>` or spec paths added. The parse is best effort, not a sandbox.
+
+`check-scope` in the root `config.yml` (under `defaults`, `owners.<owner>` or `repos.<name>`) tunes it. A repo's own
+`overbridge.yml` can't set it, so a branch can't loosen it:
+
+```yaml
+defaults:
+  check-scope:
+    mode: enforce      # enforce (default) refuses; warn prints the message and runs the command; off skips the check
+    max-projects: 5    # nx run-many -p lists longer than this count as unscoped
+```
+
 1. **Queue.** Each call writes a ticket to `.overbridge/check-queue/`. Tickets start by priority class (see
    **Priority** below), then in the order they were queued: a ticket waits until every ticket ahead of it, whose
    process is still alive, has started. Waiters remove tickets

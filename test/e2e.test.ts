@@ -495,6 +495,44 @@ describe("check queue", () => {
     expect(chained.err).toContain("overbridge check runs one command, but this script chains 2");
   }, CHECK_TEST_MS);
 
+  test("refuses an unscoped run before it queues; the root config.yml sets the cap and the mode", () => {
+    config();
+    const rootConfig = join(root, "config.yml");
+    const marker = join(tmp, "unscoped-ran");
+    const bin = join(cq(), "app", "node_modules", ".bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "nx"), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
+
+    try {
+      writeFileSync(rootConfig, "defaults:\n  check-scope:\n    max-projects: 2\n");
+      const all = check(["--", "nx", "run-many", "-t", "lint"]);
+      expect(all.code).toBe(1);
+      expect(all.err).toContain("overbridge check refused");
+      expect(all.err).toContain("nx affected -t lint --base=origin/<base>");
+      expect(existsSync(marker)).toBe(false);
+      expect(check(["--", "npx", "nx", "run-many", "-t", "lint", "-p", "a,b,c"]).err).toContain("over the cap of 2 (check-scope.max-projects)");
+      expect(check(["--", "nx", "affected", "-t", "lint", "--skip-nx-cache"]).err).toContain("--skip-nx-cache turns off the nx cache");
+      expect(check(["--", "pnpm", "test"]).err).toContain("the test script runs every test");
+      expect(tickets()).toEqual([]);
+
+      writeFileSync(rootConfig, "defaults:\n  check-scope:\n    mode: warn\n");
+      const warned = check(["--", "nx", "run-many", "-t", "lint"]);
+      expect(warned.code).toBe(0);
+      expect(warned.err).toContain("running it anyway (check-scope.mode: warn)");
+      expect(existsSync(marker)).toBe(true);
+      rmSync(marker);
+
+      writeFileSync(rootConfig, "defaults:\n  check-scope:\n    mode: off\n");
+      const off = check(["--", "nx", "run-many", "-t", "lint"]);
+      expect(off.code).toBe(0);
+      expect(off.err).not.toContain("unscoped");
+      expect(existsSync(marker)).toBe(true);
+    } finally {
+      rmSync(rootConfig, { force: true });
+      rmSync(join(cq(), "app", "node_modules"), { recursive: true, force: true });
+    }
+  }, CHECK_TEST_MS);
+
   test("two runs overlap while the load allows", async () => {
     config();
     const log = join(tmp, "overlap.log");
