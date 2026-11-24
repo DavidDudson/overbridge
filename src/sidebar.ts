@@ -11,7 +11,7 @@ import { recentToolCalls } from "./history-tail";
 import { createReaper, type ReapResult } from "./auto-remove";
 import { requireWs } from "./commands";
 import { formatDuration, readEstimates } from "./check-estimate";
-import { queueDir, readQueue, type Ticket } from "./check-queue";
+import { queueDir, type QueueView, readQueue, type Ticket } from "./check-queue";
 import { queueEstimates } from "./checks";
 import { CleanupCause, type CleanupInFlight, cleanupRecords, cleanupRows } from "./cleanup-log";
 import { Motion, sidebarMotion } from "./config";
@@ -264,7 +264,7 @@ const hiddenByRemoval = (workspaces: State["workspaces"], ws: string): boolean =
  * The generated layout opens the orchestration tabs first, so their digits come first in tab order too.
  * Each card is built on its own: a workspace whose files are bad or whose readers throw gets a fault card.
  */
-export function entries(order: string[] = tabOrder(), state: State = readState()): Entry[] {
+export function entries(order: string[] = tabOrder(), state: State = readState(), queue?: QueueView): Entry[] {
   const workspaces = state.workspaces;
   const names = Object.keys(workspaces).filter((ws) => !hiddenByRemoval(workspaces, ws) && !isIced(workspaces, ws)).sort(naturalSort);
 
@@ -273,7 +273,7 @@ export function entries(order: string[] = tabOrder(), state: State = readState()
  return i < 0 ? order.length : i; };
 
   return [
-    ...ORCHESTRATION_TABS.map((t) => guardedEntry(t.tab, Section.Orchestration, () => entryFor(t.tab, Section.Orchestration, t.label, readBadge(t.tab, state)), t.label)),
+    ...ORCHESTRATION_TABS.map((t) => guardedEntry(t.tab, Section.Orchestration, () => entryFor(t.tab, Section.Orchestration, t.label, readBadge(t.tab, { state, queue })), t.label)),
     ...names.toSorted((a, b) => rank(a) - rank(b)).map((ws) => guardedEntry(ws, Section.Workspaces, () => workspaceEntry(ws, workspaces[ws]!))),
   ];
 }
@@ -594,9 +594,12 @@ const elapsed = (sinceMs: number, now: number) => {
   return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${String(secs % 60).padStart(2, "0")}s`;
 };
 
-/** The live queue's rows, each workspace with when its checks should be done. */
-function checkQueueRows(inner: number): string[] {
-  const queue = readQueue();
+/** The live queue's rows, each workspace with when its checks should be done; none when the queue could not be read. */
+function checkQueueRows(queue: QueueView | undefined, inner: number): string[] {
+  if (!queue) {
+    return [];
+  }
+
   const now = Date.now();
 
   return queueRows(queue, inner, now, queueEstimates(queue, readEstimates(dirname(queueDir())), now).wsDoneMs);
@@ -657,10 +660,12 @@ export interface SidebarReaders {
   /** Start the merged-PR sweep when this sidebar's turn comes. */
   sweep: () => void;
   readState: (fallback: State) => { state: State; fault?: string };
-  entries: (order: string[], state: State) => Entry[];
+  /** The check queue, read once per poll for both the @checks card and the rows under the divider. */
+  queue: () => QueueView;
+  entries: (order: string[], state: State, queue: QueueView | undefined) => Entry[];
   reap: (list: Entry[]) => ReapResult;
   /** The rows under the divider: cleanups, then the check queue. */
-  status: (state: State, inner: number) => string[];
+  status: (state: State, inner: number, queue: QueueView | undefined) => string[];
   limits: () => Limits | undefined;
 }
 
@@ -712,7 +717,8 @@ export function gather(readers: SidebarReaders, inner: number, last: Model): Mod
     attempt("merge sweep", readers.sweep, undefined);
   }
 
-  const listed = attempt("workspace list", () => readers.entries(order, state), last.list);
+  const queue = attempt<QueueView | undefined>("check queue", readers.queue, undefined);
+  const listed = attempt("workspace list", () => readers.entries(order, state, queue), last.list);
   const reaped = attempt("auto-remove", () => readers.reap(listed), NO_REAP);
 
   const list = listed.map((e) => {
@@ -721,7 +727,7 @@ export function gather(readers: SidebarReaders, inner: number, last: Model): Mod
     return fault ? { ...e, fault } : reaped.unsaved.has(e.tab) ? { ...e, unsaved: true } : e;
   });
 
-  const status = attempt("status rows", () => readers.status(state, inner), []);
+  const status = attempt("status rows", () => readers.status(state, inner, queue), []);
   const limits = attempt("limits", readers.limits, undefined);
 
   const model: Model = { list, status, limits, state };
@@ -1130,9 +1136,10 @@ export async function sidebar(wsOpt?: string) {
       now: Date.now,
     }),
     readState: tryReadState,
-    entries: (order, state) => withReceipt(entries(order, state), self),
+    queue: () => readQueue(),
+    entries: (order, state, queue) => withReceipt(entries(order, state, queue), self),
     reap: createReaper(),
-    status: (state, inner) => [...icedRows(state, inner), ...cleanupRows(inFlightCleanups(state), cleanupRecords(state.cleanups), inner, Date.now(), state.mergeSweepAt), ...checkQueueRows(inner)],
+    status: (state, inner, queue) => [...icedRows(state, inner), ...cleanupRows(inFlightCleanups(state), cleanupRecords(state.cleanups), inner, Date.now(), state.mergeSweepAt), ...checkQueueRows(queue, inner)],
     limits: readLimits,
   };
 

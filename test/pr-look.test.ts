@@ -60,6 +60,10 @@ import { animate } from "../src/sidebar-motion";
 import { entryLines, type Entry } from "../src/sidebar";
 import { Motion } from "../src/config";
 import { readBadge } from "../src/tab-badge-read";
+import { CHECK_RUNNING_ICON, CHECK_WAITING_ICON, checksBadge } from "../src/checks";
+import { FROZEN_ICON } from "../src/frozen";
+import { pulsesIcon } from "../src/tab-badge";
+import type { Ticket } from "../src/check-queue";
 
 describe("sidebar badge", () => {
   const card = (rows: { draft: boolean; mergeable?: string }[]): Entry => ({ tab: "@reviews", section: "orchestration", glyph: "  ", label: badgeLabel("reviews", badgeOf(rows)), badge: badgeOf(rows) });
@@ -72,7 +76,23 @@ describe("sidebar badge", () => {
     expect(plain([e], 600)).toContain("🔥");
     expect(animate([e], 600, Motion.Off)[0]).toBe(e);
   });
+  const empty = { version: 1 as const, workspaces: {} };
+  const frozen = { version: 1 as const, workspaces: { a: { created: "", repos: {}, iceboxed: { since: "2026-11-01T00:00:00Z" } } } };
+  const ticket: Ticket = { ws: "w", repo: "r", command: "just test", queuedAtMs: 0, pid: 1 };
+
   test("a tab without a list has no badge", () => {
-    expect(readBadge("@root", { version: 1, workspaces: {} })).toBeUndefined();
+    expect(readBadge("@root", { state: empty })).toBeUndefined();
+  });
+  test("@frozen reads state and @checks the queue it is given; with no queue @checks has none", () => {
+    expect(readBadge("@frozen", { state: frozen })?.icons).toEqual([FROZEN_ICON]);
+    expect(readBadge("@checks", { state: frozen, queue: { running: [ticket], waiting: [ticket] } })?.icons).toEqual([CHECK_RUNNING_ICON, CHECK_WAITING_ICON]);
+    expect(readBadge("@checks", { state: frozen })).toBeUndefined();
+  });
+  test("only an icon with a second glyph pulses, so a still badge never stamps the clock", () => {
+    expect(pulsesIcon(HEALTH_LOOK.conflict)).toBe(true);
+    expect(pulsesIcon(HEALTH_LOOK.ready)).toBe(false);
+    expect(pulsesIcon(CHECK_WAITING_ICON)).toBe(false);
+    const still: Entry = { tab: "@checks", section: "orchestration", glyph: "  ", label: "check queue 1", badge: checksBadge({ running: [], waiting: [ticket] }) };
+    expect(animate([still], 600, Motion.WhileActive)[0]).toBe(still);
   });
 });

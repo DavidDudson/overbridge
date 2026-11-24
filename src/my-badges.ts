@@ -1,12 +1,9 @@
-import type { QueueView } from "./check-queue";
-import { frozenRows } from "./frozen";
 import { cachedRead } from "./gauge";
 import { rank } from "./pm/worklist";
 import type { CiState, HealthInput } from "./pr-look";
 import { prListPath, type PrListKind } from "./prlist-data";
 import { type Silenceable, silencedNow } from "./silence";
-import type { State } from "./state";
-import { type BadgeIcon, badgeFromIcons, badgeOf, type TabBadge } from "./tab-badge";
+import { badgeOf, type TabBadge } from "./tab-badge";
 import { isRecord, isString, type Json } from "./util";
 import { isWorkRow, worklistPath } from "./worklist-data";
 import { workInput } from "./worklist-look";
@@ -79,16 +76,3 @@ export function workBadge(): TabBadge | undefined {
 
   return raw === undefined ? undefined : workBadgeFromCache(raw, silencedNow());
 }
-
-export const CHECK_RUNNING_ICON: BadgeIcon = { icon: "🔄", alt: "🔄", color: "yellow", rank: 0 };
-
-export const CHECK_WAITING_ICON: BadgeIcon = { icon: "⏳", alt: "⏳", color: "grey", rank: 1 };
-
-/** The check queue as its badge: one icon per running check, then one per waiting check. */
-export const checksBadge = (queue: QueueView): TabBadge =>
-  badgeFromIcons([...queue.running.map(() => CHECK_RUNNING_ICON), ...queue.waiting.map(() => CHECK_WAITING_ICON)]);
-
-export const FROZEN_ICON: BadgeIcon = { icon: "🧊", alt: "🧊", color: "blue", rank: 0 };
-
-/** The iceboxed workspaces as a badge, one icon each. */
-export const frozenBadge = (state: State): TabBadge => badgeFromIcons(frozenRows(state).map(() => FROZEN_ICON));

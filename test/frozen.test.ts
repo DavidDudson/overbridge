@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { frozenRows, renderFrozen } from "../src/frozen";
+import { FROZEN_ICON, frozenBadge, frozenRows, renderFrozen } from "../src/frozen";
 import { runThaw } from "../src/frozen-run";
-import { FROZEN_ICON, frozenBadge } from "../src/my-badges";
 import type { State } from "../src/state";
 
 const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
@@ -79,7 +78,7 @@ describe("frozenBadge", () => {
     expect(frozenBadge(state)).toEqual({ count: 2, icons: [FROZEN_ICON, FROZEN_ICON] });
   });
 
-  test("nothing frozen is an empty badge", () => {
-    expect(frozenBadge({ version: 1, workspaces: {} })).toEqual({ count: 0, icons: [] });
+  test("nothing frozen has no badge", () => {
+    expect(frozenBadge({ version: 1, workspaces: {} })).toBeUndefined();
   });
 });

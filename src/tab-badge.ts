@@ -2,18 +2,15 @@ import { alternate } from "./anim";
 import { HEALTH_LOOK, healthOf, type HealthInput } from "./pr-look";
 import { textWidth, type Color } from "./term";
 
-/** One row's icon in a badge. `rank` orders the icons, lowest first; an `alt` unlike `icon` pulses between the two. */
+/** One row's icon in a badge. `rank` orders the icons, lowest first; an icon with an `alt` pulses between the two. */
 export interface BadgeIcon {
   icon: string;
-  alt: string;
+  alt?: string;
   color: Color;
   rank: number;
 }
 
-/**
- * What a sidebar entry shows for an orchestration tab that lists things: how many, and one icon per row for what it
- * needs, worst first. Any tab feeds it plain `BadgeIcon`s, so the sidebar knows nothing of the tab's data.
- */
+/** What the sidebar shows for an orchestration tab that lists things: a count and one icon per row, worst first. */
 export interface TabBadge {
   count: number;
   icons: BadgeIcon[];
@@ -22,7 +19,7 @@ export interface TabBadge {
 }
 
 /** Whether `i` pulses between two glyphs when the badge animates. */
-export const pulsesIcon = (i: BadgeIcon): boolean => i.alt !== i.icon;
+export const pulsesIcon = (i: BadgeIcon): i is BadgeIcon & { alt: string } => i.alt !== undefined && i.alt !== i.icon;
 
 export function badgeFromIcons(icons: readonly BadgeIcon[]): TabBadge {
   return { count: icons.length, icons: icons.toSorted((a, b) => a.rank - b.rank) };

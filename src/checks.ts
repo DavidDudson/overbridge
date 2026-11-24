@@ -2,6 +2,7 @@ import { Outcome, outcomeOf, type QueueView, type Ticket, ticketKey, ticketName 
 import { type Move, movedIndex, type QueueOverrides, spreadKeys } from "./check-priority";
 import { type EstimateStore, type Eta, etaSlots, formatDuration, lastDoneMs, queueEtas, workspaceDone } from "./check-estimate";
 import type { CheckRecord, HistoryStore } from "./history";
+import { type BadgeIcon, badgeFromIcons, type TabBadge } from "./tab-badge";
 import { bold, boxBottom, type Color, boxRow, boxTop, cell, colorize, dim, fit, inverse, stripControl, textWidth } from "./term";
 
 /** One check as the @checks tab lists it. */
@@ -236,4 +237,15 @@ export function renderRecent(rows: readonly RecentCheck[], { selected, offset, h
   const footer = message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit(RECENT_LEGEND, inner));
 
   return [boxTop("Recent checks (24h)", width), boxRow(dim(fit(head, inner))), ...lines, ...padding, boxRow(footer), boxBottom(width, recentTotals(rows), "blue")];
+}
+
+export const CHECK_RUNNING_ICON: BadgeIcon = { icon: "🔄", color: "yellow", rank: 0 };
+
+export const CHECK_WAITING_ICON: BadgeIcon = { icon: "⏳", color: "grey", rank: 1 };
+
+/** The @checks card's badge: an icon per running check, then one per waiting check; none when the queue is empty. */
+export function checksBadge(queue: QueueView): TabBadge | undefined {
+  const icons = [...queue.running.map(() => CHECK_RUNNING_ICON), ...queue.waiting.map(() => CHECK_WAITING_ICON)];
+
+  return icons.length ? badgeFromIcons(icons) : undefined;
 }

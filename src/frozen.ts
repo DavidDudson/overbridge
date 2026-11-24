@@ -2,6 +2,7 @@ import { isIceboxed, type State } from "./state";
 import { age } from "./pr-rows";
 import { bold, boxBottom, boxRow, boxTop, cell, colorize, dim, fit, inverse } from "./term";
 import { naturalSort } from "./util";
+import { type BadgeIcon, badgeFromIcons, type TabBadge } from "./tab-badge";
 
 /** One iceboxed workspace as the @frozen tab lists it. */
 export interface FrozenRow {
@@ -70,4 +71,13 @@ export function renderFrozen(rows: readonly FrozenRow[], { selected, offset, hei
   const footer = message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit(LEGEND, inner));
 
   return [boxTop("Frozen", width), boxRow(dim(fit(head, inner))), ...lines, ...padding, boxRow(footer), boxBottom(width, `${rows.length} frozen`, "blue")];
+}
+
+export const FROZEN_ICON: BadgeIcon = { icon: "🧊", color: "blue", rank: 0 };
+
+/** The @frozen card's badge: an icon per iceboxed workspace; none when nothing is frozen. */
+export function frozenBadge(state: State): TabBadge | undefined {
+  const rows = frozenRows(state);
+
+  return rows.length ? badgeFromIcons(rows.map(() => FROZEN_ICON)) : undefined;
 }
