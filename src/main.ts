@@ -167,7 +167,7 @@ Session (zellij by default; OVERBRIDGE_MUX=tmux for tmux)
   overbridge claude <name|@tab> [-- args]       run Claude bound to a workspace, or an orchestration tab's Claude
 
 Claude Code mods (every workspace Claude loads each one; mods-dir in config.yml, default mods in $CLAUDE_CONFIG_DIR
-or ~/.claude; install, update and rm refuse to run inside Claude)
+or ~/.claude; install, update and rm refuse to run under Claude, so run them from a terminal)
   overbridge mods install <git-url|path> [--name x]
                                         clone a git URL, or link a local folder, into the mods folder, then
                                         run claude plugin validate; a mod that fails is removed again

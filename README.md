@@ -293,8 +293,9 @@ overbridge mods rm <name>                           # remove one
   refuses a name that is already installed, and a mod whose plugin name another mod already has. `--name` sets the
   folder name. The default is the last part of the URL or path, without `.git`.
 - **`update`** runs `git pull --ff-only` in each cloned mod, or in the one you name, then validates it again. A
-  pull that fails validation, or takes a plugin name another mod has, is reset to the commit before it. It skips a
-  linked mod and says so: edit that one in place.
+  pull that fails validation, or takes a plugin name another mod has, is reset to the commit before it. A pull that
+  fails leaves the mod on the commit that passed, still loaded. It checks a linked mod again without a pull: edit
+  that one in place.
 - **`ls`** prints one line per mod: its folder name, the version from its `plugin.json`, its git remote or link
   target, and whether it validates.
 - **`rm`** deletes a cloned mod's folder. For a linked mod, it deletes only the link and never the folder it points to.
@@ -306,13 +307,14 @@ to the root. Only the root `config.yml` can set it.
 `install`, `update`, and `rm` write `<mods folder>/.claude-plugin/marketplace.json`, with one entry per mod, named
 for its `plugin.json`. A workspace Claude registers that folder as the `overbridge-mods` directory marketplace and
 enables each mod it lists as `<name>@overbridge-mods`, in the same settings that load the overbridge plugins. Claude
-reads a directory marketplace in place, so an edit to a linked mod applies after `/reload-plugins`, with no
-reinstall. A folder added to the mods folder by hand loads only after `overbridge mods update` adds it to the
+reads a directory marketplace in place, so an edit to an installed linked mod applies after `/reload-plugins`, with
+no reinstall. A newly installed mod loads in each workspace Claude started after the install. A folder added to the mods folder by hand loads only after `overbridge mods update` adds it to the
 marketplace, and `ls` shows it as `not loaded` until then.
 
 A mod's hooks run in every workspace, outside the workspace guard, so `install`, `update`, and `rm` refuse to run
-from a Claude session (`CLAUDECODE` set). Run them yourself, or with `!` in front of the command in Claude. `ls`
-works from anywhere.
+under Claude: when `CLAUDECODE` is set, or a `claude` process is above them. That includes a `!` command typed in
+Claude, so run them in a terminal outside Claude, such as the workspace's terminal pane. The guard also blocks them
+in a workspace Claude. `ls` works from anywhere.
 
 ## Agents: Claude Code or Antigravity
 

@@ -71,9 +71,9 @@ overbridge claude <name|@root>                    # run a bound Claude, or the r
 
 overbridge mods install <git-url|path> [--name x] # clone or link a Claude Code mod into the mods folder (root-only mods-dir in
                                           # config.yml, else mods in $CLAUDE_CONFIG_DIR or ~/.claude); runs claude plugin
-                                          # validate and removes it again on failure. Every workspace Claude loads each mod
-                                          # (/reload-plugins). install, update and rm refuse inside Claude: ask the user
-                                          # to run them (with ! in front)
+                                          # validate and removes it again on failure. Each workspace Claude started after
+                                          # it loads it. install, update and rm refuse under Claude (a ! command too): ask
+                                          # the user to run them in a terminal outside Claude
 overbridge mods update [name]                     # git pull --ff-only each cloned mod, then validate it again (a failure is reset); skips linked ones
 overbridge mods ls                                # name, version, source (git remote or link target), valid or not
 overbridge mods rm <name>                         # remove a mod; a linked mod's target is never deleted

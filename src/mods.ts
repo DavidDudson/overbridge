@@ -4,6 +4,8 @@ import { basename, isAbsolute, join, resolve } from "node:path";
 import { isJsonObject, isJsonString } from "./json";
 import { NAME_RE, root } from "./paths";
 import type { PluginSettings } from "./plugins";
+import { listProcs } from "./proc";
+import { ancestry } from "./agent-supervisor";
 import { loadRootLayers } from "./project-config";
 import { errorMessage, OverbridgeError, run, type RunResult } from "./util";
 
@@ -29,9 +31,22 @@ export interface Mod {
   source: ModSource;
 }
 
-/** Why an agent may not run a mods command that changes what loads, or undefined when it may. */
-export function agentModsRefusal(env: Record<string, string | undefined>): string | undefined {
-  return env.CLAUDECODE ? "mods change what every workspace Claude loads, which is for the user: ask them to run it" : undefined;
+/**
+ * Why a mods command that changes what loads may not run here, or undefined when it may. `ancestors` are the
+ * executable names above this process: an agent can clear `CLAUDECODE` in its own command, but not the `claude`
+ * process it runs under. A `!` command in Claude runs under it too, so the user runs these from a terminal.
+ */
+export function agentModsRefusal(env: Record<string, string | undefined>, ancestors: readonly string[]): string | undefined {
+  return env.CLAUDECODE || ancestors.includes("claude")
+    ? "mods change what every workspace Claude loads, so only the user may change them: ask them to run this in a terminal outside Claude"
+    : undefined;
+}
+
+/** The executable names of this process's ancestors. */
+export function ancestorNames(): string[] {
+  const procs = new Map(listProcs().map((p) => [p.pid, p]));
+
+  return ancestry(process.pid, (pid) => procs.get(pid)?.ppid).flatMap((pid) => procs.get(pid)?.comm ?? []);
 }
 
 /** The mods folder: the root config's `mods-dir` (absolute, `~/` or root-relative), else `mods` in Claude's config folder. */
@@ -287,12 +302,12 @@ export function installMod(source: string, name: string | undefined, deps: ModsD
     throw new OverbridgeError(`${dest} vanished while it was being installed`);
   }
 
-  deps.out(`installed ${folder} (${mod.plugin}@${MODS_MARKETPLACE}) from ${source}; start a workspace Claude, or run /reload-plugins in one, to load it`);
+  deps.out(`installed ${folder} (${mod.plugin}@${MODS_MARKETPLACE}) from ${source}; each workspace Claude started from now on loads it`);
 
   return mod;
 }
 
-/** The outcome of updating one mod. `Kept` failed but was reset to the version that passed; `Failed` no longer loads. */
+/** The outcome of updating one mod. `Kept` failed but stays on the version that passed (a failed pull, or a reset); `Failed` no longer loads. */
 export const UpdateOutcome = { Updated: "updated", Skipped: "skipped", Kept: "kept", Failed: "failed" } as const;
 
 export type UpdateOutcome = (typeof UpdateOutcome)[keyof typeof UpdateOutcome];
@@ -321,7 +336,7 @@ function updateOne(mod: Mod, deps: ModsDeps): UpdateResult {
   const pull = deps.run(["git", "pull", "--ff-only"], { cwd: mod.dir });
 
   if (!pull.ok) {
-    return { outcome: UpdateOutcome.Failed, detail: `git pull --ff-only failed: ${combinedOutput(pull)}` };
+    return { outcome: UpdateOutcome.Kept, detail: `git pull --ff-only failed, so it stays on the commit that passed: ${combinedOutput(pull)}` };
   }
 
   const problem = checkMod(deps, mod.dir, mod.folder);

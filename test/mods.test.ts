@@ -202,21 +202,22 @@ describe("modsMarketplace", () => {
 });
 
 describe("agentModsRefusal", () => {
-  test("refuses an agent and lets the user through", () => {
-    expect(agentModsRefusal({ CLAUDECODE: "1" })).toContain("ask them to run it");
-    expect(agentModsRefusal({})).toBeUndefined();
+  test("refuses an agent, even one that cleared CLAUDECODE, and lets the user through", () => {
+    expect(agentModsRefusal({ CLAUDECODE: "1" }, [])).toContain("ask them to run this in a terminal outside Claude");
+    expect(agentModsRefusal({}, ["bun", "zsh", "claude", "zellij"])).toContain("outside Claude");
+    expect(agentModsRefusal({}, ["bun", "zsh", "zellij"])).toBeUndefined();
   });
 });
 
 describe("updateMods", () => {
-  test("reports a failed pull, skips a plain folder, and counts only the failure", () => {
+  test("keeps a mod whose pull failed, skips a plain folder, and counts only the failure", () => {
     installMod("https://example.test/me/cloned.git", "git-mod", deps);
     makePlugin(join(deps.dir, "plain"), "plain");
     deps.responses.set("git pull", failed("fatal: Not possible to fast-forward"));
 
     expect(updateMods(undefined, deps)).toBe(1);
-    expect(deps.lines.slice(-2)).toEqual(["git-mod: failed (git pull --ff-only failed: fatal: Not possible to fast-forward)", "plain: skipped (not a git checkout)"]);
-    expect(marketplace(deps.dir).plugins.map((p: { name: string }) => p.name)).toEqual(["plain"]);
+    expect(deps.lines.slice(-2)).toEqual(["git-mod: kept (git pull --ff-only failed, so it stays on the commit that passed: fatal: Not possible to fast-forward)", "plain: skipped (not a git checkout)"]);
+    expect(marketplace(deps.dir).plugins.map((p: { name: string }) => p.name)).toEqual(["cloned", "plain"]);
   });
 
   test("resets a pull that fails validation to the commit before it", () => {

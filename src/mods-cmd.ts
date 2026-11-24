@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { agentModsRefusal, configuredModsDir, installMod, listModLines, removeMod, updateMods } from "./mods";
+import { agentModsRefusal, ancestorNames, configuredModsDir, installMod, listModLines, removeMod, updateMods } from "./mods";
 import { OverbridgeError } from "./util";
 
 const USAGE = "usage: overbridge mods install <git-url|path> [--name x] | update [name] | ls | rm <name>";
@@ -13,7 +13,7 @@ export function modsCommand(args: string[]): number {
     throw new OverbridgeError(USAGE);
   }
 
-  const refusal = sub === "ls" ? undefined : agentModsRefusal(process.env);
+  const refusal = sub === "ls" ? undefined : agentModsRefusal(process.env, ancestorNames());
 
   if (refusal) {
     throw new OverbridgeError(refusal);
