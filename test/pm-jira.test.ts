@@ -199,6 +199,10 @@ describe("facts", () => {
   test("a ticket with no priority, labels or parent, a parent it can't read, and a ticket it can't read", () => {
     expect(jiraProvider(cfg, "/w", viewer({ "ENG-1": ticket("ENG-1", {}) })).facts("ENG-1")).toEqual({ priority: "", labels: [], ancestors: [] });
     expect(jiraProvider(cfg, "/w", viewer({ "ENG-3": ticket("ENG-3", { parent: { key: "ENG-2" } }) })).facts("ENG-3")?.ancestors).toEqual(["ENG-2"]);
+    const named = viewer({ "ENG-3": ticket("ENG-3", { parent: { key: "ENG-2" } }), "ENG-2": ticket("ENG-2", { parent: { key: "ENG-1" } }) });
+    expect(jiraProvider(cfg, "/w", named).facts("ENG-3")?.ancestors).toEqual(["ENG-2", "ENG-1"]);
+    const loop = viewer({ "ENG-1": ticket("ENG-1", { parent: { key: "ENG-2" } }), "ENG-2": ticket("ENG-2", { parent: { key: "ENG-1" } }) });
+    expect(jiraProvider(cfg, "/w", loop).facts("ENG-1")?.ancestors).toEqual(["ENG-2"]);
     expect(jiraProvider(cfg, "/w", viewer({})).facts("ENG-9")).toBeUndefined();
   });
 });

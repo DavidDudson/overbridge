@@ -21,6 +21,9 @@ const textAt = (root: JsonValue | undefined, path: string[]): string | undefined
 /** How many levels `lineage` climbs at most: Initiative, Epic, Task and Subtask, plus one spare level. */
 const MAX_LINEAGE = 5;
 
+/** How many tickets above an item `facts` climbs at most: a guard against a runaway chain, well above any real hierarchy. */
+const MAX_ANCESTORS = 10;
+
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
@@ -109,6 +112,15 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
     return [...(raw.parent ? climb(raw.parent, [...seen, key]) : []), node];
   };
 
+  /** `parent` and the keys above it, nearest first; each ticket names its parent, so an unreadable ticket still counts. `seen` starts with the item. */
+  const ancestorsOf = (parent: string | undefined, seen: readonly string[]): string[] => {
+    if (!parent || seen.includes(parent) || seen.length > MAX_ANCESTORS) {
+      return [];
+    }
+
+    return [parent, ...ancestorsOf(view(parent)?.parent, [...seen, parent])];
+  };
+
   const names = namer(config, { branch: "feat/{id}-{slug}", workspace: "{id}" }, normalize, (id) => provider.itemTypes(id));
 
   const provider: Provider = {
@@ -155,11 +167,7 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
         return undefined;
       }
 
-      const above = raw.parent ? climb(raw.parent, [ticket]).map((n) => n.id) : [];
-      // this ticket names its parent even when the parent can't be read, so a rule can still match it
-      const ancestors = above.length || !raw.parent ? above.toReversed() : [raw.parent];
-
-      return { priority: raw.priority ?? "", labels: raw.labels, ancestors };
+      return { priority: raw.priority ?? "", labels: raw.labels, ancestors: ancestorsOf(raw.parent, [ticket]) };
     },
 
     assigned() {

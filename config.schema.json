@@ -22,7 +22,7 @@
           "agent": { "description": "The agent a matching item's workspace runs.", "enum": ["claude", "agy"] },
           "priority": { "description": "The item's priority name, such as Jira's Low. GitHub issues have no priority, so a rule with this never matches one.", "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
           "labels": { "description": "At least one of the item's labels.", "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
-          "parent": { "description": "The id of any item above it: its epic or the epic's initiative, such as ENG-100 for Jira or owner/repo#42 for a GitHub parent issue, since the rules apply to every repo.", "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+          "parent": { "description": "The id of any item above it: its epic or the epic's initiative, such as ENG-100 for Jira or owner/repo#42 for a GitHub parent issue, since the rules apply to every repo. A bare #42 or 42 is rejected.", "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "not": { "pattern": "^\\s*#?\\d+\\s*$" } } }
         }
       }
     },

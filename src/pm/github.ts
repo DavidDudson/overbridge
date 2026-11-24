@@ -13,8 +13,8 @@ export type Runner = (cmd: string[], opts?: { cwd?: string }) => RunResult;
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 
-/** How many issues above an item `facts` climbs at most. */
-const MAX_ANCESTORS = 4;
+/** How many issues above an item `facts` climbs at most: a guard against a runaway chain, well above any real hierarchy. */
+const MAX_ANCESTORS = 10;
 
 /** A REST issue URL: its `owner/repo` and number. */
 const ISSUE_API_RE = /\/repos\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)$/;

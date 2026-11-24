@@ -178,8 +178,8 @@ describe("facts", () => {
 
     expect(githubProvider(repoCfg, "/w", loop).facts("1")?.ancestors).toEqual(["acme/app#2"]);
 
-    const chain = api(Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`repos/acme/app/issues/${i + 1}`, { title: `${i + 1}`, parent_issue_url: parentUrl("acme/app", i + 2) }])));
-    expect(githubProvider(repoCfg, "/w", chain).facts("1")?.ancestors).toEqual(["acme/app#2", "acme/app#3", "acme/app#4", "acme/app#5"]);
+    const chain = api(Object.fromEntries(Array.from({ length: 13 }, (_, i) => [`repos/acme/app/issues/${i + 1}`, { title: `${i + 1}`, parent_issue_url: parentUrl("acme/app", i + 2) }])));
+    expect(githubProvider(repoCfg, "/w", chain).facts("1")?.ancestors).toEqual(Array.from({ length: 10 }, (_, i) => `acme/app#${i + 2}`));
 
     expect(githubProvider(repoCfg, "/w", api({ "repos/acme/app/issues/3": { title: "PR", pull_request: {} } })).facts("3")).toBeUndefined();
     expect(githubProvider(repoCfg, "/w", api({})).facts("../pulls/3")).toBeUndefined();
