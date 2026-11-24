@@ -763,7 +763,7 @@ describe("relaunch", () => {
 
     writeFileSync(join(root, "config.yml"), "agent-launch:\n  claude:\n    args: [--model, m]\n");
     // a piped caller is not a terminal, so it may set only the shorthands
-    expect(ws(["relaunch", "rl", "--", "--model", "m"]).err).toContain("in a terminal");
+    expect(ws(["relaunch", "rl", "--", "--permission-mode", "plan"]).err).toContain("in a terminal");
     const r = ws(["relaunch", "rl", "--no-code-mode", "--chrome"]);
     expect(r.err).toBe("");
     expect(r.out).toContain("handoff at");
@@ -786,6 +786,17 @@ describe("relaunch", () => {
 
     expect(ws(["relaunch", "rl", "--env", "OVERBRIDGE_NAME=other"]).err).toContain("OVERBRIDGE_* variables are set by overbridge");
     await stop("rl", p);
+  }, 30_000);
+
+  test("overbridge model restarts the agent on the model, keeps its other settings, and an agent may run it", async () => {
+    expect(ws(["new", "md"]).code).toBe(0);
+    const { p, runs } = supervise("md", { ACTION: "model md opus" });
+    await until(() => lines(runs).length === 2);
+    expect(lines(runs)[1]).toContain("--model opus --continue -- /read-handoff");
+    expect(ws(["model", "md"]).out.trim()).toBe("opus");
+
+    expect(ws(["model", "md", "--x"]).code).not.toBe(0);
+    await stop("md", p);
   }, 30_000);
 
   test("an agy workspace opened with a prompt gets it as -i, never as a bare argument", async () => {

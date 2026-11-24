@@ -153,6 +153,15 @@ only `--no-code-mode`, `--chrome`, `--prompt`, `--fresh`, and `--force`, since `
 accepts them only from an interactive terminal that is not under a supervisor or marked by Claude Code's `CLAUDECODE`
 variable. These checks raise the bar for an agent; they do not make it impossible to get past them.
 
+**Model.** `overbridge model <name> <model>` relaunches a workspace's agent on another model, the same way as
+`relaunch`: a handoff, then a restart that resumes the conversation (`--fresh` for a new one, `--force` to stop a
+mid-turn agent). It keeps the workspace's other launch settings and passes `--model <model>` to the agent (Claude Code
+and agy both take it), so the model sticks for `up`, `tab`, and `thaw`, where `/model` in the tab lasts one session.
+A workspace model replaces any `--model` in the root `config.yml`'s `agent-launch`. `default` drops the workspace's
+model, and `overbridge model <name>` with no model prints the one its agent starts on. Agents may run it: the
+orchestrator for any workspace, a workspace's agent for its own. A later `relaunch` replaces every setting, the model
+included.
+
 **Seeing what was removed.** The bottom of the sidebar shows `🧹 next check 42s`, a countdown to the next merged-PR check.
 Below it, a yellow `🧹 removing <title>` row shows a removal in progress and a grey `🧹 removed <title>` row one that finished;
 a failed one shows red as `✗ failed <title>`. Finished rows stay until the next check, then drop off. The sidebar shows at most

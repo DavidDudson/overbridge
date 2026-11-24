@@ -136,6 +136,7 @@ const OVERBRIDGE_ALLOWED = new Map<string, readonly string[]>(
     icebox: [],
     thaw: [],
     relaunch: [],
+    model: [],
     send: [],
     tab: [],
     go: [],

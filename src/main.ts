@@ -9,9 +9,10 @@ import { cleanup, Fetch, Format } from "./cleanup-gather";
 import { extCommand } from "./ext";
 import { agentRefusal, configSet } from "./config-set";
 import { icebox, thaw } from "./icebox";
-import { launchFromFlags } from "./agent-launch";
+import { DEFAULT_MODEL, launchFromFlags, launchModel } from "./agent-launch";
 import { SessionMode } from "./agent-supervisor";
-import { relaunch } from "./relaunch";
+import { relaunch, switchModel } from "./relaunch";
+import { getWorkspace, readState } from "./state";
 import { item } from "./item";
 import { go, GO_USAGE } from "./go";
 import { historyStore } from "./history";
@@ -33,6 +34,8 @@ import { externalCommand, externalEnv, externalHelp } from "./external";
 import { errorMessage, exec, log, OverbridgeError } from "./util";
 
 const RELAUNCH_USAGE = "usage: overbridge relaunch <name> [--no-code-mode] [--chrome] [--env NAME=VALUE]... [--prompt text] [--fresh] [--force] [-- agent args]";
+
+const MODEL_USAGE = "usage: overbridge model <name> [<model>|default] [--fresh] [--force]";
 
 const START_USAGE =
   "usage: overbridge start <repo> <id> [--prompt text] [--here] [--agent claude|agy] | overbridge start <repo> --stack <id1> <id2>... [--name slug] [--prompt text] [--agent claude|agy] | overbridge start <repo> --task <slug> --prompt <text> [--agent claude|agy]";
@@ -139,6 +142,10 @@ Workspaces
                                         flags replace its launch settings and stick for up and thaw; none
                                         resets them to config.yml's agent-launch. Refuses a mid-turn agent
                                         unless --force; an agent can relaunch only its own workspace
+  overbridge model <name> [<model>|default] [--fresh] [--force]
+                                        print the model the workspace's agent starts on, or relaunch it on
+                                        <model> (default: drop it), keeping its other launch settings; the
+                                        model sticks for up and thaw. Agents may run it; same refusals as relaunch
   overbridge status [--all] [--json]            claims, heads, gh-stack position, dirty and iceboxed state
   overbridge ahead [--json]                     workspaces whose branch holds commits main lacks (count, how far main
                                         moved, subjects, the Claude session name to message); the revisit skill reads it
@@ -589,6 +596,26 @@ async function main(argv: string[]): Promise<number> {
       });
 
       console.log(`relaunching ${names[0]}; handoff at ${handoff}`);
+      break;
+    }
+
+    case "model": {
+      const { values, positionals } = opts(rest, { fresh: { type: "boolean" }, force: { type: "boolean" } });
+
+      if (positionals.length < 1 || positionals.length > 2) {
+        throw new OverbridgeError(MODEL_USAGE);
+      }
+
+      const ws = cmd.requireWs(positionals[0]!);
+      const model = positionals[1];
+
+      if (model === undefined) {
+        console.log(launchModel(cmd.agentLaunchOf(getWorkspace(readState(), ws))) ?? DEFAULT_MODEL);
+        break;
+      }
+
+      const handoff = switchModel(ws, model, { session: values.fresh ? SessionMode.Fresh : SessionMode.Continue, force: values.force });
+      console.log(`relaunching ${ws} on ${model}; handoff at ${handoff}`);
       break;
     }
 
