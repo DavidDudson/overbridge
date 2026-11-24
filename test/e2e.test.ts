@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { estimateKey, estimatesFile } from "../src/check-estimate";
@@ -731,13 +731,15 @@ describe("relaunch", () => {
       ].join("\n"),
       { mode: 0o755 },
     );
+    // the same fake stands in for agy, so an agy workspace's argv lands in `runs` too
+    copyFileSync(join(bin(), "claude"), join(bin(), "agy"));
   });
 
-  const supervise = (name: string, extra: Record<string, string> = {}) => {
+  const supervise = (name: string, extra: Record<string, string> = {}, args: string[] = []) => {
     const runs = join(tmp, `${name}-runs`);
 
     const p = Bun.spawn({
-      cmd: [process.execPath, CLI, "claude", name],
+      cmd: [process.execPath, CLI, "claude", name, ...args],
       cwd: tmp,
       env: { ...env(), CLAUDE_CODE_EXPERIMENTAL_CODE_MODE: "1", PATH: `${bin()}:${process.env.PATH}`, RUNS: runs, BUN: process.execPath, CLI, ...extra },
       stdout: "pipe",
@@ -784,6 +786,15 @@ describe("relaunch", () => {
 
     expect(ws(["relaunch", "rl", "--env", "OVERBRIDGE_NAME=other"]).err).toContain("OVERBRIDGE_* variables are set by overbridge");
     await stop("rl", p);
+  }, 30_000);
+
+  test("an agy workspace opened with a prompt gets it as -i, never as a bare argument", async () => {
+    expect(ws(["new", "ag", "--agent", "agy"]).code).toBe(0);
+    // the argv a new tab runs: overbridge claude's own `--`, then the prompt after the agent's `--`
+    const { p, runs } = supervise("ag", {}, ["--", "--", "/start-item 12"]);
+    await until(() => lines(runs).length === 1);
+    expect(lines(runs)[0]).toEndWith("ARGS=-i /start-item 12");
+    await stop("ag", p);
   }, 30_000);
 
   test("an agent may relaunch its own workspace with the shorthands, but not another workspace", async () => {

@@ -63,7 +63,9 @@ export interface TabSpec {
  */
 export function workspaceTabSpec(ws: string, self: string[], opts: TabOptions = {}): TabSpec {
   const width = opts.sidebarWidth ?? SIDEBAR_WIDTH;
-  const extra = [...(opts.resume ? ["--continue"] : []), ...(opts.prompt ? ["--", opts.prompt] : [])];
+  const agentArgs = [...(opts.resume ? ["--continue"] : []), ...(opts.prompt ? ["--", opts.prompt] : [])];
+  // `overbridge claude` drops one leading `--` as its own separator, so the prompt keeps the `--` that marks it
+  const extra = agentArgs.length ? ["--", ...agentArgs] : [];
 
   return {
     name: ws,

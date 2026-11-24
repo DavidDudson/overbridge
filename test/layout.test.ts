@@ -70,7 +70,7 @@ describe("layoutKdl", () => {
   test("only workspaces with a transcript start the agent with --continue", () => {
     const kdl = layoutKdl(["a", "b"], self, { resume: new Set(["b"]) });
     expect(kdl).toContain('args "claude" "a"\n');
-    expect(kdl).toContain('args "claude" "b" "--continue"');
+    expect(kdl).toContain('args "claude" "b" "--" "--continue"');
   });
 
   test("sidebar width is configurable", () => {
@@ -141,10 +141,10 @@ describe("newTabKdl", () => {
     expect(kdl).not.toContain("status-bar");
   });
 
-  test("a prompt reaches the agent after `--`; resuming continues the conversation first", () => {
-    expect(newTabKdl("ENG-1", self, { prompt: "/start-item ENG-1" })).toContain('args "claude" "ENG-1" "--" "/start-item ENG-1"');
+  test("a prompt reaches the agent after its own `--`; resuming continues the conversation first", () => {
+    expect(newTabKdl("ENG-1", self, { prompt: "/start-item ENG-1" })).toContain('args "claude" "ENG-1" "--" "--" "/start-item ENG-1"');
     const resumed = newTabKdl("ENG-1", self, { prompt: "/start-item ENG-1", resume: true });
-    expect(resumed).toContain('args "claude" "ENG-1" "--continue" "--" "/start-item ENG-1"');
+    expect(resumed).toContain('args "claude" "ENG-1" "--" "--continue" "--" "/start-item ENG-1"');
   });
 });
 
