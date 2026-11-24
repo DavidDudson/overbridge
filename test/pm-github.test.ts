@@ -144,3 +144,45 @@ describe("validation", () => {
     expect(providerFor(repoCfg, "/w").name).toBe("github");
   });
 });
+
+describe("facts", () => {
+  /** The fields of a REST issue that `facts` reads. */
+  type RestIssue = { title: string; labels?: { name: string }[]; parent_issue_url?: string; pull_request?: { url?: string } };
+
+  const api = (issues: Record<string, RestIssue>): Runner => (cmd) => {
+    const body = issues[cmd[2]!];
+
+    return { ok: body !== undefined, code: body === undefined ? 1 : 0, stdout: body ? JSON.stringify(body) : "", stderr: "" };
+  };
+
+  const parentUrl = (repo: string, n: number) => `https://api.github.com/repos/${repo}/issues/${n}`;
+
+  test("reads the labels and the parent issues, nearest first, as lowercased owner/repo#n", () => {
+    const runner = api({
+      "repos/acme/app/issues/12": { title: "T", labels: [{ name: "tech-debt" }, { name: "low" }], parent_issue_url: parentUrl("Acme/App", 5) },
+      "repos/Acme/App/issues/5": { title: "Epic", labels: [], parent_issue_url: parentUrl("acme/roadmap", 2) },
+      "repos/acme/roadmap/issues/2": { title: "Initiative", labels: [] },
+    });
+
+    expect(githubProvider(repoCfg, "/w", runner).facts("#12")).toEqual({ priority: "", labels: ["tech-debt", "low"], ancestors: ["acme/app#5", "acme/roadmap#2"] });
+  });
+
+  test("keeps a parent it can't read, stops at a loop, and has no facts for a pull request, a bad id or a failed read", () => {
+    const unreadable = api({ "repos/acme/app/issues/12": { title: "T", parent_issue_url: parentUrl("acme/app", 5) } });
+    expect(githubProvider(repoCfg, "/w", unreadable).facts("12")?.ancestors).toEqual(["acme/app#5"]);
+
+    const loop = api({
+      "repos/acme/app/issues/1": { title: "a", parent_issue_url: parentUrl("acme/app", 2) },
+      "repos/acme/app/issues/2": { title: "b", parent_issue_url: parentUrl("acme/app", 1) },
+    });
+
+    expect(githubProvider(repoCfg, "/w", loop).facts("1")?.ancestors).toEqual(["acme/app#2"]);
+
+    const chain = api(Object.fromEntries(Array.from({ length: 13 }, (_, i) => [`repos/acme/app/issues/${i + 1}`, { title: `${i + 1}`, parent_issue_url: parentUrl("acme/app", i + 2) }])));
+    expect(githubProvider(repoCfg, "/w", chain).facts("1")?.ancestors).toEqual(Array.from({ length: 10 }, (_, i) => `acme/app#${i + 2}`));
+
+    expect(githubProvider(repoCfg, "/w", api({ "repos/acme/app/issues/3": { title: "PR", pull_request: {} } })).facts("3")).toBeUndefined();
+    expect(githubProvider(repoCfg, "/w", api({})).facts("../pulls/3")).toBeUndefined();
+    expect(githubProvider(repoCfg, "/w", api({})).facts("12")).toBeUndefined();
+  });
+});

@@ -21,6 +21,9 @@ const textAt = (root: JsonValue | undefined, path: string[]): string | undefined
 /** How many levels `lineage` climbs at most: Initiative, Epic, Task and Subtask, plus one spare level. */
 const MAX_LINEAGE = 5;
 
+/** How many tickets above an item `facts` climbs at most: a guard against a runaway chain, well above any real hierarchy. */
+const MAX_ANCESTORS = 10;
+
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
@@ -48,7 +51,7 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
   };
 
   /** The fields of a ticket as `jira issue view --raw` prints it that the provider reads. */
-  type Raw = { summary?: string; issueType?: string; statusCategory?: string; status?: string; parent?: string };
+  type Raw = { summary?: string; issueType?: string; statusCategory?: string; status?: string; parent?: string; priority?: string; labels: string[] };
 
   /** The ticket, or undefined when it can't be read. */
   const view = (id: string): Raw | undefined => {
@@ -59,12 +62,18 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
     try {
       const parsed: unknown = JSON.parse(r.stdout);
       const root = isJsonObject(parsed) ? parsed : undefined;
-      const raw: Raw = {};
+      const labels = isJsonObject(root?.fields) && Array.isArray(root.fields.labels) ? root.fields.labels.filter(isJsonString) : [];
+      const raw: Raw = { labels };
       const summary = textAt(root, ["fields", "summary"]);
       const issueType = textAt(root, ["fields", "issuetype", "name"]);
       const statusCategory = textAt(root, ["fields", "status", "statusCategory", "key"]);
       const status = textAt(root, ["fields", "status", "name"]);
       const parent = textAt(root, ["fields", "parent", "key"]);
+      const priority = textAt(root, ["fields", "priority", "name"]);
+
+      if (priority !== undefined) {
+        raw.priority = priority;
+      }
 
       if (summary !== undefined) raw.summary = summary;
 
@@ -101,6 +110,15 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
     const node: ItemNode = { id: key, title: raw.summary ?? "", status: raw.status ?? "", url: base ? `${base}/browse/${key}` : "" };
 
     return [...(raw.parent ? climb(raw.parent, [...seen, key]) : []), node];
+  };
+
+  /** `parent` and the keys above it, nearest first; each ticket names its parent, so an unreadable ticket still counts. `seen` starts with the item. */
+  const ancestorsOf = (parent: string | undefined, seen: readonly string[]): string[] => {
+    if (!parent || seen.includes(parent) || seen.length > MAX_ANCESTORS) {
+      return [];
+    }
+
+    return [parent, ...ancestorsOf(view(parent)?.parent, [...seen, parent])];
   };
 
   const names = namer(config, { branch: "feat/{id}-{slug}", workspace: "{id}" }, normalize, (id) => provider.itemTypes(id));
@@ -140,6 +158,17 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
     },
 
     lineage: (id) => climb(normalize(id), []),
+
+    facts(id) {
+      const ticket = normalize(id);
+      const raw = view(ticket);
+
+      if (!raw) {
+        return undefined;
+      }
+
+      return { priority: raw.priority ?? "", labels: raw.labels, ancestors: ancestorsOf(raw.parent, [ticket]) };
+    },
 
     assigned() {
       const jql = `project = ${key} AND assignee = currentUser() AND statusCategory != Done AND issuetype != Epic`;

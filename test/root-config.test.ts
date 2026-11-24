@@ -69,9 +69,9 @@ describe("overlay", () => {
 
 describe("loadRootLayers", () => {
   test("a missing or empty file has no layers", () => {
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude", cpuPriority: true, agentLaunch: {} });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude", agentRules: [], cpuPriority: true, agentLaunch: {} });
     writeRoot("");
-    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude", cpuPriority: true, agentLaunch: {} });
+    expect(loadRootLayers()).toEqual({ file: rootConfigPath(), owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: "claude", agentRules: [], cpuPriority: true, agentLaunch: {} });
   });
 
   test("reads defaults and per-repo layers", () => {
@@ -86,6 +86,7 @@ describe("loadRootLayers", () => {
       githubOrgs: [],
       checkClasses: DEFAULT_CLASSES,
       agent: "claude",
+      agentRules: [],
       cpuPriority: true,
       agentLaunch: {},
     });

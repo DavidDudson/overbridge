@@ -16,6 +16,15 @@ export interface ItemNode {
   url: string;
 }
 
+/** An item's priority, labels and the items above it. */
+export interface ItemFacts {
+  /** The provider's priority name; empty when the item has none. */
+  priority: string;
+  labels: readonly string[];
+  /** The ids of the items above it, nearest first: a Jira key, or `owner/repo#n` for a GitHub issue. */
+  ancestors: readonly string[];
+}
+
 /** Whether an item still needs work. */
 export const ItemStatus = { Open: "open", Done: "done" } as const;
 
@@ -47,6 +56,8 @@ export interface Provider {
   status(id: string): ItemStatus | undefined;
   /** The item and its parents, top first (Initiative, Epic, Task, Subtask); empty when the item can't be read. Hits the network. */
   lineage(id: string): ItemNode[];
+  /** The item's priority, labels and the ids above it; undefined when the item can't be read. Hits the network. */
+  facts(id: string): ItemFacts | undefined;
   /** Open items assigned to me. */
   assigned(): WorkItem[];
   /**

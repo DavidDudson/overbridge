@@ -335,6 +335,26 @@ is stored in the workspace's state when it is created, so changing the default n
 workspace. `overbridge status --all` marks agy workspaces. The orchestrator knows the flag, so asking it to "start
 ENG-123 with agy" opens an agy workspace.
 
+`agent-rules` in the root `config.yml` picks the agent from the work item when `overbridge start` has no `--agent`:
+
+```yaml
+agent: claude
+agent-rules:
+  - { agent: agy, priority: [Low, Lowest], labels: [tech-debt] }
+  - { agent: agy, parent: [ENG-100] }
+```
+
+The first rule that matches wins. When none matches, `agent` applies. Each rule sets at least one of the keys below,
+and matches when every key it sets matches one of its values, ignoring case:
+
+- **`priority`**: the item's priority name, such as Jira's `Low`. GitHub issues have no priority, so a rule with this key never matches one.
+- **`labels`**: any of the item's labels.
+- **`parent`**: any item above it, such as its epic or the epic's initiative. Write a Jira parent as its key, such as `ENG-100`, and a GitHub parent issue as `owner/repo#42`, because the rules apply to every repo.
+
+`--agent` always wins, and an existing workspace keeps its agent, so the rules apply only to a new workspace.
+`--stack` matches on the bottom item. A `--task` workspace has no item, so it gets `agent`. When `start` can't read
+the item, it says so and uses `agent`. It reads the item only when the config has rules.
+
 An agy workspace gets the same rules as a Claude one, through the files agy reads:
 
 | Claude | agy |

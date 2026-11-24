@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type AgentLaunch, envNameFault } from "./agent-launch";
 import { AGENT_KINDS, AgentKind } from "./agent-kind";
+import { type AgentRule, RULE_CRITERIA } from "./agent-rules";
 import { DEFAULT_CLASSES, MAX_NICE, MIN_WORKSPACE_NICE, type PriorityClass, type PriorityRule } from "./check-priority";
 import { repoOf, root, worktreePath } from "./paths";
 import { loadRepos } from "./config";
@@ -1007,7 +1008,7 @@ export const configPath = (repoDir: string) => join(repoDir, CONFIG_FILE);
 /** The root config, `<root>/config.yml`: settings that live outside the repos. */
 export const ROOT_CONFIG_FILE = "config.yml";
 export const rootConfigPath = () => join(root(), ROOT_CONFIG_FILE);
-const ROOT_KEYS = ["version", "defaults", "owners", "repos", "skill-extensions", "guard", "github-orgs", "priority-classes", "agent", "agent-launch", "cpu-priority", "mods-dir"];
+const ROOT_KEYS = ["version", "defaults", "owners", "repos", "skill-extensions", "guard", "github-orgs", "priority-classes", "agent", "agent-rules", "agent-launch", "cpu-priority", "mods-dir"];
 const GUARD_KEYS = ["read-paths", "deny"];
 
 /**
@@ -1040,12 +1041,57 @@ export interface RootLayers {
   checkClasses: readonly PriorityClass[];
   /** The agent a new workspace runs unless `overbridge start --agent` names one. */
   agent: AgentKind;
+  /** Rules that pick a new workspace's agent from its work item when `--agent` is not given; the first match wins over `agent`. */
+  agentRules: AgentRule[];
   /** Whether each workspace's processes get its class's CPU priority (`cpu-priority: false` turns it off). */
   cpuPriority: boolean;
   /** Env and args each kind of agent starts with (`agent-launch.<kind>`); root-only, so a branch cannot change how agents start. */
   agentLaunch: Partial<Record<AgentKind, AgentLaunch>>;
   /** The Claude Code mods folder (`mods-dir`), as written: absolute, `~/` or root-relative; unset means the default. */
   modsDir?: string;
+}
+
+/** `agent-rules`: a list of `{ agent, priority?, labels?, parent? }`, each with at least one criterion. */
+function parseAgentRules(p: Problems, raw: Json | undefined): AgentRule[] {
+  if (raw === undefined || raw === null) {
+    return [];
+  }
+
+  if (!Array.isArray(raw)) {
+    p.add("agent-rules", "expected a list of { agent, priority, labels, parent }");
+
+    return [];
+  }
+
+  return raw.flatMap((entry, i): AgentRule[] => {
+    const at = `agent-rules[${i}]`;
+
+    if (!isRecord(entry)) {
+      p.add(at, "expected a mapping with agent and at least one of priority, labels, parent");
+
+      return [];
+    }
+
+    p.unknownKeys(entry, ["agent", ...RULE_CRITERIA], at);
+    const agent = p.oneOf(p.string(entry, "agent", at, true), AGENT_KINDS, `${at}.agent`);
+    const priority = p.stringList(entry, "priority", at) ?? [];
+    const labels = p.stringList(entry, "labels", at) ?? [];
+    const parent = p.stringList(entry, "parent", at) ?? [];
+
+    parent.forEach((id, j) => {
+      if (/^#?\d+$/.test(id.trim())) {
+        p.add(`${at}.parent[${j}]`, `"${id}" names no repo; write a GitHub issue as owner/repo#${id.trim().replace(/^#/, "")}, since the rules apply to every repo`);
+      }
+    });
+
+    if (!priority.length && !labels.length && !parent.length) {
+      p.add(at, `set at least one of ${RULE_CRITERIA.join(", ")}; the top-level agent is the default for every item`);
+
+      return [];
+    }
+
+    return agent ? [{ agent, priority, labels, parent }] : [];
+  });
 }
 
 /** `agent-launch`: per agent kind, an `env` mapping (scalar values read as strings) and an `args` list. */
@@ -1110,7 +1156,7 @@ export function loadRootLayers(file = rootConfigPath()): RootLayers {
 
 /** Check parsed root config YAML (`file` names it in errors), validating every layer with `validateConfig`. */
 export function rootLayersFrom(raw: Json | undefined, file: string): RootLayers {
-  const layers: RootLayers = { file, owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: AgentKind.Claude, cpuPriority: true, agentLaunch: {} };
+  const layers: RootLayers = { file, owners: {}, repos: {}, skillExtensions: [], guard: { readPaths: [], deny: [] }, githubOrgs: [], checkClasses: DEFAULT_CLASSES, agent: AgentKind.Claude, agentRules: [], cpuPriority: true, agentLaunch: {} };
 
   if (raw === null || raw === undefined) return layers;
 
@@ -1150,6 +1196,7 @@ export function rootLayersFrom(raw: Json | undefined, file: string): RootLayers 
   layers.githubOrgs = p.stringList(raw, "github-orgs", "") ?? [];
   const classes = parseClasses(p, raw);
   layers.agent = p.oneOf(p.string(raw, "agent", "", false), AGENT_KINDS, "agent") ?? AgentKind.Claude;
+  layers.agentRules = parseAgentRules(p, raw["agent-rules"]);
 
   if (raw["cpu-priority"] !== undefined && !isBoolean(raw["cpu-priority"])) {
     p.add("cpu-priority", "expected true or false");
