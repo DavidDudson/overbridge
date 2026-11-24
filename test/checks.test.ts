@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { Move, type QueueOverrides } from "../src/check-priority";
 import { Outcome, outcomeOf, queueComparator, queueView, type Ticket, ticketName } from "../src/check-queue";
-import { type CheckRow, checkRows, formatDuration, movedOverrides, queueEstimates, nextChecksMode, ChecksMode, recentChecks, recentTotals, renderChecks, renderRecent } from "../src/checks";
+import { CHECK_RUNNING_ICON, CHECK_WAITING_ICON, checksBadge, type CheckRow, checkRows, formatDuration, movedOverrides, queueEstimates, nextChecksMode, ChecksMode, recentChecks, recentTotals, renderChecks, renderRecent } from "../src/checks";
 import { withRun } from "../src/check-estimate";
+import { badgeColor } from "../src/tab-badge";
 import type { CheckRecord, HistoryRecord, HistoryStore } from "../src/history";
 
 // eslint-disable-next-line no-control-regex -- stripping colour codes is the point
@@ -205,5 +206,17 @@ describe("queue estimates", () => {
 
     expect(lines[2]).toMatch(/▶ 20s\s+\?\s+make lint/);
     expect(lines[2]).not.toMatch(/overdue|done ~/);
+  });
+});
+
+describe("checksBadge", () => {
+  test("one icon per check, running first, coloured by the running ones", () => {
+    const badge = checksBadge({ running: [running], waiting: [a, b] });
+    expect(badge).toEqual({ count: 3, icons: [CHECK_RUNNING_ICON, CHECK_WAITING_ICON, CHECK_WAITING_ICON] });
+    expect(badge && badgeColor(badge)).toBe("yellow");
+  });
+
+  test("an empty queue has no badge", () => {
+    expect(checksBadge({ running: [], waiting: [] })).toBeUndefined();
   });
 });

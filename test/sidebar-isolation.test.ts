@@ -193,6 +193,7 @@ describe("one poll of the sidebar", () => {
     keepOrchestration: () => {},
     sweep: () => {},
     readState: () => ({ state: good }),
+    queue: () => ({ running: [], waiting: [] }),
     entries: (_order, state) => list(state),
     reap: () => ({ unsaved: new Set(), faults: new Map() }),
     status: () => ["🧹 next check 10s"],
@@ -209,6 +210,38 @@ describe("one poll of the sidebar", () => {
     expect(model.list.map((e) => e.tab)).toEqual(["w1", "w2"]);
     expect(model.status).toEqual(["🧹 next check 10s"]);
     expect(model.state).toBe(good);
+  });
+
+  test("the queue is read once and handed to both the cards and the status rows; a failed read gives neither", () => {
+    const reads: string[] = [];
+    const queue = { running: [], waiting: [] };
+    const seen: unknown[] = [];
+    const readers = okReaders();
+    readers.queue = () => {
+      reads.push("read");
+
+      return queue;
+    };
+
+    readers.entries = (_order, state, q) => {
+      seen.push(q);
+
+      return list(state);
+    };
+
+    readers.status = (_state, _inner, q) => {
+      seen.push(q);
+
+      return [];
+    };
+
+    gather(readers, 26, EMPTY_MODEL);
+    expect(reads).toEqual(["read"]);
+    expect(seen).toEqual([queue, queue]);
+    readers.queue = throwing("queue");
+    seen.length = 0;
+    expect(gather(readers, 26, EMPTY_MODEL).fault).toContain("queue broke");
+    expect(seen).toEqual([undefined, undefined]);
   });
 
   test("a state file that will not parse keeps the last good list and names the file; the next poll recovers", () => {
@@ -232,6 +265,7 @@ describe("one poll of the sidebar", () => {
       ["keepOrchestration", (m) => expect(m.list).toHaveLength(2)],
       ["sweep", (m) => expect(m.list).toHaveLength(2)],
       ["readState", (m) => expect(m.list).toHaveLength(2)],
+      ["queue", (m) => expect(m.list).toHaveLength(2)],
       ["entries", (m) => expect(m.list).toEqual(last.list)],
       ["reap", (m) => expect(m.list).toHaveLength(2)],
       ["status", (m) => expect(m.status).toEqual([])],

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { filterBoardsByOrg, type BoardSource } from "../src/worklist-data";
 import { workAnimated, workHealth, workInput, statusGlyph } from "../src/worklist-look";
 import { badgeOf } from "../src/tab-badge";
+import { HEALTH_LOOK } from "../src/pr-look";
 import { prBadgeFromCache, workBadgeFromCache } from "../src/my-badges";
 
 describe("work list look", () => {
@@ -22,7 +23,7 @@ describe("work list look", () => {
   });
   test("the badge counts items and lists the worst first", () => {
     const b = badgeOf([workInput({ status: "todo", ready: true }), workInput({ status: "blocked", ready: false }), workInput({ status: "in-progress", ready: false })]);
-    expect(b).toEqual({ count: 3, icons: ["changes", "waiting", "ready"] });
+    expect(b).toEqual({ count: 3, icons: [HEALTH_LOOK.changes, HEALTH_LOOK.waiting, HEALTH_LOOK.ready] });
   });
 });
 
@@ -44,7 +45,7 @@ describe("badge cache parsers", () => {
 
   test("work: counts open valid rows, skips done and malformed", () => {
     const b = workBadgeFromCache({ rows: [work({}), work({ id: "2", status: "done" }), work({ id: "3", status: "blocked" }), { junk: true }] });
-    expect(b).toEqual({ count: 2, icons: ["changes", "ready"] });
+    expect(b).toEqual({ count: 2, icons: [HEALTH_LOOK.changes, HEALTH_LOOK.ready] });
   });
   test("work: a file without rows has no badge", () => {
     expect(workBadgeFromCache({})).toBeUndefined();
@@ -52,7 +53,7 @@ describe("badge cache parsers", () => {
   });
   test("prs: conflict first, unknown ci ignored, malformed row skipped", () => {
     const b = prBadgeFromCache({ rows: [{ draft: false, ci: "success", mergeable: "MERGEABLE" }, { draft: false, mergeable: "CONFLICTING", ci: "bogus" }, 7] });
-    expect(b).toEqual({ count: 2, icons: ["conflict", "ready"] });
+    expect(b).toEqual({ count: 2, icons: [HEALTH_LOOK.conflict, HEALTH_LOOK.ready] });
     expect(prBadgeFromCache({})).toBeUndefined();
   });
   test("done maps to ready", () => {

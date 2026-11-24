@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { frozenRows, renderFrozen } from "../src/frozen";
+import { FROZEN_ICON, frozenBadge, frozenRows, renderFrozen } from "../src/frozen";
 import { runThaw } from "../src/frozen-run";
 import type { State } from "../src/state";
 
@@ -70,5 +70,15 @@ describe("runThaw", () => {
   test("a refusal becomes an error message", async () => {
     expect(await runThaw("older", async () => ({ code: 1, stderr: "overbridge: cannot thaw older: folder taken\n" }))).toBe("error: cannot thaw older: folder taken");
     expect(await runThaw("older", async () => ({ code: 3, stderr: "" }))).toBe("error: overbridge thaw older failed with exit code 3");
+  });
+});
+
+describe("frozenBadge", () => {
+  test("counts the iceboxed workspaces, one icon each", () => {
+    expect(frozenBadge(state)).toEqual({ count: 2, icons: [FROZEN_ICON, FROZEN_ICON] });
+  });
+
+  test("nothing frozen has no badge", () => {
+    expect(frozenBadge({ version: 1, workspaces: {} })).toBeUndefined();
   });
 });

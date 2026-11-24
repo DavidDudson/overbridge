@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { prHealthInput, pulseGlyph, pulses, timeTint, titleTone } from "../src/card-look";
-import { healthOf } from "../src/pr-look";
+import { HEALTH_LOOK, healthOf } from "../src/pr-look";
 import { type Entry, entryLines, Section } from "../src/sidebar";
 import { animate } from "../src/sidebar-motion";
 import { Motion } from "../src/config";
@@ -136,7 +136,7 @@ describe("untested arms", () => {
     const busy = entry({ state: "busy", glyph: "🔄", gauge: { pct: 50, compacted: false }, prs: [{ number: 1, status: "failing" }] });
 
     expect(plain(entryLines(busy, 0, false, 40)[1] ?? "")).not.toContain("❌");
-    const badged = entry({ state: "done", glyph: "✅", badge: { count: 1, icons: ["ready"] }, prs: [{ number: 1, status: "failing" }] });
+    const badged = entry({ state: "done", glyph: "✅", badge: { count: 1, icons: [HEALTH_LOOK.ready] }, prs: [{ number: 1, status: "failing" }] });
 
     expect(plain(entryLines(badged, 0, false, 40)[1] ?? "")).not.toContain("❌");
   });
