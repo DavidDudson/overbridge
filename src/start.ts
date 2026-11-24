@@ -1,4 +1,5 @@
 import { AgentKind } from "./agent-kind";
+import { matchingRule } from "./agent-rules";
 import { checkout, createWorkspace, holdings, removeWorkspace } from "./commands";
 import { getRepo, type RepoSpec } from "./config";
 import * as git from "./git";
@@ -32,8 +33,11 @@ function providerForRepo(spec: RepoSpec): Provider {
 /** The prompt a caller passed, and the one a newly opened tab falls back to without it. */
 type TabPrompt = { prompt?: string; defaultPrompt?: string };
 
-/** A new workspace's tab prompts, and the agent it runs when `--agent` named one. */
+/** A new workspace's tab prompts, and the agent it runs when `--agent` or an `agent-rules` entry named one. */
 type NewTab = TabPrompt & { agent?: AgentKind };
+
+/** The work item a new workspace is for, which `agent-rules` match against. */
+type ItemRef = { provider: Provider; id: string };
 
 /**
  * Bring `ws`'s tab to the front, since you asked for it, opening one with `prompt` (else `defaultPrompt`) when
@@ -83,7 +87,7 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
 
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}' for ${id}`);
   const branch = provider.branchName({ id, title });
-  const prompts: NewTab = { prompt, defaultPrompt: `/start-item ${id}`, agent: deps.agent };
+  const prompts: NewTab = { prompt, defaultPrompt: `/start-item ${id}` };
 
   const state = readState();
   const ws = currentWorkspace();
@@ -96,16 +100,15 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
   const holder = workspaceOf(state, repo, branch, provider);
 
   // checked once the target is known: a re-bind opens no tab, and a holder keeps its own agent
-  requirePlugins(deps.plugins, agentFor(holder ?? name, deps.agent));
-
   if (holder) {
+    requirePlugins(deps.plugins, agentFor(holder, deps.agent));
     log(`${id} is in ${holder}`);
     showTab(holder, prompts, deps.mux);
 
     return console.log(holder);
   }
 
-  openWorkspace(name, repo, branch, prompts, deps.mux);
+  openWorkspace(name, repo, branch, { ...prompts, agent: newAgent(name, deps.plugins, deps.agent, { provider, id }) }, deps.mux);
 }
 
 /**
@@ -233,9 +236,9 @@ export function startStack(
   const name = opts.name ?? `${provider.workspaceName(ids[0]!, repo)}${STACK_SUFFIX}`;
 
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}'`);
-  requirePlugins(deps.plugins, agentFor(name, opts.agent));
+  const agent = newAgent(name, deps.plugins, opts.agent, { provider, id: ids[0]! });
 
-  if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, { prompt: opts.prompt, agent: opts.agent }, deps.mux);
+  if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, { prompt: opts.prompt, agent }, deps.mux);
 
   // layers must be new: a branch already on origin belongs to checking out its existing PR or stack
   const remote = branches.find((b) => hasRef(repo, `refs/remotes/origin/${b}`));
@@ -253,7 +256,7 @@ export function startStack(
     name,
     repo,
     branches[0]!,
-    { prompt: opts.prompt, defaultPrompt: `/start-item ${ids[0]}. ${brief}`, agent: opts.agent },
+    { prompt: opts.prompt, defaultPrompt: `/start-item ${ids[0]}. ${brief}`, agent },
     deps.mux,
     (wt) => {
       try {
@@ -277,11 +280,58 @@ function undoStack(repo: string, wt: string, made: string[]) {
   for (const b of made) run(["git", "-C", barePath(repo), "branch", "-D", b]);
 }
 
-/** The agent workspace `name` runs: its own when it exists (a workspace keeps its agent), else `explicit`, else the root config's default. */
-export function agentFor(name: string, explicit: AgentKind | undefined): AgentKind {
+/**
+ * The agent workspace `name` runs: its own when it exists (a workspace keeps its agent), else `explicit`, else the
+ * first root `agent-rules` entry that matches the work item (`item`, read only when a rule could apply), else the
+ * root config's default.
+ */
+export function agentFor(name: string, explicit: AgentKind | undefined, item?: ItemRef): AgentKind {
   const existing = readState().workspaces[name];
 
-  return existing ? agentOf(existing) : (explicit ?? loadRootLayers().agent);
+  if (existing) {
+    return agentOf(existing);
+  }
+
+  if (explicit) {
+    return explicit;
+  }
+
+  const { agent, agentRules } = loadRootLayers();
+
+  if (!item || !agentRules.length) {
+    return agent;
+  }
+
+  const facts = item.provider.facts(item.id);
+
+  if (!facts) {
+    log(`agent-rules: cannot read ${item.id} from ${item.provider.name}; ${name} runs the default agent, ${agent}`);
+
+    return agent;
+  }
+
+  const index = matchingRule(agentRules, facts);
+
+  if (index < 0) {
+    return agent;
+  }
+
+  const ruled = agentRules[index]!.agent;
+  log(`agent-rules[${index}] matches ${item.id}: ${name} runs ${ruled}`);
+
+  return ruled;
+}
+
+/**
+ * Pick workspace `name`'s agent with `agentFor` and stop when it could not load the overbridge skills. Returns the
+ * agent to create the workspace with: `explicit`, a rule's pick, or undefined for the root default or an existing
+ * workspace, which keeps its own.
+ */
+function newAgent(name: string, plugins: (() => PluginProblems) | undefined, explicit: AgentKind | undefined, item: ItemRef): AgentKind | undefined {
+  const agent = agentFor(name, explicit, item);
+  requirePlugins(plugins, agent);
+
+  return explicit ?? (readState().workspaces[name] ? undefined : agent);
 }
 
 /** The check that `agent` can load the overbridge skills. */

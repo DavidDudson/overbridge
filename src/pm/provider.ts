@@ -1,3 +1,4 @@
+import type { ItemFacts } from "../agent-rules";
 import type { PmName, ProjectManagement } from "../project-config";
 
 /** An issue/ticket as a provider reports it. */
@@ -47,6 +48,8 @@ export interface Provider {
   status(id: string): ItemStatus | undefined;
   /** The item and its parents, top first (Initiative, Epic, Task, Subtask); empty when the item can't be read. Hits the network. */
   lineage(id: string): ItemNode[];
+  /** The item's priority, labels and the ids above it, for `agent-rules`; undefined when the item can't be read. Hits the network. */
+  facts(id: string): ItemFacts | undefined;
   /** Open items assigned to me. */
   assigned(): WorkItem[];
   /**

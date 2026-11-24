@@ -108,8 +108,9 @@ Workspaces
                                         the first item's name plus -stack) holding a gh stack with one layer
                                         (branch + claim) per item, on layer 1, in a new tab running /start-item
   overbridge start ... --agent claude|agy       the new workspace's agent: Claude Code or Antigravity CLI;
-                                        default: the root config.yml's agent, else claude. A workspace keeps
-                                        its agent; --agent never changes an existing one
+                                        default: the first config.yml agent-rules entry matching the item,
+                                        else its agent, else claude. A workspace keeps its agent; --agent
+                                        never changes an existing one
   overbridge new <name> [-r repo]... [--agent claude|agy]
                                         create a workspace and open its tab
   overbridge tab <name> [--prompt text]         open a workspace's tab when it has none, else focus it

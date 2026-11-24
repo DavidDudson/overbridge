@@ -48,7 +48,7 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
   };
 
   /** The fields of a ticket as `jira issue view --raw` prints it that the provider reads. */
-  type Raw = { summary?: string; issueType?: string; statusCategory?: string; status?: string; parent?: string };
+  type Raw = { summary?: string; issueType?: string; statusCategory?: string; status?: string; parent?: string; priority?: string; labels: string[] };
 
   /** The ticket, or undefined when it can't be read. */
   const view = (id: string): Raw | undefined => {
@@ -59,12 +59,18 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
     try {
       const parsed: unknown = JSON.parse(r.stdout);
       const root = isJsonObject(parsed) ? parsed : undefined;
-      const raw: Raw = {};
+      const labels = isJsonObject(root?.fields) && Array.isArray(root.fields.labels) ? root.fields.labels.filter(isJsonString) : [];
+      const raw: Raw = { labels };
       const summary = textAt(root, ["fields", "summary"]);
       const issueType = textAt(root, ["fields", "issuetype", "name"]);
       const statusCategory = textAt(root, ["fields", "status", "statusCategory", "key"]);
       const status = textAt(root, ["fields", "status", "name"]);
       const parent = textAt(root, ["fields", "parent", "key"]);
+      const priority = textAt(root, ["fields", "priority", "name"]);
+
+      if (priority !== undefined) {
+        raw.priority = priority;
+      }
 
       if (summary !== undefined) raw.summary = summary;
 
@@ -140,6 +146,21 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
     },
 
     lineage: (id) => climb(normalize(id), []),
+
+    facts(id) {
+      const ticket = normalize(id);
+      const raw = view(ticket);
+
+      if (!raw) {
+        return undefined;
+      }
+
+      const above = raw.parent ? climb(raw.parent, [ticket]).map((n) => n.id) : [];
+      // a parent that can't be read is still named by this ticket, so a rule can match it
+      const ancestors = above.length || !raw.parent ? above.toReversed() : [raw.parent];
+
+      return { priority: raw.priority ?? "", labels: raw.labels, ancestors };
+    },
 
     assigned() {
       const jql = `project = ${key} AND assignee = currentUser() AND statusCategory != Done AND issuetype != Epic`;

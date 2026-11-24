@@ -152,7 +152,8 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   `src/perf-cache.ts` computes every window x grouping into `<meta>/perf.json` (0600): the server writes it from a worker (`POST /refresh/perf`), the tab reads it while young and computes itself otherwise.
   Like the hook, `history.ts` imports node builtins, `paths.ts` and `json.ts` only.
 - Agents: `src/agent-kind.ts` (`claude` | `agy`). A workspace's agent is chosen once, at creation (`overbridge start --agent`,
-  else the root `config.yml`'s `agent`), and kept in `WorkspaceState.agent` (unset = Claude; read through `agentOf`).
+  else the first root `agent-rules` entry matching the item, else the root `config.yml`'s `agent`), and kept in `WorkspaceState.agent` (unset = Claude; read through `agentOf`).
+  `agentFor` in `src/start.ts` applies that order; `src/agent-rules.ts` is the pure match over `Provider.facts` (priority, labels, ancestor ids), read only when rules exist.
   `src/agy.ts` holds what an agy workspace gets instead of Claude's settings: it starts in the workspace folder
   (`agentDir`), where `scaffold` writes `AGENTS.md`, `.agents/hooks.json` and `.agents/skills.json`, and its folder goes in agy's
   `trustedWorkspaces` (`agyTrust`, `OVERBRIDGE_AGY_SETTINGS` in tests). `src/agy-hook.ts` translates agy hook payloads to Claude's shape

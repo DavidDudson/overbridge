@@ -173,3 +173,29 @@ describe("registration and cache", () => {
     expect(() => jiraProvider({ name: "jira", project: "not a key" }, "/w")).toThrow("project key");
   });
 });
+
+describe("facts", () => {
+  const ticket = (key: string, fields: Record<string, unknown>) => JSON.stringify({ key, fields: { summary: key, ...fields } });
+
+  const viewer = (tickets: Record<string, string>): Runner => (cmd) => {
+    const out = tickets[cmd[3]!];
+
+    return { ok: out !== undefined, code: out === undefined ? 1 : 0, stdout: out ?? "", stderr: out === undefined ? "not found" : "" };
+  };
+
+  test("reads the priority, labels and every ticket above, nearest first", () => {
+    const runner = viewer({
+      "ENG-3": ticket("ENG-3", { priority: { name: "Low" }, labels: ["tech-debt", "infra"], parent: { key: "ENG-2" } }),
+      "ENG-2": ticket("ENG-2", { parent: { key: "ENG-1" } }),
+      "ENG-1": ticket("ENG-1", {}),
+    });
+
+    expect(jiraProvider(cfg, "/w", runner).facts("3")).toEqual({ priority: "Low", labels: ["tech-debt", "infra"], ancestors: ["ENG-2", "ENG-1"] });
+  });
+
+  test("a ticket with no priority, labels or parent, a parent it can't read, and a ticket it can't read", () => {
+    expect(jiraProvider(cfg, "/w", viewer({ "ENG-1": ticket("ENG-1", {}) })).facts("ENG-1")).toEqual({ priority: "", labels: [], ancestors: [] });
+    expect(jiraProvider(cfg, "/w", viewer({ "ENG-3": ticket("ENG-3", { parent: { key: "ENG-2" } }) })).facts("ENG-3")?.ancestors).toEqual(["ENG-2"]);
+    expect(jiraProvider(cfg, "/w", viewer({})).facts("ENG-9")).toBeUndefined();
+  });
+});

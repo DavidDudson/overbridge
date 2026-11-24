@@ -144,3 +144,38 @@ describe("validation", () => {
     expect(providerFor(repoCfg, "/w").name).toBe("github");
   });
 });
+
+describe("facts", () => {
+  const api = (issues: Record<string, object>): Runner => (cmd) => {
+    const body = issues[cmd[2]!];
+
+    return { ok: body !== undefined, code: body === undefined ? 1 : 0, stdout: body ? JSON.stringify(body) : "", stderr: "" };
+  };
+
+  const parentUrl = (repo: string, n: number) => `https://api.github.com/repos/${repo}/issues/${n}`;
+
+  test("reads the labels and the parent issues, nearest first, naming one in another repo by owner/repo#n", () => {
+    const runner = api({
+      "repos/acme/app/issues/12": { title: "T", labels: [{ name: "tech-debt" }, { name: "low" }], parent_issue_url: parentUrl("acme/app", 5) },
+      "repos/acme/app/issues/5": { title: "Epic", labels: [], parent_issue_url: parentUrl("acme/roadmap", 2) },
+      "repos/acme/roadmap/issues/2": { title: "Initiative", labels: [] },
+    });
+
+    expect(githubProvider(repoCfg, "/w", runner).facts("#12")).toEqual({ priority: "", labels: ["tech-debt", "low"], ancestors: ["5", "acme/roadmap#2"] });
+  });
+
+  test("keeps a parent it can't read, stops at a loop, and has no facts for a pull request, a bad id or a failed read", () => {
+    const unreadable = api({ "repos/acme/app/issues/12": { title: "T", parent_issue_url: parentUrl("acme/app", 5) } });
+    expect(githubProvider(repoCfg, "/w", unreadable).facts("12")?.ancestors).toEqual(["5"]);
+
+    const loop = api({
+      "repos/acme/app/issues/1": { title: "a", parent_issue_url: parentUrl("acme/app", 2) },
+      "repos/acme/app/issues/2": { title: "b", parent_issue_url: parentUrl("acme/app", 1) },
+    });
+    expect(githubProvider(repoCfg, "/w", loop).facts("1")?.ancestors).toEqual(["2"]);
+
+    expect(githubProvider(repoCfg, "/w", api({ "repos/acme/app/issues/3": { title: "PR", pull_request: {} } })).facts("3")).toBeUndefined();
+    expect(githubProvider(repoCfg, "/w", api({})).facts("../pulls/3")).toBeUndefined();
+    expect(githubProvider(repoCfg, "/w", api({})).facts("12")).toBeUndefined();
+  });
+});

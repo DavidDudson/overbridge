@@ -1,4 +1,4 @@
-import { isJsonObject, isJsonString } from "../json";
+import { isJsonObject, isJsonString, type JsonObject } from "../json";
 import type { ProjectManagement } from "../project-config";
 import { fail, run, type RunResult } from "../util";
 import { ItemStatus, namer, type Provider, type ProviderFactory, type WorkItem } from "./provider";
@@ -12,6 +12,13 @@ interface AssignedIssue {
 export type Runner = (cmd: string[], opts?: { cwd?: string }) => RunResult;
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+
+/** How many parent issues `facts` climbs at most. */
+const MAX_PARENTS = 4;
+
+/** A REST issue URL: its `owner/repo` and number. */
+const ISSUE_API_RE = /\/repos\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)$/;
+
 const NUMBER_RE = /^\d+$/;
 
 /**
@@ -46,6 +53,43 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
   if (config.branch && !/(?:^|[/#])\{(?:id|number)\}(?:-|$)/.test(config.branch)) {
     fail(`project-management.branch '${config.branch}': for github, {number} must start the name or follow '/' or '#', and be followed by '-' or the end`);
   }
+
+  /** An issue from the REST API at `path`, or undefined when it can't be read or is a pull request. */
+  const restIssue = (path: string): JsonObject | undefined => {
+    const r = gh(["api", path]);
+
+    if (!r.ok || !r.stdout) {
+      return undefined;
+    }
+
+    try {
+      const v: unknown = JSON.parse(r.stdout);
+
+      return isJsonObject(v) && v.pull_request === undefined ? v : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  /** The ids of the issues above `issue`, nearest first: a number in this repo, else `owner/repo#n`. `seen` starts with the item itself; stops at `MAX_PARENTS`, a loop or an issue it can't read. */
+  const parentsOf = (issue: JsonObject, seen: readonly string[]): string[] => {
+    const m = isJsonString(issue.parent_issue_url) ? ISSUE_API_RE.exec(issue.parent_issue_url) : null;
+
+    if (!m || seen.length > MAX_PARENTS) {
+      return [];
+    }
+
+    const [, owner, n] = m;
+    const parentId = owner === repo() ? n! : `${owner}#${n}`;
+
+    if (seen.includes(parentId)) {
+      return [];
+    }
+
+    const parent = restIssue(`repos/${owner}/issues/${n}`);
+
+    return [parentId, ...(parent ? parentsOf(parent, [...seen, parentId]) : [])];
+  };
 
   const names = namer(config, { branch: "{number}-{slug}", workspace: "gh-{repo}-{number}" }, (id) => id.replace(/^#/, ""), (id) => provider.itemTypes(id));
 
@@ -102,6 +146,25 @@ export function githubProvider(config: ProjectManagement, cwd: string, runner: R
       } catch {
         return [];
       }
+    },
+
+    // REST for the same reason as lineage; GitHub issues have no priority field
+    facts(id) {
+      const n = id.replace(/^#/, "");
+
+      if (!NUMBER_RE.test(n)) {
+        return undefined;
+      }
+
+      const issue = restIssue(`repos/${repo()}/issues/${n}`);
+
+      if (!issue) {
+        return undefined;
+      }
+
+      const labels = Array.isArray(issue.labels) ? issue.labels.flatMap((l) => (isJsonObject(l) && isJsonString(l.name) ? [l.name] : [])) : [];
+
+      return { priority: "", labels, ancestors: parentsOf(issue, [n]) };
     },
 
     assigned() {

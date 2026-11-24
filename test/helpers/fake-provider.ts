@@ -1,15 +1,23 @@
+import type { ItemFacts } from "../../src/agent-rules";
 import type { ItemNode, NewItem, Provider, WorkItem } from "../../src/pm/provider";
 import { ItemStatus, slug } from "../../src/pm/provider";
 
 export type FakeCreated = NewItem & { id: string };
 
-/** In-memory provider for tests. `calls` counts `title` fetches; `created` records `createItem` calls; `parents` maps an item id to its parent's. */
+/** An item's priority and labels for `facts`; its ancestors come from `parents`. */
+export type FakeFacts = Readonly<Record<string, { priority?: string; labels?: string[] }>>;
+
+/**
+ * In-memory provider for tests. `calls` counts `title` fetches and `factCalls` `facts` fetches; `created` records
+ * `createItem` calls; `parents` maps an item id to its parent's.
+ */
 export function fakeProvider(
   items: WorkItem[] = [],
   name: "github" | "jira" = "github",
   done: readonly string[] = [],
   parents: Readonly<Record<string, string>> = {},
-): Provider & { calls: number; created: FakeCreated[]; bodies: Map<string, string> } {
+  facts: FakeFacts = {},
+): Provider & { calls: number; factCalls: number; created: FakeCreated[]; bodies: Map<string, string> } {
   const byId = new Map(items.map((i) => [i.id, i]));
   const bodies = new Map<string, string>();
   const created: FakeCreated[] = [];
@@ -18,6 +26,7 @@ export function fakeProvider(
   return {
     name,
     calls: 0,
+    factCalls: 0,
     created,
     bodies,
     idFromBranch: (branch) => /(?:^|\/)([A-Z]+-\d+|\d+)(?:-|$)/.exec(branch)?.[1],
@@ -43,6 +52,17 @@ export function fakeProvider(
       };
 
       return climb(id, []);
+    },
+    facts(id): ItemFacts | undefined {
+      this.factCalls++;
+
+      if (!byId.has(id)) {
+        return undefined;
+      }
+
+      const ancestors = this.lineage(id).map((n) => n.id).slice(0, -1).toReversed();
+
+      return { priority: facts[id]?.priority ?? "", labels: facts[id]?.labels ?? [], ancestors };
     },
     assigned: () => items,
     itemTypes: () => [],

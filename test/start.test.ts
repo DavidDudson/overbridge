@@ -642,3 +642,62 @@ describe("start --agent", () => {
     expect(readState().workspaces["gh-app-81"]).toBeUndefined();
   });
 });
+
+describe("agent-rules", () => {
+  const rootConfig = () => join(tmp, "workspaces", "config.yml");
+  const RULES = "agent-rules:\n  - { agent: agy, priority: [Low, Lowest], labels: [tech-debt] }\n  - { agent: agy, parent: ['#900'] }\n";
+
+  const ruleItems = () =>
+    fakeProvider(
+      [
+        { id: "900", title: "Debt epic", url: "" },
+        { id: "90", title: "Low debt", url: "" },
+        { id: "91", title: "High debt", url: "" },
+        { id: "92", title: "Under the debt epic", url: "" },
+        { id: "93", title: "Low debt forced claude", url: "" },
+      ],
+      "github",
+      [],
+      { "92": "900" },
+      { "90": { priority: "low", labels: ["Tech-Debt"] }, "91": { priority: "High", labels: ["tech-debt"] }, "93": { priority: "Low", labels: ["tech-debt"] } },
+    );
+
+  afterEach(() => rmSync(rootConfig(), { force: true }));
+
+  test("a matching rule picks the agent; a near miss falls back to the default", () => {
+    writeFileSync(rootConfig(), RULES);
+    start("app", "90", undefined, { provider: ruleItems(), plugins: noProblems });
+    expect(readState().workspaces["gh-app-90"]?.agent).toBe(AgentKind.Agy);
+
+    start("app", "91", undefined, { provider: ruleItems(), plugins: noProblems });
+    expect(readState().workspaces["gh-app-91"]?.agent).toBeUndefined();
+  });
+
+  test("a rule on a parent matches an item under it", () => {
+    writeFileSync(rootConfig(), RULES);
+    start("app", "92", undefined, { provider: ruleItems(), plugins: noProblems });
+    expect(readState().workspaces["gh-app-92"]?.agent).toBe(AgentKind.Agy);
+  });
+
+  test("--agent wins over a matching rule, and the item is not read", () => {
+    writeFileSync(rootConfig(), RULES);
+    const p = ruleItems();
+    start("app", "93", undefined, { provider: p, plugins: noProblems, agent: AgentKind.Claude });
+    expect(readState().workspaces["gh-app-93"]?.agent).toBeUndefined();
+    expect(p.factCalls).toBe(0);
+  });
+
+  test("an existing workspace keeps its agent, and no rules means the item is never read", () => {
+    writeFileSync(rootConfig(), RULES);
+    const p = ruleItems();
+    expect(agentFor("gh-app-91", undefined, { provider: p, id: "90" })).toBe(AgentKind.Claude);
+    rmSync(rootConfig());
+    expect(agentFor("not-yet", undefined, { provider: p, id: "90" })).toBe(AgentKind.Claude);
+    expect(p.factCalls).toBe(0);
+  });
+
+  test("an item it can't read runs the default agent", () => {
+    writeFileSync(rootConfig(), `agent: claude\n${RULES}`);
+    expect(agentFor("not-yet", undefined, { provider: ruleItems(), id: "404" })).toBe(AgentKind.Claude);
+  });
+});
