@@ -131,10 +131,9 @@ export { cardLabel, sidebarLabel, stripConventional } from "./top";
 
 export { currentTab, tabOrder };
 
-const entryFor = (tab: string, section: Section, label: string): Entry => {
+const entryFor = (tab: string, section: Section, label: string, badge?: TabBadge): Entry => {
   const detail = readAgentDetail(tab);
   const state = detail?.state;
-  const badge = section === Section.Orchestration ? readBadge(tab) : undefined;
 
   const entry: Entry = { tab, section, glyph: glyphFor(state), state, label: badge ? badgeLabel(label, badge) : label };
 
@@ -274,7 +273,7 @@ export function entries(order: string[] = tabOrder(), state: State = readState()
  return i < 0 ? order.length : i; };
 
   return [
-    ...ORCHESTRATION_TABS.map((t) => guardedEntry(t.tab, Section.Orchestration, () => entryFor(t.tab, Section.Orchestration, t.label), t.label)),
+    ...ORCHESTRATION_TABS.map((t) => guardedEntry(t.tab, Section.Orchestration, () => entryFor(t.tab, Section.Orchestration, t.label, readBadge(t.tab, state)), t.label)),
     ...names.toSorted((a, b) => rank(a) - rank(b)).map((ws) => guardedEntry(ws, Section.Workspaces, () => workspaceEntry(ws, workspaces[ws]!))),
   ];
 }

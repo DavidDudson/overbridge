@@ -3,6 +3,7 @@ import type { Motion } from "./config";
 import { Motion as Modes } from "./config";
 import { pulseGlyph, pulses } from "./card-look";
 import type { Entry } from "./sidebar";
+import { pulsesIcon } from "./tab-badge";
 
 /** A quarter turn of a clock hand per frame; every frame is two columns wide like the static glyph, so no card reflows. */
 export const BUSY_FRAMES = ["🕛", "🕒", "🕕", "🕘"] as const;
@@ -16,8 +17,8 @@ export const busyFrame = (nowMs: number): string => BUSY_FRAMES[Math.floor(nowMs
 /** A card that is working and shows the static busy glyph; a faulted card or one with another glyph stays as it is. */
 const isBusyCard = (e: Entry): boolean => e.state === "busy" && !e.fault && e.glyph === GLYPHS.busy;
 
-/** A card whose badge has a merge conflict, which pulses. */
-const hasConflict = (e: Entry): boolean => !e.fault && (e.badge?.icons.includes("conflict") ?? false);
+/** A card whose badge has an icon that pulses, such as a merge conflict. */
+const hasConflict = (e: Entry): boolean => !e.fault && (e.badge?.icons.some(pulsesIcon) ?? false);
 
 /** A card with a claimed PR in conflict: its chip pulses. */
 const hasPrConflict = (e: Entry): boolean => e.prs?.some((p) => p.status === "conflict") ?? false;

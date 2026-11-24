@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { alternate, pulse, spinner } from "../src/anim";
-import { ciFromRollup, conflictLook, healthOf } from "../src/pr-look";
+import { ciFromRollup, conflictLook, HEALTH_LOOK, healthOf } from "../src/pr-look";
 import { badgeColor, badgeLabel, badgeOf, badgeText } from "../src/tab-badge";
 
 const pr = { draft: false };
@@ -40,7 +40,7 @@ describe("tab badge", () => {
 
   test("count, icons worst first, label and colour", () => {
     const b = badgeOf(rows);
-    expect(b).toEqual({ count: 3, icons: ["conflict", "draft", "ready"] });
+    expect(b).toEqual({ count: 3, icons: [HEALTH_LOOK.conflict, HEALTH_LOOK.draft, HEALTH_LOOK.ready] });
     expect(badgeLabel("reviews", b)).toBe("reviews 3");
     expect(badgeLabel("reviews", badgeOf([]))).toBe("reviews");
     expect(badgeColor(b)).toBe("red");
@@ -73,6 +73,6 @@ describe("sidebar badge", () => {
     expect(animate([e], 600, Motion.Off)[0]).toBe(e);
   });
   test("a tab without a list has no badge", () => {
-    expect(readBadge("@root")).toBeUndefined();
+    expect(readBadge("@root", { version: 1, workspaces: {} })).toBeUndefined();
   });
 });

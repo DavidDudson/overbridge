@@ -97,7 +97,8 @@ queued checks, writes a handoff to `<ws>/.overbridge/handoffs/` (reason `icebox`
 iceboxed. Claims and worktrees stay, so nothing else can take its branch or PR. The sidebar lists it as a dim
 `❄ <name> iceboxed` row, `status` marks it `iceboxed`, and `up`/`layout` leave it out. `f` in a workspace's sidebar
 iceboxes that workspace; a refusal (unsaved work) shows in the sidebar footer. The `@frozen` orchestration tab
-(`overbridge frozen`) lists every iceboxed workspace with its age and claims; `t` there thaws the selected one.
+(`overbridge frozen`) lists every iceboxed workspace with its age and claims; `t` there thaws the selected one. Its
+sidebar card shows the count and a 🧊 per iceboxed workspace.
 `overbridge thaw <name>` reopens the tab, the agent continuing its conversation and reading the handoff. `--prompt <text>`
 gives it a request to carry out after the handoff, in place of the handoff's Next line. The orchestrator thaws this way
 when asked to pick up a PR whose branch an iceboxed workspace claims, and `overbridge start` or `overbridge tab` passes
@@ -595,7 +596,8 @@ While a check queued by an older overbridge is waiting or running, every process
 older one does, so the two never wait on each other. Classes and moves apply again once it has left the queue.
 
 The `@checks` orchestration tab (`overbridge checks`) lists the queue: running checks first, then the waiting ones in
-the order they will start. `j`/`k` select a check, `K`/`J` move a waiting one up or down, `t` moves it to the top
+the order they will start. Its sidebar card shows the count and one icon per check: 🔄 running, then ⏳ waiting.
+`j`/`k` select a check, `K`/`J` move a waiting one up or down, `t` moves it to the top
 and `b` to the bottom. `x` then `y` kills the selected check, running or waiting: its `overbridge check` exits
 with 143 and the run is recorded as killed. Each row shows `est`, the median of the last 20 runs of exactly that command in the repo, and `eta`: when a waiting check should start, or how long a running one has left. The bottom border shows when the queue should be clear, and the sidebar shows when each workspace's checks should be done. A waiting `overbridge check` prints its estimated start and run time too. A command that has never finished in the repo has no estimate (`?`), and nothing that waits behind it gets a start, clear or done time. Run times live in `.overbridge/check-estimates.json`, built from the last week of history the first time the tab opens. `v` switches to the checks that finished in the last 24 hours, newest
 first, with each one's result, queue wait and run time, and the totals in the bottom border. A move is saved in `.overbridge/check-queue/order.state` and lasts until the check leaves the
