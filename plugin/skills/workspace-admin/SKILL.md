@@ -38,7 +38,7 @@ overbridge start <repo> <id> --here               # re-bind the current workspac
                                           # is uncommitted or unpushed
 overbridge start ... --agent claude|agy           # the new workspace's agent: Claude Code or Antigravity CLI
                                           # (default: the first config.yml agent-rules entry matching
-                                          # the item, else its agent, else claude); a workspace keeps
+                                          # the item, else the agent key, else claude); a workspace keeps
                                           # its agent
 overbridge send <name> <text>                     # type a message into a workspace's agent pane and submit it
                                           # (the orchestrator's way to reach an agy workspace)

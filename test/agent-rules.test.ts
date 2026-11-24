@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { AgentKind } from "../src/agent-kind";
-import { type AgentRule, type ItemFacts, matchingRule, ruleMatches } from "../src/agent-rules";
+import { type AgentRule, matchingRule, ruleMatches } from "../src/agent-rules";
+import type { ItemFacts } from "../src/pm/provider";
 import { parseYaml, rootLayersFrom } from "../src/project-config";
 
 const rule = (over: Partial<AgentRule> = {}): AgentRule => ({ agent: AgentKind.Agy, priority: [], labels: [], parent: [], ...over });
@@ -19,10 +20,14 @@ describe("ruleMatches", () => {
     expect(ruleMatches(rule({ priority: ["Low"] }), facts({ priority: "" }))).toBe(false);
   });
 
-  test("a parent matches any item above, with or without a leading #", () => {
+  test("a parent matches any item above, by its full id", () => {
     expect(ruleMatches(rule({ parent: ["eng-100"] }), facts({ ancestors: ["ENG-200", "ENG-100"] }))).toBe(true);
-    expect(ruleMatches(rule({ parent: ["#42"] }), facts({ ancestors: ["42"] }))).toBe(true);
-    expect(ruleMatches(rule({ parent: ["42"] }), facts({ ancestors: ["acme/other#42"] }))).toBe(false);
+    expect(ruleMatches(rule({ parent: ["Acme/App#42"] }), facts({ ancestors: ["acme/app#42"] }))).toBe(true);
+    expect(ruleMatches(rule({ parent: ["acme/app#42"] }), facts({ ancestors: ["acme/other#42"] }))).toBe(false);
+  });
+
+  test("a label is compared whole, so a leading # is part of it", () => {
+    expect(ruleMatches(rule({ labels: ["urgent"] }), facts({ labels: ["#urgent"] }))).toBe(false);
   });
 });
 
@@ -54,6 +59,7 @@ describe("agent-rules in config.yml", () => {
     ["agent-rules:\n  - { agent: agy }\n", "agent-rules[0]: set at least one of priority, labels, parent"],
     ["agent-rules:\n  - { agent: agy, label: [x] }\n", "agent-rules[0].label: unknown key, did you mean 'labels'?"],
     ["agent-rules:\n  - { agent: agy, labels: tech-debt }\n", "agent-rules[0].labels: expected a list of strings"],
+    ["agent-rules:\n  - { agent: agy, parent: ['#42'] }\n", 'agent-rules[0].parent[0]: "#42" names no repo; write a GitHub issue as owner/repo#42'],
   ])("rejects %j", (yaml, message) => {
     expect(() => load(yaml)).toThrow(message);
   });

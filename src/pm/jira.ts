@@ -156,7 +156,7 @@ export function jiraProvider(config: ProjectManagement, cwd: string, runner: Run
       }
 
       const above = raw.parent ? climb(raw.parent, [ticket]).map((n) => n.id) : [];
-      // a parent that can't be read is still named by this ticket, so a rule can match it
+      // this ticket names its parent even when the parent can't be read, so a rule can still match it
       const ancestors = above.length || !raw.parent ? above.toReversed() : [raw.parent];
 
       return { priority: raw.priority ?? "", labels: raw.labels, ancestors };

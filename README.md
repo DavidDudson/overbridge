@@ -349,7 +349,7 @@ and matches when every key it sets matches one of its values, ignoring case:
 
 - **`priority`**: the item's priority name, such as Jira's `Low`. GitHub issues have no priority, so a rule with this key never matches one.
 - **`labels`**: any of the item's labels.
-- **`parent`**: any item above it, such as its epic or the epic's initiative. A GitHub parent issue is `#42` in the same repo and `owner/repo#42` in another.
+- **`parent`**: any item above it, such as its epic or the epic's initiative. Write a Jira parent as its key, such as `ENG-100`, and a GitHub parent issue as `owner/repo#42`, because the rules apply to every repo.
 
 `--agent` always wins, and an existing workspace keeps its agent, so the rules apply only to a new workspace.
 `--stack` matches on the bottom item. A `--task` workspace has no item, so it gets `agent`. When `start` can't read

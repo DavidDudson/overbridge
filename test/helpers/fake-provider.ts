@@ -1,5 +1,4 @@
-import type { ItemFacts } from "../../src/agent-rules";
-import type { ItemNode, NewItem, Provider, WorkItem } from "../../src/pm/provider";
+import type { ItemFacts, ItemNode, NewItem, Provider, WorkItem } from "../../src/pm/provider";
 import { ItemStatus, slug } from "../../src/pm/provider";
 
 export type FakeCreated = NewItem & { id: string };

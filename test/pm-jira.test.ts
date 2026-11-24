@@ -175,7 +175,10 @@ describe("registration and cache", () => {
 });
 
 describe("facts", () => {
-  const ticket = (key: string, fields: Record<string, unknown>) => JSON.stringify({ key, fields: { summary: key, ...fields } });
+  /** The fields of `jira issue view --raw` that `facts` reads. */
+  type Fields = { priority?: { name: string }; labels?: string[]; parent?: { key: string } };
+
+  const ticket = (key: string, fields: Fields) => JSON.stringify({ key, fields: { summary: key, ...fields } });
 
   const viewer = (tickets: Record<string, string>): Runner => (cmd) => {
     const out = tickets[cmd[3]!];

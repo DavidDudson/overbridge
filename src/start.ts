@@ -99,7 +99,7 @@ export function start(repo: string, id: string, prompt?: string, deps: StartDeps
 
   const holder = workspaceOf(state, repo, branch, provider);
 
-  // checked once the target is known: a re-bind opens no tab, and a holder keeps its own agent
+  // a re-bind opens no tab, so the plugin check waits until the target is known
   if (holder) {
     requirePlugins(deps.plugins, agentFor(holder, deps.agent));
     log(`${id} is in ${holder}`);
@@ -236,9 +236,11 @@ export function startStack(
   const name = opts.name ?? `${provider.workspaceName(ids[0]!, repo)}${STACK_SUFFIX}`;
 
   if (!NAME_RE.test(name)) fail(`invalid workspace name '${name}'`);
-  const agent = newAgent(name, deps.plugins, opts.agent, { provider, id: ids[0]! });
+  const item: ItemRef = { provider, id: ids[0]! };
 
-  if (readState().workspaces[name]) return openWorkspace(name, repo, branches[0]!, { prompt: opts.prompt, agent }, deps.mux);
+  if (readState().workspaces[name]) {
+    return openWorkspace(name, repo, branches[0]!, { prompt: opts.prompt, agent: newAgent(name, deps.plugins, opts.agent, item) }, deps.mux);
+  }
 
   // layers must be new: a branch already on origin belongs to checking out its existing PR or stack
   const remote = branches.find((b) => hasRef(repo, `refs/remotes/origin/${b}`));
@@ -248,6 +250,8 @@ export function startStack(
   const owner = claimOwner(readState(), repo, cover(stacks, branches), holdings(repo, stacks), name);
 
   if (owner) fail(`${repo} ${branches.join(" <- ")} (or a stack or issue it touches) is claimed by workspace ${owner}`);
+  // after the cheap refusals, since agent-rules may read the bottom item and its parents
+  const agent = newAgent(name, deps.plugins, opts.agent, item);
 
   const made = branches.filter((b) => !hasRef(repo, `refs/heads/${b}`));
   const layers = items.map((i, n) => `${n + 1}. ${i.id} (${i.branch})`).join("; ");
@@ -280,22 +284,28 @@ function undoStack(repo: string, wt: string, made: string[]) {
   for (const b of made) run(["git", "-C", barePath(repo), "branch", "-D", b]);
 }
 
-/**
- * The agent workspace `name` runs: its own when it exists (a workspace keeps its agent), else `explicit`, else the
- * first root `agent-rules` entry that matches the work item (`item`, read only when a rule could apply), else the
- * root config's default.
- */
-export function agentFor(name: string, explicit: AgentKind | undefined, item?: ItemRef): AgentKind {
+/** The agent workspace `name` runs: its own, else `explicit`, else the first matching `agent-rules` entry, else the root default. */
+export const agentFor = (name: string, explicit: AgentKind | undefined, item?: ItemRef): AgentKind => chooseAgent(name, explicit, item).agent;
+
+/** The agent a workspace runs, and whether the workspace already exists (so it keeps that agent). */
+interface AgentChoice {
+  agent: AgentKind;
+  existing: boolean;
+}
+
+/** `agentFor`'s pick for workspace `name`. `item` is read only when a rule could apply. */
+function chooseAgent(name: string, explicit: AgentKind | undefined, item: ItemRef | undefined): AgentChoice {
   const existing = readState().workspaces[name];
 
   if (existing) {
-    return agentOf(existing);
+    return { agent: agentOf(existing), existing: true };
   }
 
-  if (explicit) {
-    return explicit;
-  }
+  return { agent: explicit ?? ruledAgent(name, item), existing: false };
+}
 
+/** The first `agent-rules` entry's agent that matches `item`, else the root default. */
+function ruledAgent(name: string, item: ItemRef | undefined): AgentKind {
   const { agent, agentRules } = loadRootLayers();
 
   if (!item || !agentRules.length) {
@@ -316,22 +326,18 @@ export function agentFor(name: string, explicit: AgentKind | undefined, item?: I
     return agent;
   }
 
-  const ruled = agentRules[index]!.agent;
-  log(`agent-rules[${index}] matches ${item.id}: ${name} runs ${ruled}`);
+  const ruleAgent = agentRules[index]!.agent;
+  log(`agent-rules[${index}] matches ${item.id}: ${name} runs ${ruleAgent}`);
 
-  return ruled;
+  return ruleAgent;
 }
 
-/**
- * Pick workspace `name`'s agent with `agentFor` and stop when it could not load the overbridge skills. Returns the
- * agent to create the workspace with: `explicit`, a rule's pick, or undefined for the root default or an existing
- * workspace, which keeps its own.
- */
+/** The agent to create workspace `name` with, after checking it can load the skills; undefined for an existing workspace unless `explicit`. */
 function newAgent(name: string, plugins: (() => PluginProblems) | undefined, explicit: AgentKind | undefined, item: ItemRef): AgentKind | undefined {
-  const agent = agentFor(name, explicit, item);
+  const { agent, existing } = chooseAgent(name, explicit, item);
   requirePlugins(plugins, agent);
 
-  return explicit ?? (readState().workspaces[name] ? undefined : agent);
+  return existing ? explicit : agent;
 }
 
 /** The check that `agent` can load the overbridge skills. */

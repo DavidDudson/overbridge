@@ -109,7 +109,7 @@ Workspaces
                                         (branch + claim) per item, on layer 1, in a new tab running /start-item
   overbridge start ... --agent claude|agy       the new workspace's agent: Claude Code or Antigravity CLI;
                                         default: the first config.yml agent-rules entry matching the item,
-                                        else its agent, else claude. A workspace keeps its agent; --agent
+                                        else the agent key, else claude. A workspace keeps its agent; --agent
                                         never changes an existing one
   overbridge new <name> [-r repo]... [--agent claude|agy]
                                         create a workspace and open its tab

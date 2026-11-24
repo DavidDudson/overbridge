@@ -645,21 +645,32 @@ describe("start --agent", () => {
 
 describe("agent-rules", () => {
   const rootConfig = () => join(tmp, "workspaces", "config.yml");
-  const RULES = "agent-rules:\n  - { agent: agy, priority: [Low, Lowest], labels: [tech-debt] }\n  - { agent: agy, parent: ['#900'] }\n";
+  const RULES = "agent-rules:\n  - { agent: agy, priority: [Low, Lowest], labels: [tech-debt] }\n  - { agent: agy, parent: [DEBT-1] }\n";
 
   const ruleItems = () =>
     fakeProvider(
       [
-        { id: "900", title: "Debt epic", url: "" },
+        { id: "DEBT-1", title: "Debt epic", url: "" },
         { id: "90", title: "Low debt", url: "" },
         { id: "91", title: "High debt", url: "" },
         { id: "92", title: "Under the debt epic", url: "" },
         { id: "93", title: "Low debt forced claude", url: "" },
+        { id: "94", title: "Spike on claude", url: "" },
+        { id: "95", title: "Low debt without agy skills", url: "" },
+        { id: "96", title: "Low debt stack base", url: "" },
+        { id: "97", title: "Plain stack top", url: "" },
       ],
       "github",
       [],
-      { "92": "900" },
-      { "90": { priority: "low", labels: ["Tech-Debt"] }, "91": { priority: "High", labels: ["tech-debt"] }, "93": { priority: "Low", labels: ["tech-debt"] } },
+      { "92": "DEBT-1" },
+      {
+        "90": { priority: "low", labels: ["Tech-Debt"] },
+        "91": { priority: "High", labels: ["tech-debt"] },
+        "93": { priority: "Low", labels: ["tech-debt"] },
+        "94": { labels: ["spike"] },
+        "95": { priority: "Low", labels: ["tech-debt"] },
+        "96": { priority: "Low", labels: ["tech-debt"] },
+      },
     );
 
   afterEach(() => rmSync(rootConfig(), { force: true }));
@@ -699,5 +710,36 @@ describe("agent-rules", () => {
   test("an item it can't read runs the default agent", () => {
     writeFileSync(rootConfig(), `agent: claude\n${RULES}`);
     expect(agentFor("not-yet", undefined, { provider: ruleItems(), id: "404" })).toBe(AgentKind.Claude);
+  });
+
+  test("a rule can pick claude over an agy default", () => {
+    writeFileSync(rootConfig(), "agent: agy\nagent-rules:\n  - { agent: claude, labels: [spike] }\n");
+    start("app", "94", undefined, { provider: ruleItems(), plugins: noProblems });
+    expect(readState().workspaces["gh-app-94"]?.agent).toBeUndefined();
+    expect(existsSync(join(tmp, "workspaces", "gh-app-94", "AGENTS.md"))).toBe(false);
+  });
+
+  test("the plugin check is for the agent the rule picked", () => {
+    writeFileSync(rootConfig(), RULES);
+    const plugins = () => ({ errors: ["no skills"], warnings: [] });
+    expect(() => start("app", "95", undefined, { provider: ruleItems(), plugins })).toThrow("the new tab's agy would not have the overbridge skills");
+    expect(readState().workspaces["gh-app-95"]).toBeUndefined();
+  });
+
+  test("a stack picks its agent from the bottom item", () => {
+    writeFileSync(rootConfig(), RULES);
+    const plugins = () => ({ errors: ["no skills"], warnings: [] });
+    const run = () => startStack("app", ["96", "97"], { name: "debt-stack" }, { provider: ruleItems(), plugins, ghStack: () => true });
+
+    expect(run).toThrow("the new tab's agy would not have the overbridge skills");
+    expect(readState().workspaces["debt-stack"]).toBeUndefined();
+  });
+
+  const hasGhStack = Bun.spawnSync({ cmd: ["gh", "stack", "--version"], stdout: "pipe", stderr: "pipe" }).exitCode === 0;
+
+  (hasGhStack ? test : test.skip)("a stack workspace stores the bottom item's agent", () => {
+    writeFileSync(rootConfig(), RULES);
+    startStack("app", ["96", "97"], { name: "debt-stack" }, { provider: ruleItems(), plugins: noProblems });
+    expect(readState().workspaces["debt-stack"]?.agent).toBe(AgentKind.Agy);
   });
 });

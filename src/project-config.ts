@@ -1053,7 +1053,9 @@ export interface RootLayers {
 
 /** `agent-rules`: a list of `{ agent, priority?, labels?, parent? }`, each with at least one criterion. */
 function parseAgentRules(p: Problems, raw: Json | undefined): AgentRule[] {
-  if (raw === undefined || raw === null) return [];
+  if (raw === undefined || raw === null) {
+    return [];
+  }
 
   if (!Array.isArray(raw)) {
     p.add("agent-rules", "expected a list of { agent, priority, labels, parent }");
@@ -1075,6 +1077,12 @@ function parseAgentRules(p: Problems, raw: Json | undefined): AgentRule[] {
     const priority = p.stringList(entry, "priority", at) ?? [];
     const labels = p.stringList(entry, "labels", at) ?? [];
     const parent = p.stringList(entry, "parent", at) ?? [];
+
+    parent.forEach((id, j) => {
+      if (/^#?\d+$/.test(id.trim())) {
+        p.add(`${at}.parent[${j}]`, `"${id}" names no repo; write a GitHub issue as owner/repo#${id.trim().replace(/^#/, "")}, since the rules apply to every repo`);
+      }
+    });
 
     if (!priority.length && !labels.length && !parent.length) {
       p.add(at, `set at least one of ${RULE_CRITERIA.join(", ")}; the top-level agent is the default for every item`);
