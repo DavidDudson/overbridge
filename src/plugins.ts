@@ -2,8 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isJsonObject, isJsonString, type JsonValue } from "./json";
+import { modsSettings } from "./mods";
 import { packageRoot } from "./paths";
-import { run } from "./util";
+import { log, run } from "./util";
 
 const MARKETPLACE_FILE = join(".claude-plugin", "marketplace.json");
 
@@ -46,7 +47,7 @@ function readMarketplace(root: string): Marketplace | string {
  * Relative-path plugins load in place, so the skills always match the running overbridge. Empty when the
  * package ships no marketplace: `pluginProblems` reports that.
  */
-export function pluginSettings(root = packageRoot()) {
+export function pluginSettings(root = packageRoot()): PluginSettings {
   const marketplace = readMarketplace(root);
 
   if (isJsonString(marketplace)) {
@@ -56,6 +57,24 @@ export function pluginSettings(root = packageRoot()) {
   return {
     extraKnownMarketplaces: { [marketplace.name]: { source: { source: "directory", path: root } } },
     enabledPlugins: Object.fromEntries(marketplace.plugins.map((p) => [`${p.name}@${marketplace.name}`, true])),
+  };
+}
+
+/** Marketplace and enable settings, as Claude reads them from settings.json or `--settings`. */
+export interface PluginSettings {
+  extraKnownMarketplaces?: Record<string, { source: { source: string; path: string } }>;
+  enabledPlugins?: Record<string, boolean>;
+}
+
+/** The overbridge plugins plus the user's mods (`overbridge mods`): what a workspace Claude loads. */
+export function workspacePluginSettings(base: PluginSettings = pluginSettings(), mods: PluginSettings = modsSettings(undefined, log)): PluginSettings {
+  if (!mods.extraKnownMarketplaces) {
+    return base;
+  }
+
+  return {
+    extraKnownMarketplaces: { ...base.extraKnownMarketplaces, ...mods.extraKnownMarketplaces },
+    enabledPlugins: { ...base.enabledPlugins, ...mods.enabledPlugins },
   };
 }
 

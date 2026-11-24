@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { agentDirOf } from "./layout";
 import { excludeInRepo } from "./git";
 import { ghReposCache, metaDir, ORCHESTRATION_ENV, orchestrationPlansDir, PLANS_DIR, root, selfCommand, worktreePath, wsDir } from "./paths";
-import { pluginSettings } from "./plugins";
+import { pluginSettings, workspacePluginSettings } from "./plugins";
 import { defaultIde, fileLinkSection } from "./file-links";
 import { type IdeConfig, ideFromEnv } from "./ide";
 import { loadRepoConfig, resolveConfig, rootConfigPath, rootMcpServers } from "./project-config";
@@ -56,7 +56,7 @@ export const workspaceSettingsPath = (ws: string) => join(metaDir(), "workspaces
 
 const workspaceSettings = (ws: string, mcp: McpServerSettings) => ({
   env: { OVERBRIDGE_NAME: ws, OVERBRIDGE_ROOT: root() },
-  ...pluginSettings(),
+  ...workspacePluginSettings(),
   // relative, so plans land in the folder the agent starts in, which the guard lets it write
   plansDirectory: PLANS_DIR,
   permissions: { allow: ALLOWED_COMMANDS },
@@ -160,7 +160,7 @@ export function scaffoldPlugins(): string {
   mkdirSync(dirname(file), { recursive: true });
   // every tab's Claude launches at once when the session starts, so none may read a half-written file
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(pluginSettings(), null, 2) + "\n");
+  writeFileSync(tmp, JSON.stringify(workspacePluginSettings(), null, 2) + "\n");
   renameSync(tmp, file);
 
   return file;

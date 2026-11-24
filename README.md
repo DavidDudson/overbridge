@@ -275,6 +275,47 @@ skill-extensions:
 `overbridge ext list` shows every extension file it finds. A skill that runs `overbridge ext` for a phase with no
 file gets no output and carries on as written.
 
+### Mods
+
+A mod is a Claude Code plugin you add for yourself, such as a theme, a status line, a hook, or a slash command. It
+is a folder holding `.claude-plugin/plugin.json`. `overbridge mods` keeps your mods in one folder, and every
+workspace Claude loads each mod in it. The orchestration tabs load only the overbridge plugins.
+
+```sh
+overbridge mods install <git-url|path> [--name x]   # clone a git URL, or link a local folder
+overbridge mods update [name]                       # git pull --ff-only each cloned mod
+overbridge mods ls                                  # name, version, source, valid or not
+overbridge mods rm <name>                           # remove one
+```
+
+- **`install`** clones a git URL into the mods folder, or links a local folder there, then runs `claude plugin
+  validate` on it. A mod that fails validation is removed again, and the command prints the validator's output. It
+  refuses a name that is already installed, and a mod whose plugin name another mod already has. `--name` sets the
+  folder name. The default is the last part of the URL or path, without `.git`.
+- **`update`** runs `git pull --ff-only` in each cloned mod, or in the one you name, then validates it again. A
+  pull that fails validation, or takes a plugin name another mod has, is reset to the commit before it. A pull that
+  fails leaves the mod on the commit that passed, still loaded. It checks a linked mod again without a pull: edit
+  that one in place.
+- **`ls`** prints one line per mod: its folder name, the version from its `plugin.json`, its git remote or link
+  target, and whether it validates.
+- **`rm`** deletes a cloned mod's folder. For a linked mod, it deletes only the link and never the folder it points to.
+
+The mods folder is `mods` in Claude's config folder (`~/.claude/mods`, or `$CLAUDE_CONFIG_DIR/mods`). Set
+`mods-dir` in the root `config.yml` to use another folder. It takes an absolute path, a `~/` path, or a path relative
+to the root. Only the root `config.yml` can set it.
+
+`install`, `update`, and `rm` write `<mods folder>/.claude-plugin/marketplace.json`, with one entry per mod, named
+for its `plugin.json`. A workspace Claude registers that folder as the `overbridge-mods` directory marketplace and
+enables each mod it lists as `<name>@overbridge-mods`, in the same settings that load the overbridge plugins. Claude
+reads a directory marketplace in place, so an edit to an installed linked mod applies after `/reload-plugins`, with
+no reinstall. A newly installed mod loads in each workspace Claude started after the install. A folder added to the mods folder by hand loads only after `overbridge mods update` adds it to the
+marketplace, and `ls` shows it as `not loaded` until then.
+
+A mod's hooks run in every workspace, outside the workspace guard, so `install`, `update`, and `rm` refuse to run
+under Claude: when `CLAUDECODE` is set, or a `claude` process is above them. That includes a `!` command typed in
+Claude, so run them in a terminal outside Claude, such as the workspace's terminal pane. The guard also blocks them
+in a workspace Claude. `ls` works from anywhere.
+
 ## Agents: Claude Code or Antigravity
 
 Each workspace runs one agent: Claude Code (`claude`, the default) or Google's Antigravity CLI (`agy`). Set the
@@ -614,6 +655,7 @@ owners:               # under the repo's overbridge.yml, for every repo a GitHub
   my-org:
     commands:
       lint: pnpm lint
+mods-dir: ~/.claude/mods   # where overbridge mods installs Claude Code mods (see Mods)
 repos:                # over one repo's overbridge.yml, by its name in repos.toml
   app:
     commands:

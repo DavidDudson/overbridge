@@ -1,6 +1,6 @@
 ---
 name: workspace-admin
-description: Set up and manage overbridge workspaces from outside a workspace — register repos, create/remove workspaces, add repos to a workspace, launch the zellij session. Use when the user says "add repo X to overbridge", "new workspace", "spin up a workspace for …", "remove ws3", "launch workspaces", or asks how the overbridge tool works. Not for workspace-bound sessions (the guard blocks admin commands there).
+description: Set up and manage overbridge workspaces from outside a workspace — register repos, create/remove workspaces, add repos to a workspace, launch the zellij session, install Claude Code mods. Use when the user says "add repo X to overbridge", "install a mod", "new workspace", "spin up a workspace for …", "remove ws3", "launch workspaces", or asks how the overbridge tool works. Not for workspace-bound sessions (the guard blocks admin commands there).
 ---
 
 # Managing overbridge workspaces
@@ -68,6 +68,15 @@ overbridge up [--fresh]                           # zellij session "workspaces":
 overbridge up <name>                              # inside the session: open (or show) one workspace's tab, same as `overbridge tab <name>`
 overbridge layout                                 # print the layout `up` would use (stderr says where from); a tmux script under OVERBRIDGE_MUX=tmux
 overbridge claude <name|@root>                    # run a bound Claude, or the root Claude, outside zellij
+
+overbridge mods install <git-url|path> [--name x] # clone or link a Claude Code mod into the mods folder (root-only mods-dir in
+                                          # config.yml, else mods in $CLAUDE_CONFIG_DIR or ~/.claude); runs claude plugin
+                                          # validate and removes it again on failure. Each workspace Claude started after
+                                          # it loads it. install, update and rm refuse under Claude (a ! command too): ask
+                                          # the user to run them in a terminal outside Claude
+overbridge mods update [name]                     # git pull --ff-only each cloned mod, then validate it again (a failure is reset); skips linked ones
+overbridge mods ls                                # name, version, source (git remote or link target), valid or not
+overbridge mods rm <name>                         # remove a mod; a linked mod's target is never deleted
 ```
 
 ## Config

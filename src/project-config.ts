@@ -969,7 +969,7 @@ export const configPath = (repoDir: string) => join(repoDir, CONFIG_FILE);
 /** The root config, `<root>/config.yml`: settings that live outside the repos. */
 export const ROOT_CONFIG_FILE = "config.yml";
 export const rootConfigPath = () => join(root(), ROOT_CONFIG_FILE);
-const ROOT_KEYS = ["version", "defaults", "owners", "repos", "skill-extensions", "guard", "github-orgs", "priority-classes", "agent", "agent-launch", "cpu-priority"];
+const ROOT_KEYS = ["version", "defaults", "owners", "repos", "skill-extensions", "guard", "github-orgs", "priority-classes", "agent", "agent-launch", "cpu-priority", "mods-dir"];
 const GUARD_KEYS = ["read-paths", "deny"];
 
 /**
@@ -1006,6 +1006,8 @@ export interface RootLayers {
   cpuPriority: boolean;
   /** Env and args each kind of agent starts with (`agent-launch.<kind>`); root-only, so a branch cannot change how agents start. */
   agentLaunch: Partial<Record<AgentKind, AgentLaunch>>;
+  /** The Claude Code mods folder (`mods-dir`), as written: absolute, `~/` or root-relative; unset means the default. */
+  modsDir?: string;
 }
 
 /** `agent-launch`: per agent kind, an `env` mapping (scalar values read as strings) and an `args` list. */
@@ -1117,6 +1119,9 @@ export function rootLayersFrom(raw: Json | undefined, file: string): RootLayers 
 
   layers.cpuPriority = raw["cpu-priority"] !== false;
   layers.agentLaunch = parseAgentLaunch(p, raw["agent-launch"]);
+  const modsDir = p.string(raw, "mods-dir", "", false);
+
+  if (modsDir) layers.modsDir = modsDir;
 
   if (classes?.length) layers.checkClasses = classes;
 
