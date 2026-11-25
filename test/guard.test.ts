@@ -238,6 +238,35 @@ describe("agy calls", () => {
     expect(check(bash(String.raw`rg -n '\.agents|hooks\.json' src`), ctx)).toBeUndefined();
   });
 
+  test("agy CLI 1.5.16: in-workspace reads, writes and commands pass; reads outside the root pass", () => {
+    expect(check(agy("read_file", { Path: "/w/ws1/HANDOFF.md" }), ctx)).toBeUndefined();
+    expect(check(agy("read_file", { Path: "/home/u/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md" }), ctx)).toBeUndefined();
+    expect(check(agy("write_file", { Path: "/w/ws1/app/b.txt", Content: "x" }), ctx)).toBeUndefined();
+    expect(check(agy("edit_file", { Path: "/w/ws1/app/a.txt", Target: "a", Replacement: "/b" }), ctx)).toBeUndefined();
+    expect(check(agy("run_command", { CommandLine: "ls -la", WaitMsBeforeAsync: 5000, toolSummary: "List files" }), ctx)).toBeUndefined();
+    expect(check(agy("run_command", { CommandLine: "overbridge status", WaitMsBeforeAsync: 5000 }), ctx)).toBeUndefined();
+    expect(check(agy("send_message", { Message: "/pickup #3", Recipient: "r" }), ctx)).toBeUndefined();
+    expect(check(agy("run_workflow", { Script: "run('./app/x.js') // done" }), ctx)).toBeUndefined();
+    expect(check(agy("run_workflow", { Script: "read(`./app/x`)" }), ctx)).toBeUndefined();
+    expect(check(fromAgy({ hookEventName: "PreToolUse", cwd: "/w/ws1/app", toolCall: { name: "run_workflow", args: { Script: "run()", Cwd: ".." } } }), ctx)).toBeUndefined();
+  });
+
+  test("agy CLI 1.5.16: foreign reads, outside writes, .agents edits and a foreign subagent are blocked", () => {
+    expect(check(agy("read_file", { Path: "/w/ws2/HANDOFF.md" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("write_file", { Path: "/home/u/.gemini/x", Content: "x" }), ctx)).toContain("is outside workspace ws1");
+    expect(check(agy("edit_file", { Path: "/w/ws1/.agents/hooks.json", Target: "a", Replacement: "b" }), ctx)).toContain(".agents config is managed by overbridge");
+    expect(check(agy("invoke_subagent", { Prompt: "go", Workspace: "/w/ws2" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_workflow", { Script: "cat /w/ws2/secret" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_workflow", { Script: "const p = `/w/ws2/secret`; read(p)" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_workflow", { Script: "read(path.join('/w', 'ws2'))" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_workflow", { Script: "read(`../ws2/secret`)", Cwd: "/w/ws1" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_workflow", { Script: "read(`~/ws2/x`)" }), { ...ctx, home: "/w" })).toContain("outside workspace ws1");
+    expect(check(agy("schedule", { Prompt: "go", Command: "/w/ws2/run.sh" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_workflow", { Script: "run('overbridge rm ws2')" }), ctx)).toContain("workspace admin commands are for the user");
+    const withDeny = { ...ctx, extra: { readPaths: [], deny: [{ pattern: /^npm\s+publish\b/, reason: "publish from CI" }] } };
+    expect(check(agy("run_workflow", { Script: "exec(`npm publish --tag x`)" }), withDeny)).toBe("publish from CI");
+  });
+
   test("allows work inside the workspace", () => {
     expect(check(agy("write_to_file", { TargetFile: "/w/ws1/app/x.ts", CodeContent: "/** doc */" }), ctx)).toBeUndefined();
     expect(check(agy("run_command", { CommandLine: "bun test", Cwd: "/w/ws1/app" }), ctx)).toBeUndefined();

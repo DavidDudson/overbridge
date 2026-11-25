@@ -5,7 +5,7 @@
  * An orchestration tab's Claude gets the stricter `checkOrchestrator` (guard-orchestrator.ts) instead.
  *
  * Exit 2 blocks the tool call and shows stderr to Claude. Under agy (`guard --agy`) the payload is translated
- * from agy's shape first and the answer is agy's JSON decision on stdout.
+ * from agy's shape first; a deny is agy's JSON decision on stdout and an allow prints nothing.
  */
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -17,7 +17,8 @@ import { isJsonString, type JsonObject, stringField } from "./json";
 import { currentWorkspace, isInside, ORCHESTRATION_ENV, realPath, root } from "./paths";
 import { type GuardConfig, loadRootLayers } from "./project-config";
 
-export type HookInput = { cwd?: string; tool_name?: string; tool_input?: JsonObject };
+/** `agent_cwd` is set for agy, whose tool calls can name their own folder in `cwd`; the workspace comes from it. */
+export type HookInput = { cwd?: string; agent_cwd?: string; tool_name?: string; tool_input?: JsonObject };
 
 /** `extra` is the root config's `guard` block: more paths to read and more commands to block. */
 export type GuardCtx = { root: string; ws: string; home: string; extra?: GuardConfig; agent?: AgentKind };
@@ -130,27 +131,47 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
   }
 
   if (tool === "Bash") {
-    const cmd = String(ti.command ?? "").replace(/\$\{?HOME\}?/g, ctx.home);
-
     // the folder the command runs in, whole: the token scan below stops at a space in it
     if (foreign(expand(cwd))) return `${expand(cwd)} is outside workspace ${ctx.ws}; only ${wsPath} is accessible`;
 
     if (ctx.agent === AgentKind.Agy && isInside(expand(cwd), join(wsPath, ".agents"))) return "workspace .agents config is managed by overbridge";
 
-    for (const [re, reason] of BASH_RULES) if (re.test(cmd)) return reason;
+    // a script's string literals (agy's run_workflow) are each checked as a command of their own, so anchored rules see them
+    const literals = Array.isArray(ti.commands) ? ti.commands.filter(isJsonString) : [];
 
-    if (ctx.agent === AgentKind.Agy) for (const [re, reason] of AGY_BASH_RULES) if (re.test(cmd)) return reason;
+    for (const each of [String(ti.command ?? ""), ...literals]) {
+      const reason = shellReason(each.replace(/\$\{?HOME\}?/g, ctx.home), { ctx, wsPath, expand, foreign });
 
-    for (const { pattern, reason } of ctx.extra?.deny ?? []) if (pattern.test(cmd)) return reason;
-    const other = /--ws[=\s]+(\S+)/.exec(cmd);
-
-    if (other && other[1] !== ctx.ws) return `workspace ${ctx.ws} cannot act on workspace ${other[1]}`;
-
-    for (const m of cmd.matchAll(PATH_TOKEN)) {
-      const abs = expand(m[1]!);
-
-      if (foreign(abs)) return `${abs} is outside workspace ${ctx.ws}; only ${wsPath} is accessible`;
+      if (reason) {
+        return reason;
+      }
     }
+  }
+}
+
+/** What `shellReason` needs from `check`: the guard's context, path expansion from the call's cwd, and the foreign-path test. */
+interface ShellScope {
+  ctx: GuardCtx;
+  wsPath: string;
+  expand: (p: string) => string;
+  foreign: (abs: string) => boolean;
+}
+
+/** Why the shell command `cmd` is blocked, by the branch, admin and deny rules and the paths it names, or undefined. */
+function shellReason(cmd: string, { ctx, wsPath, expand, foreign }: ShellScope): string | undefined {
+  for (const [re, reason] of BASH_RULES) if (re.test(cmd)) return reason;
+
+  if (ctx.agent === AgentKind.Agy) for (const [re, reason] of AGY_BASH_RULES) if (re.test(cmd)) return reason;
+
+  for (const { pattern, reason } of ctx.extra?.deny ?? []) if (pattern.test(cmd)) return reason;
+  const other = /--ws[=\s]+(\S+)/.exec(cmd);
+
+  if (other && other[1] !== ctx.ws) return `workspace ${ctx.ws} cannot act on workspace ${other[1]}`;
+
+  for (const m of cmd.matchAll(PATH_TOKEN)) {
+    const abs = expand(m[1]!);
+
+    if (foreign(abs)) return `${abs} is outside workspace ${ctx.ws}; only ${wsPath} is accessible`;
   }
 }
 
@@ -170,10 +191,14 @@ export async function guardMain(agent: AgentKind = AgentKind.Claude): Promise<nu
   }
 }
 
-/** Block with `message`, or allow when there is none: exit 2 and stderr for Claude; for agy, its JSON decision on stdout and exit 0, since agy reads a hook's answer only from its JSON. */
+/** Block with `message`, or allow when there is none: exit 2 and stderr for Claude; for agy, exit 0 with its JSON deny on stdout, or nothing on stdout to allow. */
 function answer(agent: AgentKind, message: string | undefined): number {
   if (agent === AgentKind.Agy) {
-    console.log(JSON.stringify(agyToolDecision(message)));
+    const decision = agyToolDecision(message);
+
+    if (decision) {
+      console.log(decision);
+    }
 
     return 0;
   }
@@ -194,7 +219,7 @@ export function guardReason(input: HookInput, env: Record<string, string | undef
     return checkOrchestrator(input);
   }
 
-  const ws = currentWorkspace(input.cwd ?? process.cwd());
+  const ws = currentWorkspace(input.agent_cwd ?? input.cwd ?? process.cwd());
 
   if (!ws) {
     return undefined;

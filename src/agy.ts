@@ -1,5 +1,5 @@
 /** What an agy workspace gets in place of Claude's settings. agy starts in the workspace folder, which holds no repo, so these files never land in a worktree. */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isJsonObject, isJsonString, parseJson, type JsonObject } from "./json";
@@ -52,28 +52,113 @@ export function agyHooks(ws: string) {
   };
 }
 
-/** One folder agy scans for skills; `include_only` limits it to the named skills. */
-export interface SkillsEntry {
-  path: string;
-  include_only?: string[];
+/** One skill an agy workspace loads: its folder name and the folder it is copied from. */
+export interface AgySkill {
+  name: string;
+  from: string;
 }
 
-/** agy's `skills.json`: the folders it scans for skills. */
-export interface SkillsJson {
-  entries: SkillsEntry[];
-}
+const skillsIn = (dir: string): AgySkill[] =>
+  existsSync(dir) ? readdirSync(dir).flatMap((name) => (existsSync(join(dir, name, "SKILL.md")) ? [{ name, from: join(dir, name) }] : [])) : [];
 
-/** The `skills/` folders of the package's plugins, as `skills.json` entries, plus the folders holding the skills they require. */
-export function agySkills(pkg = packageRoot(), required: readonly string[] = REQUIRED_SKILLS, dirs: readonly string[] = skillDirs()): SkillsJson {
-  const own = PLUGIN_FOLDERS.flatMap((p): SkillsEntry[] => {
-    const path = join(pkg, p, "skills");
+/** The skills of the package's plugins, then each required skill from the first folder holding it; the first skill of a name wins. */
+export function agySkills(pkg = packageRoot(), required: readonly string[] = REQUIRED_SKILLS, dirs: readonly string[] = skillDirs()): AgySkill[] {
+  const own = PLUGIN_FOLDERS.flatMap((p) => skillsIn(join(pkg, p, "skills")));
 
-    return existsSync(path) ? [{ path }] : [];
+  const deps = required.flatMap((name): AgySkill[] => {
+    const dir = dirs.find((d) => existsSync(join(d, name, "SKILL.md")));
+
+    return dir ? [{ name, from: join(dir, name) }] : [];
   });
 
-  const deps = dirs.flatMap((path): SkillsEntry[] => (required.some((name) => existsSync(join(path, name, "SKILL.md"))) ? [{ path, include_only: [...required] }] : []));
+  return [...own, ...deps].filter((skill, i, all) => all.findIndex((s) => s.name === skill.name) === i);
+}
 
-  return { entries: [...own, ...deps] };
+/** The file in `.agents/skills` that lists the skill folders overbridge put there, so a re-scaffold removes only those. */
+const SKILLS_MANIFEST = ".overbridge.json";
+
+/** A manifest entry overbridge may remove: one folder name, never empty, `.`, `..` or a path, since the file can be edited by hand. */
+const SKILL_NAME = /^\w[\w.-]*$/;
+
+/** `path` and everything under it made writable by its owner, since a copy keeps a read-only source's modes (a Nix store). */
+function makeWritable(path: string) {
+  const stat = lstatSync(path);
+
+  if (stat.isSymbolicLink()) {
+    return;
+  }
+
+  chmodSync(path, stat.mode | (stat.isDirectory() ? 0o700 : 0o200));
+
+  if (stat.isDirectory()) {
+    readdirSync(path).forEach((name) => makeWritable(join(path, name)));
+  }
+}
+
+/** Remove `path` and everything under it, read-only or not. */
+function removeTree(path: string) {
+  if (existsSync(path)) {
+    makeWritable(path);
+    rmSync(path, { recursive: true, force: true });
+  }
+}
+
+function readManifest(dest: string): string[] {
+  try {
+    const parsed = parseJson(readFileSync(join(dest, SKILLS_MANIFEST), "utf8"));
+
+    return Array.isArray(parsed) ? parsed.filter(isJsonString) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Copy one skill folder into `dest` through a temporary sibling, so a failed copy leaves the old one in place. */
+function copySkill(dest: string, { name, from }: AgySkill) {
+  const tmp = join(dest, `.${name}.${process.pid}.tmp`);
+
+  try {
+    removeTree(tmp);
+    cpSync(from, tmp, { recursive: true, dereference: true });
+    makeWritable(tmp);
+    removeTree(join(dest, name));
+    renameSync(tmp, join(dest, name));
+  } finally {
+    removeTree(tmp);
+  }
+}
+
+/**
+ * Copy `skills` into `dest` (`.agents/skills`), replacing the ones overbridge copied before and leaving any other folder
+ * alone, even one with a skill's name. agy loads a workspace's skills only from real folders inside it, not from paths outside it or symlinks.
+ */
+export function copyAgySkills(dest: string, skills: readonly AgySkill[]) {
+  mkdirSync(dest, { recursive: true });
+  const before = readManifest(dest).filter((name) => SKILL_NAME.test(name));
+  const ours = skills.filter((s) => before.includes(s.name) || !existsSync(join(dest, s.name)));
+  const names = ours.map((s) => s.name);
+  const manifest = join(dest, SKILLS_MANIFEST);
+
+  skills
+    .filter((s) => !names.includes(s.name))
+    .forEach((s) => log(`warning: ${join(dest, s.name)} was not copied by overbridge, so it is left as it is and overbridge's ${s.name} skill is not copied`));
+  const record = (list: readonly string[]) => writeAtomic(manifest, `${JSON.stringify(list, null, 2)}\n`);
+  const kept = before.filter((name) => names.includes(name));
+
+  before.filter((name) => !names.includes(name)).forEach((name) => removeTree(join(dest, name)));
+  record(kept);
+  const done = [...kept];
+
+  // each skill is listed once its copy is in place, so a failed copy never claims a folder overbridge did not write
+  for (const skill of ours) {
+    copySkill(dest, skill);
+
+    if (!done.includes(skill.name)) {
+      done.push(skill.name);
+    }
+
+    record(done);
+  }
 }
 
 /** Problems that leave a new agy workspace without its agent, the overbridge skills or the skills they require, each with its fix. */
@@ -112,7 +197,8 @@ export function scaffoldAgy(ws: string, brief: string) {
   const dir = join(wsDir(ws), AGY_DIR);
   mkdirSync(dir, { recursive: true });
   writeAtomic(join(dir, "hooks.json"), `${JSON.stringify(agyHooks(ws), null, 2)}\n`);
-  writeAtomic(join(dir, "skills.json"), `${JSON.stringify(agySkills(), null, 2)}\n`);
+  copyAgySkills(join(dir, "skills"), agySkills());
+  rmSync(join(dir, "skills.json"), { force: true });
   writeAtomic(join(wsDir(ws), AGY_BRIEF), `${brief}${agyBriefNote(ws)}`);
 }
 
