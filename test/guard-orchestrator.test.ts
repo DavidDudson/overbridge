@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { orchestrationPlansDir } from "../src/paths";
+import { orchestrationPlansDir, root } from "../src/paths";
+import { fromAgy } from "../src/agy-hook";
 import { guardReason, type HookInput } from "../src/guard";
 import type { JsonObject } from "../src/json";
 import { checkOrchestrator, splitCommand, START_HINT } from "../src/guard-orchestrator";
@@ -269,6 +270,20 @@ describe("guardReason", () => {
   test("a workspace Claude never gets the orchestrator guard, even with OVERBRIDGE_TAB inherited", () => {
     const reason = guardReason(bash("git commit -m x"), { OVERBRIDGE_TAB: "@root", OVERBRIDGE_NAME: "ws1" });
     expect(reason ?? "").not.toContain("orchestrator");
+  });
+
+  test("an agy call's own Cwd never picks the workspace: agy's cwd does", () => {
+    const saved = process.env.OVERBRIDGE_NAME;
+    process.env.OVERBRIDGE_NAME = "";
+    mkdirSync(join(root(), "ws1"), { recursive: true });
+    mkdirSync(join(root(), "ws2"), { recursive: true });
+
+    try {
+      const call = fromAgy({ hookEventName: "PreToolUse", cwd: join(root(), "ws1"), toolCall: { name: "run_workflow", args: { Script: "run()", Cwd: join(root(), "ws2") } } });
+      expect(guardReason(call, {})).toContain("outside workspace ws1");
+    } finally {
+      process.env.OVERBRIDGE_NAME = saved;
+    }
   });
 
   test("outside any workspace and tab there is no guard", () => {

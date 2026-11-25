@@ -142,11 +142,23 @@ export function copyAgySkills(dest: string, skills: readonly AgySkill[]) {
   skills
     .filter((s) => !names.includes(s.name))
     .forEach((s) => log(`warning: ${join(dest, s.name)} was not copied by overbridge, so it is left as it is and overbridge's ${s.name} skill is not copied`));
-  // listed before copying, so a copy that stops halfway is still overbridge's to replace next time
-  writeAtomic(manifest, `${JSON.stringify([...new Set([...before, ...names])], null, 2)}\n`);
+  const record = (list: readonly string[]) => writeAtomic(manifest, `${JSON.stringify(list, null, 2)}\n`);
+  const kept = before.filter((name) => names.includes(name));
+
   before.filter((name) => !names.includes(name)).forEach((name) => removeTree(join(dest, name)));
-  ours.forEach((skill) => copySkill(dest, skill));
-  writeAtomic(manifest, `${JSON.stringify(names, null, 2)}\n`);
+  record(kept);
+  const done = [...kept];
+
+  // each skill is listed once its copy is in place, so a failed copy never claims a folder overbridge did not write
+  for (const skill of ours) {
+    copySkill(dest, skill);
+
+    if (!done.includes(skill.name)) {
+      done.push(skill.name);
+    }
+
+    record(done);
+  }
 }
 
 /** Problems that leave a new agy workspace without its agent, the overbridge skills or the skills they require, each with its fix. */

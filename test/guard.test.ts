@@ -248,6 +248,7 @@ describe("agy calls", () => {
     expect(check(agy("send_message", { Message: "/pickup #3", Recipient: "r" }), ctx)).toBeUndefined();
     expect(check(agy("run_workflow", { Script: "run('./app/x.js') // done" }), ctx)).toBeUndefined();
     expect(check(agy("run_workflow", { Script: "read(`./app/x`)" }), ctx)).toBeUndefined();
+    expect(check(fromAgy({ hookEventName: "PreToolUse", cwd: "/w/ws1/app", toolCall: { name: "run_workflow", args: { Script: "run()", Cwd: ".." } } }), ctx)).toBeUndefined();
   });
 
   test("agy CLI 1.5.16: foreign reads, outside writes, .agents edits and a foreign subagent are blocked", () => {

@@ -55,6 +55,8 @@ export const UNREADABLE_TOOL = "AgyUnreadable";
 /** The Claude hook fields the guard and the agent-state hook read. */
 export interface ClaudeHookInput {
   hook_event_name?: string;
+  /** agy's own working directory, when a tool's `Cwd` replaced `cwd`; the guard picks the workspace from it. */
+  agent_cwd?: string;
   session_id?: string;
   cwd?: string;
   tool_name?: string;
@@ -152,7 +154,8 @@ function scriptCall(name: string, args: JsonObject, base: string | undefined): C
     return unreadable(name, `agy's ${name} call has no Script or ScriptPath, so overbridge cannot check it`);
   }
 
-  const text = strings(args);
+  const { Cwd: _cwd, ...scanned } = args;
+  const text = strings(scanned);
 
   if (text.some((s) => AGENTS_DIR.test(s))) {
     return unreadable(name, "workspace .agents config is managed by overbridge");
@@ -206,6 +209,11 @@ export function fromAgy(raw: JsonValue): ClaudeHookInput {
 
   if (call && name) {
     Object.assign(out, claudeTool(name, isJsonObject(call.args) ? call.args : {}, cwd));
+
+    if (cwd && out.cwd !== cwd) {
+      out.agent_cwd = cwd;
+    }
+
     const id = str(call, "id");
 
     if (id) out.tool_use_id = id;

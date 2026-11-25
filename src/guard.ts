@@ -17,7 +17,8 @@ import { isJsonString, type JsonObject, stringField } from "./json";
 import { currentWorkspace, isInside, ORCHESTRATION_ENV, realPath, root } from "./paths";
 import { type GuardConfig, loadRootLayers } from "./project-config";
 
-export type HookInput = { cwd?: string; tool_name?: string; tool_input?: JsonObject };
+/** `agent_cwd` is set for agy, whose tool calls can name their own folder in `cwd`; the workspace comes from it. */
+export type HookInput = { cwd?: string; agent_cwd?: string; tool_name?: string; tool_input?: JsonObject };
 
 /** `extra` is the root config's `guard` block: more paths to read and more commands to block. */
 export type GuardCtx = { root: string; ws: string; home: string; extra?: GuardConfig; agent?: AgentKind };
@@ -218,7 +219,7 @@ export function guardReason(input: HookInput, env: Record<string, string | undef
     return checkOrchestrator(input);
   }
 
-  const ws = currentWorkspace(input.cwd ?? process.cwd());
+  const ws = currentWorkspace(input.agent_cwd ?? input.cwd ?? process.cwd());
 
   if (!ws) {
     return undefined;

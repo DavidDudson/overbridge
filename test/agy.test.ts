@@ -168,6 +168,18 @@ describe("agySkills", () => {
     expect(existsSync(join(dest, "users-own"))).toBe(false);
   });
 
+  test("a skill whose copy failed is not listed, so a folder made there later stays the user's", () => {
+    const src = join(tmp, "unlisted-src");
+    const dest = join(tmp, "unlisted-ws", ".agents", "skills");
+    skill(src, "gh-stack", "ours");
+
+    expect(() => copyAgySkills(dest, [{ name: "gh-stack", from: join(tmp, "missing") }])).toThrow();
+    skill(dest, "gh-stack", "users");
+    copyAgySkills(dest, [{ name: "gh-stack", from: join(src, "gh-stack") }]);
+
+    expect(readFileSync(join(dest, "gh-stack", "SKILL.md"), "utf8")).toBe("users");
+  });
+
   test("a failed copy keeps the skill already there and leaves no temporary folder", () => {
     const src = join(tmp, "fail-src");
     const dest = join(tmp, "fail-ws", ".agents", "skills");
@@ -215,6 +227,7 @@ describe("fromAgy", () => {
       hook_event_name: "PreToolUse",
       session_id: "c1",
       cwd: "/w/ws1/app",
+      agent_cwd: "/w/ws1",
       tool_name: "Bash",
       tool_use_id: "t1",
       tool_input: { command: "bun test" },
@@ -280,11 +293,11 @@ describe("agy CLI 1.5.16 tool calls", () => {
     const call = claudeTool("run_workflow", { ScriptPath: "flow.js", Args: [{ out: "/w/ws2/x" }], Script: "read(`/w/ws2/y`)", Cwd: "app" }, "/w/ws1");
     expect(call.tool_name).toBe("Bash");
     expect(call.cwd).toBe("/w/ws1/app");
-    expect(String(call.tool_input.command).split("\n")).toEqual(["flow.js", "/w/ws2/x", "read(`/w/ws2/y`)", "app", "/w/ws2/x", "/w/ws2/y"]);
+    expect(String(call.tool_input.command).split("\n")).toEqual(["flow.js", "/w/ws2/x", "read(`/w/ws2/y`)", "/w/ws2/x", "/w/ws2/y"]);
     expect(claudeTool("run_workflow", { Description: "x" }).tool_name).toBe(UNREADABLE_TOOL);
   });
 
-  test.each<JsonObject>([{ Script: "fs.rmSync('.agents/skills', { recursive: true })" }, { ScriptPath: ".agents/x.js" }, { Script: "run()", Args: [".agents/hooks.json"] }, { Script: "run()", Cwd: ".agents" }])(
+  test.each<JsonObject>([{ Script: "fs.rmSync('.agents/skills', { recursive: true })" }, { ScriptPath: ".agents/x.js" }, { Script: "run()", Args: [".agents/hooks.json"] }])(
     "run_workflow naming .agents anywhere is denied: %j",
     (args) => {
       expect(claudeTool("run_workflow", args)).toMatchObject({ tool_name: UNREADABLE_TOOL, tool_input: { reason: "workspace .agents config is managed by overbridge" } });
