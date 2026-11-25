@@ -361,15 +361,17 @@ An agy workspace gets the same rules as a Claude one, through the files agy read
 | --- | --- |
 | `CLAUDE.md` in the workspace | `AGENTS.md` in the workspace, with the same text |
 | `.claude/settings.json` hooks | `.agents/hooks.json` in the workspace: the guard on every tool call, the agent-state hook on `SessionStart`, `PreInvocation`, `PostToolUse` and `Stop` |
-| Plugins from the installed overbridge | `.agents/skills.json` pointing at the installed `plugin/skills` and `plugin-review/skills`, plus the folder holding `gh-stack` |
+| Plugins from the installed overbridge | Copies of the installed `plugin/skills` and `plugin-review/skills`, plus `gh-stack`, in `.agents/skills/`. agy loads a workspace's skills only from real folders inside it, so it ignores a `skills.json` entry or a symlink that points outside |
 | Folder trust in `~/.claude.json` | The workspace folder in `trustedWorkspaces` of `~/.gemini/antigravity-cli/settings.json` |
 | `--continue`, first prompt after `--` | `--continue`, first prompt as `-i <prompt>` |
 | `SendMessage` from the orchestrator | `overbridge send <ws> '<text>'`, which types the message into the agent pane |
 
 agy starts in the workspace folder, not the first repo, because it reads `AGENTS.md` and `.agents/` only from its
 start folder up to the repo root. The workspace folder holds no repo, so none of these files lands in a worktree.
-The guard translates agy's tools (`run_command`, `write_to_file`, `view_file` and the rest) to the Claude tools it
-checks, and treats any path argument of a tool it does not know as a read. It also blocks writes to `.agents`.
+The guard translates agy's tools to the Claude tools it checks: `read_file`, `write_file`, `edit_file`, `run_command`,
+and `run_workflow` in agy CLI 1.5, and older names such as `view_file` and `write_to_file`. It checks any path argument
+of a tool it does not know as a write, and it blocks writes to `.agents`. To allow a call, the guard prints nothing, which
+leaves the call to agy's own permission check. agy reads `{}` as a deny with an empty reason.
 
 Not there yet for agy: the context gauge and usage limits (both read Claude's statusline), and the orchestrator
 hearing when an agy workspace finishes.

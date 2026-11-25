@@ -606,7 +606,8 @@ describe("start --agent", () => {
     expect(agents).toContain("## Working directory");
     const hooks = JSON.parse(readFileSync(join(dir, ".agents", "hooks.json"), "utf8"));
     expect(Object.keys(hooks.overbridge)).toEqual(["PreToolUse", "PostToolUse", "SessionStart", "PreInvocation", "Stop"]);
-    expect(existsSync(join(dir, ".agents", "skills.json"))).toBe(true);
+    expect(existsSync(join(dir, ".agents", "skills", "read-handoff", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(dir, ".agents", "skills.json"))).toBe(false);
     expect(agyTrusted()).toContain(realpathSync(dir));
   });
 

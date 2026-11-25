@@ -170,10 +170,12 @@ export async function guardMain(agent: AgentKind = AgentKind.Claude): Promise<nu
   }
 }
 
-/** Block with `message`, or allow when there is none: exit 2 and stderr for Claude; for agy, its JSON decision on stdout and exit 0, since agy reads a hook's answer only from its JSON. */
+/** Block with `message`, or allow when there is none: exit 2 and stderr for Claude; for agy, exit 0 with its JSON deny on stdout, or nothing on stdout to allow. */
 function answer(agent: AgentKind, message: string | undefined): number {
   if (agent === AgentKind.Agy) {
-    console.log(JSON.stringify(agyToolDecision(message)));
+    const decision = agyToolDecision(message);
+
+    if (decision) console.log(decision);
 
     return 0;
   }

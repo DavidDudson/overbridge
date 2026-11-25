@@ -1,14 +1,15 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentKind } from "../src/agent-kind";
-import { agyArgs, agyHooks, agyPluginProblems, agySettingsPath, agySkills, agyTrust, agyUntrust } from "../src/agy";
+import { agyArgs, agyHooks, agyPluginProblems, agySettingsPath, agySkills, agyTrust, agyUntrust, copyAgySkills } from "../src/agy";
 import { agyContinue, agyToolDecision, claudeTool, fromAgy, UNREADABLE_TOOL } from "../src/agy-hook";
 import { agentDir } from "../src/layout";
 import { agentFlag } from "../src/main";
 import { root, wsDir } from "../src/paths";
 import { pluginCheckFor } from "../src/start";
+import type { JsonObject } from "../src/json";
 import { agentOf, workspaceFault } from "../src/state";
 
 const saved = { ...process.env };
@@ -71,16 +72,46 @@ describe("agyHooks", () => {
 });
 
 describe("agySkills", () => {
-  test("lists the package's skills folders and only the required skill from the user's folder", () => {
+  const skill = (dir: string, name: string, text = "") => {
+    mkdirSync(join(dir, name), { recursive: true });
+    writeFileSync(join(dir, name, "SKILL.md"), text);
+  };
+
+  test("lists every package skill and only the required skill from the user's folder, first of a name winning", () => {
     const pkg = join(tmp, "pkg");
     const user = join(tmp, "user-skills");
-    mkdirSync(join(pkg, "plugin", "skills"), { recursive: true });
-    mkdirSync(join(user, "gh-stack"), { recursive: true });
-    writeFileSync(join(user, "gh-stack", "SKILL.md"), "");
+    skill(join(pkg, "plugin", "skills"), "read-handoff");
+    skill(join(pkg, "plugin-review", "skills"), "mob-review");
+    mkdirSync(join(pkg, "plugin", "skills", "not-a-skill"), { recursive: true });
+    skill(user, "gh-stack");
+    skill(user, "other");
+    skill(user, "read-handoff");
 
-    expect(agySkills(pkg, ["gh-stack"], [user, join(tmp, "empty")])).toEqual({
-      entries: [{ path: join(pkg, "plugin", "skills") }, { path: user, include_only: ["gh-stack"] }],
-    });
+    expect(agySkills(pkg, ["gh-stack", "read-handoff"], [join(tmp, "empty"), user])).toEqual([
+      { name: "read-handoff", from: join(pkg, "plugin", "skills", "read-handoff") },
+      { name: "mob-review", from: join(pkg, "plugin-review", "skills", "mob-review") },
+      { name: "gh-stack", from: join(user, "gh-stack") },
+    ]);
+  });
+
+  test("copyAgySkills copies real folders with their files, follows symlinks, and drops skills no longer listed", () => {
+    const src = join(tmp, "copy-src");
+    const dest = join(tmp, "copy-ws", ".agents", "skills");
+    skill(src, "read-handoff", "handoff");
+    writeFileSync(join(src, "read-handoff", "HANDOFF-FORMAT.md"), "format");
+    skill(src, "real-gh-stack", "stack");
+    symlinkSync(join(src, "real-gh-stack"), join(src, "gh-stack"));
+    skill(dest, "stale");
+
+    copyAgySkills(dest, [
+      { name: "read-handoff", from: join(src, "read-handoff") },
+      { name: "gh-stack", from: join(src, "gh-stack") },
+    ]);
+
+    expect(readFileSync(join(dest, "read-handoff", "HANDOFF-FORMAT.md"), "utf8")).toBe("format");
+    expect(lstatSync(join(dest, "gh-stack")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(dest, "gh-stack", "SKILL.md"), "utf8")).toBe("stack");
+    expect(existsSync(join(dest, "stale"))).toBe(false);
   });
 
   test("agyPluginProblems names a missing agy and a missing skills folder", () => {
@@ -127,10 +158,61 @@ describe("fromAgy", () => {
     expect(fromAgy("nonsense")).toEqual({});
   });
 
-  test("answers in agy's shape, giving no decision when nothing blocks", () => {
-    expect(agyToolDecision(undefined)).toEqual({});
-    expect(agyToolDecision("no")).toEqual({ decision: "deny", reason: "no" });
+  test("answers in agy's shape: a deny with its reason, and nothing at all to allow, since agy reads {} as a deny", () => {
+    expect(agyToolDecision(undefined)).toBe("");
+    expect(JSON.parse(agyToolDecision("no"))).toEqual({ decision: "deny", reason: "no" });
     expect(agyContinue("go on")).toEqual({ decision: "continue", reason: "go on" });
+  });
+});
+
+/** A PreToolUse payload as agy CLI 1.5.16 sends it, with the paths moved under `/w`. */
+const agy1516 = (name: string, args: JsonObject) => ({
+  artifactDirectoryPath: "/home/u/.gemini/antigravity-cli/brain/c1",
+  conversationId: "c1",
+  cwd: "/w/ws1",
+  hookEventName: "PreToolUse",
+  lastUserInput: "read a.txt",
+  modelName: "gemini-4-carbon-medium",
+  stepIdx: 2,
+  toolCall: { args, id: "call_1", name },
+  transcriptPath: "/home/u/.gemini/antigravity-cli/brain/c1/.system_generated/logs/transcript_full.jsonl",
+  workspacePaths: ["/w/ws1"],
+});
+
+describe("agy CLI 1.5.16 tool calls", () => {
+  test("read_file, write_file and edit_file map to Read, Write and Edit on their Path", () => {
+    expect(fromAgy(agy1516("read_file", { Path: "/w/ws1/a.txt" }))).toMatchObject({ tool_name: "Read", tool_input: { paths: ["/w/ws1/a.txt"] } });
+    expect(fromAgy(agy1516("write_file", { Content: "/x", Path: "/w/ws1/b.txt" }))).toMatchObject({ tool_name: "Write", tool_input: { paths: ["/w/ws1/b.txt"] } });
+    expect(fromAgy(agy1516("edit_file", { Path: "/w/ws1/a.txt", Replacement: "/y", Target: "hello" }))).toMatchObject({
+      tool_name: "Edit",
+      tool_input: { paths: ["/w/ws1/a.txt"] },
+    });
+  });
+
+  test("run_command with agy's extra arguments and no Cwd is Bash in the hook's cwd", () => {
+    expect(fromAgy(agy1516("run_command", { CommandLine: "ls -la", WaitMsBeforeAsync: 5000, toolSummary: "List files" }))).toEqual({
+      hook_event_name: "PreToolUse",
+      session_id: "c1",
+      cwd: "/w/ws1",
+      tool_name: "Bash",
+      tool_use_id: "call_1",
+      tool_input: { command: "ls -la" },
+    });
+  });
+
+  test("run_workflow is Bash over its script path, arguments and script, in its Cwd", () => {
+    expect(claudeTool("run_workflow", { ScriptPath: "/w/ws1/flow.js", Args: ["--to", "/w/ws2"], Script: "run()", Cwd: "app" }, "/w/ws1")).toEqual({
+      tool_name: "Bash",
+      tool_input: { command: "/w/ws1/flow.js\n--to\n/w/ws2\nrun()" },
+      cwd: "/w/ws1/app",
+    });
+    expect(claudeTool("run_workflow", { Description: "x" }).tool_name).toBe(UNREADABLE_TOOL);
+  });
+
+  test("a message or prompt starting with / is not a path; a subagent's Workspace is", () => {
+    expect(claudeTool("send_message", { Message: "/pickup #3", Recipient: "r" })).toEqual({ tool_name: "Write", tool_input: { paths: [], agy_tool: "send_message" } });
+    expect(claudeTool("invoke_subagent", { Prompt: "/read-handoff", Workspace: "/w/ws2" })).toEqual({ tool_name: "Write", tool_input: { paths: ["/w/ws2"], agy_tool: "invoke_subagent" } });
+    expect(claudeTool("ask_question", { questions: [{ question: "/tmp or ~?" }] })).toEqual({ tool_name: "ask_question", tool_input: { questions: [{ question: "/tmp or ~?" }] } });
   });
 });
 

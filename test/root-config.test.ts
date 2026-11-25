@@ -515,12 +515,14 @@ describe("guard hook", () => {
       stderr: "pipe",
     });
 
-    return { code: p.exitCode, out: JSON.parse(p.stdout.toString()) };
+    const out = p.stdout.toString();
+
+    return { code: p.exitCode, out: out ? JSON.parse(out) : out };
   };
 
-  test("under agy, answers with JSON on stdout and exit 0: deny, no decision, and deny on an internal error", () => {
+  test("under agy, exits 0: a JSON deny, nothing on stdout to allow (agy reads {} as a deny), and a deny on an internal error", () => {
     expect(agyGuard("git switch main")).toEqual({ code: 0, out: { decision: "deny", reason: expect.stringContaining("overbridge checkout") } });
-    expect(agyGuard("bun test")).toEqual({ code: 0, out: {} });
+    expect(agyGuard("bun test")).toEqual({ code: 0, out: "" });
     writeRoot("guard: [x]\n");
     expect(agyGuard("bun test").out).toEqual({ decision: "deny", reason: expect.stringContaining("internal error, blocking to be safe") });
   });

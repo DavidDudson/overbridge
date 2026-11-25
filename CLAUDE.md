@@ -155,10 +155,10 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   else the first root `agent-rules` entry matching the item, else the root `config.yml`'s `agent`), and kept in `WorkspaceState.agent` (unset = Claude; read through `agentOf`).
   `agentFor` in `src/start.ts` applies that order; `src/agent-rules.ts` is the pure match over `Provider.facts` (`ItemFacts`: priority, labels, ancestor ids, GitHub ones as `owner/repo#n`), read only when rules exist.
   `src/agy.ts` holds what an agy workspace gets instead of Claude's settings: it starts in the workspace folder
-  (`agentDir`), where `scaffold` writes `AGENTS.md`, `.agents/hooks.json` and `.agents/skills.json`, and its folder goes in agy's
+  (`agentDir`), where `scaffold` writes `AGENTS.md` and `.agents/hooks.json` and copies the skills into `.agents/skills/` (`copyAgySkills`: agy ignores skill paths outside the workspace and symlinks), and its folder goes in agy's
   `trustedWorkspaces` (`agyTrust`, `OVERBRIDGE_AGY_SETTINGS` in tests). `src/agy-hook.ts` translates agy hook payloads to Claude's shape
   (`fromAgy`) for `guard --agy` (one decision per agy entry, so it records the call too through `recordHook`) and `hook --agy`;
-  the hook imports it, so it imports only `json.ts`. `src/send.ts` (`overbridge send`) types into an agent pane (`Mux.sendText`),
+  the hook imports it, so it imports only `json.ts`. `guard --agy` prints nothing to allow a call, since agy reads `{}` as a deny. `src/send.ts` (`overbridge send`) types into an agent pane (`Mux.sendText`),
   which is how the orchestrator reaches agy, since agy has no `SendMessage`.
 - `src/guard.ts` is the Claude PreToolUse hook; pure `check()` is unit-tested in `test/guard.test.ts`.
   Exit 2 = block. Fail closed on internal errors. The root `config.yml`'s `guard` block (`GuardConfig`) adds
