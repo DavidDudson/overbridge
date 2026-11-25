@@ -140,6 +140,18 @@ describe("agySkills", () => {
     expect(statSync(join(dest, "read-handoff", "SKILL.md")).mode & 0o200).toBe(0o200);
   });
 
+  test("a folder overbridge did not copy keeps its files, even with a skill's name", () => {
+    const src = join(tmp, "collide-src");
+    const dest = join(tmp, "collide-ws", ".agents", "skills");
+    skill(src, "gh-stack", "ours");
+    skill(dest, "gh-stack", "users");
+
+    copyAgySkills(dest, [{ name: "gh-stack", from: join(src, "gh-stack") }]);
+    copyAgySkills(dest, [{ name: "gh-stack", from: join(src, "gh-stack") }]);
+
+    expect(readFileSync(join(dest, "gh-stack", "SKILL.md"), "utf8")).toBe("users");
+  });
+
   test("a hand-edited manifest removes only plain skill folder names", () => {
     const src = join(tmp, "manifest-src");
     const dest = join(tmp, "manifest-ws", ".agents", "skills");

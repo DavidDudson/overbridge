@@ -130,27 +130,47 @@ export function check(input: HookInput, ctx: GuardCtx): string | undefined {
   }
 
   if (tool === "Bash") {
-    const cmd = String(ti.command ?? "").replace(/\$\{?HOME\}?/g, ctx.home);
-
     // the folder the command runs in, whole: the token scan below stops at a space in it
     if (foreign(expand(cwd))) return `${expand(cwd)} is outside workspace ${ctx.ws}; only ${wsPath} is accessible`;
 
     if (ctx.agent === AgentKind.Agy && isInside(expand(cwd), join(wsPath, ".agents"))) return "workspace .agents config is managed by overbridge";
 
-    for (const [re, reason] of BASH_RULES) if (re.test(cmd)) return reason;
+    // a script's string literals (agy's run_workflow) are each checked as a command of their own, so anchored rules see them
+    const literals = Array.isArray(ti.commands) ? ti.commands.filter(isJsonString) : [];
 
-    if (ctx.agent === AgentKind.Agy) for (const [re, reason] of AGY_BASH_RULES) if (re.test(cmd)) return reason;
+    for (const each of [String(ti.command ?? ""), ...literals]) {
+      const reason = shellReason(each.replace(/\$\{?HOME\}?/g, ctx.home), { ctx, wsPath, expand, foreign });
 
-    for (const { pattern, reason } of ctx.extra?.deny ?? []) if (pattern.test(cmd)) return reason;
-    const other = /--ws[=\s]+(\S+)/.exec(cmd);
-
-    if (other && other[1] !== ctx.ws) return `workspace ${ctx.ws} cannot act on workspace ${other[1]}`;
-
-    for (const m of cmd.matchAll(PATH_TOKEN)) {
-      const abs = expand(m[1]!);
-
-      if (foreign(abs)) return `${abs} is outside workspace ${ctx.ws}; only ${wsPath} is accessible`;
+      if (reason) {
+        return reason;
+      }
     }
+  }
+}
+
+/** What `shellReason` needs from `check`: the guard's context, path expansion from the call's cwd, and the foreign-path test. */
+interface ShellScope {
+  ctx: GuardCtx;
+  wsPath: string;
+  expand: (p: string) => string;
+  foreign: (abs: string) => boolean;
+}
+
+/** Why the shell command `cmd` is blocked, by the branch, admin and deny rules and the paths it names, or undefined. */
+function shellReason(cmd: string, { ctx, wsPath, expand, foreign }: ShellScope): string | undefined {
+  for (const [re, reason] of BASH_RULES) if (re.test(cmd)) return reason;
+
+  if (ctx.agent === AgentKind.Agy) for (const [re, reason] of AGY_BASH_RULES) if (re.test(cmd)) return reason;
+
+  for (const { pattern, reason } of ctx.extra?.deny ?? []) if (pattern.test(cmd)) return reason;
+  const other = /--ws[=\s]+(\S+)/.exec(cmd);
+
+  if (other && other[1] !== ctx.ws) return `workspace ${ctx.ws} cannot act on workspace ${other[1]}`;
+
+  for (const m of cmd.matchAll(PATH_TOKEN)) {
+    const abs = expand(m[1]!);
+
+    if (foreign(abs)) return `${abs} is outside workspace ${ctx.ws}; only ${wsPath} is accessible`;
   }
 }
 

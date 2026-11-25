@@ -31,6 +31,9 @@ const FREE_TEXT_ARG = /^(?:message|prompt|systemprompt|instructions|description|
 /** A path anywhere in a script, after any character that cannot end a word: a quote, a backtick, a bracket, an operator. */
 const SCRIPT_PATH = /(?<![\w.-])(?:~|\.\.|\/)[^\s'"`;|&()<>,+[\]{}]*/g;
 
+/** A string literal in a script: single-quoted, double-quoted or a template literal. */
+const SCRIPT_LITERAL = /'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g;
+
 /** A script that names the workspace's `.agents` folder, which overbridge manages. */
 const AGENTS_DIR = /(?<![\w-])\.agents\b/;
 
@@ -140,7 +143,8 @@ export function claudeTool(name: string, args: JsonObject, base?: string): Claud
 
 /**
  * `run_workflow` as a shell command over every string in the call, with each path a script names on a line of its
- * own, since a script's paths sit in quotes, template literals and calls that the shell scan does not split on. Like
+ * own, since a script's paths sit in quotes, template literals and calls that the shell scan does not split on, and
+ * each string literal as a command of its own (`commands`), since a script can run one. Like
  * the shell scan it is best effort: a path built at runtime passes to agy's own permission check.
  */
 function scriptCall(name: string, args: JsonObject, base: string | undefined): ClaudeToolCall {
@@ -155,8 +159,10 @@ function scriptCall(name: string, args: JsonObject, base: string | undefined): C
   }
 
   const found = text.flatMap((s) => [...s.matchAll(SCRIPT_PATH)].map((m) => m[0]));
+  const literals = text.flatMap((s) => [...s.matchAll(SCRIPT_LITERAL)].map((m) => m[1] ?? m[2] ?? m[3] ?? ""));
+  const call = bashCall([...text, ...found].join("\n"), str(args, "Cwd"), base);
 
-  return bashCall([...text, ...found].join("\n"), str(args, "Cwd"), base);
+  return literals.length ? { ...call, tool_input: { ...call.tool_input, commands: literals } } : call;
 }
 
 /** Claude's name for an agy hook event; PreInvocation runs per model call, so only the first of a turn is a prompt. */

@@ -261,6 +261,9 @@ describe("agy calls", () => {
     expect(check(agy("run_workflow", { Script: "read(`../ws2/secret`)", Cwd: "/w/ws1" }), ctx)).toContain("outside workspace ws1");
     expect(check(agy("run_workflow", { Script: "read(`~/ws2/x`)" }), { ...ctx, home: "/w" })).toContain("outside workspace ws1");
     expect(check(agy("schedule", { Prompt: "go", Command: "/w/ws2/run.sh" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_workflow", { Script: "run('overbridge rm ws2')" }), ctx)).toContain("workspace admin commands are for the user");
+    const withDeny = { ...ctx, extra: { readPaths: [], deny: [{ pattern: /^npm\s+publish\b/, reason: "publish from CI" }] } };
+    expect(check(agy("run_workflow", { Script: "exec(`npm publish --tag x`)" }), withDeny)).toBe("publish from CI");
   });
 
   test("allows work inside the workspace", () => {

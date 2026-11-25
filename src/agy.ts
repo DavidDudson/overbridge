@@ -130,17 +130,23 @@ function copySkill(dest: string, { name, from }: AgySkill) {
 
 /**
  * Copy `skills` into `dest` (`.agents/skills`), replacing the ones overbridge copied before and leaving any other folder
- * alone. agy loads a workspace's skills only from real folders inside it, not from paths outside it or symlinks.
+ * alone, even one with a skill's name. agy loads a workspace's skills only from real folders inside it, not from paths outside it or symlinks.
  */
 export function copyAgySkills(dest: string, skills: readonly AgySkill[]) {
   mkdirSync(dest, { recursive: true });
-  const names = skills.map((s) => s.name);
+  const before = readManifest(dest).filter((name) => SKILL_NAME.test(name));
+  const ours = skills.filter((s) => before.includes(s.name) || !existsSync(join(dest, s.name)));
+  const names = ours.map((s) => s.name);
+  const manifest = join(dest, SKILLS_MANIFEST);
 
-  readManifest(dest)
-    .filter((name) => !names.includes(name) && SKILL_NAME.test(name))
-    .forEach((name) => removeTree(join(dest, name)));
-  skills.forEach((skill) => copySkill(dest, skill));
-  writeAtomic(join(dest, SKILLS_MANIFEST), `${JSON.stringify(names, null, 2)}\n`);
+  skills
+    .filter((s) => !names.includes(s.name))
+    .forEach((s) => log(`warning: ${join(dest, s.name)} was not copied by overbridge, so it is left as it is and overbridge's ${s.name} skill is not copied`));
+  // listed before copying, so a copy that stops halfway is still overbridge's to replace next time
+  writeAtomic(manifest, `${JSON.stringify([...new Set([...before, ...names])], null, 2)}\n`);
+  before.filter((name) => !names.includes(name)).forEach((name) => removeTree(join(dest, name)));
+  ours.forEach((skill) => copySkill(dest, skill));
+  writeAtomic(manifest, `${JSON.stringify(names, null, 2)}\n`);
 }
 
 /** Problems that leave a new agy workspace without its agent, the overbridge skills or the skills they require, each with its fix. */
