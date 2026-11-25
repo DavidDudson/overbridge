@@ -1,9 +1,9 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentKind } from "../src/agent-kind";
-import { agyArgs, agyHooks, agyPluginProblems, agySettingsPath, agySkills, agyTrust, agyUntrust, copyAgySkills } from "../src/agy";
+import { agyArgs, agyHooks, agyPluginProblems, agySettingsPath, agySkills, agyTrust, agyUntrust, copyAgySkills, scaffoldAgy } from "../src/agy";
 import { agyContinue, agyToolDecision, claudeTool, fromAgy, UNREADABLE_TOOL } from "../src/agy-hook";
 import { agentDir } from "../src/layout";
 import { agentFlag } from "../src/main";
@@ -94,15 +94,20 @@ describe("agySkills", () => {
     ]);
   });
 
-  test("copyAgySkills copies real folders with their files, follows symlinks, and drops skills no longer listed", () => {
+  test("copyAgySkills copies real folders with their files, follows symlinks, and replaces only the skills it copied before", () => {
     const src = join(tmp, "copy-src");
     const dest = join(tmp, "copy-ws", ".agents", "skills");
     skill(src, "read-handoff", "handoff");
     writeFileSync(join(src, "read-handoff", "HANDOFF-FORMAT.md"), "format");
     skill(src, "real-gh-stack", "stack");
     symlinkSync(join(src, "real-gh-stack"), join(src, "gh-stack"));
-    skill(dest, "stale");
+    skill(src, "dropped");
+    skill(dest, "users-own");
 
+    copyAgySkills(dest, [
+      { name: "read-handoff", from: join(src, "read-handoff") },
+      { name: "dropped", from: join(src, "dropped") },
+    ]);
     copyAgySkills(dest, [
       { name: "read-handoff", from: join(src, "read-handoff") },
       { name: "gh-stack", from: join(src, "gh-stack") },
@@ -111,7 +116,66 @@ describe("agySkills", () => {
     expect(readFileSync(join(dest, "read-handoff", "HANDOFF-FORMAT.md"), "utf8")).toBe("format");
     expect(lstatSync(join(dest, "gh-stack")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(dest, "gh-stack", "SKILL.md"), "utf8")).toBe("stack");
-    expect(existsSync(join(dest, "stale"))).toBe(false);
+    expect(existsSync(join(dest, "dropped"))).toBe(false);
+    expect(existsSync(join(dest, "users-own", "SKILL.md"))).toBe(true);
+  });
+
+  test("copyAgySkills makes a read-only source's copy writable and copies it again, as a Nix store install needs", () => {
+    const src = join(tmp, "ro-src");
+    const dest = join(tmp, "ro-ws", ".agents", "skills");
+    skill(src, "read-handoff", "handoff");
+    chmodSync(join(src, "read-handoff", "SKILL.md"), 0o444);
+    chmodSync(join(src, "read-handoff"), 0o555);
+    const skills = [{ name: "read-handoff", from: join(src, "read-handoff") }];
+
+    try {
+      copyAgySkills(dest, skills);
+      copyAgySkills(dest, skills);
+    } finally {
+      chmodSync(join(src, "read-handoff"), 0o755);
+    }
+
+    expect(readFileSync(join(dest, "read-handoff", "SKILL.md"), "utf8")).toBe("handoff");
+    expect(statSync(join(dest, "read-handoff")).mode & 0o200).toBe(0o200);
+    expect(statSync(join(dest, "read-handoff", "SKILL.md")).mode & 0o200).toBe(0o200);
+  });
+
+  test("a hand-edited manifest removes only plain skill folder names", () => {
+    const src = join(tmp, "manifest-src");
+    const dest = join(tmp, "manifest-ws", ".agents", "skills");
+    skill(src, "kept");
+    skill(dest, "users-own");
+    skill(join(dest, ".."), "sibling");
+    copyAgySkills(dest, [{ name: "kept", from: join(src, "kept") }]);
+    writeFileSync(join(dest, ".overbridge.json"), JSON.stringify(["..", ".", "a/b", "", "users-own"]));
+
+    copyAgySkills(dest, [{ name: "kept", from: join(src, "kept") }]);
+
+    expect(existsSync(join(dest, "kept", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(dest, "..", "sibling", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(dest, "users-own"))).toBe(false);
+  });
+
+  test("a failed copy keeps the skill already there and leaves no temporary folder", () => {
+    const src = join(tmp, "fail-src");
+    const dest = join(tmp, "fail-ws", ".agents", "skills");
+    skill(src, "keep", "kept");
+    copyAgySkills(dest, [{ name: "keep", from: join(src, "keep") }]);
+
+    expect(() => copyAgySkills(dest, [{ name: "keep", from: join(tmp, "missing") }])).toThrow();
+    expect(readFileSync(join(dest, "keep", "SKILL.md"), "utf8")).toBe("kept");
+    expect(readdirSync(dest).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+  });
+
+  test("scaffoldAgy copies the skills and removes a skills.json an older overbridge wrote", () => {
+    const agents = join(wsDir("w-scaffold"), ".agents");
+    mkdirSync(agents, { recursive: true });
+    writeFileSync(join(agents, "skills.json"), "{}");
+
+    scaffoldAgy("w-scaffold", "# brief\n");
+
+    expect(existsSync(join(agents, "skills.json"))).toBe(false);
+    expect(existsSync(join(agents, "skills", "read-handoff", "SKILL.md"))).toBe(true);
   });
 
   test("agyPluginProblems names a missing agy and a missing skills folder", () => {
@@ -165,7 +229,7 @@ describe("fromAgy", () => {
   });
 });
 
-/** A PreToolUse payload as agy CLI 1.5.16 sends it, with the paths moved under `/w`. */
+/** A PreToolUse payload in the shape agy CLI 1.5.16 sends, with the paths moved under `/w`. */
 const agy1516 = (name: string, args: JsonObject) => ({
   artifactDirectoryPath: "/home/u/.gemini/antigravity-cli/brain/c1",
   conversationId: "c1",
@@ -200,18 +264,32 @@ describe("agy CLI 1.5.16 tool calls", () => {
     });
   });
 
-  test("run_workflow is Bash over its script path, arguments and script, in its Cwd", () => {
-    expect(claudeTool("run_workflow", { ScriptPath: "/w/ws1/flow.js", Args: ["--to", "/w/ws2"], Script: "run()", Cwd: "app" }, "/w/ws1")).toEqual({
-      tool_name: "Bash",
-      tool_input: { command: "/w/ws1/flow.js\n--to\n/w/ws2\nrun()" },
-      cwd: "/w/ws1/app",
-    });
+  test("run_workflow is Bash over every string in the call, each script path on its own line, in its Cwd", () => {
+    const call = claudeTool("run_workflow", { ScriptPath: "flow.js", Args: [{ out: "/w/ws2/x" }], Script: "read(`/w/ws2/y`)", Cwd: "app" }, "/w/ws1");
+    expect(call.tool_name).toBe("Bash");
+    expect(call.cwd).toBe("/w/ws1/app");
+    expect(String(call.tool_input.command).split("\n")).toEqual(["flow.js", "/w/ws2/x", "read(`/w/ws2/y`)", "app", "/w/ws2/x", "/w/ws2/y"]);
     expect(claudeTool("run_workflow", { Description: "x" }).tool_name).toBe(UNREADABLE_TOOL);
   });
 
-  test("a message or prompt starting with / is not a path; a subagent's Workspace is", () => {
-    expect(claudeTool("send_message", { Message: "/pickup #3", Recipient: "r" })).toEqual({ tool_name: "Write", tool_input: { paths: [], agy_tool: "send_message" } });
-    expect(claudeTool("invoke_subagent", { Prompt: "/read-handoff", Workspace: "/w/ws2" })).toEqual({ tool_name: "Write", tool_input: { paths: ["/w/ws2"], agy_tool: "invoke_subagent" } });
+  test.each<JsonObject>([{ Script: "fs.rmSync('.agents/skills', { recursive: true })" }, { ScriptPath: ".agents/x.js" }, { Script: "run()", Args: [".agents/hooks.json"] }, { Script: "run()", Cwd: ".agents" }])(
+    "run_workflow naming .agents anywhere is denied: %j",
+    (args) => {
+      expect(claudeTool("run_workflow", args)).toMatchObject({ tool_name: UNREADABLE_TOOL, tool_input: { reason: "workspace .agents config is managed by overbridge" } });
+    },
+  );
+
+  test("run_workflow naming a near miss of .agents is a shell command", () => {
+    expect(claudeTool("run_workflow", { Script: "read('my.agents'); read('.agentsrc')" }).tool_name).toBe("Bash");
+  });
+
+  test.each(["send_message", "invoke_subagent", "define_subagent", "schedule"])("%s: free text starting with / is not a path; other values and a Workspace are", (name) => {
+    expect(claudeTool(name, { Message: "/pickup #3", Prompt: "/read-handoff", SystemPrompt: "/x" }).tool_input.paths).toEqual([]);
+    expect(claudeTool(name, { Prompt: "go", Workspace: "/w/ws2" }).tool_input.paths).toEqual(["/w/ws2"]);
+    expect(claudeTool(name, { Prompt: "go", Command: "/w/ws2/run.sh" }).tool_input.paths).toEqual(["/w/ws2/run.sh"]);
+  });
+
+  test("ask_question names no path", () => {
     expect(claudeTool("ask_question", { questions: [{ question: "/tmp or ~?" }] })).toEqual({ tool_name: "ask_question", tool_input: { questions: [{ question: "/tmp or ~?" }] } });
   });
 });

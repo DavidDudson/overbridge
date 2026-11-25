@@ -1,5 +1,5 @@
 /** What an agy workspace gets in place of Claude's settings. agy starts in the workspace folder, which holds no repo, so these files never land in a worktree. */
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isJsonObject, isJsonString, parseJson, type JsonObject } from "./json";
@@ -74,18 +74,73 @@ export function agySkills(pkg = packageRoot(), required: readonly string[] = REQ
   return [...own, ...deps].filter((skill, i, all) => all.findIndex((s) => s.name === skill.name) === i);
 }
 
+/** The file in `.agents/skills` that lists the skill folders overbridge put there, so a re-scaffold removes only those. */
+const SKILLS_MANIFEST = ".overbridge.json";
+
+/** A manifest entry overbridge may remove: one folder name, never empty, `.`, `..` or a path, since the file can be edited by hand. */
+const SKILL_NAME = /^\w[\w.-]*$/;
+
+/** `path` and everything under it made writable by its owner, since a copy keeps a read-only source's modes (a Nix store). */
+function makeWritable(path: string) {
+  const stat = lstatSync(path);
+
+  if (stat.isSymbolicLink()) {
+    return;
+  }
+
+  chmodSync(path, stat.mode | (stat.isDirectory() ? 0o700 : 0o200));
+
+  if (stat.isDirectory()) {
+    readdirSync(path).forEach((name) => makeWritable(join(path, name)));
+  }
+}
+
+/** Remove `path` and everything under it, read-only or not. */
+function removeTree(path: string) {
+  if (existsSync(path)) {
+    makeWritable(path);
+    rmSync(path, { recursive: true, force: true });
+  }
+}
+
+function readManifest(dest: string): string[] {
+  try {
+    const parsed = parseJson(readFileSync(join(dest, SKILLS_MANIFEST), "utf8"));
+
+    return Array.isArray(parsed) ? parsed.filter(isJsonString) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Copy one skill folder into `dest` through a temporary sibling, so a failed copy leaves the old one in place. */
+function copySkill(dest: string, { name, from }: AgySkill) {
+  const tmp = join(dest, `.${name}.${process.pid}.tmp`);
+
+  try {
+    removeTree(tmp);
+    cpSync(from, tmp, { recursive: true, dereference: true });
+    makeWritable(tmp);
+    removeTree(join(dest, name));
+    renameSync(tmp, join(dest, name));
+  } finally {
+    removeTree(tmp);
+  }
+}
+
 /**
- * Copy `skills` into `dest` (`.agents/skills`), replacing what was there. agy loads a workspace's skills only from real
- * folders inside it: it skips a `skills.json` entry outside the workspace and a symlinked skill folder.
+ * Copy `skills` into `dest` (`.agents/skills`), replacing the ones overbridge copied before and leaving any other folder
+ * alone. agy loads a workspace's skills only from real folders inside it, not from paths outside it or symlinks.
  */
 export function copyAgySkills(dest: string, skills: readonly AgySkill[]) {
-  const tmp = `${dest}.${process.pid}.tmp`;
-  rmSync(tmp, { recursive: true, force: true });
-  mkdirSync(tmp, { recursive: true });
+  mkdirSync(dest, { recursive: true });
+  const names = skills.map((s) => s.name);
 
-  for (const { name, from } of skills) cpSync(from, join(tmp, name), { recursive: true, dereference: true });
-  rmSync(dest, { recursive: true, force: true });
-  renameSync(tmp, dest);
+  readManifest(dest)
+    .filter((name) => !names.includes(name) && SKILL_NAME.test(name))
+    .forEach((name) => removeTree(join(dest, name)));
+  skills.forEach((skill) => copySkill(dest, skill));
+  writeAtomic(join(dest, SKILLS_MANIFEST), `${JSON.stringify(names, null, 2)}\n`);
 }
 
 /** Problems that leave a new agy workspace without its agent, the overbridge skills or the skills they require, each with its fix. */

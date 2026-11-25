@@ -1,7 +1,7 @@
 /** agy hook payloads translated to the Claude shape the guard and the agent-state hook read. Imports only `json.ts`: the per-call hook loads it. */
 import { isJsonNumber, isJsonObject, isJsonString, type JsonObject, type JsonValue } from "./json";
 
-/** agy tools that change a file, by the Claude tool the guard checks them as: agy CLI 1.5's names first, then older ones. */
+/** agy tools that change a file, by the Claude tool the guard checks them as. */
 const WRITE_TOOLS = new Map([
   ["write_file", "Write"],
   ["edit_file", "Edit"],
@@ -10,7 +10,7 @@ const WRITE_TOOLS = new Map([
   ["multi_replace_file_content", "MultiEdit"],
 ]);
 
-/** agy tools that read files or folders, by the Claude tool the guard checks them as: agy CLI 1.5's names first, then older ones. */
+/** agy tools that read files or folders, by the Claude tool the guard checks them as. */
 const READ_TOOLS = new Map([
   ["read_file", "Read"],
   ["view_file", "Read"],
@@ -22,11 +22,17 @@ const READ_TOOLS = new Map([
 
 const SHELL_TOOL = "run_command";
 
-/** agy's tool that runs a script (`Script` inline or `ScriptPath`, with `Args`, in `Cwd`); the guard checks it as a shell command. */
+/** agy's tool that runs a script (`Script` or `ScriptPath`); the guard checks every string in the call as a shell command. */
 const SCRIPT_TOOL = "run_workflow";
 
-/** agy tools whose free text (a prompt, a message) can start with `/`, so only their path-named arguments, such as `Workspace`, are checked as writes. */
-const KEY_SCANNED_TOOLS = new Set(["invoke_subagent", "define_subagent", "send_message", "schedule"]);
+/** Argument names that hold free text, such as a prompt or a message, which can start with `/` without naming a path. */
+const FREE_TEXT_ARG = /^(?:message|prompt|systemprompt|instructions|description|summary|toolsummary|title|query)$/i;
+
+/** A path anywhere in a script, after any character that cannot end a word: a quote, a backtick, a bracket, an operator. */
+const SCRIPT_PATH = /(?<![\w.-])(?:~|\.\.|\/)[^\s'"`;|&()<>,+[\]{}]*/g;
+
+/** A script that names the workspace's `.agents` folder, which overbridge manages. */
+const AGENTS_DIR = /(?<![\w-])\.agents\b/;
 
 /** Argument names agy tools give a file or folder in, such as `TargetFile`, `AbsolutePath`, `DirectoryPath`, `SearchPath`, in any case. */
 const PATH_ARG = /(?:path|file|directory|dir|uri|workspace)s?$/i;
@@ -65,9 +71,13 @@ export const PathScan = { Keys: "keys", KeysAndValues: "keys-and-values" } as co
 
 export type PathScan = (typeof PathScan)[keyof typeof PathScan];
 
-/** Every path an agy tool call names, through arrays and nested objects: values under a path-like key, and with `KeysAndValues` any one-line value that reads as a path. */
+/** Every path an agy tool call names, through arrays and nested objects: values under a path-like key, and with `KeysAndValues` any one-line value outside free text that reads as a path. */
 export function agyToolPaths(args: JsonValue | undefined, scan: PathScan, key = ""): string[] {
-  if (isJsonString(args)) return args && (PATH_ARG.test(key) || (scan === PathScan.KeysAndValues && PATH_VALUE.test(args))) ? [asPath(args)] : [];
+  if (isJsonString(args)) {
+    const byValue = scan === PathScan.KeysAndValues && !FREE_TEXT_ARG.test(key) && PATH_VALUE.test(args);
+
+    return args && (PATH_ARG.test(key) || byValue) ? [asPath(args)] : [];
+  }
 
   if (Array.isArray(args)) return args.flatMap((v) => agyToolPaths(v, scan, key));
 
@@ -79,28 +89,47 @@ export function agyToolPaths(args: JsonValue | undefined, scan: PathScan, key = 
 /** `dir` as an absolute path, a relative one taken from the hook's `cwd`. */
 const underCwd = (base: string | undefined, dir: string) => (dir.startsWith("/") || dir.startsWith("~") || !base ? dir : `${base}/${dir}`);
 
-const unreadable = (name: string, reason: string) => ({ tool_name: UNREADABLE_TOOL, tool_input: { agy_tool: name, reason } });
+/** Every string in an agy argument tree, keys excluded. */
+const strings = (v: JsonValue | undefined): string[] => {
+  if (isJsonString(v)) {
+    return [v];
+  }
+
+  if (Array.isArray(v)) {
+    return v.flatMap(strings);
+  }
+
+  return isJsonObject(v) ? Object.values(v).flatMap(strings) : [];
+};
+
+/** The guard's tool call: a Claude tool name, its input, and the folder a command runs in when agy gave one. */
+export type ClaudeToolCall = Required<Pick<ClaudeHookInput, "tool_name" | "tool_input">> & Pick<ClaudeHookInput, "cwd">;
+
+const unreadable = (name: string, reason: string): ClaudeToolCall => ({ tool_name: UNREADABLE_TOOL, tool_input: { agy_tool: name, reason } });
+
+/** A shell command for the guard, in `given` (agy's `Cwd`, taken from the hook's `cwd` when relative) when there is one. */
+const bashCall = (command: string, given: string | undefined, base: string | undefined): ClaudeToolCall =>
+  given ? { tool_name: "Bash", tool_input: { command }, cwd: underCwd(base, given) } : { tool_name: "Bash", tool_input: { command } };
 
 /**
  * agy's tool call as the Claude tool the guard knows. A shell or file tool whose command or path is not where
  * overbridge expects it is unreadable (denied). An unknown tool has every path it names checked as a write; one
  * that names no path the scan can find is allowed, so its arguments are only as safe as that scan.
  */
-export function claudeTool(name: string, args: JsonObject, base?: string): Required<Pick<ClaudeHookInput, "tool_name" | "tool_input">> & Pick<ClaudeHookInput, "cwd"> {
+export function claudeTool(name: string, args: JsonObject, base?: string): ClaudeToolCall {
   if (name === SHELL_TOOL) {
     const command = str(args, "CommandLine");
 
     if (!command) return unreadable(name, `agy's ${name} call has no CommandLine, so overbridge cannot check it`);
-    const given = str(args, "Cwd");
 
     // the command stays as agy sent it, so anchored `guard.deny` rules and history read it; the guard checks `cwd` itself
-    return given ? { tool_name: "Bash", tool_input: { command }, cwd: underCwd(base, given) } : { tool_name: "Bash", tool_input: { command } };
+    return bashCall(command, str(args, "Cwd"), base);
   }
 
   if (name === SCRIPT_TOOL) return scriptCall(name, args, base);
 
   const known = WRITE_TOOLS.get(name) ?? READ_TOOLS.get(name);
-  const paths = agyToolPaths(args, known || KEY_SCANNED_TOOLS.has(name) ? PathScan.Keys : PathScan.KeysAndValues);
+  const paths = agyToolPaths(args, known ? PathScan.Keys : PathScan.KeysAndValues);
 
   if (known) return paths.length ? { tool_name: known, tool_input: { paths } } : unreadable(name, `agy's ${name} call names no path overbridge can find, so it cannot check it`);
 
@@ -109,17 +138,25 @@ export function claudeTool(name: string, args: JsonObject, base?: string): Requi
   return { tool_name: "Write", tool_input: { paths, agy_tool: name } };
 }
 
-/** `run_workflow` as a shell command: its script, script path and arguments are all scanned, in its `Cwd` when it gives one. */
-function scriptCall(name: string, args: JsonObject, base: string | undefined): ReturnType<typeof claudeTool> {
-  const script = str(args, "Script");
-  const scriptPath = str(args, "ScriptPath");
+/**
+ * `run_workflow` as a shell command over every string in the call, with each path a script names on a line of its
+ * own, since a script's paths sit in quotes, template literals and calls that the shell scan does not split on. Like
+ * the shell scan it is best effort: a path built at runtime passes to agy's own permission check.
+ */
+function scriptCall(name: string, args: JsonObject, base: string | undefined): ClaudeToolCall {
+  if (!str(args, "Script") && !str(args, "ScriptPath")) {
+    return unreadable(name, `agy's ${name} call has no Script or ScriptPath, so overbridge cannot check it`);
+  }
 
-  if (!script && !scriptPath) return unreadable(name, `agy's ${name} call has no Script or ScriptPath, so overbridge cannot check it`);
-  const extra = Array.isArray(args.Args) ? args.Args.filter(isJsonString) : [];
-  const command = [scriptPath, ...extra, script].filter((part) => part !== undefined).join("\n");
-  const given = str(args, "Cwd");
+  const text = strings(args);
 
-  return given ? { tool_name: "Bash", tool_input: { command }, cwd: underCwd(base, given) } : { tool_name: "Bash", tool_input: { command } };
+  if (text.some((s) => AGENTS_DIR.test(s))) {
+    return unreadable(name, "workspace .agents config is managed by overbridge");
+  }
+
+  const found = text.flatMap((s) => [...s.matchAll(SCRIPT_PATH)].map((m) => m[0]));
+
+  return bashCall([...text, ...found].join("\n"), str(args, "Cwd"), base);
 }
 
 /** Claude's name for an agy hook event; PreInvocation runs per model call, so only the first of a turn is a prompt. */
@@ -171,10 +208,7 @@ export function fromAgy(raw: JsonValue): ClaudeHookInput {
   return out;
 }
 
-/**
- * agy's PreToolUse answer, as the text to print: a deny with the reason, or nothing, which leaves the call to agy's
- * own permission check. agy reads `{}` (no `decision`) as a deny with an empty reason, and `allow` would skip its prompt.
- */
+/** agy's PreToolUse answer as text to print: a deny with its reason, or nothing to leave the call to agy's own check, since agy reads `{}` as a deny. */
 export const agyToolDecision = (reason: string | undefined): string => (reason ? JSON.stringify({ decision: "deny", reason }) : "");
 
 /** A hook's answer that keeps the agent working after a Stop: Claude's `block`, agy's `continue`. */

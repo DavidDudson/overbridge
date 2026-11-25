@@ -5,7 +5,7 @@
  * An orchestration tab's Claude gets the stricter `checkOrchestrator` (guard-orchestrator.ts) instead.
  *
  * Exit 2 blocks the tool call and shows stderr to Claude. Under agy (`guard --agy`) the payload is translated
- * from agy's shape first and the answer is agy's JSON decision on stdout.
+ * from agy's shape first; a deny is agy's JSON decision on stdout and an allow prints nothing.
  */
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -175,7 +175,9 @@ function answer(agent: AgentKind, message: string | undefined): number {
   if (agent === AgentKind.Agy) {
     const decision = agyToolDecision(message);
 
-    if (decision) console.log(decision);
+    if (decision) {
+      console.log(decision);
+    }
 
     return 0;
   }

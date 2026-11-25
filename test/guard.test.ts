@@ -246,6 +246,8 @@ describe("agy calls", () => {
     expect(check(agy("run_command", { CommandLine: "ls -la", WaitMsBeforeAsync: 5000, toolSummary: "List files" }), ctx)).toBeUndefined();
     expect(check(agy("run_command", { CommandLine: "overbridge status", WaitMsBeforeAsync: 5000 }), ctx)).toBeUndefined();
     expect(check(agy("send_message", { Message: "/pickup #3", Recipient: "r" }), ctx)).toBeUndefined();
+    expect(check(agy("run_workflow", { Script: "run('./app/x.js') // done" }), ctx)).toBeUndefined();
+    expect(check(agy("run_workflow", { Script: "read(`./app/x`)" }), ctx)).toBeUndefined();
   });
 
   test("agy CLI 1.5.16: foreign reads, outside writes, .agents edits and a foreign subagent are blocked", () => {
@@ -254,6 +256,11 @@ describe("agy calls", () => {
     expect(check(agy("edit_file", { Path: "/w/ws1/.agents/hooks.json", Target: "a", Replacement: "b" }), ctx)).toContain(".agents config is managed by overbridge");
     expect(check(agy("invoke_subagent", { Prompt: "go", Workspace: "/w/ws2" }), ctx)).toContain("outside workspace ws1");
     expect(check(agy("run_workflow", { Script: "cat /w/ws2/secret" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_workflow", { Script: "const p = `/w/ws2/secret`; read(p)" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_workflow", { Script: "read(path.join('/w', 'ws2'))" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_workflow", { Script: "read(`../ws2/secret`)", Cwd: "/w/ws1" }), ctx)).toContain("outside workspace ws1");
+    expect(check(agy("run_workflow", { Script: "read(`~/ws2/x`)" }), { ...ctx, home: "/w" })).toContain("outside workspace ws1");
+    expect(check(agy("schedule", { Prompt: "go", Command: "/w/ws2/run.sh" }), ctx)).toContain("outside workspace ws1");
   });
 
   test("allows work inside the workspace", () => {
