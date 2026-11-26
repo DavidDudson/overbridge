@@ -1,6 +1,6 @@
 ---
 name: ship-pr
-description: Commit, run the mob-review panel on the branch and apply its fixes before anything is pushed (required; `review.ship-pr: false` turns it off), then push and open (or update) a GitHub PR from an overbridge workspace, record the PR against the workspace, wait for a green build, then request Copilot and CodeRabbit reviews (CodeRabbit also on drafts) and resolve their feedback. Fills the PR body from the shared template (visible change summary and gaps, a benchmark table on performance PRs, screenshots; everything else collapsed). Handles a single PR on the default branch, a stacked PR on top of another branch or PR (always a real gh stack), and splitting one oversized branch into a stack. Use when the user says "ship it", "open a PR", "raise a PR", "push this up", "update the PR", "stack this on X", "on top of #123", "restack this onto X", "split this into a stack", "break this PR up", or "stacked PR".
+description: Commit, run the mob-review panel on the branch and apply its fixes before anything is pushed (required; `review.ship-pr: false` turns it off), then push and open (or update) a GitHub PR from an overbridge workspace, record the PR against the workspace, wait for a green build, then request Copilot and CodeRabbit reviews (CodeRabbit also on drafts) and resolve their feedback. Closes test gaps with new tests and lists every gap in the chat before the push, never in the PR description. Fills the PR body from the shared template (visible change summary, a benchmark table on performance PRs, screenshots; everything else collapsed). Handles a single PR on the default branch, a stacked PR on top of another branch or PR (always a real gh stack), and splitting one oversized branch into a stack. Use when the user says "ship it", "open a PR", "raise a PR", "push this up", "update the PR", "stack this on X", "on top of #123", "restack this onto X", "split this into a stack", "break this PR up", or "stacked PR".
 requires: gh-stack
 ---
 
@@ -20,7 +20,7 @@ the two conflict, the extension wins. It prints nothing when there is no extensi
 
 ## Run to completion
 
-Invoking this skill ("ship it", "open a PR", "stack this") is the approval to commit, push, open the PR as a draft and drive it to a green build, with no question in between. Do steps 1 to 12 in one run. Never stop to ask "want me to push / submit / write the descriptions?" and never end the turn on a list of what is not done yet: do it, or say in the final summary why a step was skipped.
+Invoking this skill ("ship it", "open a PR", "stack this") is the approval to commit, push, open the PR as a draft and drive it to a green build, with no question in between. Do steps 1 to 12 in one run. The one stop is an open behavioural gap at the gap report (step 3). Never stop to ask "want me to push / submit / write the descriptions?" and never end the turn on a list of what is not done yet: do it, or say in the final summary why a step was skipped.
 
 That holds when you own the repo. Check once, at step 1:
 
@@ -82,6 +82,15 @@ An unset key means the repo has no such command: say so rather than guessing. Sc
 
 Run each through the check queue: `overbridge check <repo> -- <command>`. It queues them across workspaces and runs several at once while the load allows, in the repo's dev shell. Exit 124 means it went over its time limit, 137 that it stopped using CPU, and 75 that no turn came: report it rather than retrying in a loop.
 
+### Push back on gaps
+
+Before committing, hold the change against the item's ACs, the plan's test conditions, and the variations it spans. Close each gap, or leave it for the gap report below:
+
+- **Test gap** (an AC, a planned test condition, or a variation with no automated test): write the test at the cheapest level that proves it, and run it through the check queue. Testing by hand does not close a gap.
+- **Behavioural gap** (an AC the code does not deliver, behaviour that differs from what the item asks, a performance target missed or not measured, a test you cannot write): fix it when the fix is clear and in scope. Otherwise leave it open for the gap report.
+
+**Gap report.** Before the first push (step 6), list every gap in the chat: each test gap with the test that now closes it, and each open behavioural gap with what solving it takes. When a behavioural gap is open, stop there and ask the user to solve it; push only once they have, or once they say to ship anyway. Gaps go in the chat only. Never put them in the PR body, a PR comment, or a review reply.
+
 ## 4. Commit
 
 `ext: commit`: run `overbridge ext ship-pr commit` first (the commit message convention).
@@ -108,6 +117,8 @@ Required, and it runs **before the first push** of this run, so no PR is opened 
 A stacked PR is reviewed per layer: a review of the layer below says nothing about this one. `gh stack push` pushes every layer, so before it, review every layer that has commits the panel has not seen, bottom first, and run `gh stack rebase --upstack` from any layer that got fixes before reviewing the next. When this run only updates an existing PR, the panel still runs before the push, over the whole branch.
 
 ## 6. Push
+
+Post the gap report (step 3) first. With a behavioural gap still open, do not push.
 
 Plain branch: `git push -u origin HEAD`.
 
@@ -136,7 +147,7 @@ A change with a visual surface owes a screenshot. Never block the PR on it.
 
 Use **`TEMPLATE.md` in this skill's directory** in every repo, in place of the repo's own `PULL_REQUEST_TEMPLATE.md`, unless the repo's `CLAUDE.md` says otherwise. Read it and follow its filling rules:
 
-1. The visible items: the optional **Feature flag**, then **User-facing change**, **Functional change**, **Gaps**, and on a performance PR **Performance** with a benchmark table that is never collapsed.
+1. The visible items: the optional **Feature flag**, then **User-facing change**, **Functional change**, and on a performance PR **Performance** with a benchmark table that is never collapsed.
 2. Screenshots, visible, with the `<!-- screenshots -->` marker until the images exist.
 3. Collapsed blocks, each dropped when empty: **Acceptance criteria**, **Testing**, **Related items**, **Dependencies** (only when a manifest changed; `update-library` supplies its own filled template for it).
 
@@ -300,7 +311,7 @@ If either check prints `STOP`, don't push. Show the user what it found. A lower 
 ### What differs from a normal PR
 
 - **Submit** with `gh stack submit --auto` (no confirmation needed on a repo you own): it pushes every layer, opens or updates one PR per layer with the right base chaining, and injects the navigation table. The PR must end up a **draft** based on `$BASE_BRANCH`; if it opened ready, `gh pr ready --undo <pr>`. Run `gh stack view`: it must show the chain `<default> ← base ← head`. A PR with only a base field is not done.
-- **Scope every section to this layer.** The change items, the AC table and the Testing block cover only `git diff "$BASE_BRANCH"...HEAD`. An AC delivered by another layer gets a row `Delivered in <PR link>`, not a claim or a drop. A planned test condition proven in another layer belongs in that layer's PR, not this one's **Gaps**.
+- **Scope every section to this layer.** The change items, the AC table and the Testing block cover only `git diff "$BASE_BRANCH"...HEAD`. An AC delivered by another layer gets a row `Delivered in <PR link>`, not a claim or a drop. A planned test condition proven in another layer counts as covered in this one.
 - **Related items** includes the base PR's item when it differs, labelled **Stacked on**.
 - **Screenshots**: the "before" is the stack base (`origin/$BASE_BRANCH`), never the default branch: a diff against the default branch credits this PR with the layers below it. Screenshot the layer that owns the visual change; a layer that only moves code gets a written reason, not a duplicate image.
 - **Counterpart-PR links** go above the stack navigation table, and only the layer carrying the change needs one.
@@ -361,8 +372,10 @@ Turn one big branch into a stack of smaller PRs, one slice per layer. This rewri
 - **Always run `mob-review` (step 5) before the first push, and apply its fixes before the PR is opened or updated.** Never open a PR on code the panel has not reviewed. Only `review.ship-pr: false` in `overbridge.yml` skips it. On someone else's branch it reports and fixes nothing.
 - **Draft PRs, and request a Copilot review and, where the repo uses CodeRabbit, a CodeRabbit review** (by comment, since it skips drafts) on every PR. Only open one ready when the user says so.
 - **Attribution**: end commits and PR bodies with exactly the attribution lines the session's instructions specify, and add none if none are specified. Never invent one. Always commit with the user's git identity.
+- **Never list gaps and never mention manual testing** in a PR title, body, or comment. Close test gaps with tests, and list every gap in the chat before the push (step 3).
 - **Always use `TEMPLATE.md`** for the PR body, unless the repo's `CLAUDE.md` says otherwise. Tick the checkboxes that match the real changes.
 - **Never name a personal skill, agent or review tool in a PR body or title.** Describe outcomes, not the tooling that produced them.
+- **Write the body for the reviewer, not the author.** Say what changed, where to look, and what proves it. No first person and no checklist of the author's own steps.
 - **Describe the change, not the process of making it.** The body says what changed and why, in the fewest words that carry it. Never narrate your own investigation and never revise a claim in place: if an earlier reading was wrong, publish the correct one and delete the wrong one. No "I first thought", "turned out to be", "worth flagging". When the body is edited after review feedback or a red build, rewrite the affected section so it reads as though it were always correct.
 - **Cut anything that would not change a reviewer's decision**: long verbatim changelogs, notes about which local check caught what, commentary on how the work went. Keep the diff's intent, the callsites, the risks and the evidence.
 - **Never commit a screenshot.** Never paste an empty or `null` attachment URL into a body. Never drive an SSO or MFA login yourself.

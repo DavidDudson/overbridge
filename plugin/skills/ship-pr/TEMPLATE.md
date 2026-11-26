@@ -1,6 +1,6 @@
 # PR body template
 
-Used for every PR in every repo instead of the repo's own `PULL_REQUEST_TEMPLATE.md`, unless the repo's `CLAUDE.md` says otherwise. Three visible items, the screenshots, then at most four collapsed blocks. Everything is `**Label:** value` lines, not headed sections. The body is a summary: the reviewer has the diff for the how.
+Used for every PR in every repo instead of the repo's own `PULL_REQUEST_TEMPLATE.md`, unless the repo's `CLAUDE.md` says otherwise. Two visible items, the screenshots, then at most four collapsed blocks. Everything is `**Label:** value` lines, not headed sections. The body is a summary: the reviewer has the diff for the how.
 
 ## Body
 
@@ -12,9 +12,6 @@ Used for every PR in every repo instead of the repo's own `PULL_REQUEST_TEMPLATE
 
 **Functional change:** <Yes | No>
 - <what changes, one bullet per change | refactor / tests / tooling / docs>
-
-**Gaps:** <None | n>
-- <what is untested, and why that is acceptable or the follow-up item>
 
 **Performance:** <data size, the action timed and where it ends, runs per side, and the build on each side>
 
@@ -29,18 +26,18 @@ Used for every PR in every repo instead of the repo's own `PULL_REQUEST_TEMPLATE
 | ![<what it shows>](<url>) | ![<what it shows>](<url>) |
 
 <details>
-<summary>Acceptance criteria: <N> ACs, <All Tested | n tested manually (B, C)></summary>
+<summary>Acceptance criteria: <N> ACs</summary>
 
 | # | AC | Old behaviour | Implementation | Tested by |
 | --- | --- | --- | --- | --- |
-| A | <AC, verbatim from the item> | <what happened before this PR, or "None (new)"> | <where and how, one line> | <Unit / Integration / E2E / Manual>: `<test file>` › <test name> |
+| A | <AC, verbatim from the item> | <what happened before this PR, or "None (new)"> | <where and how, one line> | <Unit / Integration / E2E>: `<test file>` › <test name> |
 | A.1 | <sub-AC> | <…> | <…> | <…> |
 | — | <behaviour no AC covers> | <…> | <…> | <…> |
 
 </details>
 
 <details>
-<summary>Testing: <Unit & Integration & E2E | Manual | None></summary>
+<summary>Testing: <Unit & Integration & E2E | None></summary>
 
 **Existing behaviour:** <how regressions are covered><br>
 **Variations:** <dimensions and values; covered set and where; combinations left out and why>
@@ -49,7 +46,6 @@ Used for every PR in every repo instead of the repo's own `PULL_REQUEST_TEMPLATE
 - [ ] 🧩 Integration tests
 - [ ] 🧑‍🔬 End-to-End tests
 - [ ] 🙅 No tests necessary
-- [ ] I have reviewed my own diff.
 
 </details>
 
@@ -78,6 +74,7 @@ Closing keywords go on a line of their own at the very end of the body (`Closes 
 
 ## Filling rules
 
+- **Write for the reviewer.** Every line tells the person reviewing the PR what changed, where to look, and what proves it. No first person ("I", "we", "my"), no account of how the work was done, and nothing addressed to the author.
 - **Summarise, don't restate the code.** No technical summary, file list or walkthrough of the diff. A reviewer reads the diff for that.
 - **`**Label:** value` lines, not sections.** No `##` headings in the body. Lines in the same group end in `<br>` so GitHub keeps them on separate lines without spacing them out; groups are separated by a blank line.
 - Every line should change a reviewer's decision, or it goes. Drop any label, and any collapsed block, that would be empty. The two optional visible labels (**Feature flag**, **Performance**) appear only when they apply.
@@ -87,14 +84,14 @@ Closing keywords go on a line of their own at the very end of the body (`Closes 
 
 ### The visible items
 
-Always present, in this order. The change items are `Yes`/`No`, and Gaps is a count, each with bullets under it (no blank line between, so the list sits under its label).
+Always present, in this order. The change items are `Yes`/`No`, each with bullets under it (no blank line between, so the list sits under its label).
 
 - **Feature flag** (only when the diff adds or reads a flag): the flag key in backticks and its production and staging state, read from wherever the repo keeps them, not guessed. A flag this PR introduces is "new, off everywhere". No flag → drop the label.
 - **User-facing change:** whether users see anything the moment this merges, then one bullet saying what or why not.
   - `Yes` → what they see.
   - `No` → `behind \`flag-key\`` when the flag is off in production, or the reason users can't reach it yet (a route nothing links to, a backend change that hasn't deployed). Non-functional PRs: `No` with no bullet.
 - **Functional change:** `Yes` or `No`, then one bullet per behaviour change in plain words a product manager would follow ("admins can edit a user from the list"). `No` gets one bullet naming the kind of change ("refactor of the pricing composables").
-- **Gaps:** the count, then one bullet per gap: every planned test condition with no delivered test, every acceptance criterion with no test, and each uncovered variation, each with why that's acceptable or the follow-up item. `None` (no bullets) only when true. Gaps are untested behaviour only: a missing screenshot or demo is not a gap.
+- **No gaps section.** Test gaps are closed with tests before the PR opens, and every gap is listed in the chat before the push (`SKILL.md` step 3). The body never lists a gap, never raises one with reviewers, and never mentions manual testing.
 
 ### Performance (visible, performance PRs only)
 
@@ -102,8 +99,8 @@ Always present, in this order. The change items are `Yes`/`No`, and Gaps is a co
 - **Never collapse it.** The benchmark is the evidence for a performance change, so a reviewer must see it without expanding anything. Keep it out of the Testing and Acceptance criteria blocks; those can point to it ("see Performance").
 - **What to measure:** one row per metric the item sets a target for, plus the metrics that explain the result. **Target** is the item's number for that metric, or `None`.
 - **How to measure:** the same data, the same steps and the same kind of build on both sides, medians of at least three runs. A dev build can't be compared with a production build. Name the test data by its size, never by the customer.
-- **Missed target:** say so in the sentence under the table, and add it to **Gaps** with the reason or the follow-up item.
-- **Not measured yet:** keep the label and write `Not measured yet: <reason>` in place of the table. Add each unmeasured target to **Gaps**.
+- **Missed target:** say so in the sentence under the table. It is a behavioural gap for the chat gap report.
+- **Not measured yet:** keep the label and write `Not measured yet: <reason>` in place of the table. Each unmeasured target is a behavioural gap for the chat gap report.
 
 ### Screenshots
 
@@ -112,25 +109,24 @@ Always present, in this order. The change items are `Yes`/`No`, and Gaps is a co
 
 ### Acceptance criteria (collapsed)
 
-- Summary line: AC count (including `—` rows), then `All Tested` when every row has an automated test. Otherwise name the exceptions: `1 tested manually (B)`, `1 untested (C)`.
+- Summary line: AC count (including `—` rows). Every row has an automated test; a row without one is a gap to close before the PR opens.
 - One row per AC, verbatim (lightly trimmed) from the item, keyed by its id in **#**. Items letter their ACs (`A`, `B`) with numbered sub-ACs (`A.1`). An unlettered item → letter them in the order the item lists them.
 - Sub-ACs get their own row only when implemented or tested differently from their parent; otherwise one `A` row with `A.1 to A.3` in the AC cell.
 - Dropped ACs: `Out of scope: <item>`. Delivered by another PR: `Delivered in <PR link>`.
 - A `—` row for each material behaviour the diff adds that no AC covers (a new user-facing state, a flag gate, a permission check). Incidental refactors don't get one.
 - **Old behaviour:** what the product did before, in user terms. `None (new)` when it didn't exist. Blank for out-of-scope and delivered-elsewhere rows.
 - **Implementation:** the file, component or function that satisfies it, one line.
-- **Tested by:** level, then a real test file and test name a reviewer can open. Cheapest level that proves the AC: Unit for pure logic, Integration for wiring across components or layers, E2E for cross-page or real-backend flows, Manual only when automation is impractical (say why).
+- **Tested by:** level, then a real test file and test name a reviewer can open. Cheapest level that proves the AC: Unit for pure logic, Integration for wiring across components or layers, E2E for cross-page or real-backend flows.
 - No ACs (task, chore, tech debt) → drop the block, unless the diff adds behaviour that needs a `—` row.
 
 ### Testing (collapsed)
 
-Summary: the test levels this PR adds or changes, capitalised and joined with `&` (`Unit & Integration`, `Manual`, `None`).
+Summary: the test levels this PR adds or changes, capitalised and joined with `&` (`Unit & Integration`, `None`).
 
-- **Existing behaviour:** how regressions are covered (existing tests, an e2e run with its outcome, a manual check). Say plainly if they aren't.
+- **Existing behaviour:** how regressions are covered (existing tests, or an e2e run with its outcome). No cover is a test gap: close it before the PR opens.
 - **Variations:** only when the change spans two or more dimensions (product, role, account type, flag, state, locale).
 - Risks, follow-ups or a rejected alternative a reviewer needs to know go on a **Notes:** line here. Skip it when the diff makes the reasoning obvious.
-- Tick the test boxes that match the tests this PR adds or changes. Tick the self-review box only when the diff has actually been reviewed.
-
+- Tick the test boxes that match the tests this PR adds or changes.
 ### Related items (collapsed)
 
 - Source: the item's links, its parent, and any item the diff or commits mention. Read each one's title.
