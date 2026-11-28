@@ -8,7 +8,7 @@ import { Motion, sidebarMotion, sidebarWidth } from "../src/config";
 import { animate, BUSY_FRAMES, busyFrame, FRAME_MS } from "../src/sidebar-motion";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { BusyVerb, bodyRowsFor, KILL_KEY, killStep, KillStepKind, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, clickTab, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
+import { BusyVerb, bodyRowsFor, KILL_KEY, killStep, KillStepKind, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Footer, FooterKind, footerRow, footerRows, legendRows, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, clickTab, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
 import { readHistory, Travel, writeHistory } from "../src/sidebar-history";
 import type { Finished } from "../src/child";
 import { type Input, textWidth } from "../src/term";
@@ -98,7 +98,7 @@ describe("orchestration frame", () => {
   test("a click picks a pinned card, or a workspace card through the offset; borders pick nothing", () => {
     const h = Array(withRoot.length).fill(2);
     const rows = bodyRowsFor(20, pinnedRowsFor(h, 1));
-    expect(rows).toBe(10);
+    expect(rows).toBe(9);
     const click = (row: number, current = 3) => targetFor({ kind: "click", col: 3, row }, current, 2, h, rows, 1);
     expect(click(0)).toBeUndefined();
     expect(click(1)).toBe(0);
@@ -237,6 +237,32 @@ describe("commitDigit", () => {
   });
 });
 
+describe("legend rows", () => {
+  test("splits on whole items, keeping every key readable in two rows", () => {
+    const [a, b] = legendRows(legend(14), 36);
+
+    expect(a.length).toBeLessThanOrEqual(36);
+    expect(b.length).toBeLessThanOrEqual(36);
+    expect(`${a.trimEnd()}  ${b.trimEnd()}`).toBe(legend(14));
+  });
+
+  test("an item that exactly fills the row stays on it", () => {
+    expect(legendRows("aaaa  bbbb  cc", 10)[0].trimEnd()).toBe("aaaa  bbbb");
+    expect(legendRows("aaaa  bbbb  cc", 9)[0].trimEnd()).toBe("aaaa");
+  });
+
+  test("a wide pane keeps all on the first row", () => {
+    expect(legendRows(legend(3), 200)[1].trim()).toBe("");
+  });
+
+  test("a non-legend footer takes the first row and leaves the second blank", () => {
+    const rows = footerRows({ kind: FooterKind.Busy, id: "79" }, 20);
+
+    expect(rows[0].replace(/\x1b\[[0-9;]*m/g, "").trimEnd()).toBe("starting 79…");
+    expect(rows[1].trim()).toBe("");
+  });
+});
+
 describe("legend", () => {
   test("shows the range the digits reach", () => {
     expect(legend(14)).toStartWith("1-14 go");
@@ -323,12 +349,15 @@ describe("click focuses Claude", () => {
 
   test("a failed switch does not focus anything", () => {
     const calls: string[][] = [];
+
     const mux = zellijMux((c) => {
       calls.push(c);
 
       return { ok: false, stdout: "" };
     });
+
     expect(clickTab("w1", "w2", mux)).toBe(false);
+
     expect(calls.some((c) => c[2] === "focus-pane-id")).toBe(false);
   });
 });
@@ -454,7 +483,7 @@ describe("new workspace prompt", () => {
   test("the legend names the s key and shows in the footer by default", () => {
     expect(legend(12)).toContain("s new ws");
     const rows = renderSidebar(list, 0, 0, 20, 60, undefined, 0);
-    expect(strip(rows.at(-2)!)).toContain("s new ws");
+    expect(strip(rows.at(-3)!) + strip(rows.at(-2)!)).toContain("s new ws");
   });
 
   test("printable keys type, including sidebar keys; backspace deletes one character", () => {
