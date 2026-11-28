@@ -120,7 +120,7 @@ export function workspaceFault(w: Json | undefined): string | undefined {
     return `state record has removeErrorAt as ${describeValue(w.removeErrorAt)}`;
   }
 
-  if (w.removeFailures !== undefined && !(Number.isInteger(w.removeFailures) && w.removeFailures >= 0)) {
+  if (w.removeFailures !== undefined && !(typeof w.removeFailures === "number" && Number.isInteger(w.removeFailures) && w.removeFailures >= 0)) {
     return `state record has removeFailures as ${describeValue(w.removeFailures)}`;
   }
 
