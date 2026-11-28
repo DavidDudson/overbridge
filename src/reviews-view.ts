@@ -3,6 +3,7 @@ import { age, type PrRow, type ViewState } from "./pr-rows";
 import { silencedTitle } from "./silence";
 import { ciLook, conflictLook } from "./pr-look";
 import type { PrView } from "./prs-view";
+import { Action, Keyset, legendOf } from "./keys";
 import { SORT_LABEL, type SortMode } from "./sort-mode";
 import { REVIEWER_LOOK, type ReviewerStatus } from "./reviewers";
 import { bold, boxBottom, boxRow, boxTop, type Color, colorize, dim, fit, inverse } from "./term";
@@ -167,7 +168,7 @@ export const windowStart = (count: number, selected: number | undefined, rows: n
   selected === undefined || count <= rows ? 0 : Math.min(count - rows, Math.max(0, selected - Math.floor(rows / 2)));
 
 const footer = (message: string, inner: number, sort: SortMode) =>
-  message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit(`j/k move   o open in browser   s sort: ${SORT_LABEL[sort]}   x silence   r refresh   q quit`, inner));
+  message.startsWith("error: ") ? colorize(fit(message, inner), "red") : message ? bold(fit(message, inner)) : dim(fit(legendOf(Keyset.reviews, { [Action.Enter]: "", [Action.Sort]: `sort: ${SORT_LABEL[sort]}` }), inner));
 
 /** The Reviews tab as screen rows: two tables, same columns, direct requests above team requests. Pure, so it is snapshot-tested. */
 function render(rows: readonly PrRow[], { selected, height, width, message, now, sort = DEFAULT_REVIEWS_SORT, silenced = new Set() }: ViewState): string[] {

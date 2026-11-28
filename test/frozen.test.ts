@@ -47,12 +47,12 @@ describe("renderFrozen", () => {
     expect(out[2]).toContain("11d");
     expect(out[2]).toContain("· dropped");
     expect(out[3]).toContain("app:feat/b #12");
-    expect(out[6]).toContain("t thaw");
+    expect(out[6]).toContain("z thaw");
     expect(out[7]).toContain("2 frozen");
   });
 
   test("an empty list says how to freeze", () => {
-    expect(renderFrozen([], ui).map(strip)[2]).toContain("press f");
+    expect(renderFrozen([], ui).map(strip)[2]).toContain("press z");
   });
 
   test("an error message replaces the legend", () => {

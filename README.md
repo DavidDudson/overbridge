@@ -95,9 +95,9 @@ removed this way.
 draft PR. It refuses while any repo has uncommitted or unpushed work. Otherwise it stops the workspace's apps and
 queued checks, writes a handoff to `<ws>/.overbridge/handoffs/` (reason `icebox`), closes its tab and marks it
 iceboxed. Claims and worktrees stay, so nothing else can take its branch or PR. The sidebar lists it as a dim
-`❄ <name> iceboxed` row, `status` marks it `iceboxed`, and `up`/`layout` leave it out. `f` in a workspace's sidebar
+`❄ <name> iceboxed` row, `status` marks it `iceboxed`, and `up`/`layout` leave it out. `z` in a workspace's sidebar
 iceboxes that workspace; a refusal (unsaved work) shows in the sidebar footer. The `@frozen` orchestration tab
-(`overbridge frozen`) lists every iceboxed workspace with its age and claims; `t` there thaws the selected one. Its
+(`overbridge frozen`) lists every iceboxed workspace with its age and claims; `z` there thaws the selected one. Its
 sidebar card shows the count and a 🧊 per iceboxed workspace.
 `overbridge thaw <name>` reopens the tab, the agent continuing its conversation and reading the handoff. `--prompt <text>`
 gives it a request to carry out after the handoff, in place of the handoff's Next line. The orchestrator thaws this way
@@ -619,8 +619,8 @@ older one does, so the two never wait on each other. Classes and moves apply aga
 
 The `@checks` orchestration tab (`overbridge checks`) lists the queue: running checks first, then the waiting ones in
 the order they will start. Its sidebar card shows the count and one icon per check: 🔄 running, then ⏳ waiting.
-`j`/`k` select a check, `K`/`J` move a waiting one up or down, `t` moves it to the top
-and `b` to the bottom. `x` then `y` kills the selected check, running or waiting: its `overbridge check` exits
+`j`/`k` select a check, `K`/`J` move a waiting one up or down, `T` moves it to the top
+and `B` to the bottom. `d` then `y` kills the selected check, running or waiting: its `overbridge check` exits
 with 143 and the run is recorded as killed. Each row shows `est`, the median of the last 20 runs of exactly that command in the repo, and `eta`: when a waiting check should start, or how long a running one has left. The bottom border shows when the queue should be clear, and the sidebar shows when each workspace's checks should be done. A waiting `overbridge check` prints its estimated start and run time too. A command that has never finished in the repo has no estimate (`?`), and nothing that waits behind it gets a start, clear or done time. Run times live in `.overbridge/check-estimates.json`, built from the last week of history the first time the tab opens. `v` switches to the checks that finished in the last 24 hours, newest
 first, with each one's result, queue wait and run time, and the totals in the bottom border. A move is saved in `.overbridge/check-queue/order.state` and lasts until the check leaves the
 queue. A running check never moves. A low class can wait behind a stream of higher ones until `wait-seconds` runs
@@ -641,7 +641,7 @@ out, so move it up if it has to run.
 | `project-management.issue-type` | `Task` | Jira issue type for new items |
 | `project-management.worklist-project` | none | GitHub only: a Projects v2 board, `<owner>/<number>` (or a bare number for the repo's owner), such as `DavidDudson/2`. The `@work` tab then lists that board's issues for the repo, assigned to you or not, instead of only your assigned issues. Needs `gh auth refresh -s project` |
 | `project-management.worklist-statuses` | every Status but Done | With `worklist-project`: the board Status values to list, such as `[Backlog, Ready]` |
-| `project-management.worklist-jql` | `(sprint in openSprints() OR statusCategory = "In Progress")` | Jira only: JQL that narrows the `@work` tab to some of your open tickets. Set it to `""` to list every open ticket. Repos on the same project and filter share one read, so each ticket appears once and `s` asks which repo to start it in |
+| `project-management.worklist-jql` | `(sprint in openSprints() OR statusCategory = "In Progress")` | Jira only: JQL that narrows the `@work` tab to some of your open tickets. Set it to `""` to list every open ticket. Repos on the same project and filter share one read, so each ticket appears once and `n` asks which repo to start it in |
 | `project-management.worklist-scope` | `assigned` | GitHub only: whose open issues `@work` lists. `assigned` is yours; `unassigned` is nobody's issues that sit on a Projects v2 board; `all` is both |
 | `board.columns` | none | GitHub Projects v2 only: maps a `Status` column name (any case) to `todo`, `in-progress`, `blocked` or `done`. Unlisted names fall back to common ones (done, in progress, blocked), then to labels. Needs `gh auth refresh -s read:project` |
 | `apps` | `[]` | launchable apps, see [Apps](#apps) |
@@ -955,9 +955,9 @@ then cut to the newest half). Two things write it:
 tool and permission-prompt time, time waiting on the user (a gap over 30 minutes counts as away), and the checks by
 group. Shares are exact, to one decimal (`12.4%`). `--by repo` totals the check runs of every workspace per repo.
 Claude's Bash calls keep their command label (the program and, for task runners and tools with subcommands, the task such as `bun test`; every other word is dropped) and Skill calls their skill name, so history can say which commands were slow and which skills ran. `--by commands` lists every Bash and check command (kind, runs, total, mean, worst, failures) and `--by total` adds every workspace together.
-The `@perf` orchestration tab (`overbridge perf`) has three views, switched with `v`: the **dashboard** (home: sessions, turns, where Claude's time went, time in each tool, Bash by kind, checks, skills and the slowest commands across every workspace; `j`/`k` scroll), **sessions** (below) and **commands** (every Bash and check command with its kind, runs, total, mean and worst time; `f` filters Bash or check, `o` orders by total, runs, worst or mean). Sessions shows the same per workspace, busiest first: turns, time in
+The `@perf` orchestration tab (`overbridge perf`) has three views, switched with `v`: the **dashboard** (home: sessions, turns, where Claude's time went, time in each tool, Bash by kind, checks, skills and the slowest commands across every workspace; `j`/`k` scroll, `g`/`G` jump), **sessions** (below) and **commands** (every Bash and check command with its kind, runs, total, mean and worst time; `f` filters Bash or check, `s` orders by total, runs, worst or mean). Sessions shows the same per workspace, busiest first: turns, time in
 turns, the model, tool, permission and user shares, and the check count and time, with the selected workspace's
-slowest tools and check groups below. `g` switches to one row per repo (check runs, run time, queue wait, failures, and
+slowest tools and check groups below. `b` switches to one row per repo (check runs, run time, queue wait, failures, and
 for the selected repo each group's share of its check time and the full command of the slowest). `j`/`k` move, `w`
 cycles the window (1h, 24h, 7d, all), `r` reloads; it reloads itself every 5 seconds. `overbridge serve` builds every
 window and both groupings into `.overbridge/perf.json` (`POST /refresh/perf`, rebuilt at most every 5 seconds); the tab
@@ -988,8 +988,8 @@ Every tab's sidebar shares one history per zellij session (`<meta>/sidebar-histo
 tabs closed since are skipped, and a failed switch leaves it as it was. Switches made outside the sidebar
 (zellij keys, the tab bar, `overbridge next`, `overbridge go`) are not recorded.
 `p` jumps to the `@perf` tab (also `overbridge go perf`, or its number), where the legend lists it.
-`f` iceboxes the sidebar's own workspace (see Icebox); `@frozen` thaws it.
-`X` pressed twice within 5 s kills the sidebar's own workspace: it is removed like Cleanup, but whatever its state,
+`z` iceboxes the sidebar's own workspace (see Icebox); `@frozen` thaws it.
+`d` pressed twice within 5 s kills the sidebar's own workspace: it is removed like Cleanup, but whatever its state,
 so uncommitted changes and unpushed commits are lost. An orchestration tab refuses it.
 The new tab's sidebar takes focus so stepping continues. The list scrolls to keep the
 current tab visible. Long titles wrap under their text (up to three rows).
@@ -1011,7 +1011,7 @@ workspace holds the branch does it run `overbridge start ... --prompt '/pickup #
 messages every workspace whose work is still outstanding to continue, `/revisit` asks the Claude of every workspace whose branch is ahead of main whether its commits are still relevant, and `/cleanup` finds the workspaces
 that can go (see [Claude Code plugin](#claude-code-plugin)). The Workspaces frame is below it. Keys,
 clicks, and `overbridge next` treat both frames as one list, so `⌥1` goes to the root tab.
-`o` cycles how the workspaces are ordered: a-z (the default), by status (faults, then agents that want you, then busy,
+`s` cycles how the workspaces are ordered: a-z (the default), by status (faults, then agents that want you, then busy,
 then the rest) or by age (longest in its state first). The mode shows in the Workspaces title, every mode ends in the
 workspace name so the order never shifts between redraws, and the Orchestration tabs stay first. Digits typed in the
 sidebar follow the order shown; the multiplexer's `⌥1`-`⌥9` keys follow tab position, so they match only in a-z order
@@ -1025,6 +1025,24 @@ a few seconds waits a little longer each time (up to 30s). When the tab is close
 opens it again at the front and returns focus to the tab you were on. A lock in
 `<meta>/orchestration/@root.reopen.lock` makes sure only one sidebar reopens it. A user layout
 (`layouts/overbridge.kdl`) decides its own tabs, so nothing is reopened when one exists.
+
+**Keys.** Every list pane shares one key table (`src/keys.ts`), so a key means the same thing in the sidebar, `@prs`,
+`@reviews`, `@work`, `@checks`, `@perf`, `@frozen` and the explore picker; a pane answers only to the actions it has,
+and its footer legend is built from the same table.
+
+| Key | Action | Key | Action |
+|---|---|---|---|
+| `j`/`k`, `↑`/`↓` | move | `o` | open in browser |
+| `g` / `G` | top / bottom | `x` | silence / un-silence |
+| `⏎` | primary action on the row | `d` | kill (asks again) |
+| `l`, `→` | drill in | `z` | freeze / thaw |
+| `esc`, `h`, `←` | back, cancel, clear filter | `r` | refresh |
+| `/` | filter | `␣` | expand |
+| `s` | cycle sort | `q` | quit |
+| `v` | cycle view | `a` | sidebar: next tab that needs you |
+| `f` | cycle source filter | `n` | new (sidebar: workspace; `@work`: start item) |
+
+Pane-only keys: `K`/`J`/`T`/`B` reorder a waiting check, `w` cycles the `@perf` window and `b` its grouping.
 
 Two more orchestration tabs list GitHub PRs through `gh search`: `@prs` (open PRs you opened) and `@reviews` (open PRs
 waiting for your review). `j`/`k` move, `o` opens the PR in a browser, `r` refreshes (every minute otherwise).
@@ -1077,7 +1095,7 @@ Space expands this tab's card: the whole title, its PR numbers, the CI state and
 the end of the history file, only while expanded). Space again collapses it. The key legend follows the selected card: it
 adds `⚠ blocked` (or `fault`, `unsaved`, `cleanup failed`) or `✓ mergeable` where they apply, and the new-workspace prompt shows its keys when there is room.
 
-`s` opens a one-line prompt at the foot of the sidebar. Type `<repo> <id>`, such as `overbridge 79` or
+`n` opens a one-line prompt at the foot of the sidebar. Type `<repo> <id>`, such as `overbridge 79` or
 `web-monorepo ENG-123`. If the tab's workspace holds one repo, the id alone is enough; otherwise the prompt asks for
 the repo next. Enter runs `overbridge start`, which opens the item's workspace in a new background tab, or switches to its tab if
 it already has one. Esc cancels. While the prompt is open, every key goes into it. If the start fails (unknown repo,
@@ -1094,7 +1112,7 @@ minutes old). The selected card shows a last-turn receipt (`last turn 2m14s · 3
 `<meta>/agent/<ws>.turn.json`, which the agent hook updates only on a prompt, an edit tool, a failure, a stop or a
 compaction. Both files are read mtime-cached; the sidebar never reads the history.
 
-`overbridge next` (the `n` key in the sidebar, and a zellij binding) goes to the next tab that needs you:
+`overbridge next` (the `a` key in the sidebar, and a zellij binding) goes to the next tab that needs you:
 waiting for input first, then finished, then finished with background tasks running, cycling from the current tab.
 
 `overbridge go <n>|<name>|next|prev` switches tab by its sidebar number (`go 1` is the root tab, like `⌥1`), by name,

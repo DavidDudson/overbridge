@@ -479,10 +479,10 @@ describe("new workspace prompt", () => {
       return step.prompt;
     }, start);
 
-  test("the legend names the s key and shows in the footer by default", () => {
-    expect(legend(12)).toContain("s new ws");
+  test("the legend names the n key and shows in the footer by default", () => {
+    expect(legend(12)).toContain("n new ws");
     const rows = renderSidebar(list, 0, 0, 20, 60, undefined, 0);
-    expect(strip(rows.at(-3)!) + strip(rows.at(-2)!)).toContain("s new ws");
+    expect(strip(rows.at(-3)!) + strip(rows.at(-2)!)).toContain("n new ws");
   });
 
   test("printable keys type, including sidebar keys; backspace deletes one character", () => {
@@ -580,7 +580,7 @@ describe("runFreeze", () => {
   });
 
   test("the legend names the key and the busy footer says what runs", () => {
-    expect(legend(3)).toContain("f freeze");
+    expect(legend(3)).toContain("z freeze");
     expect(footerRow({ kind: FooterKind.Busy, id: "w1", verb: BusyVerb.Freezing }, 20).replace(/[[0-9;]*m/g, "").trimEnd()).toBe("freezing w1…");
   });
 });

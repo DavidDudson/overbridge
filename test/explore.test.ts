@@ -83,7 +83,7 @@ describe("renderPicker", () => {
 
     expect(rows).toHaveLength(10);
     expect(rows.map(strip).some((r) => r.trim() === "○ r30")).toBe(true);
-    expect(strip(rows.at(-1)!)).toContain("q: quit");
+    expect(strip(rows.at(-1)!)).toContain("q quit");
   });
 
   test("pickerOffset keeps the window inside the list", () => {

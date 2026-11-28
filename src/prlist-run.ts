@@ -9,6 +9,7 @@ import { prsView } from "./prs-view";
 import { DEFAULT_REVIEWS_SORT, reviewsView } from "./reviews-view";
 import { sortPrRows } from "./pr-sort";
 import { nextSort, type SortMode } from "./sort-mode";
+import { Action, Keyset, moveSelection, resolve } from "./keys";
 import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN } from "./term";
 
 export { age, type PrRow };
@@ -157,20 +158,20 @@ export async function prListPane(kind: PrListKind) {
     for (const input of decodeInput(data)) {
       if (input.kind !== "key") continue;
       const chosen = rowsOf()[selected];
+      const action = resolve(kind === "reviews" ? Keyset.reviews : Keyset.prs, input.key);
 
-      if (input.key === "q" || input.key === "ctrl-c") quit();
-      else if (input.key === "j" || input.key === "down") selected = Math.max(0, Math.min(rowsOf().length - 1, selected + 1));
-      else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
-      else if (input.key === "s" && kind === "reviews") {
+      if (action === Action.Quit) quit();
+      else if (action === Action.Down || action === Action.Up || action === Action.Top || action === Action.Bottom) selected = moveSelection(action, selected, rowsOf().length);
+      else if (action === Action.Sort) {
         // the cursor stays on the same PR when the order changes under it
         const url = rowsOf()[selected]?.url;
         sort = nextSort(sort);
         selected = Math.max(0, rowsOf().findIndex((r) => r.url === url));
-      } else if (input.key === "x" && chosen) {
+      } else if (action === Action.Silence && chosen) {
         message = toggleMessage(chosen, `${chosen.repo}#${chosen.number}`);
-      } else if (input.key === "r") refresh(true);
-      else if (input.key === "o" && rowsOf()[selected]) {
-        Bun.spawn({ cmd: ["gh", "pr", "view", "--web", rowsOf()[selected]!.url], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+      } else if (action === Action.Refresh) refresh(true);
+      else if ((action === Action.Open || action === Action.Enter) && chosen) {
+        Bun.spawn({ cmd: ["gh", "pr", "view", "--web", chosen.url], cwd: spawnCwd(), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
       }
     }
 

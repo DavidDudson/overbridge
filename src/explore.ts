@@ -1,3 +1,4 @@
+import { Action, Keyset, legendOf } from "./keys";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getRepo, loadRepos } from "./config";
@@ -196,7 +197,7 @@ export function renderPicker(v: PickerView): string[] {
 
   const empty = v.repos.length ? [] : [fit("  no repos registered; add one with `overbridge repo add <name> <url>`", v.width)];
 
-  return [fit(" explore: pick a repo to run on its default branch", v.width), "", ...empty, ...list, "", fit(v.message ?? dim(" enter/click: open · j/k: move · q: quit"), v.width)];
+  return [fit(" explore: pick a repo to run on its default branch", v.width), "", ...empty, ...list, "", fit(v.message ?? dim(` ${legendOf(Keyset.explore, { [Action.Enter]: "open" })}   click open`), v.width)];
 }
 
 /** The repo at 0-based screen `row`, if that row shows one. */

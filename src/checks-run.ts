@@ -4,6 +4,7 @@ import { Move, readOverrides, readOverridesForWrite, writeOverrides } from "./ch
 import { CHECKS_CHROME, type CheckRow, checkRows, ChecksMode, queueEstimates, type QueueEstimates, movedOverrides, nextChecksMode, RECENT_WINDOW_MS, type RecentCheck, recentChecks, recentKey, renderChecks, renderRecent } from "./checks";
 import { readEstimates, seedEstimates, seedRuns } from "./check-estimate";
 import { historyStore } from "./history";
+import { Action, Keyset, moveSelection, resolve } from "./keys";
 import { decodeInput, ENTER_SCREEN, frame, LEAVE_SCREEN, stripControl } from "./term";
 import { errorMessage } from "./util";
 import { createPainter } from "./zellij-view";
@@ -18,8 +19,8 @@ const SEED_WINDOW_MS = 7 * 24 * 60 * 60_000;
 const MOVE_KEYS = new Map<string, Move>([
   ["K", Move.Up],
   ["J", Move.Down],
-  ["t", Move.Top],
-  ["b", Move.Bottom],
+  ["T", Move.Top],
+  ["B", Move.Bottom],
 ]);
 
 /** `overbridge checks`: the pane of the @checks tab, over the check queue and the runs that finished recently. */
@@ -203,21 +204,21 @@ export async function checksPane() {
       const pending = killing;
       killing = undefined;
 
-      if (input.key === "q" || input.key === "ctrl-c") {
+      const action = resolve(mode === ChecksMode.Queue ? Keyset.checksQueue : Keyset.checksRecent, input.key);
+
+      if (action === Action.Quit) {
         quit();
       } else if (pending && input.key === "y") {
         confirmKill(pending);
-      } else if (input.key === "x" && mode === ChecksMode.Queue) {
+      } else if (action === Action.Delete) {
         askKill();
-      } else if (input.key === "v") {
+      } else if (action === Action.View) {
         switchMode();
-      } else if (input.key === "j" || input.key === "down") {
-        selected = Math.max(0, Math.min(listLength() - 1, selected + 1));
-      } else if (input.key === "k" || input.key === "up") {
-        selected = Math.max(0, selected - 1);
+      } else if (action === Action.Down || action === Action.Up || action === Action.Top || action === Action.Bottom) {
+        selected = moveSelection(action, selected, listLength());
       } else if (move) {
         moveSelected(move);
-      } else if (input.key === "r") {
+      } else if (action === Action.Refresh) {
         reload();
       }
     }

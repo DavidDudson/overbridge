@@ -1,3 +1,4 @@
+import { Action, Keyset, moveSelection, resolve } from "./keys";
 import { frozenRows, FROZEN_CHROME, renderFrozen } from "./frozen";
 import { selfCommand } from "./paths";
 import { tryReadState, watchState } from "./state";
@@ -103,15 +104,15 @@ export async function frozenPane() {
         notice = "";
       }
 
-      if (input.key === "q" || input.key === "ctrl-c") {
+      const action = resolve(Keyset.frozen, input.key);
+
+      if (action === Action.Quit) {
         quit();
-      } else if (input.key === "j" || input.key === "down") {
-        selected = Math.max(0, Math.min(rows.length - 1, selected + 1));
-      } else if (input.key === "k" || input.key === "up") {
-        selected = Math.max(0, selected - 1);
-      } else if (input.key === "t") {
+      } else if (action === Action.Down || action === Action.Up || action === Action.Top || action === Action.Bottom) {
+        selected = moveSelection(action, selected, rows.length);
+      } else if (action === Action.Freeze) {
         thawSelected();
-      } else if (input.key === "r") {
+      } else if (action === Action.Refresh) {
         reload();
       }
     }

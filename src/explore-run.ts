@@ -1,3 +1,4 @@
+import { Action, Keyset, moveSelection, resolve as resolveKey } from "./keys";
 import { existsSync } from "node:fs";
 import { killApp, recordIds, stopApp } from "./apps";
 import { spawnAsync } from "./child";
@@ -143,12 +144,13 @@ function pick(initial: string | undefined, initialMessage?: string): Promise<str
 
         const current = repos[selected];
 
-        if (input.key === "q" || input.key === "ctrl-c") {
+        const action = resolveKey(Keyset.explore, input.key);
+
+        if (action === Action.Quit) {
           process.stdout.write(LEAVE_SCREEN);
           process.exit(0);
-        } else if (input.key === "j" || input.key === "down") selected = Math.min(repos.length - 1, selected + 1);
-        else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
-        else if ((input.key === "enter" || input.key === " ") && current !== undefined) return leave(current);
+        } else if (action === Action.Down || action === Action.Up || action === Action.Top || action === Action.Bottom) selected = moveSelection(action, selected, repos.length);
+        else if ((action === Action.Enter || input.key === " ") && current !== undefined) return leave(current);
       }
 
       draw();
