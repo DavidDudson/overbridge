@@ -238,11 +238,13 @@ describe("tmuxMux argv", () => {
 
   test("fitWidths sets the sidebar to a quarter and Claude to half the rest, leaving panes already right", () => {
     const row = (...f: (string | number)[]) => f.join("|||");
+
     const r = recorder((cmd) =>
       cmd[1] === "list-panes"
         ? ok([row("%1", "@1", 200, "sidebar", 0, 80), row("%2", "@1", 200, "top", 81, 119), row("%3", "@1", 200, "w · claude", 81, 88), row("%4", "@1", 200, "w · diff", 170, 30)].join("\n"))
         : ok(),
     );
+
     tmuxMux(r.exec, { session: "s" }).fitWidths();
     expect(r.calls.filter((c) => c[1] === "resize-pane")).toEqual([
       ["tmux", "resize-pane", "-t", "%1", "-x", "50"],

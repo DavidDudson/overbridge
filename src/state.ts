@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { type AgentLaunch, launchFault } from "./agent-launch";
 import { AgentKind, isAgentKind } from "./agent-kind";
 import type { CleanupCause, CleanupRecord } from "./cleanup-log";
+import { isJsonNumber } from "./json";
 import { metaDir } from "./paths";
 import { pidAlive } from "./proc";
 import { type Cover, overlaps } from "./stack";
@@ -120,7 +121,7 @@ export function workspaceFault(w: Json | undefined): string | undefined {
     return `state record has removeErrorAt as ${describeValue(w.removeErrorAt)}`;
   }
 
-  if (w.removeFailures !== undefined && !(typeof w.removeFailures === "number" && Number.isInteger(w.removeFailures) && w.removeFailures >= 0)) {
+  if (w.removeFailures !== undefined && !(isJsonNumber(w.removeFailures) && Number.isInteger(w.removeFailures) && w.removeFailures >= 0)) {
     return `state record has removeFailures as ${describeValue(w.removeFailures)}`;
   }
 

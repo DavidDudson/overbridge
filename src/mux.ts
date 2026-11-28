@@ -339,6 +339,7 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
       const r = tmux("list-panes", "-s", "-t", `=${session}`, "-F", ["#{pane_id}", "#{window_id}", "#{window_width}", "#{pane_title}", "#{pane_left}", "#{pane_width}"].join(SEP));
 
       if (!r.ok) return;
+
       const boxes: PaneBox[] = lines(r.stdout).map((l) => {
         const [id = "", window = "", windowWidth = "0", title = "", left = "0", width = "0"] = l.split(SEP);
 
