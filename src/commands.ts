@@ -581,7 +581,6 @@ export async function claude(ws: string, extra: string[]): Promise<never> {
       return session(relaunchExtra(request), 0);
     }
 
-    // the agent exited on its own: bring it back, unless the user ended the session on purpose
     const next = afterAgentExit({ elapsedMs: Date.now() - startedMs, streak, endedForGood: sessionEndedForGood(ws), signal });
 
     if (!next.restart) {

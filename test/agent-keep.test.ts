@@ -3,6 +3,7 @@ import { afterAgentExit } from "../src/agent-restart";
 import { ensureAgentPane, placement, REOPEN_COOLDOWN_MS, resetAgentKeep } from "../src/agent-keep";
 import type { MuxPane, NewPane } from "../src/mux";
 import { QUICK_EXIT_MS } from "../src/orchestration-keep";
+import { shouldKeepAgent } from "../src/sidebar";
 import { deltaCommand, difftCommand, DIFFT_SIDE_BY_SIDE_MIN_COLUMNS, pickDiffTool } from "../src/panes";
 
 const pane = (id: string, title: string, over: Partial<MuxPane> = {}): MuxPane => ({ id, title, tab: "w1", exited: false, ...over });
@@ -37,7 +38,9 @@ describe("afterAgentExit", () => {
 
   test("a session the user ended on purpose, or a hang-up, stays closed", () => {
     expect(afterAgentExit({ elapsedMs: 60_000, streak: 0, endedForGood: true })).toEqual({ restart: false });
-    expect(afterAgentExit({ elapsedMs: 60_000, streak: 0, endedForGood: false, signal: "SIGHUP" })).toEqual({ restart: false });
+
+    for (const signal of ["SIGHUP", "SIGTERM", "SIGKILL"]) expect(afterAgentExit({ elapsedMs: 60_000, streak: 0, endedForGood: false, signal })).toEqual({ restart: false });
+    expect(afterAgentExit({ elapsedMs: 60_000, streak: 0, endedForGood: false, signal: "SIGSEGV" })).toMatchObject({ restart: true });
   });
 
   test("a resumed agent that exits quickly gets a fresh conversation, then backs off", () => {
@@ -87,11 +90,11 @@ describe("ensureAgentPane", () => {
     expect(f.opened).toHaveLength(2);
   });
 
-  test("a refused open sets no cooldown", () => {
+  test("a refused open waits out the cooldown too, since each try focuses the anchor pane", () => {
     const f = fakeMux([pane("1", "sidebar"), pane("3", "w1 · diff")], false);
-    expect(ensureAgentPane("w1", deps(f.mux))).toBe(false);
-    expect(ensureAgentPane("w1", deps(f.mux))).toBe(false);
-    expect(f.opened).toHaveLength(2);
+    expect(ensureAgentPane("w1", deps(f.mux, () => 0))).toBe(false);
+    expect(ensureAgentPane("w1", deps(f.mux, () => 1))).toBe(false);
+    expect(f.opened).toHaveLength(1);
   });
 });
 
@@ -113,4 +116,19 @@ describe("diff tool", () => {
     expect(deltaCommand(80)).toContain("--no-side-by-side");
     expect(deltaCommand(200)).not.toContain("--no-side-by-side");
   });
+});
+
+describe("shouldKeepAgent", () => {
+  const live = { created: "now", repos: {} };
+
+  const table: [string, Parameters<typeof shouldKeepAgent>, boolean][] = [
+    ["a live, focused workspace", [live, false, true], true],
+    ["no such workspace", [undefined, false, true], false],
+    ["being removed", [{ ...live, removing: { since: new Date().toISOString() } }, false, true], false],
+    ["iceboxed", [{ ...live, iceboxed: { since: new Date().toISOString() } }, false, true], false],
+    ["the user ended the session", [live, true, true], false],
+    ["its tab is not in view", [live, false, false], false],
+  ];
+
+  for (const [name, args, want] of table) test(name, () => expect(shouldKeepAgent(...args)).toBe(want));
 });

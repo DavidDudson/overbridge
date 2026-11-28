@@ -653,6 +653,10 @@ export function inFlightCleanups(state: State = readState(), now = Date.now()): 
   });
 }
 
+/** Whether this sidebar should bring its Claude pane back: the workspace is live, the user did not end the session, and its tab is the one in view (opening a pane focuses it). */
+export const shouldKeepAgent = (w: WorkspaceState | undefined, endedForGood: boolean, focused: boolean): boolean =>
+  w !== undefined && !w.removing && !isIceboxed(w) && !endedForGood && focused;
+
 /** What the sidebar reads on every poll. Injectable so a throwing reader can be tested without zellij, git or files. */
 export interface SidebarReaders {
   tabOrder: () => string[];
@@ -1140,8 +1144,7 @@ export async function sidebar(wsOpt?: string) {
       : (state) => {
           const w = state.workspaces[self];
 
-          if (!w || w.removing || isIceboxed(w) || sessionEndedForGood(self) || !isFocused(self, readView())) return;
-          ensureAgentPane(self);
+          if (shouldKeepAgent(w, sessionEndedForGood(self), isFocused(self, readView()))) ensureAgentPane(self);
         },
     // with the server down, the sidebar that takes the sweep also runs the CPU priority pass the server would
     sweep: createSweepTrigger({ serverOwns: () => serverOwnsSweep(), claim: claimSweep, start: () => {

@@ -20,6 +20,9 @@ export interface MuxPane {
   exited: boolean;
 }
 
+/** tmux `split-window` flags for each direction a pane can open in. */
+const SPLIT_FLAGS: Record<NewPane["direction"], string[]> = { down: ["-v"], left: ["-h", "-b"], right: ["-h"] };
+
 export interface NewPane {
   /** The pane the new one opens beside. */
   anchor: string;
@@ -326,7 +329,7 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
     resizePane: (id, change) => tmux("resize-pane", "-t", id, change === PaneResize.Grow ? "-D" : "-U", "1").ok,
     sendText: (id, text) => tmux("send-keys", "-t", id, "-l", "--", text).ok && settle() && tmux("send-keys", "-t", id, "Enter").ok,
     newPane(req) {
-      const args = ["split-window", "-P", "-F", "#{pane_id}", "-t", req.anchor, ...(req.direction === "down" ? ["-v"] : req.direction === "left" ? ["-h", "-b"] : ["-h"]), "-c", req.cwd];
+      const args = ["split-window", "-P", "-F", "#{pane_id}", "-t", req.anchor, ...SPLIT_FLAGS[req.direction], "-c", req.cwd];
 
       if (req.command.length) args.push(req.command.map(shellQuote).join(" "));
       const r = tmux(...args);

@@ -87,8 +87,8 @@ export function togglePane(ws: string, kind: PaneKind, deps: PaneDeps = defaultD
     direction: other ? "down" : "right",
     title: paneTitle(ws, kind),
     cwd: terminalDir(ws),
-    command: kind === "diff" ? [...deps.self, "diff", "--ws", ws] : terminalCommand(ws, deps),
-    closeOnExit: kind === "diff",
+    command: kind === "diff" ? [...deps.self, "diff", "--ws", ws, "--follow"] : terminalCommand(ws, deps),
+    closeOnExit: false,
   });
 
   return opened ? undefined : `could not open ${kind}`;
@@ -121,12 +121,12 @@ export type DiffTool = "difft" | "delta" | "git";
 /** The renderer to use given which programs are on PATH: difftastic, else delta, else git's own colours. */
 export const pickDiffTool = (have: { difft: boolean; delta: boolean }): DiffTool => (have.difft ? "difft" : have.delta ? "delta" : "git");
 
-/** `git` arguments and extra environment that make git render `base` against the worktree with difftastic at `columns` wide. */
 export interface DifftCommand {
   args: string[];
   env: Record<string, string>;
 }
 
+/** `git` arguments and extra environment that make git render `base` against the worktree with difftastic at `columns` wide. */
 export function difftCommand(base: string, columns: number): DifftCommand {
   return {
     args: ["-c", "diff.external=difft", "diff", "--ext-diff", base],
@@ -140,31 +140,42 @@ function renderRepo(dir: string, base: string, columns: number, tool: DiffTool):
     const { args, env } = difftCommand(base, columns);
     const out = Bun.spawnSync({ cmd: ["git", "-C", dir, ...args], cwd: spawnCwd(), env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" });
 
-    return out.exitCode === 0 ? out.stdout.toString() : "";
+    if (out.exitCode === 0) return out.stdout.toString();
+
+    // difft missing or crashed: an empty result would read as "no changes", so show the plain diff instead
+    return renderRepo(dir, base, columns, pickDiffTool({ difft: false, delta: !!Bun.which("delta") }));
   }
 
   const raw = Bun.spawnSync({ cmd: ["git", "-C", dir, "diff", "-w", "--color=always", base], cwd: spawnCwd(), stdout: "pipe", stderr: "pipe" });
 
   if (!raw.stdout.length || tool === "git") return raw.stdout.toString();
 
-  return Bun.spawnSync({ cmd: deltaCommand(columns), cwd: dir, stdin: raw.stdout, stdout: "pipe", stderr: "pipe" }).stdout.toString();
+  const piped = Bun.spawnSync({ cmd: deltaCommand(columns), cwd: dir, stdin: raw.stdout, stdout: "pipe", stderr: "pipe" });
+
+  // delta rejecting a flag (its options differ between versions) must not read as no changes
+  return piped.exitCode === 0 ? piped.stdout.toString() : raw.stdout.toString();
 }
 
 /** How long a following diff waits before it looks for changes again. */
 export const FOLLOW_POLL_MS = 5_000;
 
+/** A pager that exits sooner than this was not shown (no `less` on PATH): wait before looking again instead of spinning. */
+const PAGER_MIN_MS = 200;
+
 /**
  * `overbridge diff [--follow]`: each claimed repo's changes since it left the default branch (committed
- * and uncommitted), rendered with difftastic (else delta from the user's git config, else plain git) and paged.
- * With `follow` it never exits: it waits for changes and re-renders when the pager is quit (`q` refreshes), which
- * is how the diff pane a workspace tab opens with stays useful.
+ * and uncommitted), rendered with difftastic (else delta, else plain git) and paged. With `follow` it never
+ * exits: it waits for changes, and `q` in the pager refreshes.
  */
 export function diff(ws: string, follow = false) {
   for (;;) {
     const out = renderDiff(ws, process.stdout.columns ?? 80);
 
     if (out) {
+      const startedMs = Date.now();
       Bun.spawnSync({ cmd: ["less", "-R"], cwd: spawnCwd(), stdin: Buffer.from(out), stdout: "inherit", stderr: "inherit" });
+
+      if (follow && Date.now() - startedMs < PAGER_MIN_MS) Bun.sleepSync(FOLLOW_POLL_MS);
     } else {
       if (follow) process.stdout.write("\x1b[2J\x1b[H");
       console.log("no changes");
