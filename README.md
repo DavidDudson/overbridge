@@ -979,7 +979,7 @@ A cleaned-up workspace has no card. Errors, failed removals, kept-by-the-sweep a
 Each workspace's Claude session is named after it (`claude --name <ws>`), so the orchestrator's `ListAgents` and
 `SendMessage` address it by workspace name. `overbridge ahead [--json]` lists workspaces whose branch holds commits main lacks,
 and the orchestrator's `revisit` skill uses it to ask each one's Claude whether those commits are still relevant.
-Up/Down or `j`/`k` step to the neighbouring tab, a click picks a row, and a tab's number jumps to it.
+Up/Down or `j`/`k` step to the neighbouring tab, a click picks a row and focuses its Claude pane, and a tab's number jumps to it.
 A digit that could start a two-digit number waits 0.6 s for a second one, so with 14 tabs `1` then `2`
 goes to tab 12 and `1` alone goes to tab 1. If you leave the tab some other way while a digit waits, the digit is dropped.
 The legend shows the range the digits reach, such as `1-14`.

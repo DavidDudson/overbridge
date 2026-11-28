@@ -38,6 +38,7 @@ import { bold, boxBottom, boxDivider, boxRow, boxTop, type Color, colorize, deco
 import { beginRemoval } from "./remove";
 import { cardLabel, CLEANUP_ARM_MS, pressCleanup, readTopCache, readTopCacheChecked, sidebarLabel, type PrStatus, type TopCache } from "./top";
 import { defaultMux, type Mux } from "./mux";
+import { focusClaude } from "./panes";
 import { currentTab, tabOrder } from "./tab";
 import { createPainter, isFocused, readView, shouldPoll } from "./zellij-view";
 import { errorMessage, naturalSort } from "./util";
@@ -1017,6 +1018,8 @@ export interface Step {
   travel?: Travel;
   /** A digit waiting for a second one; empty for none. */
   pending: string;
+  /** A click hit this entry (the current one too): its Claude pane takes focus once the tab is shown. */
+  clicked?: number;
 }
 
 /**
@@ -1051,7 +1054,26 @@ export function stepFor(input: Input, current: number, offset: number, heights: 
     return { travel: Travel.Forward, pending: "" };
   }
 
+  if (input.kind === "click") {
+    const clicked = clickTarget(input.row, offset, heights, rows, pinned);
+
+    return { ...(clicked === undefined ? {} : { clicked }), target: inRange(clicked, count, current), pending: "" };
+  }
+
   return { target: targetFor(input, current, offset, heights, rows, pinned), pending: "" };
+}
+
+/**
+ * A click on `tab`'s card: go there and focus its Claude pane. `switchTab` leaves the sidebar
+ * focused so keys keep stepping; a click wants the agent, so it focuses Claude after the switch (also on the current tab,
+ * where focus may sit in the sidebar or another pane). False when the switch failed.
+ */
+export function clickTab(self: string, tab: string, mux: Mux = defaultMux()): boolean {
+  const moved = tab === self || visitTab(self, tab, mux);
+
+  if (moved) focusClaude(tab, mux);
+
+  return moved;
 }
 
 /**
@@ -1422,7 +1444,9 @@ export async function sidebar(wsOpt?: string) {
           const step = stepFor(input, current, offset, heights, bodyRowsFor(height, pinnedRowsFor(heights, pinned), statusRowCount), pinned, pending);
           hold(step.pending);
 
-          if (step.travel !== undefined) {
+          if (step.clicked !== undefined) {
+            clickTab(self, list[step.clicked]!.tab);
+          } else if (step.travel !== undefined) {
             travelTab(self, step.travel, list);
           } else if (step.target !== undefined) {
             visitTab(self, list[step.target]!.tab);
