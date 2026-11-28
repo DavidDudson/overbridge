@@ -354,7 +354,9 @@ describe("click focuses Claude", () => {
 
       return { ok: false, stdout: "" };
     });
+
     expect(clickTab("w1", "w2", mux)).toBe(false);
+
     expect(calls.some((c) => c[2] === "focus-pane-id")).toBe(false);
   });
 });

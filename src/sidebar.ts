@@ -1078,7 +1078,11 @@ export function stepFor(input: Input, current: number, offset: number, heights: 
   if (input.kind === "click") {
     const clicked = clickTarget(input.row, offset, heights, rows, pinned);
 
-    return { ...(clicked === undefined ? {} : { clicked }), target: inRange(clicked, count, current), pending: "" };
+    const step: { clicked?: number; target: number; pending: string } = { target: inRange(clicked, count, current), pending: "" };
+
+    if (clicked !== undefined) step.clicked = clicked;
+
+    return step;
   }
 
   return { target: targetFor(input, current, offset, heights, rows, pinned), pending: "" };
