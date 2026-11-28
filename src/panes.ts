@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { getRepo } from "./config";
 import { focusedDiff, type Noise } from "./focused-diff";
 import * as git from "./git";
@@ -6,7 +9,7 @@ import { loadRepoConfig } from "./project-config";
 import { getWorkspace, readState } from "./state";
 import { defaultMux, type Mux, type MuxPane } from "./mux";
 import type { PaneKind } from "./top";
-import { run, spawnCwd } from "./util";
+import { run, shellQuote, spawnCwd } from "./util";
 
 /**
  * The claude / terminal / diff buttons. Claude is always open at the left of the tab; terminal and
@@ -109,11 +112,12 @@ export function focusClaude(tab: string, mux: Mux): boolean {
 export const SIDE_BY_SIDE_MIN_COLUMNS = 140;
 
 /** The pager command for a diff: the user's `delta` (git config styles), whitespace hidden by the caller's `-w`. */
-export function deltaCommand(columns: number): string[] {
-  return ["delta", "--paging=never", `--width=${columns}`, ...(columns < SIDE_BY_SIDE_MIN_COLUMNS ? ["--no-side-by-side"] : [])];
+export function deltaCommand(columns: number, sideBySide = false): string[] {
+  // delta has no --no-side-by-side, and the user's git config may turn side-by-side on, so the inline view removes the feature
+  return ["delta", "--paging=never", `--width=${columns}`, sideBySide && columns >= SIDE_BY_SIDE_MIN_COLUMNS ? "--side-by-side" : "--features=-side-by-side"];
 }
 
-/** difftastic's side-by-side layout needs at least this many columns; narrower panes get its inline display. */
+/** difftastic's side-by-side layout needs at least this many columns; narrower views get its inline display. */
 export const DIFFT_SIDE_BY_SIDE_MIN_COLUMNS = 100;
 
 /** The diff renderers `diff` can use, best first. */
@@ -128,30 +132,30 @@ export interface DifftCommand {
 }
 
 /** `git` arguments and extra environment that make git render `base` against the worktree with difftastic at `columns` wide. */
-export function difftCommand(base: string, columns: number): DifftCommand {
+export function difftCommand(base: string, columns: number, sideBySide = false): DifftCommand {
   return {
     args: ["-c", "diff.external=difft", "diff", "--ext-diff", base],
-    env: { DFT_COLOR: "always", DFT_WIDTH: String(columns), DFT_DISPLAY: columns >= DIFFT_SIDE_BY_SIDE_MIN_COLUMNS ? "side-by-side-show-both" : "inline" },
+    env: { DFT_COLOR: "always", DFT_WIDTH: String(columns), DFT_DISPLAY: sideBySide && columns >= DIFFT_SIDE_BY_SIDE_MIN_COLUMNS ? "side-by-side-show-both" : "inline" },
   };
 }
 
 /** One repo's diff, rendered; empty when nothing changed. */
-function renderRepo(dir: string, base: string, columns: number, tool: DiffTool): string {
+function renderRepo(dir: string, base: string, columns: number, tool: DiffTool, sideBySide: boolean): string {
   if (tool === "difft") {
-    const { args, env } = difftCommand(base, columns);
+    const { args, env } = difftCommand(base, columns, sideBySide);
     const out = Bun.spawnSync({ cmd: ["git", "-C", dir, ...args], cwd: spawnCwd(), env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" });
 
     if (out.exitCode === 0) return out.stdout.toString();
 
     // difft missing or crashed: an empty result would read as "no changes", so show the plain diff instead
-    return renderRepo(dir, base, columns, pickDiffTool({ difft: false, delta: !!Bun.which("delta") }));
+    return renderRepo(dir, base, columns, pickDiffTool({ difft: false, delta: !!Bun.which("delta") }), sideBySide);
   }
 
   const raw = Bun.spawnSync({ cmd: ["git", "-C", dir, "diff", "-w", "--color=always", base], cwd: spawnCwd(), stdout: "pipe", stderr: "pipe" });
 
   if (!raw.stdout.length || tool === "git") return raw.stdout.toString();
 
-  const piped = Bun.spawnSync({ cmd: deltaCommand(columns), cwd: dir, stdin: raw.stdout, stdout: "pipe", stderr: "pipe" });
+  const piped = Bun.spawnSync({ cmd: deltaCommand(columns, sideBySide), cwd: dir, stdin: raw.stdout, stdout: "pipe", stderr: "pipe" });
 
   // delta rejecting a flag (its options differ between versions) must not read as no changes
   return piped.exitCode === 0 ? piped.stdout.toString() : raw.stdout.toString();
@@ -161,7 +165,7 @@ function renderRepo(dir: string, base: string, columns: number, tool: DiffTool):
 function renderRepoFocused(dir: string, base: string, columns: number, tool: DiffTool, keep: ReadonlySet<Noise>): string {
   const raw = Bun.spawnSync({ cmd: ["git", "-C", dir, "-c", "core.quotepath=off", "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--submodule=short", "--ignore-submodules=none", "-M", "-U3", base, "--"], cwd: spawnCwd(), stdout: "pipe", stderr: "pipe" });
 
-  return raw.exitCode === 0 ? focusedDiff(raw.stdout.toString(), { keep }) : renderRepo(dir, base, columns, tool);
+  return raw.exitCode === 0 ? focusedDiff(raw.stdout.toString(), { keep }) : renderRepo(dir, base, columns, tool, false);
 }
 
 /** How long a following diff waits before it looks for changes again. */
@@ -170,19 +174,92 @@ export const FOLLOW_POLL_MS = 5_000;
 /** A pager that exits sooner than this was not shown (no `less` on PATH): wait before looking again instead of spinning. */
 const PAGER_MIN_MS = 200;
 
+/** Environment variable carrying the shell command `d` runs in the inline pager. */
+const OVERLAY_ENV = "OVERBRIDGE_DIFF_OVERLAY";
+
+/** `--lesskey-src` arrived in less 582; an older less rejects it and exits without paging. */
+const LESSKEY_SRC_MIN_VERSION = 582;
+
+/** Whether the installed `less` takes `--lesskey-src`; without it the pager runs plain and `d` does nothing. */
+function lessTakesLesskey(): boolean {
+  try {
+    const version = /^less (\d+)/.exec(Bun.spawnSync({ cmd: ["less", "--version"], stdout: "pipe", stderr: "pipe" }).stdout.toString());
+
+    return version !== null && Number(version[1]) >= LESSKEY_SRC_MIN_VERSION;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The less key file for the diff pager: in the inline pane `d` runs the shell command in `OVERLAY_ENV` (`!` runs it
+ * from inside less, and the second newline answers its "press RETURN"); in the overlay itself `d` quits, so the same
+ * key toggles it away.
+ */
+export const diffLesskey = (opensOverlay: boolean) => `#command\n${opensOverlay ? `d noaction !eval "$${OVERLAY_ENV}"\\n\\n` : "d quit"}\n`;
+
+/** Page `out`, with the `d` key when `overlayCommand` is given and less supports it. */
+function diffPager(out: string, overlayCommand: string | undefined) {
+  if (!lessTakesLesskey()) {
+    Bun.spawnSync({ cmd: ["less", "-R"], cwd: spawnCwd(), stdin: Buffer.from(out), stdout: "inherit", stderr: "inherit" });
+
+    return;
+  }
+
+  const dir = mkdtempSync(join(tmpdir(), "overbridge-less-"));
+  const keyFile = join(dir, "keys");
+
+  // the command travels in the environment: less rewrites `%`/`#` and lesskey `\\`/`^` in a typed command, and the shell expands it intact
+  const env = { ...process.env };
+
+  if (overlayCommand !== undefined) env[OVERLAY_ENV] = overlayCommand;
+
+  try {
+    writeFileSync(keyFile, diffLesskey(overlayCommand !== undefined));
+    Bun.spawnSync({
+      cmd: ["less", "-R", `--lesskey-src=${keyFile}`],
+      cwd: spawnCwd(),
+      env,
+      stdin: Buffer.from(out),
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Open the side-by-side viewer as a floating pane over the current one. */
+export function openDiffOverlay(ws: string, deps: PaneDeps = defaultDeps()): string | undefined {
+  const opened = deps.mux.newPane({
+    anchor: deps.mux.ownPaneId() ?? "",
+    direction: "right",
+    title: `${paneTitle(ws, "diff")} (side by side)`,
+    cwd: terminalDir(ws),
+    command: [...deps.self, "diff", "--ws", ws, "--side-by-side"],
+    closeOnExit: true,
+    floating: true,
+  });
+
+  return opened ? undefined : "could not open the side-by-side overlay";
+}
+
 /**
  * `overbridge diff [--follow]`: each claimed repo's changes since it left the default branch (committed
- * and uncommitted), rendered with difftastic (else delta, else plain git) and paged. With `follow` it never
- * exits: it waits for changes, and `q` in the pager refreshes. With `focus` it prints the focused diff instead
- * (see `src/focused-diff.ts`).
+ * and uncommitted), rendered inline with difftastic (else delta, else plain git) and paged. With `follow` it never
+ * exits: it waits for changes, and `q` in the pager refreshes. `sideBySide` renders the one-shot overlay that `d` opens.
+ * With `focus` it prints the focused diff instead (see `src/focused-diff.ts`); that has no side-by-side view, so no `d` overlay.
  */
-export function diff(ws: string, follow = false, focus?: FocusMode) {
+export function diff(ws: string, follow = false, sideBySide = false, focus?: FocusMode) {
+  const self = selfCommand();
+  const overlayCommand = sideBySide || focus ? undefined : [...self, "diff", "--ws", ws, "--overlay"].map(shellQuote).join(" ");
+
   for (;;) {
-    const out = renderDiff(ws, process.stdout.columns ?? 80, undefined, focus);
+    const out = renderDiff(ws, process.stdout.columns ?? 80, undefined, sideBySide, focus);
 
     if (out) {
       const startedMs = Date.now();
-      Bun.spawnSync({ cmd: ["less", "-R"], cwd: spawnCwd(), stdin: Buffer.from(out), stdout: "inherit", stderr: "inherit" });
+      diffPager(out, overlayCommand);
 
       if (follow && Date.now() - startedMs < PAGER_MIN_MS) Bun.sleepSync(FOLLOW_POLL_MS);
     } else {
@@ -191,7 +268,7 @@ export function diff(ws: string, follow = false, focus?: FocusMode) {
       Bun.sleepSync(follow ? FOLLOW_POLL_MS : 2_000);
     }
 
-    if (!follow) return;
+    if (!follow || sideBySide) return;
   }
 }
 
@@ -201,7 +278,13 @@ export interface FocusMode {
 }
 
 /** Every claimed repo's changes since it left the default branch (committed and uncommitted), rendered; empty when none. */
-export function renderDiff(ws: string, columns: number, tool: DiffTool = pickDiffTool({ difft: !!Bun.which("difft"), delta: !!Bun.which("delta") }), focus?: FocusMode): string {
+export function renderDiff(
+  ws: string,
+  columns: number,
+  tool: DiffTool = pickDiffTool({ difft: !!Bun.which("difft"), delta: !!Bun.which("delta") }),
+  sideBySide = false,
+  focus?: FocusMode,
+): string {
   const repos = Object.keys(getWorkspace(readState(), ws).repos);
   let out = "";
 
@@ -217,7 +300,7 @@ export function renderDiff(ws: string, columns: number, tool: DiffTool = pickDif
     })();
 
     const base = (def && run(["git", "-C", dir, "merge-base", "HEAD", `origin/${def}`]).stdout) || "HEAD";
-    const text = focus ? renderRepoFocused(dir, base, columns, tool, focus.keep) : renderRepo(dir, base, columns, tool);
+    const text = focus ? renderRepoFocused(dir, base, columns, tool, focus.keep) : renderRepo(dir, base, columns, tool, sideBySide);
 
     if (!text.trim()) continue;
 

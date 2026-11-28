@@ -1129,8 +1129,8 @@ second press within five seconds, and merges a stack atomically with `gh stack m
 buttons. PR buttons are coloured by status: 🟣 merged, 🟢 mergeable (GitHub `CLEAN` or `HAS_HOOKS`: could be squash-merged now), 🟡 pending (no conflict, but checks running or not `CLEAN`: review missing, behind, unstable), 🔴 failing build or conflicts,
 🔵 draft, ⚫ closed. Every workspace tab opens with the diff already
 beside the agent (`overbridge diff --follow`: it waits for changes and `q` in the pager refreshes it); terminal opens a shell in
-the first repo and diff opens the changes since the default branch, rendered by [difftastic](https://difftastic.wilfred.me.uk) (`difft`;
-else `delta` from your git config, else plain git) in a column to the agent's right, and a second press closes them.
+the first repo and diff opens the changes since the default branch, rendered inline by [difftastic](https://difftastic.wilfred.me.uk) (`difft`;
+else `delta` from your git config, else plain git) in a column to the agent's right, and a second press closes them. `d` in the diff pager opens the same changes side by side in a floating overlay; `d` or `q` closes it.
 `overbridge diff --focused` prints a mini diff instead: the blocks that are not noise, with a `⋯ imports +zod −lodash` marker where
 a block was hidden and a summary of everything hidden. Noise is formatting only (equal after dropping whitespace, `;`, trailing
 commas and quote style; indentation counts in Python and YAML), import statements, code that only moved within its file, comments,

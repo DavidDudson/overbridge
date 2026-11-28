@@ -20,7 +20,7 @@ import { commandLine, commandRows, mergeSummaries, repoLines, repoSummaries, sum
 import { defaultMux } from "./mux";
 import { next } from "./next";
 import { isNoise, NOISE_KINDS } from "./focused-diff";
-import { diff } from "./panes";
+import { diff, openDiffOverlay } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
 import { FINISH_FLAG, finishRemoval } from "./remove";
@@ -67,7 +67,7 @@ Setup
   overbridge go <n>|<name>|next|prev            switch tab by sidebar number, name, or neighbour (wrapping);
                                         works outside zellij too, so a window-manager key can call it
   overbridge diff [--ws name] [--follow] [--focused [--keep kinds]]
-                                                changes since the default branch, via difftastic (else delta);
+                                                changes since the default branch, inline, via difftastic (else delta); d opens a side-by-side overlay;
                                                 --focused hides noise (format, imports, moved, comments, generated, renamed, mode)
   overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
@@ -280,7 +280,15 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case "diff": {
-      const { values } = opts(rest, { ...ws, follow: { type: "boolean" as const }, focused: { type: "boolean" as const }, keep: { type: "string" as const } });
+      const { values } = opts(rest, {
+        ...ws,
+        follow: { type: "boolean" as const },
+        "side-by-side": { type: "boolean" as const },
+        overlay: { type: "boolean" as const },
+        focused: { type: "boolean" as const },
+        keep: { type: "string" as const },
+      });
+      const name = cmd.requireWs(values.ws);
       const keep = (values.keep ?? "").split(",").filter(Boolean);
       const bad = keep.find((k) => !isNoise(k));
 
@@ -288,7 +296,14 @@ async function main(argv: string[]): Promise<number> {
 
       if (keep.length && !values.focused) throw new OverbridgeError("--keep needs --focused");
 
-      diff(cmd.requireWs(values.ws), values.follow ?? false, values.focused ? { keep: new Set(keep.filter(isNoise)) } : undefined);
+      if (values.overlay) {
+        const err = openDiffOverlay(name);
+
+        if (err) throw new OverbridgeError(err);
+      } else {
+        diff(name, values.follow ?? false, values["side-by-side"] ?? false, values.focused ? { keep: new Set(keep.filter(isNoise)) } : undefined);
+      }
+
       break;
     }
 
