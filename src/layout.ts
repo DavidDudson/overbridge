@@ -91,19 +91,26 @@ export function orchestrationTabSpec(t: OrchestrationTab, self: string[], opts: 
   const width = opts.sidebarWidth ?? SIDEBAR_WIDTH;
   const dir = t.dir();
 
+  const main: PaneSpec = {
+    name: t.pane ? `${t.tab} · ${t.pane}` : `${t.tab} · claude`,
+    cwd: dir,
+    command: [...self, ...(t.pane ? [t.pane] : ["claude", t.tab, ...(opts.resume ? ["--continue"] : [])])],
+  };
+
+  // the agent is a full-screen program we cannot draw in; the tab's own panes (`@prs`, `@perf`...) frame themselves
+  if (!t.pane) {
+    main.borderless = true;
+    main.frame = { ws: t.tab, kind: "claude", self };
+  }
+
   return {
     name: t.tab,
     focus: opts.focus ?? false,
     sidebar: { name: "sidebar", cwd: dir, command: [...self, "sidebar", "--ws", t.tab], size: width, borderless: true },
-    main: {
-      name: t.pane ? `${t.tab} · ${t.pane}` : `${t.tab} · claude`,
-      cwd: dir,
-      command: [...self, ...(t.pane ? [t.pane] : ["claude", t.tab, ...(opts.resume ? ["--continue"] : [])])],
-      // the agent is a full-screen program we cannot draw in; the tab's own panes (`@prs`, `@perf`...) frame themselves
-      ...(t.pane ? {} : { borderless: true, frame: { ws: t.tab, kind: "claude" as const, self } }),
-    },
+    main,
   };
 }
+
 
 const kdlPane = (p: PaneSpec, indent: string, focus = false): string => {
   const [cmd, ...args] = p.command;
