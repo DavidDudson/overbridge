@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentState } from "../src/agent-state";
@@ -265,6 +265,22 @@ describe("sweepMerged while GraphQL is rate limited", () => {
     const { deps, removed } = graphQlDown(() => undefined, head);
     expect(sweepMerged(deps).r2).toBe(Verdict.Keep);
     expect(removed).not.toContain("r2");
+  });
+});
+
+describe("rm of a squash-merged workspace", () => {
+  test("removes it when HEAD is contained in the merged PR head", () => {
+    cacheMerged("rm1", mergedWorkspace("rm1"));
+    ob(["rm", "rm1"]);
+    expect(existsSync(join(root, "rm1"))).toBe(false);
+  });
+
+  test("refuses it when a commit sits past the merged PR head", () => {
+    const head = mergedWorkspace("rm2");
+    cacheMerged("rm2", head);
+    sh(["git", "commit", "-q", "--allow-empty", "-m", "late"], join(root, "rm2", "app"));
+    expect(() => ob(["rm", "rm2"])).toThrow("unpushed or unmerged commits");
+    expect(existsSync(join(root, "rm2"))).toBe(true);
   });
 });
 
