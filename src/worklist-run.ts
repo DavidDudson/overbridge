@@ -1,7 +1,7 @@
 import { subscribeEvents } from "./events-client";
 import { selfCommand } from "./paths";
 import { detailLines, filterRanked } from "./pm/worklist-filter";
-import { keyOf, noClass, rank, type Ranked, type RowClass, rowRepos, type WorkRow } from "./pm/worklist";
+import { noClass, rank, type Ranked, type RowClass, rowRepos, type WorkRow } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
 import { serverRefreshWorklist } from "./server-client";
 import { readWorklist, WORKLIST_REFRESH_MS, type WorklistCache } from "./worklist-data";
