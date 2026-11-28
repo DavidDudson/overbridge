@@ -66,7 +66,13 @@ export function resolve(keyset: readonly Action[], key: string): Action | undefi
 }
 
 /** The key the legend shows for `action`. */
-export const keyOf = (action: Action): string => KEYS.find(([a]) => a === action)![1][0]!;
+export const keyOf = (action: Action): string => {
+  const key = KEYS.find(([a]) => a === action)?.[1][0];
+
+  if (key === undefined) throw new Error(`no key for ${action}`);
+
+  return key;
+};
 
 const KEY_LABEL = new Map([
   ["enter", "⏎"],

@@ -1,5 +1,5 @@
 import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, watch } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { PRESS_KEYS } from "./keys";
 import { metaDir } from "./paths";
 import { defaultMux, type Mux } from "./mux";
@@ -16,6 +16,9 @@ export const PRESS_MAX_AGE_MS = 3_000;
 export const PRESS_USAGE = "usage: overbridge top press <key> [--ws name]";
 
 const pressDir = () => join(metaDir(), "top-press");
+
+/** A tab name is one path segment, so a crafted `--ws` cannot reach outside the press folder. */
+const isTabName = (tab: string): boolean => tab !== "" && tab !== "." && tab !== ".." && basename(tab) === tab;
 
 /** The keys a press may carry: a button key of the panel, listed once in `keys.ts` for the tmux and zellij bindings too. */
 export const isPressKey = (key: string): boolean => PRESS_KEYS.includes(key);
@@ -36,6 +39,8 @@ export function parsePresses(text: string, now: number, maxAgeMs = PRESS_MAX_AGE
 /** Queue `key` for the panel of tab `tab`. */
 export function pressKey(tab: string, key: string, now = Date.now()): void {
   if (!isPressKey(key)) throw new OverbridgeError(`'${key}' is not a button key; ${PRESS_USAGE}`);
+
+  if (!isTabName(tab)) throw new OverbridgeError(`'${tab}' is not a tab name`);
   mkdirSync(pressDir(), { recursive: true });
   appendFileSync(join(pressDir(), tab), `${now} ${key}\n`);
 }
@@ -47,8 +52,10 @@ export function drainPresses(tab: string, now = Date.now()): string[] {
 
   try {
     renameSync(file, taken);
-  } catch {
-    return [];
+  } catch (e) {
+    // no file is the normal empty queue; anything else (permissions, a read-only folder) is worth hearing about
+    if (e instanceof Error && "code" in e && e.code === "ENOENT") return [];
+    throw e;
   }
 
   try {
@@ -65,12 +72,19 @@ export function watchPresses(tab: string, onKey: (key: string) => void): () => v
   mkdirSync(pressDir(), { recursive: true });
 
   const run = () => {
-    for (const key of drainPresses(tab)) onKey(key);
+    try {
+      for (const key of drainPresses(tab)) onKey(key);
+    } catch {
+      // an unreadable queue must not take the panel down; the next poll tries again
+    }
   };
 
   const watcher = watch(pressDir(), (_event, filename) => {
     if (filename === tab) run();
   });
+
+  // the poll below still catches presses when the watch fails (inotify limit, folder removed)
+  watcher.on("error", () => watcher.close());
 
   // a missed watch event is caught here
   const poll = setInterval(run, 2_000);

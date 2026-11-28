@@ -6,9 +6,12 @@ import { shellQuote } from "./util";
  * sees it), then a button key of the top panel. `overbridge top press <key>` does the rest. Pure: it renders
  * the tmux bindings and the zellij keybinds block for a leader.
  *
- * The leader is `[keys] leader` in repos.toml, written `ctrl-space`, `alt-space` or `ctrl-` / `alt-` and one letter.
+ * The leader is `[keys] leader` in repos.toml: `ctrl-space`, `alt-space`, `ctrl-`/`alt-` and a free letter, or `off`.
  */
-export const DEFAULT_LEADER = "ctrl-space";
+export const DEFAULT_LEADER_TEXT = "ctrl-space";
+
+/** `[keys] leader = "off"` binds no chord at all. */
+export const LEADER_OFF = "off";
 
 export interface Leader {
   mod: "ctrl" | "alt";
@@ -16,11 +19,27 @@ export interface Leader {
   key: string;
 }
 
-/** The leader `text` names, or undefined when it is not `ctrl-` or `alt-` and `space` or a letter. */
+export const DEFAULT_LEADER: Leader = { mod: "ctrl", key: "space" };
+
+/** Letters whose Ctrl chord is a terminal control byte (c, d, z, h, i, j, l, m): taking one would break interrupt, EOF, suspend, backspace, tab or enter in every pane. */
+const CONTROL_LETTERS = new Set(["c", "d", "z", "h", "i", "j", "l", "m"]);
+
+/** Alt chords the generated tmux config already binds (`⌥w` runs `next`). */
+const TAKEN_ALT = new Set(["w"]);
+
+/** The leader `text` names, or undefined when it is not `ctrl-` or `alt-` and `space` or a letter that is free to take. */
 export function parseLeader(text: string): Leader | undefined {
   const m = /^(ctrl|alt)-(space|[a-z])$/.exec(text.trim().toLowerCase());
 
-  return m ? { mod: m[1] === "alt" ? "alt" : "ctrl", key: m[2]! } : undefined;
+  if (!m) return undefined;
+  const mod = m[1] === "alt" ? "alt" : "ctrl";
+  const key = m[2]!;
+
+  if (mod === "ctrl" && CONTROL_LETTERS.has(key)) return undefined;
+
+  if (mod === "alt" && TAKEN_ALT.has(key)) return undefined;
+
+  return { mod, key };
 }
 
 /** tmux's name for the leader: `C-Space`, `M-x`. */
@@ -42,7 +61,7 @@ export function tmuxLeaderLines(self: string[], leader: Leader): string[] {
 
 /**
  * The zellij keybinds block for `leader`, to merge into `config.kdl`. Zellij has no user-defined modes, so the chord
- * borrows the built-in `tmux` mode with its defaults cleared; Esc or any other key leaves it. Each press runs
+ * borrows the built-in `tmux` mode with its defaults cleared; only Esc or a press key leaves it. Each press runs
  * `overbridge top press` in a floating pane that closes at once.
  */
 export function zellijKeybinds(self: string[], leader: Leader): string {

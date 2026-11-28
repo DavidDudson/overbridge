@@ -39,8 +39,8 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   (inside a session, whichever multiplexer you are in is used). With tmux, `overbridge layout` prints a tmux command
   script rather than KDL and there is no user layout file. `overbridge up` starts the server with a generated config
   (`.overbridge/tmux.conf`): no prefix key, no status bar, mouse on, extended keys on so Shift+Enter and Ctrl+Enter
-  reach Claude, and pane titles left alone. Its only bindings are Alt+1…9, Alt+`,`, Alt+`.` and Alt+w, which run
-  `overbridge go` and `overbridge next`.
+  reach Claude, and pane titles left alone. Its bindings are Alt+1…9, Alt+`,`, Alt+`.` and Alt+w, which run
+  `overbridge go` and `overbridge next`, plus the leader chord (Ctrl+Space by default, `[keys] leader`, `off` to disable; see Keys).
 
 ## Quick start
 

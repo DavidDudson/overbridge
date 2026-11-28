@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { DEFAULT_LEADER, type Leader, parseLeader } from "./leader";
+import { DEFAULT_LEADER, DEFAULT_LEADER_TEXT, type Leader, LEADER_OFF, parseLeader } from "./leader";
 import { reposFile } from "./paths";
 import { fail, isNumber, isRecord, isString, type Json } from "./util";
 
@@ -19,7 +19,7 @@ const HEADER = `# overbridge repo registry. Add with \`overbridge repo add <name
 # layout = "auto"           # auto (compact when narrow), compact or wide
 #
 # [keys]
-# leader = "ctrl-space"     # chord that presses a top panel button while Claude has focus: ctrl- or alt-, then space or a letter
+# leader = "ctrl-space"     # chord that presses a top panel button while Claude has focus: ctrl- or alt-, then space or a letter; "off" binds none
 `;
 
 export function initReposFile() {
@@ -71,15 +71,17 @@ export function appendRepo(spec: RepoSpec) {
   appendFileSync(reposFile(), block);
 }
 
-/** `[keys] leader` in repos.toml: the chord that presses a top panel button from any pane (`ctrl-space` by default). */
-export function leaderKey(): Leader {
+/** `[keys] leader` in repos.toml: the chord that presses a top panel button from any pane (`ctrl-space` by default); null for `off`. */
+export function leaderKey(): Leader | null {
   const data = existsSync(reposFile()) ? Bun.TOML.parse(readFileSync(reposFile(), "utf8")) : {};
   const keys = isRecord(data) && isRecord(data.keys) ? data.keys : {};
   const text = keys.leader;
 
-  if (text === undefined) return parseLeader(DEFAULT_LEADER)!;
+  if (text === undefined) return DEFAULT_LEADER;
 
-  return (isString(text) ? parseLeader(text) : undefined) ?? fail('repos.toml: keys.leader must be "ctrl-" or "alt-" and then "space" or a letter, such as "ctrl-space"');
+  if (text === LEADER_OFF) return null;
+
+  return (isString(text) ? parseLeader(text) : undefined) ?? fail(`repos.toml: keys.leader must be "off", or "ctrl-" or "alt-" and then "space" or a free letter (not ctrl-c, d, z, h, i, j, l, m or alt-w), such as "${DEFAULT_LEADER_TEXT}"`);
 }
 
 /** `[sidebar] motion` in repos.toml: `off` keeps every glyph still, `while-active` animates a card only while its agent works. */

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_LEADER, parseLeader, tmuxKey, tmuxLeaderLines, zellijKey, zellijKeybinds } from "../src/leader";
+import { parseLeader, tmuxKey, tmuxLeaderLines, zellijKey, zellijKeybinds } from "../src/leader";
 import { allBindings, PRESS_KEYS, RESERVED_KEYS } from "../src/keys";
 import { drainPresses, isPressKey, parsePresses, PRESS_MAX_AGE_MS, pressKey, topPress } from "../src/top-press";
 
@@ -58,11 +58,13 @@ describe("the press queue", () => {
 
 describe("leader", () => {
   test("parses ctrl- and alt- with space or a letter, and nothing else", () => {
-    expect(parseLeader(DEFAULT_LEADER)).toEqual({ mod: "ctrl", key: "space" });
+    expect(parseLeader("ctrl-space")).toEqual({ mod: "ctrl", key: "space" });
     expect(parseLeader("Alt-X")).toEqual({ mod: "alt", key: "x" });
     expect(parseLeader("super-a")).toBeUndefined();
     expect(parseLeader("ctrl-")).toBeUndefined();
     expect(parseLeader("ctrl-ab")).toBeUndefined();
+    expect(parseLeader("ctrl-c")).toBeUndefined();
+    expect(parseLeader("alt-w")).toBeUndefined();
   });
 
   test("names the key for each multiplexer", () => {

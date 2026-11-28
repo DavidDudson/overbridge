@@ -33,8 +33,19 @@ describe("[keys] leader", () => {
     expect(choice.source === "generated" && choice.conf).toContain("bind -n M-x switch-client -T overbridge");
   });
 
-  test("a bad value is refused", () => {
+  test("a bad value is refused by leaderKey, but never stops the layout", () => {
     writeFileSync(reposFile(), '[keys]\nleader = "hyper-z"\n');
     expect(() => leaderKey()).toThrow("keys.leader");
+    const choice = chooseLayout(["w1"], ["ob"], "tmux", "s", join(tmp, "none.kdl"));
+
+    expect(choice.source === "generated" && choice.conf).toContain("bind -n C-Space switch-client -T overbridge");
+  });
+
+  test("off binds no chord", () => {
+    writeFileSync(reposFile(), '[keys]\nleader = "off"\n');
+    expect(leaderKey()).toBeNull();
+    const choice = chooseLayout(["w1"], ["ob"], "tmux", "s", join(tmp, "none.kdl"));
+
+    expect(choice.source === "generated" && choice.conf).not.toContain("switch-client -T overbridge");
   });
 });

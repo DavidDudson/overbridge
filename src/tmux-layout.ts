@@ -1,5 +1,5 @@
 import type { PaneSpec, TabSpec } from "./layout";
-import { DEFAULT_LEADER, type Leader, parseLeader, tmuxLeaderLines } from "./leader";
+import { DEFAULT_LEADER, type Leader, tmuxLeaderLines } from "./leader";
 import { shellQuote } from "./util";
 
 /**
@@ -80,7 +80,7 @@ export function layoutScript(session: string, tabs: TabSpec[]): string {
  * bindings are the root-table Alt keys that run the CLI's `go` and `next`, and the leader chord (Ctrl+Space by default),
  * which opens a key table whose keys run `overbridge top press`.
  */
-export function tmuxConf(self: string[], leader: Leader = parseLeader(DEFAULT_LEADER)!): string {
+export function tmuxConf(self: string[], leader: Leader | null = DEFAULT_LEADER): string {
   const cmd = self.map(shellQuote).join(" ");
   const go = (arg: string) => `run-shell -b ${tmuxQuote(`${cmd} go ${arg}`)}`;
 
@@ -110,6 +110,6 @@ export function tmuxConf(self: string[], leader: Leader = parseLeader(DEFAULT_LE
     `bind -n M-, ${go("prev")}`,
     `bind -n M-. ${go("next")}`,
     `bind -n M-w run-shell -b ${tmuxQuote(`${cmd} next`)}`,
-    ...tmuxLeaderLines(self, leader),
+    ...(leader ? tmuxLeaderLines(self, leader) : []),
   ].join("\n")}\n`;
 }

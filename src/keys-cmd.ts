@@ -10,7 +10,7 @@ import { selfCommand } from "./paths";
 export function keysCommand(zellij: boolean): string {
   const leader = leaderKey();
 
-  if (zellij) return zellijKeybinds(selfCommand(), leader).trimEnd();
+  if (zellij) return leader ? zellijKeybinds(selfCommand(), leader).trimEnd() : "# [keys] leader is off: no zellij keybinds to add";
 
   const table = allBindings().map(([action, keys]) => `  ${keys.map((k) => (k === " " ? "space" : k)).join(", ").padEnd(18)} ${action}`);
 
@@ -18,7 +18,7 @@ export function keysCommand(zellij: boolean): string {
     "shared list keys:",
     ...table,
     "",
-    `leader chord: ${zellijKey(leader)} (tmux ${tmuxKey(leader)}), then a top panel button key: ${PRESS_KEYS.join(" ")}`,
+    leader ? `leader chord: ${zellijKey(leader)} (tmux ${tmuxKey(leader)}), then a top panel button key: ${PRESS_KEYS.join(" ")}` : "leader chord: off",
     "set `[keys] leader` in repos.toml to change it; `overbridge keys --zellij` prints the zellij keybinds",
   ].join("\n");
 }
