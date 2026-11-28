@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ORCHESTRATION_TABS } from "../src/orchestration";
 import { root, worktreePath, wsDir } from "../src/paths";
-import { agentDir, chooseLayout, layoutKdl, newTabKdl, orchestrationTabSpec, resumable, SIDEBAR_WIDTH, specKdl, TOP_ROWS, transcriptDir, userLayoutPath, workspaceTabSpec, zellijConfigDir } from "../src/layout";
+import { withState } from "../src/state";
+import { agentDir, canResume, chooseLayout, layoutKdl, newTabKdl, orchestrationTabSpec, resumable, SIDEBAR_WIDTH, specKdl, TOP_ROWS, transcriptDir, userLayoutPath, workspaceTabSpec, zellijConfigDir } from "../src/layout";
 import { tabFill } from "../src/tmux-layout";
 
 const self = ["overbridge"];
@@ -146,6 +147,28 @@ describe("newTabKdl", () => {
     expect(newTabKdl("ENG-1", self, { prompt: "/start-item ENG-1" })).toContain('args "claude" "ENG-1" "--" "--" "/start-item ENG-1"');
     const resumed = newTabKdl("ENG-1", self, { prompt: "/start-item ENG-1", resume: true });
     expect(resumed).toContain('args "claude" "ENG-1" "--" "--continue" "--" "/start-item ENG-1"');
+  });
+});
+
+describe("canResume", () => {
+  const home = () => join(tmp, "home");
+
+  test("a workspace with no conversation has nothing to continue, so its first launch must start fresh", () => {
+    withState((s) => {
+      s.workspaces.w1 = { created: "now", repos: { app: { branch: "b" } } };
+    });
+    expect(canResume("w1", home())).toBe(false);
+    mkdirSync(transcriptDir(worktreePath("w1", "app"), home()), { recursive: true });
+    expect(canResume("w1", home())).toBe(false);
+    writeFileSync(join(transcriptDir(worktreePath("w1", "app"), home()), "s.jsonl"), "{}\n");
+    expect(canResume("w1", home())).toBe(true);
+  });
+
+  test("agy starts afresh by itself, so it always may", () => {
+    withState((s) => {
+      s.workspaces.a = { created: "now", repos: {}, agent: "agy" };
+    });
+    expect(canResume("a", home())).toBe(true);
   });
 });
 

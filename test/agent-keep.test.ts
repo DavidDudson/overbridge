@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { afterAgentExit } from "../src/agent-restart";
+import { afterAgentExit, launchArgs, withoutContinue } from "../src/agent-restart";
 import { ensureAgentPane, placement, REOPEN_COOLDOWN_MS, resetAgentKeep } from "../src/agent-keep";
 import type { MuxPane, NewPane } from "../src/mux";
 import { QUICK_EXIT_MS } from "../src/orchestration-keep";
@@ -131,4 +131,25 @@ describe("shouldKeepAgent", () => {
   ];
 
   for (const [name, args, want] of table) test(name, () => expect(shouldKeepAgent(...args)).toBe(want));
+});
+
+describe("launchArgs", () => {
+  test("with a conversation to resume the arguments are kept", () => {
+    expect(launchArgs(["--continue", "--", "/read-handoff"], true, [])).toEqual(["--continue", "--", "/read-handoff"]);
+  });
+
+  test("with none, --continue is dropped so the agent starts fresh, and the prompt stays", () => {
+    expect(launchArgs(["--continue", "--", "/read-handoff"], false, [])).toEqual(["--", "/read-handoff"]);
+    expect(launchArgs(["--continue"], false, [])).toEqual([]);
+  });
+
+  test("a restart after a failed first launch repeats that launch's prompt instead of resuming nothing", () => {
+    expect(launchArgs(["--continue"], false, ["--", "/start-item 5"])).toEqual(["--", "/start-item 5"]);
+    expect(launchArgs(["--continue"], false, ["--continue", "--", "/start-item 5"])).toEqual(["--", "/start-item 5"]);
+  });
+
+  test("a prompt that happens to say --continue is left alone", () => {
+    expect(withoutContinue(["--", "--continue"])).toEqual(["--", "--continue"]);
+    expect(launchArgs(["--", "--continue"], false, [])).toEqual(["--", "--continue"]);
+  });
 });

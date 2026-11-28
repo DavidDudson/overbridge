@@ -36,12 +36,14 @@ interface Fake {
   deps: RelaunchDeps;
   signals: [number, string][];
   opened: [string, string, SessionMode][];
+  verified: string[];
   zellij: string[][];
 }
 
 function fake(o: { launcher?: boolean; caller?: Caller; state?: AgentState; tabs?: string; signalFails?: boolean } = {}): Fake {
   const signals: Fake["signals"] = [];
   const opened: Fake["opened"] = [];
+  const verified: string[] = [];
   const zellij: Fake["zellij"] = [];
 
   const deps: RelaunchDeps = {
@@ -64,9 +66,10 @@ function fake(o: { launcher?: boolean; caller?: Caller; state?: AgentState; tabs
     },
     agentState: () => o.state,
     open: (ws, prompt, session) => void opened.push([ws, prompt, session]),
+    verify: (ws) => void verified.push(ws),
   };
 
-  return { deps, signals, opened, zellij };
+  return { deps, signals, opened, zellij, verified };
 }
 
 const opts = (o: Partial<RelaunchOptions> = {}): RelaunchOptions => ({ launch: launchFromFlags({ noCodeMode: true, chrome: true }), session: SessionMode.Continue, ...o });
