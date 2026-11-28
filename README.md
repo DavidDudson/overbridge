@@ -221,7 +221,7 @@ Run `overbridge help` for every command.
 ## Claude Code plugin
 
 `plugin/` ships skills: `workspace`, `ship-pr` (commit, mob-review panel and fixes before the push, PR, stacked PRs and splitting a branch into a stack,
-green build, Copilot and CodeRabbit feedback), `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
+green build, Copilot and CodeRabbit feedback; a single PR is watched by Claude Code's `/steward`), `workspace-admin`, and the dev loop (`loop-item`, `start-item`,
 `scope-item`, `pickup`, `resolve-feedback`, `merge-main`, `rebase-main`), the dependency skills (`update-library`, `audit-vulns`, `loop-tech-debt`), `read-handoff` (continue from a handoff file after `/clear`), `perf-recommend` (read the performance history and rank where to get time back), `optimize-usage` (read the last 7 days of history and propose skill reductions and faster Bash commands) `revisit` (from the orchestration tab: find workspaces whose branch is ahead of main and ask each one's Claude whether the commits are still relevant, continuing if so) and `whip` (from the
 orchestration tab: find every workspace with work still outstanding, such as a draft PR, a conflict with main,
 review feedback, a red build, uncommitted or unpushed work or an item not yet shipped, and message its Claude a
