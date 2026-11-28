@@ -19,6 +19,7 @@ import { historyStore } from "./history";
 import { commandLine, commandRows, mergeSummaries, repoLines, repoSummaries, summaries, summaryLines } from "./history-report";
 import { defaultMux } from "./mux";
 import { next } from "./next";
+import { isNoise, NOISE_KINDS } from "./focused-diff";
 import { diff } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
@@ -65,7 +66,9 @@ Setup
                                         then finished with background tasks (zellij binds it to a key)
   overbridge go <n>|<name>|next|prev            switch tab by sidebar number, name, or neighbour (wrapping);
                                         works outside zellij too, so a window-manager key can call it
-  overbridge diff [--ws name] [--follow]        changes since the default branch, via difftastic (else delta)
+  overbridge diff [--ws name] [--follow] [--focused [--keep kinds]]
+                                                changes since the default branch, via difftastic (else delta);
+                                                --focused hides noise (format, imports, moved, comments, generated, renamed, mode)
   overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
   overbridge serve                              the one long-running process that owns network refreshes and the shared
@@ -277,8 +280,15 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case "diff": {
-      const { values } = opts(rest, { ...ws, follow: { type: "boolean" as const } });
-      diff(cmd.requireWs(values.ws), values.follow ?? false);
+      const { values } = opts(rest, { ...ws, follow: { type: "boolean" as const }, focused: { type: "boolean" as const }, keep: { type: "string" as const } });
+      const keep = (values.keep ?? "").split(",").filter(Boolean);
+      const bad = keep.find((k) => !isNoise(k));
+
+      if (bad) throw new OverbridgeError(`--keep: unknown noise ${JSON.stringify(bad)}; use ${NOISE_KINDS.join(", ")}`);
+
+      if (keep.length && !values.focused) throw new OverbridgeError("--keep needs --focused");
+
+      diff(cmd.requireWs(values.ws), values.follow ?? false, values.focused ? { keep: new Set(keep.filter(isNoise)) } : undefined);
       break;
     }
 

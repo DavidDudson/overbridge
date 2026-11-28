@@ -1131,6 +1131,11 @@ buttons. PR buttons are coloured by status: 🟣 merged, 🟢 mergeable (GitHub 
 beside the agent (`overbridge diff --follow`: it waits for changes and `q` in the pager refreshes it); terminal opens a shell in
 the first repo and diff opens the changes since the default branch, rendered by [difftastic](https://difftastic.wilfred.me.uk) (`difft`;
 else `delta` from your git config, else plain git) in a column to the agent's right, and a second press closes them.
+`overbridge diff --focused` prints a mini diff instead: the blocks that are not noise, with a `⋯ imports +zod −lodash` marker where
+a block was hidden and a summary of everything hidden. Noise is formatting only (equal after dropping whitespace, `;`, trailing
+commas and quote style; indentation counts in Python and YAML), import statements, code that only moved within its file, comments,
+lockfiles and generated files, pure renames and mode changes. It reads `git diff -U3` with a language-agnostic lexer (no grammar,
+so no parse failures), is deterministic, and shows anything it cannot prove is noise. `--keep comments,imports` shows those kinds anyway.
 Claude comes back by itself: when its process exits the supervisor starts it again with `--continue` (a session you ended
 with `/exit` stays closed, and quick repeated exits back off), and the focused tab's sidebar reopens a Claude pane that was closed. Click or Enter to
 activate, arrows or Tab to move, `o` open a running app, `L` show its log, `r` refresh,
