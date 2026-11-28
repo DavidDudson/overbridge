@@ -22,6 +22,8 @@ const env = {
   OVERBRIDGE_AGY_SETTINGS: join(agyConfig, "settings.json"),
   // Outside a session `defaultMux` targets `sessionName()`, which is the live session by default.
   OVERBRIDGE_SESSION: `overbridge-test-${process.pid}`,
+  // a fake multiplexer never starts an agent, so waiting for one would only time out
+  OVERBRIDGE_NO_AGENT_CHECK: "1",
   [ISOLATED_ENV]: "1",
 };
 

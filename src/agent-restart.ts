@@ -20,3 +20,22 @@ export function afterAgentExit(f: ExitFacts): AfterExit {
 
   return { restart: true, ...next, args: next.streak <= 1 ? ["--continue"] : [] };
 }
+
+/** `args` without the resume flag: only the ones before the `--` that starts the prompt are flags. */
+export function withoutContinue(args: readonly string[]): string[] {
+  const split = args.indexOf("--");
+  const flags = split === -1 ? args : args.slice(0, split);
+
+  return [...flags.filter((a) => a !== "--continue"), ...(split === -1 ? [] : args.slice(split))];
+}
+
+/**
+ * The argv for the next agent start. `--continue` fails at once when there is no conversation, so without one
+ * (`canResume` false) it is dropped and the agent starts fresh. A restart after a failed first launch then repeats
+ * that launch's own arguments (its prompt) rather than resuming nothing.
+ */
+export function launchArgs(args: readonly string[], canResume: boolean, firstArgs: readonly string[]): string[] {
+  if (canResume || !args.includes("--continue")) return [...args];
+
+  return withoutContinue(args.every((a) => a === "--continue") ? firstArgs : args);
+}
