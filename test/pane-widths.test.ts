@@ -55,7 +55,7 @@ describe("planWidths", () => {
   });
 
   test("a window too narrow to split plans no negative widths", () => {
-    expect(planWidths([box("%1", "sidebar", 0, 2, 6), box("%3", "w · claude", 3, 1, 6), box("%4", "w · diff", 5, 1, 6)])).toEqual([{ id: "%1", width: 1 }]);
+    expect(planWidths([box("%1", "sidebar", 0, 2, 4), box("%3", "w · claude", 3, 1, 4), box("%4", "w · diff", 5, 1, 4)])).toEqual([{ id: "%1", width: 1 }]);
   });
 
   test("the sidebar share matches tmux's own percentage", () => {
