@@ -63,7 +63,7 @@ export function showTab(ws: string, prompts: TabPrompt = {}, mux: Mux = defaultM
   }
 
   requireTab(ws, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Foreground, mux);
-  requireAgent(ws, mux);
+  requireAgent(ws, mux, undefined, prompts.prompt ?? prompts.defaultPrompt);
 }
 
 /** What `start` may inject: the provider, the multiplexer, the plugin check, `--here` and `--agent`. */
@@ -386,5 +386,5 @@ function openWorkspace(name: string, repo: string, branch: string, prompts: NewT
   scaffold(name);
   requireTab(name, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Background, mux);
   console.log(name);
-  requireAgent(name, mux);
+  requireAgent(name, mux, undefined, prompts.prompt ?? prompts.defaultPrompt);
 }

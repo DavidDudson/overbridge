@@ -9,16 +9,17 @@ const LIVE = { pid: 1, child: 2 };
 function world(upAtMs: number | undefined, opts: { dropAtMs?: number } = {}) {
   let t = 0;
   const reopened: string[] = [];
+  const prompts: (string | undefined)[] = [];
 
   const deps: VerifyDeps = {
     launcher: () => (upAtMs !== undefined && t >= upAtMs && (opts.dropAtMs === undefined || t < opts.dropAtMs) ? LIVE : undefined),
     now: () => t,
     sleep: (ms) => void (t += ms),
-    reopen: (ws) => reopened.push(ws) > 0,
+    reopen: (ws, prompt) => (prompts.push(prompt), reopened.push(ws) > 0),
     retries: 2,
   };
 
-  return { deps, reopened, at: () => t };
+  return { deps, reopened, prompts, at: () => t };
 }
 
 const inSession = zellijMux(() => ({ ok: true, stdout: "", stderr: "" }), { env: { ZELLIJ: "0" } });
@@ -48,6 +49,12 @@ describe("requireAgent", () => {
     const w = world(0);
     requireAgent("w1", inSession, w.deps);
     expect(w.reopened).toEqual([]);
+  });
+
+  test("the reopened pane gets the prompt the first one lost", () => {
+    const w = world(undefined);
+    expect(() => requireAgent("w1", inSession, w.deps, "/start-item 5")).toThrow(OverbridgeError);
+    expect(w.prompts).toEqual(["/start-item 5", "/start-item 5"]);
   });
 
   test("a pane that never started is reopened, and a later success is accepted", () => {
