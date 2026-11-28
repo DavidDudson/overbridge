@@ -325,7 +325,7 @@ describe("one poll of the sidebar", () => {
   test("a fault footer renders inside the frame", () => {
     const rows = renderSidebar(list(good), 0, 0, 12, 30, undefined, 0, "", [], { kind: "error", message: "state.json: bad" });
     expect(rows).toHaveLength(12);
-    expect(plain(rows).at(-2)).toContain("state.json: bad");
+    expect(plain(rows).at(-3)).toContain("state.json: bad");
   });
 });
 
