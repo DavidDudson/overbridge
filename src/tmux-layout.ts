@@ -10,7 +10,10 @@ export const SIDEBAR_PERCENT = 25;
 /** Shell run by tmux hooks: size every pane titled `sidebar` to its share. `##` keeps run-shell from expanding the formats. */
 const SIDEBAR_RESIZE = `tmux list-panes -a -F '##{pane_id} ##{pane_title}' | awk '$2=="sidebar"{print $1}' | xargs -r -I{} tmux resize-pane -t {} -x ${SIDEBAR_PERCENT}%`;
 
-/** A tmux command as argv, without the leading `tmux`. */
+/** The border text: a pane's title in bold between corners when it is `<tab> · <kind>`, nothing for the sidebar and the top panel. */
+const BORDER_FORMAT = "#{?#{m:* · *,#{pane_title}},╭─ #[bold]#{pane_title}#[nobold] ─╮,}";
+
+/** A tmux command as argv,without the leading `tmux`. */
 export type TmuxCommand = string[];
 
 const word = (p: PaneSpec) => p.command.map(shellQuote).join(" ");
@@ -87,8 +90,13 @@ export function tmuxConf(self: string[]): string {
     "set -g allow-set-title off",
     "set -g default-terminal tmux-256color",
     "set -as terminal-overrides ',*:RGB'",
-    "set -g pane-border-style fg=black",
-    "set -g pane-active-border-style fg=black",
+    // tmux draws a cell of border between panes, so a frame of edge panes would have gaps; instead the Claude and diff panes
+    // (titled `<tab> · <kind>`) get their title set into the border above them, in the Workspaces frame's grey
+    "set -g pane-border-style fg=brightblack",
+    "set -g pane-active-border-style fg=brightblack",
+    "set -g pane-border-lines single",
+    "set -g pane-border-status top",
+    `set -g pane-border-format ${tmuxQuote(BORDER_FORMAT)}`,
     "set -g escape-time 10",
     // no dragging a border with the mouse, and the sidebar goes back to its share when a client attaches or resizes
     "unbind -n MouseDrag1Border",

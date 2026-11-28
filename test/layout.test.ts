@@ -36,7 +36,7 @@ describe("layoutKdl", () => {
     expect(first).toContain(`cwd=${JSON.stringify(root())}`);
     expect(first).toContain('args "sidebar" "--ws" "@root"');
     expect(first).toContain('args "claude" "@root"\n');
-    expect(first).not.toContain('"top"');
+    expect(first).not.toContain('name="top"');
 
     for (const tab of rest) expect(tab.split("\n")[0]).not.toContain("focus=true");
   });
@@ -217,23 +217,50 @@ describe("agentDir", () => {
 describe("the diff pane a workspace tab opens with", () => {
   test("the spec holds a diff pane titled the way the diff button finds it", () => {
     const spec = workspaceTabSpec("w1", self);
-    expect(spec.side).toEqual({ name: "w1 · diff", cwd: wsDir("w1"), command: ["overbridge", "diff", "--ws", "w1", "--follow"] });
+    expect(spec.side).toEqual({
+      name: "w1 · diff",
+      cwd: wsDir("w1"),
+      command: ["overbridge", "diff", "--ws", "w1", "--follow"],
+      borderless: true,
+      frame: { ws: "w1", kind: "diff", self },
+    });
     expect(orchestrationTabSpec(ORCHESTRATION_TABS[0]!, self).side).toBeUndefined();
   });
 
   test("zellij puts it beside the agent, under the top panel", () => {
     const kdl = specKdl(workspaceTabSpec("w1", self));
     expect(kdl).toContain('args "diff" "--ws" "w1" "--follow"');
-    expect(kdl.indexOf('"top"')).toBeLessThan(kdl.indexOf('"w1 · claude"'));
-    expect(kdl.indexOf('"w1 · claude"')).toBeLessThan(kdl.indexOf('"w1 · diff"'));
-    expect(kdl.match(/split_direction="vertical"/g)?.length).toBe(2);
+    expect(kdl.indexOf('name="top"')).toBeLessThan(kdl.indexOf('name="w1 · claude"'));
+    expect(kdl.indexOf('name="w1 · claude"')).toBeLessThan(kdl.indexOf('name="w1 · diff"'));
+    // sidebar | rest, claude | diff, and a left | pane | right row inside each of the two frames
+    expect(kdl.match(/split_direction="vertical"/g)?.length).toBe(4);
   });
 
-  test("tmux splits it off the agent first, then spans the top panel across both", () => {
+  test("zellij frames the agent and the diff in four edge panes that leave with the pane, and neither pane draws its own border", () => {
+    const kdl = specKdl(workspaceTabSpec("w1", self));
+    const lines = kdl.split("\n");
+
+    for (const kind of ["claude", "diff"]) {
+      for (const side of ["top", "bottom", "left", "right"]) {
+        expect(lines.find((l) => l.includes(`name="w1 · ${kind} · frame ${side}"`))).toContain("size=1 borderless=true close_on_exit=true");
+        expect(kdl).toContain(`args "frame-edge" "--side" "${side}" "--ws" "w1" "--kind" "${kind}" "--title" "w1 · ${kind}"`);
+      }
+
+      expect(lines.find((l) => l.includes(`name="w1 · ${kind}" `))).toContain("borderless=true");
+    }
+  });
+
+  test("a tab's own panes (not the agent) get no frame edges", () => {
+    const own = ORCHESTRATION_TABS.find((t) => t.pane);
+    expect(specKdl(orchestrationTabSpec(own!, self))).not.toContain("frame-edge");
+  });
+
+  test("tmux splits it off the agent first, then spans the top panel across both, and draws no frame edges (it titles borders instead)", () => {
     const cmds = tabFill("@3", workspaceTabSpec("w1", self));
     const verbs = cmds.map((c) => `${c[0]}${c.includes("-f") ? " -f" : ""}${c.includes("-L") ? " -L" : ""}`);
     expect(verbs).toEqual(["select-pane", "split-window", "select-pane", "select-pane -L", "split-window -f", "select-pane", "split-window -f", "select-pane"]);
     expect(cmds[1]).toContain("-h");
     expect(cmds[2]).toEqual(["select-pane", "-t", "@3", "-T", "w1 · diff"]);
+    expect(JSON.stringify(cmds)).not.toContain("frame-edge");
   });
 });

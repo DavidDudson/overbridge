@@ -1118,6 +1118,16 @@ An agent that stops right after an *automatic* compaction (`PreCompact` with tri
 tool call or prompt between) is restarted: the `Stop` hook blocks the stop once with a "continue where you left off"
 reason. Manual `/compact` is left alone.
 
+### Pane frames
+
+The Claude and diff panes sit in the same rounded, titled frame as the Workspaces pane. Neither program can draw
+inside a frame (Claude is a full-screen TUI, the diff goes through a pager), so the frame is drawn around them:
+under zellij, four one-cell `overbridge frame-edge` panes (top, bottom, left, right) surround the borderless pane,
+and each leaves once its pane is closed. tmux puts a one-cell border between every pane, which would leave gaps in
+such a frame, so there the pane's title is set into the border above it instead (`pane-border-format`). A diff pane
+opened by the diff button is not framed under zellij: `zellij action new-pane` can only split right or down and
+cannot set a size.
+
 ### Top panel
 
 `overbridge top` is a pane for the top of every tab, in a rounded frame titled with the task name (the

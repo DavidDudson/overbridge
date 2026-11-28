@@ -282,6 +282,17 @@ describe("tmux layout script", () => {
     expect(layoutScript("workspaces", [])).toBe("");
   });
 
+  test("the server config titles the Claude and diff panes in the border above them and leaves the sidebar and top panel untitled", () => {
+    const conf = tmuxConf(["ob"]);
+    expect(conf).toContain("set -g pane-border-status top\n");
+    expect(conf).toContain("set -g pane-border-lines single\n");
+    const format = conf.split("\n").find((l) => l.startsWith("set -g pane-border-format"))!;
+    // a glob on " · " selects `<tab> · <kind>` titles; any other title takes the empty branch
+    expect(format).toContain("#{m:* · *,#{pane_title}}");
+    expect(format).toContain("╭─ #[bold]#{pane_title}#[nobold] ─╮");
+    expect(format).toEndWith(',}"');
+  });
+
   test("the server config has no prefix, no status bar, extended keys, fixed titles and only Alt root bindings", () => {
     const conf = tmuxConf(["ob"]);
 
