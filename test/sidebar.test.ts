@@ -298,7 +298,7 @@ describe("agent state", () => {
   });
 });
 
-describe("click focuses Claude", () => {
+describe("click switches tab and focuses Claude", () => {
   const h = Array(12).fill(2);
   const click = (row: number): Input => ({ kind: "click", col: 3, row });
 
