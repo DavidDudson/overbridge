@@ -8,6 +8,8 @@ import { sessionName, worktreePath, wsDir } from "./paths";
 import { agentOf, readState } from "./state";
 import { AgentKind } from "./agent-kind";
 import { layoutScript, tmuxConf } from "./tmux-layout";
+import { frameEdges } from "./frame";
+import type { PaneKind } from "./top";
 
 export { SIDEBAR_WIDTH };
 
@@ -43,6 +45,10 @@ export interface PaneSpec {
   /** Columns (the sidebar) or rows (the top panel); the pane shares the rest equally when unset. */
   size?: number;
   borderless?: boolean;
+  /** Close the pane when its command exits (a frame edge goes with the pane it frames). */
+  closeOnExit?: boolean;
+  /** Draw a rounded, titled frame around this pane, as the Workspaces pane has: four thin edge panes beside it. */
+  frame?: { ws: string; kind: PaneKind; self: string[] };
 }
 
 /**
@@ -74,9 +80,9 @@ export function workspaceTabSpec(ws: string, self: string[], opts: TabOptions = 
     focus: opts.focus ?? false,
     sidebar: { name: "sidebar", cwd: wsDir(ws), command: [...self, "sidebar", "--ws", ws], size: width, borderless: true },
     top: { name: "top", cwd: wsDir(ws), command: [...self, "top", "--ws", ws], size: TOP_ROWS, borderless: true },
-    main: { name: `${ws} · claude`, cwd: opts.agentCwd ?? wsDir(ws), command: [...self, "claude", ws, ...extra] },
+    main: { name: `${ws} · claude`, cwd: opts.agentCwd ?? wsDir(ws), command: [...self, "claude", ws, ...extra], borderless: true, frame: { ws, kind: "claude", self } },
     // same title `paneTitle(ws, "diff")` gives, so the diff button finds it and a press closes it
-    side: { name: `${ws} · diff`, cwd: wsDir(ws), command: [...self, "diff", "--ws", ws, "--follow"] },
+    side: { name: `${ws} · diff`, cwd: wsDir(ws), command: [...self, "diff", "--ws", ws, "--follow"], borderless: true, frame: { ws, kind: "diff", self } },
   };
 }
 
@@ -93,6 +99,8 @@ export function orchestrationTabSpec(t: OrchestrationTab, self: string[], opts: 
       name: t.pane ? `${t.tab} · ${t.pane}` : `${t.tab} · claude`,
       cwd: dir,
       command: [...self, ...(t.pane ? [t.pane] : ["claude", t.tab, ...(opts.resume ? ["--continue"] : [])])],
+      // the agent is a full-screen program we cannot draw in; the tab's own panes (`@prs`, `@perf`...) frame themselves
+      ...(t.pane ? {} : { borderless: true, frame: { ws: t.tab, kind: "claude" as const, self } }),
     },
   };
 }
@@ -100,8 +108,25 @@ export function orchestrationTabSpec(t: OrchestrationTab, self: string[], opts: 
 const kdlPane = (p: PaneSpec, indent: string, focus = false): string => {
   const [cmd, ...args] = p.command;
 
-  return `${indent}pane name=${q(p.name)} command=${q(cmd!)} cwd=${q(p.cwd)}${p.size === undefined ? "" : ` size=${p.size}`}${p.borderless ? " borderless=true" : ""}${focus ? " focus=true" : ""} {
+  return `${indent}pane name=${q(p.name)} command=${q(cmd!)} cwd=${q(p.cwd)}${p.size === undefined ? "" : ` size=${p.size}`}${p.borderless ? " borderless=true" : ""}${p.closeOnExit ? " close_on_exit=true" : ""}${focus ? " focus=true" : ""} {
 ${indent}  args ${args.map(q).join(" ")}
+${indent}}`;
+};
+
+/** A pane, inside its four frame edges when it has a frame: the top over [left, pane, right] over the bottom. */
+const kdlFramed = (p: PaneSpec, indent: string): string => {
+  if (!p.frame) return kdlPane(p, indent);
+  const e = frameEdges(p);
+  const inner = `${indent}  `;
+
+  return `${indent}pane split_direction="horizontal" {
+${kdlPane(e.top, inner)}
+${inner}pane split_direction="vertical" {
+${kdlPane(e.left, `${inner}  `)}
+${kdlPane(p, `${inner}  `)}
+${kdlPane(e.right, `${inner}  `)}
+${inner}}
+${kdlPane(e.bottom, inner)}
 ${indent}}`;
 };
 
@@ -110,10 +135,10 @@ export function specKdl(t: TabSpec): string {
   const agent = (indent: string) =>
     t.side
       ? `${indent}pane split_direction="vertical" {
-${kdlPane(t.main, `${indent}  `)}
-${kdlPane(t.side, `${indent}  `)}
+${kdlFramed(t.main, `${indent}  `)}
+${kdlFramed(t.side, `${indent}  `)}
 ${indent}}`
-      : kdlPane(t.main, indent);
+      : kdlFramed(t.main, indent);
 
   const main = t.top
     ? `      pane split_direction="horizontal" {

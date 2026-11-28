@@ -7,8 +7,24 @@ exports[`generated layout two workspaces, one resuming 1`] = `
       pane name="sidebar" command="overbridge" cwd="/ws-root" size=60 borderless=true focus=true {
         args "sidebar" "--ws" "@root"
       }
-      pane name="@root · claude" command="overbridge" cwd="/ws-root" {
-        args "claude" "@root"
+      pane split_direction="horizontal" {
+        pane name="@root · claude · frame top" command="overbridge" cwd="/ws-root" size=1 borderless=true close_on_exit=true {
+          args "frame-edge" "--side" "top" "--ws" "@root" "--kind" "claude" "--title" "@root · claude"
+        }
+        pane split_direction="vertical" {
+          pane name="@root · claude · frame left" command="overbridge" cwd="/ws-root" size=1 borderless=true close_on_exit=true {
+            args "frame-edge" "--side" "left" "--ws" "@root" "--kind" "claude" "--title" "@root · claude"
+          }
+          pane name="@root · claude" command="overbridge" cwd="/ws-root" borderless=true {
+            args "claude" "@root"
+          }
+          pane name="@root · claude · frame right" command="overbridge" cwd="/ws-root" size=1 borderless=true close_on_exit=true {
+            args "frame-edge" "--side" "right" "--ws" "@root" "--kind" "claude" "--title" "@root · claude"
+          }
+        }
+        pane name="@root · claude · frame bottom" command="overbridge" cwd="/ws-root" size=1 borderless=true close_on_exit=true {
+          args "frame-edge" "--side" "bottom" "--ws" "@root" "--kind" "claude" "--title" "@root · claude"
+        }
       }
     }
   }
@@ -92,11 +108,43 @@ exports[`generated layout two workspaces, one resuming 1`] = `
           args "top" "--ws" "ws1"
         }
         pane split_direction="vertical" {
-          pane name="ws1 · claude" command="overbridge" cwd="/ws-root/ws1" {
-            args "claude" "ws1"
+          pane split_direction="horizontal" {
+            pane name="ws1 · claude · frame top" command="overbridge" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+              args "frame-edge" "--side" "top" "--ws" "ws1" "--kind" "claude" "--title" "ws1 · claude"
+            }
+            pane split_direction="vertical" {
+              pane name="ws1 · claude · frame left" command="overbridge" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+                args "frame-edge" "--side" "left" "--ws" "ws1" "--kind" "claude" "--title" "ws1 · claude"
+              }
+              pane name="ws1 · claude" command="overbridge" cwd="/ws-root/ws1" borderless=true {
+                args "claude" "ws1"
+              }
+              pane name="ws1 · claude · frame right" command="overbridge" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+                args "frame-edge" "--side" "right" "--ws" "ws1" "--kind" "claude" "--title" "ws1 · claude"
+              }
+            }
+            pane name="ws1 · claude · frame bottom" command="overbridge" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+              args "frame-edge" "--side" "bottom" "--ws" "ws1" "--kind" "claude" "--title" "ws1 · claude"
+            }
           }
-          pane name="ws1 · diff" command="overbridge" cwd="/ws-root/ws1" {
-            args "diff" "--ws" "ws1" "--follow"
+          pane split_direction="horizontal" {
+            pane name="ws1 · diff · frame top" command="overbridge" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+              args "frame-edge" "--side" "top" "--ws" "ws1" "--kind" "diff" "--title" "ws1 · diff"
+            }
+            pane split_direction="vertical" {
+              pane name="ws1 · diff · frame left" command="overbridge" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+                args "frame-edge" "--side" "left" "--ws" "ws1" "--kind" "diff" "--title" "ws1 · diff"
+              }
+              pane name="ws1 · diff" command="overbridge" cwd="/ws-root/ws1" borderless=true {
+                args "diff" "--ws" "ws1" "--follow"
+              }
+              pane name="ws1 · diff · frame right" command="overbridge" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+                args "frame-edge" "--side" "right" "--ws" "ws1" "--kind" "diff" "--title" "ws1 · diff"
+              }
+            }
+            pane name="ws1 · diff · frame bottom" command="overbridge" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+              args "frame-edge" "--side" "bottom" "--ws" "ws1" "--kind" "diff" "--title" "ws1 · diff"
+            }
           }
         }
       }
@@ -112,11 +160,43 @@ exports[`generated layout two workspaces, one resuming 1`] = `
           args "top" "--ws" "ws2"
         }
         pane split_direction="vertical" {
-          pane name="ws2 · claude" command="overbridge" cwd="/ws-root/ws2" {
-            args "claude" "ws2" "--" "--continue"
+          pane split_direction="horizontal" {
+            pane name="ws2 · claude · frame top" command="overbridge" cwd="/ws-root/ws2" size=1 borderless=true close_on_exit=true {
+              args "frame-edge" "--side" "top" "--ws" "ws2" "--kind" "claude" "--title" "ws2 · claude"
+            }
+            pane split_direction="vertical" {
+              pane name="ws2 · claude · frame left" command="overbridge" cwd="/ws-root/ws2" size=1 borderless=true close_on_exit=true {
+                args "frame-edge" "--side" "left" "--ws" "ws2" "--kind" "claude" "--title" "ws2 · claude"
+              }
+              pane name="ws2 · claude" command="overbridge" cwd="/ws-root/ws2" borderless=true {
+                args "claude" "ws2" "--" "--continue"
+              }
+              pane name="ws2 · claude · frame right" command="overbridge" cwd="/ws-root/ws2" size=1 borderless=true close_on_exit=true {
+                args "frame-edge" "--side" "right" "--ws" "ws2" "--kind" "claude" "--title" "ws2 · claude"
+              }
+            }
+            pane name="ws2 · claude · frame bottom" command="overbridge" cwd="/ws-root/ws2" size=1 borderless=true close_on_exit=true {
+              args "frame-edge" "--side" "bottom" "--ws" "ws2" "--kind" "claude" "--title" "ws2 · claude"
+            }
           }
-          pane name="ws2 · diff" command="overbridge" cwd="/ws-root/ws2" {
-            args "diff" "--ws" "ws2" "--follow"
+          pane split_direction="horizontal" {
+            pane name="ws2 · diff · frame top" command="overbridge" cwd="/ws-root/ws2" size=1 borderless=true close_on_exit=true {
+              args "frame-edge" "--side" "top" "--ws" "ws2" "--kind" "diff" "--title" "ws2 · diff"
+            }
+            pane split_direction="vertical" {
+              pane name="ws2 · diff · frame left" command="overbridge" cwd="/ws-root/ws2" size=1 borderless=true close_on_exit=true {
+                args "frame-edge" "--side" "left" "--ws" "ws2" "--kind" "diff" "--title" "ws2 · diff"
+              }
+              pane name="ws2 · diff" command="overbridge" cwd="/ws-root/ws2" borderless=true {
+                args "diff" "--ws" "ws2" "--follow"
+              }
+              pane name="ws2 · diff · frame right" command="overbridge" cwd="/ws-root/ws2" size=1 borderless=true close_on_exit=true {
+                args "frame-edge" "--side" "right" "--ws" "ws2" "--kind" "diff" "--title" "ws2 · diff"
+              }
+            }
+            pane name="ws2 · diff · frame bottom" command="overbridge" cwd="/ws-root/ws2" size=1 borderless=true close_on_exit=true {
+              args "frame-edge" "--side" "bottom" "--ws" "ws2" "--kind" "diff" "--title" "ws2 · diff"
+            }
           }
         }
       }
@@ -133,8 +213,24 @@ exports[`generated layout a wide sidebar and a self command with arguments 1`] =
       pane name="sidebar" command="/usr/bin/bun" cwd="/ws-root" size=40 borderless=true focus=true {
         args "/opt/overbridge/src/cli.ts" "sidebar" "--ws" "@root"
       }
-      pane name="@root · claude" command="/usr/bin/bun" cwd="/ws-root" {
-        args "/opt/overbridge/src/cli.ts" "claude" "@root"
+      pane split_direction="horizontal" {
+        pane name="@root · claude · frame top" command="/usr/bin/bun" cwd="/ws-root" size=1 borderless=true close_on_exit=true {
+          args "/opt/overbridge/src/cli.ts" "frame-edge" "--side" "top" "--ws" "@root" "--kind" "claude" "--title" "@root · claude"
+        }
+        pane split_direction="vertical" {
+          pane name="@root · claude · frame left" command="/usr/bin/bun" cwd="/ws-root" size=1 borderless=true close_on_exit=true {
+            args "/opt/overbridge/src/cli.ts" "frame-edge" "--side" "left" "--ws" "@root" "--kind" "claude" "--title" "@root · claude"
+          }
+          pane name="@root · claude" command="/usr/bin/bun" cwd="/ws-root" borderless=true {
+            args "/opt/overbridge/src/cli.ts" "claude" "@root"
+          }
+          pane name="@root · claude · frame right" command="/usr/bin/bun" cwd="/ws-root" size=1 borderless=true close_on_exit=true {
+            args "/opt/overbridge/src/cli.ts" "frame-edge" "--side" "right" "--ws" "@root" "--kind" "claude" "--title" "@root · claude"
+          }
+        }
+        pane name="@root · claude · frame bottom" command="/usr/bin/bun" cwd="/ws-root" size=1 borderless=true close_on_exit=true {
+          args "/opt/overbridge/src/cli.ts" "frame-edge" "--side" "bottom" "--ws" "@root" "--kind" "claude" "--title" "@root · claude"
+        }
       }
     }
   }
@@ -218,11 +314,43 @@ exports[`generated layout a wide sidebar and a self command with arguments 1`] =
           args "/opt/overbridge/src/cli.ts" "top" "--ws" "ws1"
         }
         pane split_direction="vertical" {
-          pane name="ws1 · claude" command="/usr/bin/bun" cwd="/ws-root/ws1" {
-            args "/opt/overbridge/src/cli.ts" "claude" "ws1"
+          pane split_direction="horizontal" {
+            pane name="ws1 · claude · frame top" command="/usr/bin/bun" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+              args "/opt/overbridge/src/cli.ts" "frame-edge" "--side" "top" "--ws" "ws1" "--kind" "claude" "--title" "ws1 · claude"
+            }
+            pane split_direction="vertical" {
+              pane name="ws1 · claude · frame left" command="/usr/bin/bun" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+                args "/opt/overbridge/src/cli.ts" "frame-edge" "--side" "left" "--ws" "ws1" "--kind" "claude" "--title" "ws1 · claude"
+              }
+              pane name="ws1 · claude" command="/usr/bin/bun" cwd="/ws-root/ws1" borderless=true {
+                args "/opt/overbridge/src/cli.ts" "claude" "ws1"
+              }
+              pane name="ws1 · claude · frame right" command="/usr/bin/bun" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+                args "/opt/overbridge/src/cli.ts" "frame-edge" "--side" "right" "--ws" "ws1" "--kind" "claude" "--title" "ws1 · claude"
+              }
+            }
+            pane name="ws1 · claude · frame bottom" command="/usr/bin/bun" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+              args "/opt/overbridge/src/cli.ts" "frame-edge" "--side" "bottom" "--ws" "ws1" "--kind" "claude" "--title" "ws1 · claude"
+            }
           }
-          pane name="ws1 · diff" command="/usr/bin/bun" cwd="/ws-root/ws1" {
-            args "/opt/overbridge/src/cli.ts" "diff" "--ws" "ws1" "--follow"
+          pane split_direction="horizontal" {
+            pane name="ws1 · diff · frame top" command="/usr/bin/bun" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+              args "/opt/overbridge/src/cli.ts" "frame-edge" "--side" "top" "--ws" "ws1" "--kind" "diff" "--title" "ws1 · diff"
+            }
+            pane split_direction="vertical" {
+              pane name="ws1 · diff · frame left" command="/usr/bin/bun" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+                args "/opt/overbridge/src/cli.ts" "frame-edge" "--side" "left" "--ws" "ws1" "--kind" "diff" "--title" "ws1 · diff"
+              }
+              pane name="ws1 · diff" command="/usr/bin/bun" cwd="/ws-root/ws1" borderless=true {
+                args "/opt/overbridge/src/cli.ts" "diff" "--ws" "ws1" "--follow"
+              }
+              pane name="ws1 · diff · frame right" command="/usr/bin/bun" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+                args "/opt/overbridge/src/cli.ts" "frame-edge" "--side" "right" "--ws" "ws1" "--kind" "diff" "--title" "ws1 · diff"
+              }
+            }
+            pane name="ws1 · diff · frame bottom" command="/usr/bin/bun" cwd="/ws-root/ws1" size=1 borderless=true close_on_exit=true {
+              args "/opt/overbridge/src/cli.ts" "frame-edge" "--side" "bottom" "--ws" "ws1" "--kind" "diff" "--title" "ws1 · diff"
+            }
           }
         }
       }

@@ -70,6 +70,9 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   addresses windows by id or index, never by name: a name starting with `@` (an orchestration tab) reads as a window id even
   after `=`. Read tabs and panes through `-F` formats, never by parsing text. `src/tmux-layout.ts` renders a `TabSpec` as
   tmux commands (`tabOpen`, `tabFill`), the `overbridge layout` script and the server config.
+- `src/frame.ts` (pure) and `src/frame-edge.ts` (`overbridge frame-edge`) frame the Claude and diff panes under zellij: `PaneSpec.frame` makes
+  `specKdl` wrap the pane in four one-cell edge panes (`frameEdges`) that draw the Workspaces frame's border (`boxTop`, `boxBottom`, `boxSide`) and exit
+  when `findPane` no longer finds the pane. tmux draws a border cell between panes, so it gets titles in `pane-border-format` (`tmuxConf`) and ignores `frame`.
 - `src/layout.ts` describes each tab as data (`TabSpec`: `workspaceTabSpec`, `orchestrationTabSpec`, `layoutSpecs`) and renders
   zellij KDL from it (`specKdl`, `tabKdl`, `layoutKdl`); tmux renders the same specs. A zellij user `layouts/overbridge.kdl`
   replaces the generated KDL; tmux has no user layout.

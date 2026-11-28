@@ -9,6 +9,7 @@ import { selfCommand, worktreePath, wsDir } from "./paths";
 import { loadRepoConfig } from "./project-config";
 import { getWorkspace, readState } from "./state";
 import { defaultMux, type Mux, type MuxPane } from "./mux";
+import { findPane, paneTitle } from "./pane-title";
 import type { PaneKind } from "./top";
 import { run, shellQuote, spawnCwd } from "./util";
 
@@ -18,12 +19,7 @@ import { run, shellQuote, spawnCwd } from "./util";
  * the title the layout and this module give them, so nothing is stored.
  */
 
-export const paneTitle = (ws: string, kind: PaneKind) => `${ws} · ${kind}`;
-
-/** The live pane of `kind` in `ws`'s tab, if any. */
-export function findPane(panes: MuxPane[], ws: string, kind: PaneKind): MuxPane | undefined {
-  return panes.find((p) => !p.exited && p.tab === ws && p.title === paneTitle(ws, kind));
-}
+export { findPane, paneTitle };
 
 /** Where a terminal opens: the first claimed repo's worktree, else the workspace dir. */
 export function terminalDir(ws: string): string {

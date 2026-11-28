@@ -19,19 +19,20 @@ describe("generated layout", () => {
 
   test("structure: the orchestration tab is sidebar | agent, every workspace tab sidebar | (top panel over agent)", () => {
     const kdl = layoutKdl(["a", "b", "c"], ["overbridge"]);
+    const names = (tab: string) => [...tab.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1]!).filter((n) => !n.includes(" · frame "));
     const [orchestration, work, prs, reviews, perf, checks, frozen, explore, ...tabs] = kdl.split(/\n(?=  tab )/).slice(1);
-    expect([...orchestration!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@root · claude"]);
-    expect([...work!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@work · worklist"]);
-    expect([...prs!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@prs · prs"]);
-    expect([...reviews!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@reviews · reviews"]);
-    expect([...perf!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@perf · perf"]);
-    expect([...checks!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@checks · checks"]);
-    expect([...frozen!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@frozen · frozen"]);
-    expect([...explore!.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1])).toEqual(["sidebar", "@explore · explore"]);
+    expect(names(orchestration!)).toEqual(["sidebar", "@root · claude"]);
+    expect(names(work!)).toEqual(["sidebar", "@work · worklist"]);
+    expect(names(prs!)).toEqual(["sidebar", "@prs · prs"]);
+    expect(names(reviews!)).toEqual(["sidebar", "@reviews · reviews"]);
+    expect(names(perf!)).toEqual(["sidebar", "@perf · perf"]);
+    expect(names(checks!)).toEqual(["sidebar", "@checks · checks"]);
+    expect(names(frozen!)).toEqual(["sidebar", "@frozen · frozen"]);
+    expect(names(explore!)).toEqual(["sidebar", "@explore · explore"]);
     expect(tabs).toHaveLength(3);
 
     for (const tab of tabs) {
-      const order = [...tab.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1]!.replace(/^\w+ · /, ""));
+      const order = names(tab).map((n) => n.replace(/^\w+ · /, ""));
       expect(order).toEqual(["sidebar", "top", "claude", "diff"]);
     }
   });

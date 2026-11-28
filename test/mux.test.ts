@@ -263,12 +263,13 @@ describe("tmux layout script", () => {
 
   test("each tab gets the sidebar full-height at the left, the top panel above the agent, and titled panes", () => {
     const w1 = lines.filter((l) => l.includes(`workspaces:${w1Index}`));
-    expect(w1.map((l) => l.split(" ")[0])).toEqual(['"select-pane"', '"split-window"', '"select-pane"', '"select-pane"', '"split-window"', '"select-pane"', '"split-window"', '"select-pane"']);
-    // the diff splits off the agent first, then the top panel spans both of them
-    expect(w1[1]).toContain('"-h" "-l" "50%"');
-    expect(w1[3]).toContain('"-L"');
-    expect(w1[4]).toContain('"-f" "-b" "-v" "-l" "5"');
-    expect(w1[6]).toContain(`"-f" "-b" "-h" "-l" "${SIDEBAR_PERCENT}%"`);
+    expect(w1.map((l) => l.split(" ")[0])).toEqual(['"select-pane"', '"set-option"', '"split-window"', '"select-pane"', '"set-option"', '"select-pane"', '"split-window"', '"select-pane"', '"split-window"', '"select-pane"']);
+    // the agent and the diff each get a border row of their own, the diff splits off the agent first, then the top panel spans both
+    expect(w1.filter((l) => l.startsWith('"set-option"')).every((l) => l.includes('"-p" "-t"') && l.includes('"pane-border-status" "top"'))).toBe(true);
+    expect(w1[2]).toContain('"-h" "-l" "50%"');
+    expect(w1[5]).toContain('"-L"');
+    expect(w1[6]).toContain('"-f" "-b" "-v" "-l" "5"');
+    expect(w1[8]).toContain(`"-f" "-b" "-h" "-l" "${SIDEBAR_PERCENT}%"`);
     expect(w1.filter((l) => l.startsWith('"select-pane"') && !l.includes('"-L"')).map((l) => l.split('"').at(-2))).toEqual(["w1 · claude", "w1 · diff", "top", "sidebar"]);
   });
 
@@ -280,6 +281,13 @@ describe("tmux layout script", () => {
   test("is a pure function of its arguments, and empty without tabs", () => {
     expect(layoutScript("workspaces", layoutSpecs(["w1"], ["ob", "x y"], { sidebarWidth: 40 }))).toBe(script);
     expect(layoutScript("workspaces", [])).toBe("");
+  });
+
+  test("the server config sets the border's title format but no border row of its own, so only the panes that ask for one lose a row", () => {
+    const conf = tmuxConf(["ob"]);
+    expect(conf).toContain("set -g pane-border-lines single\n");
+    expect(conf).not.toContain("pane-border-status");
+    expect(conf).toContain('set -g pane-border-format "╭─ #[bold]#{pane_title}#[nobold] ─╮"\n');
   });
 
   test("the server config has no prefix, no status bar, extended keys, fixed titles and only Alt root bindings", () => {

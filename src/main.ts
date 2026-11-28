@@ -83,6 +83,8 @@ Setup
   overbridge worklist [refresh|show]            work list pane (the @work tab); refresh reads every board into its cache; show prints it
   overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
   overbridge checks                             the check queue (the @checks tab); K/J/t/b move, x kills, v recent runs
+  overbridge frame-edge --side S --ws NAME --kind K
+                                        one side of the frame around a Claude or diff pane (run by the generated layout)
   overbridge frozen                             iceboxed workspaces (the @frozen tab); t thaws the selected one
   overbridge explore [sync <repo>|shell <repo>] the @explore tab: pick a repo, then its apps, editor and a terminal on a
                                         checkout of its default branch; sync fast-forwards that checkout when clean
@@ -383,6 +385,20 @@ async function main(argv: string[]): Promise<number> {
       opts(rest, {});
       const { checksPane } = await import("./checks-run");
       await checksPane();
+      break;
+    }
+
+    case "frame-edge": {
+      const { values } = opts(rest, { ...ws, side: { type: "string" as const }, kind: { type: "string" as const }, title: { type: "string" as const } });
+      const { frameEdge } = await import("./frame-edge");
+      const { isFrameSide, isPaneKind } = await import("./frame");
+      const kind = values.kind;
+
+      if (!values.side || !isFrameSide(values.side) || !values.ws || !kind || !isPaneKind(kind)) {
+        throw new OverbridgeError("usage: overbridge frame-edge --side top|bottom|left|right --ws NAME --kind claude|diff|terminal [--title TEXT]");
+      }
+
+      await frameEdge(values.side, values.ws, kind, values.title ?? "");
       break;
     }
 

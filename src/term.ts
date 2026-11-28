@@ -149,5 +149,8 @@ export const boxBottom = (width: number, label = "", color: Color = "yellow") =>
   return `${edge("╰─")}${colorize(text, color)}${edge(`${"─".repeat(Math.max(0, width - 3 - textWidth(text)))}╯`)}`;
 };
 
+/** One cell of the left or right border. */
+export const boxSide = () => edge("│");
+
 /** A row of content (already styled, fitted to `width - 4`) between the side borders with one column of padding. */
 export const boxRow = (content: string) => `${edge("│")} ${content} ${edge("│")}`;

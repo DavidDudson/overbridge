@@ -10,6 +10,9 @@ export const SIDEBAR_PERCENT = 25;
 /** Shell run by tmux hooks: size every pane titled `sidebar` to its share. `##` keeps run-shell from expanding the formats. */
 const SIDEBAR_RESIZE = `tmux list-panes -a -F '##{pane_id} ##{pane_title}' | awk '$2=="sidebar"{print $1}' | xargs -r -I{} tmux resize-pane -t {} -x ${SIDEBAR_PERCENT}%`;
 
+/** The border text of a pane with a border status: its title in bold between corners, as the Workspaces frame has it. */
+const BORDER_FORMAT = "╭─ #[bold]#{pane_title}#[nobold] ─╮";
+
 /** A tmux command as argv, without the leading `tmux`. */
 export type TmuxCommand = string[];
 
@@ -35,14 +38,17 @@ export function tabOpen(session: string, t: TabSpec, opts: { first: boolean; pri
  */
 export function tabFill(win: string, t: TabSpec): TmuxCommand[] {
   const title = (p: PaneSpec): TmuxCommand => ["select-pane", "-t", win, "-T", p.name];
+  // the active pane's border row carries its title, for the panes the zellij layout frames with edge panes
+  const titled = (p: PaneSpec): TmuxCommand[] => (p.frame ? [["set-option", "-p", "-t", win, "pane-border-status", "top"]] : []);
 
   // with a side pane the top panel spans both (`-f`), and the side split comes first so it targets the main pane
   const side: TmuxCommand[] = t.side
-    ? [["split-window", "-h", "-l", "50%", "-t", win, "-c", t.side.cwd, word(t.side)], title(t.side), ["select-pane", "-t", win, "-L"]]
+    ? [["split-window", "-h", "-l", "50%", "-t", win, "-c", t.side.cwd, word(t.side)], title(t.side), ...titled(t.side), ["select-pane", "-t", win, "-L"]]
     : [];
 
   return [
     title(t.main),
+    ...titled(t.main),
     ...side,
     ...(t.top ? [["split-window", ...(t.side ? ["-f"] : []), "-b", "-v", "-l", String(t.top.size ?? 5), "-t", win, "-c", t.top.cwd, word(t.top)], title(t.top)] : []),
     ["split-window", "-f", "-b", "-h", "-l", `${SIDEBAR_PERCENT}%`, "-t", win, "-c", t.sidebar.cwd, word(t.sidebar)],
@@ -87,8 +93,13 @@ export function tmuxConf(self: string[]): string {
     "set -g allow-set-title off",
     "set -g default-terminal tmux-256color",
     "set -as terminal-overrides ',*:RGB'",
-    "set -g pane-border-style fg=black",
-    "set -g pane-active-border-style fg=black",
+    // tmux draws a cell of border between panes, so a frame of edge panes would have gaps; instead each framed pane
+    // gets its title set into the border above it, in the Workspaces frame's grey. The status is set per pane
+    // (`titled`), so the sidebar, the top panel and a tab's self-framed panes keep their rows
+    "set -g pane-border-style fg=brightblack",
+    "set -g pane-active-border-style fg=brightblack",
+    "set -g pane-border-lines single",
+    `set -g pane-border-format ${tmuxQuote(BORDER_FORMAT)}`,
     "set -g escape-time 10",
     // no dragging a border with the mouse, and the sidebar goes back to its share when a client attaches or resizes
     "unbind -n MouseDrag1Border",
