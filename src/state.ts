@@ -42,7 +42,7 @@ export type WorkspaceState = {
   removeError?: string;
   /** When `removeError` was recorded (ISO); unset on errors from older builds. */
   removeErrorAt?: string;
-  /** How many removals have failed in a row; kept across retries so the sweep's wait grows, gone with the workspace. */
+  /** How many removals of this workspace have failed so far; kept across retries so the sweep's wait grows, gone with the workspace. */
   removeFailures?: number;
   /** Set by the merged-PR sweep when the workspace would be removed but holds unsaved work. */
   removalBlocked?: RemovalBlock;

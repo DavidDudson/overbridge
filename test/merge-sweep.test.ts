@@ -147,7 +147,7 @@ describe("verdictFor", () => {
     expect(verdictFor(input({ now, workspace: failed(1000) }))).toBe(Verdict.Keep);
   });
 
-  test("a failed removal holds for exactly the retry window, doubling per failure in a row up to the cap", () => {
+  test("a failed removal holds for exactly the retry window, doubling per failure up to the cap", () => {
     const now = Date.now();
     const failed = (agoMs: number, failures: number) => workspace({ removeError: "boom", removeErrorAt: new Date(now - agoMs).toISOString(), removeFailures: failures });
     expect(verdictFor(input({ now, workspace: failed(REMOVE_RETRY_MS - 1, 1) }))).toBe(Verdict.Keep);

@@ -8,7 +8,7 @@ import { serverRefreshAll } from "./server-client";
 import { claimedCache, noUnsavedWork, readTopCache, refreshTop, type TopCache } from "./top";
 import { errorMessage, log } from "./util";
 
-/** How long the first failed removal holds the sweep off; each further failure in a row doubles it, up to `REMOVE_RETRY_MAX_MS`. */
+/** How long the first failed removal holds the sweep off; each further failure doubles it, up to `REMOVE_RETRY_MAX_MS`. */
 export const REMOVE_RETRY_MS = 30 * 60_000;
 export const REMOVE_RETRY_MAX_MS = 24 * 60 * 60_000;
 
