@@ -170,7 +170,7 @@ describe("workflow", () => {
     sh(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-m", "local only"], wt);
     const r = ws(["rm", "unpushed"]);
     expect(r.code).not.toBe(0);
-    expect(r.err).toContain("unpushed commits");
+    expect(r.err).toContain("unpushed or unmerged commits");
     expect(existsSync(wt)).toBe(true);
     expect(ws(["rm", "--force", "unpushed"]).code).toBe(0);
   });

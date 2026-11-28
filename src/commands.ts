@@ -7,7 +7,7 @@ import type { PrChecksTarget } from "./pr-checks";
 import { slugOfDir } from "./repo-slug";
 import { CheckScopeMode, checkClassNames, configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, type ProjectConfig, rootConfigPath } from "./project-config";
 import { aheadRows } from "./ahead";
-import { noUnsavedWork } from "./top";
+import { noUnsavedWork, refreshTop } from "./top";
 import { clearPhase, parseLayer, PHASES, writePhase } from "./task-status";
 import { agentDirOf, canResume, chooseLayout, userLayoutPath } from "./layout";
 import { isOrchestrationTab, orchestrationRemoveMessage, type OrchestrationTab } from "./orchestration";
@@ -163,8 +163,11 @@ export function removeWorkspace(ws: string, force: boolean) {
 
     if (dirty.length) fail(`${ws} has uncommitted changes in: ${dirty.join(", ")} (use --force to discard)`);
 
-    // squash-merged PRs leave no remote branch, so noUnsavedWork compares with the PR head instead of `--remotes`
-    if (!noUnsavedWork(ws)) fail(`${ws} has unpushed commits (use --force to discard)`);
+    // squash-merged PRs leave no remote branch, so noUnsavedWork compares with the PR head instead of `--remotes`;
+    // a stale top cache hides that merge, so read it again before refusing, as finishRemoval does
+    if (!noUnsavedWork(ws)) refreshTop(ws);
+
+    if (!noUnsavedWork(ws)) fail(`${ws} has unpushed or unmerged commits (use --force to discard)`);
   }
 
   for (const [repo, claim] of Object.entries(w.repos)) {
