@@ -1088,11 +1088,12 @@ export function stepFor(input: Input, current: number, offset: number, heights: 
 
 /**
  * A click on `tab`'s card: go there and focus its Claude pane. `switchTab` leaves the sidebar
- * focused so keys keep stepping; a click wants the agent, so it focuses Claude after the switch (also on the current tab,
- * where focus may sit in the sidebar or another pane). False when the switch failed.
+ * focused so keys keep stepping; a click wants the agent, so it focuses Claude after the switch. A click on the tab
+ * already in view changes nothing, so the sidebar keeps focus and keys keep stepping. False when the switch failed.
  */
 export function clickTab(self: string, tab: string, mux: Mux = defaultMux()): boolean {
-  const moved = tab === self || visitTab(self, tab, mux);
+  if (tab === self) return true;
+  const moved = visitTab(self, tab, mux);
 
   if (moved) focusClaude(tab, mux);
 

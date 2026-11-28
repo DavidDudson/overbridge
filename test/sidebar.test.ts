@@ -340,11 +340,10 @@ describe("click focuses Claude", () => {
     expect(calls.at(-1)).toEqual(["zellij", "action", "focus-pane-id", "terminal_5"]);
   });
 
-  test("a click on the current tab still focuses Claude, without switching", () => {
+  test("a click on the current tab does nothing, so the sidebar keeps focus", () => {
     const calls: string[][] = [];
     expect(clickTab("w2", "w2", fakeZellij(calls))).toBe(true);
-    expect(calls.some((c) => c[2] === "go-to-tab-name")).toBe(false);
-    expect(calls.at(-1)).toEqual(["zellij", "action", "focus-pane-id", "terminal_5"]);
+    expect(calls).toEqual([]);
   });
 
   test("a failed switch does not focus anything", () => {
