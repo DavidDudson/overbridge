@@ -1,4 +1,5 @@
 import { alternate } from "./anim";
+import { Action, Keyset, legendOf } from "./keys";
 import { ciLook, conflictLook, HEALTH_LOOK, healthOf } from "./pr-look";
 import { age, CHROME, type PrRow, type ViewState } from "./pr-rows";
 import { silencedTitle } from "./silence";
@@ -14,7 +15,7 @@ export interface PrView {
 }
 
 const EMPTY = "no open PRs of yours";
-const LEGEND = "j/k move   o open in browser   x silence   r refresh   q quit";
+const LEGEND = legendOf(Keyset.prs, { [Action.Enter]: "" });
 
 const isConflict = (r: PrRow) => r.mergeable === "CONFLICTING";
 

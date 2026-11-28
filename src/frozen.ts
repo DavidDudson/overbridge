@@ -1,3 +1,4 @@
+import { Action, Keyset, legendOf } from "./keys";
 import { isIceboxed, type State } from "./state";
 import { age } from "./pr-rows";
 import { bold, boxBottom, boxRow, boxTop, cell, colorize, dim, fit, inverse } from "./term";
@@ -35,8 +36,8 @@ export function frozenRows(state: State): FrozenRow[] {
     .toSorted((a, b) => a.since.localeCompare(b.since) || naturalSort(a.ws, b.ws));
 }
 
-const EMPTY = "nothing frozen; press f in a workspace's sidebar to freeze it";
-const LEGEND = "j/k move   t thaw   q quit";
+const EMPTY = "nothing frozen; press z in a workspace's sidebar to freeze it";
+const LEGEND = legendOf(Keyset.frozen, { [Action.Freeze]: "thaw" });
 
 /** Rows the frame takes beyond the list: top border, header, footer, bottom border. */
 export const FROZEN_CHROME = 4;

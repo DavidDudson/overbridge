@@ -1,7 +1,7 @@
 import { subscribeEvents } from "./events-client";
 import { selfCommand } from "./paths";
 import { detailLines, filterRanked } from "./pm/worklist-filter";
-import { keyOf, noClass, rank, type Ranked, type RowClass, rowRepos, type WorkRow } from "./pm/worklist";
+import { noClass, rank, type Ranked, type RowClass, rowRepos, type WorkRow } from "./pm/worklist";
 import { FooterKind, runStart } from "./sidebar";
 import { serverRefreshWorklist } from "./server-client";
 import { readWorklist, WORKLIST_REFRESH_MS, type WorklistCache } from "./worklist-data";
@@ -15,7 +15,11 @@ import { silencedTitle } from "./silence";
 import { mentionScanError, silencedSet, spawnMentionRefresh, toggleMessage } from "./silence-refresh";
 import { statusGlyph, workAnimated } from "./worklist-look";
 import { loadQueues, rowClassOf } from "./worklist-class";
+import { Action, Keyset, legendOf, moveSelection, resolve } from "./keys";
 import { bold, boxBottom, boxRow, boxTop, cell, colorize, decodeInput, dim, ENTER_SCREEN, fit, frame, inverse, LEAVE_SCREEN, stripControl } from "./term";
+
+const LIST_LEGEND = legendOf(Keyset.worklist, { [Action.Enter]: "", [Action.In]: "detail", [Action.New]: "start" });
+const DETAIL_LEGEND = legendOf(Keyset.worklistDetail, { [Action.New]: "start in a workspace" });
 
 /** Rows the frame uses besides the item rows: top border, header, reasons, legend, bottom border. */
 const CHROME = 5;
@@ -118,7 +122,7 @@ export function renderWorklist(list: Ranked[], selected: number, offset: number,
   const chosen = list[selected];
   rows.push(boxRow(fit(chosen ? `why: ${chosen.reasons.join(", ")}` : "", inner)));
   const shown = message || (notes[0] ? `error: ${notes[0]}${notes.length > 1 ? ` (+${notes.length - 1} more)` : ""}; showing the last good list` : "");
-  const status = shown.startsWith("error: ") ? colorize(fit(shown, inner), "red") : shown ? bold(fit(shown, inner)) : dim(fit("j/k move   enter detail   o open   / filter   s start   x silence   r refresh   q quit", inner));
+  const status = shown.startsWith("error: ") ? colorize(fit(shown, inner), "red") : shown ? bold(fit(shown, inner)) : dim(fit(LIST_LEGEND, inner));
   rows.push(boxRow(status));
   rows.push(boxBottom(width, filter ? `${list.length} match /${filter}` : `${list.length} open`));
 
@@ -131,7 +135,7 @@ export function renderDetail(item: Ranked, all: readonly Ranked[], height: numbe
   const body = Math.max(1, height - 3);
   const lines = detailLines(item, all).slice(0, body);
 
-  return [boxTop("Work item", width), ...lines.map((l) => boxRow(fit(l, inner))), ...Array.from({ length: body - lines.length }, () => boxRow(fit("", inner))), boxRow(message ? bold(fit(message, inner)) : dim(fit("esc back   o open   s start in a workspace   q quit", inner))), boxBottom(width, item.key)];
+  return [boxTop("Work item", width), ...lines.map((l) => boxRow(fit(l, inner))), ...Array.from({ length: body - lines.length }, () => boxRow(fit("", inner))), boxRow(message ? bold(fit(message, inner)) : dim(fit(DETAIL_LEGEND, inner))), boxBottom(width, item.key)];
 }
 
 /** Open `item` in the browser; the message to show, which explains an item with no link. */
@@ -242,11 +246,13 @@ export async function worklistPane() {
       }
 
       if (detail) {
-        if (input.key === "escape" || input.key === "enter" || input.key === "h" || input.key === "left") detail = undefined;
-        else if (input.key === "q" || input.key === "ctrl-c") quit();
-        else if (input.key === "o") {
+        const action = resolve(Keyset.worklistDetail, input.key);
+
+        if (action === Action.Back || input.key === "enter") detail = undefined;
+        else if (action === Action.Quit) quit();
+        else if (action === Action.Open) {
           message = openItem(detail);
-        } else if (input.key === "s") {
+        } else if (action === Action.New) {
           const item = detail;
           const repos = rowRepos(item);
           detail = undefined;
@@ -276,22 +282,21 @@ export async function worklistPane() {
         continue;
       }
 
-      if (input.key === "q" || input.key === "ctrl-c") quit();
-      else if (input.key === "j" || input.key === "down") selected = Math.max(0, Math.min(list.length - 1, selected + 1));
-      else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
-      else if (input.key === "r") refresh(true);
-      else if (input.key === "x" && chosen) message = toggleMessage(chosen, chosen.key);
-      else if (input.key === "o" && chosen) {
+      const action = resolve(Keyset.worklist, input.key);
+
+      if (action === Action.Quit) quit();
+      else if (action === Action.Down || action === Action.Up || action === Action.Top || action === Action.Bottom) selected = moveSelection(action, selected, list.length);
+      else if (action === Action.Refresh) refresh(true);
+      else if (action === Action.Silence && chosen) message = toggleMessage(chosen, chosen.key);
+      else if (action === Action.Open && chosen) {
         message = openItem(chosen);
-      }
-      else if (input.key === "/") typing = true;
+      } else if (action === Action.Filter) typing = true;
       else if (input.key === "escape" && filter) filter = "";
-      else if ((input.key === "enter" || input.key === "l" || input.key === "right") && list[selected]) {
-        detail = list[selected];
+      else if ((action === Action.Enter || action === Action.In) && chosen) {
+        detail = chosen;
         message = "";
-      }
-      else if (input.key === "s" && list[selected]) {
-        const item = list[selected]!;
+      } else if (action === Action.New && chosen) {
+        const item = chosen;
         const repos = rowRepos(item);
 
         if (repos.length === 1) {

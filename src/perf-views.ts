@@ -1,3 +1,4 @@
+import { Action, Keyset, legendOf } from "./keys";
 import type { Summary, Tally } from "./history";
 import { activeMs, checkTotals, type CommandRow, duration, pct, percent, topGroups } from "./history-report";
 import { bold, boxBottom, boxRow, boxTop, colorize, dim, fit, inverse } from "./term";
@@ -109,7 +110,7 @@ export function renderDashboard(lines: readonly string[], offset: number, height
   const rows: string[] = [boxTop(`Performance dashboard · ${windowLabel}`, width)];
 
   for (let i = 0; i < body; i++) rows.push(boxRow(fit(lines[offset + i] ?? "", inner)));
-  rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit("j/k scroll   v view   w window   r reload   q quit", inner))));
+  rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit(`${legendOf(Keyset.perfDashboard, { [Action.Down]: "scroll", [Action.Refresh]: "reload" })}   w window`, inner))));
   rows.push(boxBottom(width, `${lines.length} lines`));
 
   return rows;
@@ -156,7 +157,7 @@ export function renderCommands(list: readonly CommandRow[], selected: number, of
   rows.push(boxRow(fit(c ? `what    ${c.source === "bash" ? "Claude Bash call" : "overbridge check run"}, kind ${c.cls}, ${percent(c.ms, total)}% of the listed time${c.queuedMs > 0 ? `, queued ${duration(c.queuedMs)}` : ""}` : "", inner)));
   rows.push(boxRow(fit(c ? (c.fulls.length ? `full    ${c.fulls.join("   ")}` : c.source === "bash" ? "full    not kept: Bash history stores only the leading words" : "") : "", inner)));
   rows.push(boxRow(fit(c && c.failed > 0 ? colorize(`failed  ${c.failed} of ${c.count} runs`, "red") : "", inner)));
-  rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit("j/k move   v view   f from   o order   w window   r reload   q quit", inner))));
+  rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit(`${legendOf(Keyset.perfCommands, { [Action.Source]: "from", [Action.Sort]: "order", [Action.Refresh]: "reload" })}   w window`, inner))));
   rows.push(boxBottom(width, `${list.length} command${list.length === 1 ? "" : "s"}`));
 
   return rows;

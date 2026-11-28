@@ -3,6 +3,7 @@ import { type Move, movedIndex, type QueueOverrides, spreadKeys } from "./check-
 import { type EstimateStore, type Eta, etaSlots, formatDuration, lastDoneMs, queueEtas, workspaceDone } from "./check-estimate";
 import type { CheckRecord, HistoryStore } from "./history";
 import { type BadgeIcon, badgeFromIcons, type TabBadge } from "./tab-badge";
+import { Action, Keyset, legendOf } from "./keys";
 import { bold, boxBottom, type Color, boxRow, boxTop, cell, colorize, dim, fit, inverse, stripControl, textWidth } from "./term";
 
 /** One check as the @checks tab lists it. */
@@ -54,9 +55,9 @@ export type ChecksMode = (typeof ChecksMode)[keyof typeof ChecksMode];
 export const nextChecksMode = (mode: ChecksMode): ChecksMode => (mode === ChecksMode.Queue ? ChecksMode.Recent : ChecksMode.Queue);
 
 const EMPTY = "no checks queued; `overbridge check <repo> -- <cmd>` queues one";
-const LEGEND = "j/k select   K/J move   t top   b bottom   x kill   v recent   q quit";
+const LEGEND = `${legendOf(Keyset.checksQueue, { [Action.Down]: "select", [Action.Delete]: "kill", [Action.View]: "recent" })}   K/J T/B reorder`;
 const RECENT_EMPTY = "no checks finished in this window";
-const RECENT_LEGEND = "j/k select   v queue   r reload   q quit";
+const RECENT_LEGEND = legendOf(Keyset.checksRecent, { [Action.Down]: "select", [Action.View]: "queue" });
 
 /** Rows the frame takes beyond the list: top border, header, footer, bottom border. */
 export const CHECKS_CHROME = 4;

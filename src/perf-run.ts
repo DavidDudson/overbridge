@@ -1,3 +1,4 @@
+import { Action, Keyset, legendOf, moveSelection, resolve } from "./keys";
 import type { RepoSummary } from "./history";
 import { activeMs, type CommandRow, checkTotals, duration, emptySummary, pct, rankedRepos, topGroups, WINDOWS, type WorkspaceSummary } from "./history-report";
 import { computePerf, loadPerf, type PerfViews, readPerfCache } from "./perf-cache";
@@ -52,7 +53,7 @@ export function renderPerf(list: readonly WorkspaceSummary[], selected: number, 
   rows.push(boxRow(fit(tools.length ? `tools   ${tools.map(([t, v]) => `${t} ${v.count}× ${duration(v.ms)}`).join("   ")}` : "", inner)));
   rows.push(boxRow(fit(byGroup.length ? `checks  ${byGroup.map(([c, v]) => `${c} ${v.count}× ${duration(v.ms)} ${pct(v.ms, checkMs)}${v.failed ? colorize(` (${v.failed} failed)`, "red") : ""}`).join("   ")}` : "", inner)));
   rows.push(boxRow(fit(chosen && chosen.awayMs > 0 ? `away    ${duration(chosen.awayMs)} (gaps over 30m, not counted as waiting)` : "", inner)));
-  rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit("j/k move   v view   w window   g by repo   r reload   q quit", inner))));
+  rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit(`${legendOf(Keyset.perfSessions, { [Action.Refresh]: "reload" })}   w window   b by repo`, inner))));
   rows.push(boxBottom(width, `${list.length} workspace${list.length === 1 ? "" : "s"}`));
 
   return rows;
@@ -83,7 +84,7 @@ export function renderRepos(list: readonly RepoSummary[], selected: number, offs
   rows.push(boxRow(fit(groups.length ? `groups  ${groups.slice(0, 5).map(([n, g]) => `${n} ${g.count}× ${duration(g.ms)} ${pct(g.ms, total)}${g.failed ? colorize(` (${g.failed} failed)`, "red") : ""}`).join("   ")}` : "", inner)));
   rows.push(boxRow(fit(groups.length ? `command ${groups.slice(0, 3).map(([n, g]) => `${n}: ${g.fulls[0] ?? n}`).join("   ")}` : "", inner)));
   rows.push(boxRow(fit(groups.length ? `queued  ${groups.slice(0, 5).map(([n, g]) => `${n} ${duration(g.queuedMs)}`).join("   ")}` : "", inner)));
-  rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit("j/k move   v view   w window   g by workspace   r reload   q quit", inner))));
+  rows.push(boxRow(message ? bold(fit(message, inner)) : dim(fit(`${legendOf(Keyset.perfSessions, { [Action.Refresh]: "reload" })}   w window   b by workspace`, inner))));
   rows.push(boxBottom(width, `${list.length} repo${list.length === 1 ? "" : "s"}`));
 
   return rows;
@@ -197,28 +198,30 @@ export async function perfPane() {
     for (const input of decodeInput(data)) {
       if (input.kind !== "key") continue;
 
-      if (input.key === "q" || input.key === "ctrl-c") quit();
-      else if (view === "dashboard" && (input.key === "j" || input.key === "down")) scroll++;
-      else if (view === "dashboard" && (input.key === "k" || input.key === "up")) scroll--;
-      else if (input.key === "j" || input.key === "down") selected = Math.max(0, Math.min(list.rows.length - 1, selected + 1));
-      else if (input.key === "k" || input.key === "up") selected = Math.max(0, selected - 1);
-      else if (input.key === "v") {
+      const action = resolve(view === "dashboard" ? Keyset.perfDashboard : view === "commands" ? Keyset.perfCommands : Keyset.perfSessions, input.key);
+
+      if (action === Action.Quit) quit();
+      else if (view === "dashboard" && (action === Action.Down || action === Action.Up || action === Action.Top || action === Action.Bottom)) {
+        // Bottom overshoots on purpose: the draw clamps the scroll to the last line
+        scroll = action === Action.Down ? scroll + 1 : action === Action.Up ? scroll - 1 : action === Action.Top ? 0 : Number.MAX_SAFE_INTEGER;
+      } else if (action === Action.Down || action === Action.Up || action === Action.Top || action === Action.Bottom) selected = moveSelection(action, selected, list.rows.length);
+      else if (action === Action.View) {
         view = nextView(view);
         reset();
-      } else if (input.key === "f" && view === "commands") {
+      } else if (action === Action.Source && view === "commands") {
         source = nextOf(COMMAND_SOURCES, source);
         reset();
-      } else if (input.key === "o" && view === "commands") {
+      } else if (action === Action.Sort && view === "commands") {
         sort = nextOf(COMMAND_SORTS, sort);
         reset();
-      } else if (input.key === "g" && view === "sessions") {
+      } else if (input.key === "b" && view === "sessions") {
         grouping = grouping === "repo" ? "workspace" : "repo";
         reset();
       } else if (input.key === "w") {
         // every window is in the views already
         windowAt = (windowAt + 1) % WINDOWS.length;
         list = rows();
-      } else if (input.key === "r") void reload(true);
+      } else if (action === Action.Refresh) void reload(true);
     }
 
     draw();

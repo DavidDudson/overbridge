@@ -1,3 +1,4 @@
+import { Action, keyOf } from "./keys";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userLayoutPath } from "./layout";
 import { dirname, join } from "node:path";
@@ -49,13 +50,19 @@ export const PERF_KEY = "p";
 export const PERF_TAB = "@perf";
 
 /** Ices this sidebar's workspace (`overbridge icebox`); the @frozen tab thaws it. */
-export const FREEZE_KEY = "f";
+export const FREEZE_KEY = keyOf(Action.Freeze);
 
 /** Pressed twice within `CLEANUP_ARM_MS`, removes this sidebar's workspace and discards its unsaved work. */
-export const KILL_KEY = "X";
+export const KILL_KEY = keyOf(Action.Delete);
 
 /** Cycles how the workspaces are ordered: a-z, by status, by age. */
-export const SORT_KEY = "o";
+export const SORT_KEY = keyOf(Action.Sort);
+
+/** Opens the new-workspace prompt. */
+export const NEW_KEY = keyOf(Action.New);
+
+/** Jumps to the next tab that needs attention (`overbridge next`); also Alt+w on tmux. */
+export const NEXT_KEY = "a";
 
 /** How long a held digit waits for a second one before it goes to its one-digit tab. */
 export const DIGIT_MS = 600;
@@ -68,7 +75,7 @@ export function legend(count: number, pending = ""): string {
 
   const digits = count > 1 ? `1-${count} go  ` : count === 1 ? "1 go  " : "";
 
-  return `${digits}←→ back  ⌥w next  s new ws  f freeze  X kill  p perf  o sort`;
+  return `${digits}←→ back  ${NEXT_KEY} next  ${NEW_KEY} new ws  ${SORT_KEY} sort  ${FREEZE_KEY} freeze  ${KILL_KEY} kill  ${PERF_KEY} perf`;
 }
 
 /**
@@ -1337,7 +1344,7 @@ export async function sidebar(wsOpt?: string) {
       show(LEGEND_FOOTER);
     }
 
-    if (input.kind === "key" && input.key === "s") {
+    if (input.kind === "key" && input.key === NEW_KEY) {
       if (footer.kind !== FooterKind.Busy) {
         show(EMPTY_PROMPT);
       }
@@ -1388,7 +1395,7 @@ export async function sidebar(wsOpt?: string) {
         }
 
         guarded("key", () => {
-          if (input.kind === "key" && input.key === "n") {
+          if (input.kind === "key" && input.key === NEXT_KEY) {
             hold("");
             next(self);
 
