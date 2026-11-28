@@ -639,13 +639,19 @@ describe("classifyPr", () => {
     expect(classifyPr({ state: "OPEN", mergeStateStatus: "DRAFT", ...run("SUCCESS") })).toBe("blocked");
     expect(classifyPr({ state: "OPEN" })).toBe("unknown");
   });
-  test("mergeable only when GitHub says CLEAN; no conflict but not CLEAN is pending", () => {
+  test("mergeable only when GitHub says CLEAN or HAS_HOOKS; no conflict but not mergeable is pending", () => {
     for (const mergeStateStatus of ["BLOCKED", "BEHIND", "UNSTABLE"]) expect(classifyPr({ state: "OPEN", mergeable: "MERGEABLE", mergeStateStatus, ...run("SUCCESS") })).toBe("pending");
+
     for (const mergeStateStatus of ["CLEAN", "HAS_HOOKS"]) expect(classifyPr({ state: "OPEN", mergeable: "MERGEABLE", mergeStateStatus, ...run("SUCCESS") })).toBe("mergeable");
+
     expect(classifyPr({ state: "OPEN", isDraft: true, mergeable: "MERGEABLE", mergeStateStatus: "BLOCKED", ...run("SUCCESS") })).toBe("blocked");
+
     expect(classifyPr({ state: "OPEN", mergeable: "MERGEABLE", ...run("SUCCESS") })).toBe("pending");
+
     expect(classifyPr({ state: "OPEN", mergeable: "MERGEABLE", mergeStateStatus: "UNKNOWN", ...run("SUCCESS") })).toBe("pending");
+
     expect(classifyPr({ state: "OPEN", mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN", ...run("SUCCESS") })).toBe("unknown");
+
     expect(classifyPr({ state: "OPEN", mergeable: "CONFLICTING", mergeStateStatus: "DIRTY", ...run("SUCCESS") })).toBe("conflict");
   });
   test("PR links are coloured by status", () => {
