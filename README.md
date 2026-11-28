@@ -1126,8 +1126,8 @@ status icon, repo, number and title with its actions at the right (**Ready**/**D
 its stack, between draft and ready for review; **Merge** appears once the PR is green and not a draft, asks for a
 second press within five seconds, and merges a stack atomically with `gh stack merge`). Between the PR and its actions sit Copilot and CodeRabbit chips: 🟡 reviewing, 🟢 reviewed, 🔴 changes requested or failed, 💬 (blue, with a count) unresolved review threads that reviewer opened, which win over every other state, 🚫 out of quota (CodeRabbit says when it is back, e.g. `🚫 CodeRabbit 56m`), ⚪ skipped or no review. Copilot has no check of its own, so ⚪ also covers a Copilot out of premium requests, a request never made and a repo without Copilot review: GitHub accepts the request and does nothing, so they look the same, a button for the item. With PR rows showing, the launchers get their own section under an `── actions ──` divider, left-aligned: a toggle per app with its state
 (⚫ stopped, 🟡 starting, 🟢 running, 🔴 exited) and port, an editor button (`ide`), and the 💻 terminal / 🔀 diff
-buttons. PR buttons are coloured by status: 🟣 merged, 🟢 mergeable, 🔴 failing build or conflicts,
-🟡 build pending, 🔵 blocked (review or behind), ⚫ closed. Every workspace tab opens with the diff already
+buttons. PR buttons are coloured by status: 🟣 merged, 🟢 mergeable (GitHub `CLEAN` or `HAS_HOOKS`: could be squash-merged now), 🟡 pending (no conflict, but checks running or not `CLEAN`: review missing, behind, unstable), 🔴 failing build or conflicts,
+🔵 draft, ⚫ closed. Every workspace tab opens with the diff already
 beside the agent (`overbridge diff --follow`: it waits for changes and `q` in the pager refreshes it); terminal opens a shell in
 the first repo and diff opens the changes since the default branch, rendered by [difftastic](https://difftastic.wilfred.me.uk) (`difft`;
 else `delta` from your git config, else plain git) in a column to the agent's right, and a second press closes them.

@@ -1,6 +1,6 @@
 ---
 name: whip
-description: From the orchestrator (the overbridge root tab), find every workspace that still has work outstanding (a draft PR, a PR conflicting with main, review feedback or red CI, uncommitted changes, commits with no PR, an item not yet shipped) and send its Claude session a tailored "continue" message, skipping workspaces that are done (PR mergeable and awaiting merge, branch merged, sitting on the default branch with nothing changed) and detached ones with no claim, then print a table of who was sent what and who was skipped and why. Use when the user says "whip", "whip the workspaces", "tell every tab to continue", "nudge everyone", "send continue to all", or invokes /whip. Pass `--dry-run` to print the table without sending. Runs only in the orchestrator, never inside a workspace.
+description: From the orchestrator (the overbridge root tab), find every workspace that still has work outstanding (a draft PR, a PR conflicting with main, review feedback or red CI, uncommitted changes, commits with no PR, an item not yet shipped) and send its Claude session a tailored "continue" message, skipping workspaces that are done (PR mergeable, meaning `mergeStateStatus` `CLEAN` or `HAS_HOOKS`, and awaiting merge, branch merged, sitting on the default branch with nothing changed) and detached ones with no claim, then print a table of who was sent what and who was skipped and why. Use when the user says "whip", "whip the workspaces", "tell every tab to continue", "nudge everyone", "send continue to all", or invokes /whip. Pass `--dry-run` to print the table without sending. Runs only in the orchestrator, never inside a workspace.
 requires: gh-stack
 ---
 
@@ -91,7 +91,7 @@ The first match wins, checked in this order:
 | no repos, or every claim is `-` and no worktree is dirty | detached, no claim |
 | claim is the default branch and the worktree is clean | on main, no changes |
 | the claimed branch's PR is merged and the worktree is clean, nothing unpushed | merged |
-| every open PR is not a draft, `mergeable` is `MERGEABLE`, CI green, no `CHANGES_REQUESTED`, no feedback newer than the head commit, worktree clean, nothing unpushed | mergeable, awaiting merge |
+| every open PR is not a draft, `mergeable` is `MERGEABLE`, `mergeStateStatus` is `CLEAN` (or `HAS_HOOKS`), CI green, no `CHANGES_REQUESTED`, no feedback newer than the head commit, worktree clean, nothing unpushed | mergeable, awaiting merge |
 | no session row matched in `ListAgents` (Claude workspaces only: an agy workspace has none and is sent to in step 4) | no session (say `overbridge tab <ws>` reopens it) |
 
 **Send (outstanding):** any of these, listed in the message in this order.
@@ -101,14 +101,18 @@ The first match wins, checked in this order:
 | open PR `isDraft` | PR #n "title" is still a draft |
 | `mergeable` is `CONFLICTING` or `mergeStateStatus` is `DIRTY` | PR #n conflicts with `<default>` |
 | `reviewDecision` is `CHANGES_REQUESTED`, or a review or comment from someone else is newer than the head commit | PR #n has review feedback newer than the last push |
+| `mergeStateStatus` is `BEHIND` | PR #n is behind `<default>` |
 | CI worst conclusion is red | PR #n has a red build |
 | worktree dirty | uncommitted changes in `<repo>` |
 | commits ahead of `origin/<default>` or unpushed, and no open PR for the branch | commits on `<branch>` with no PR |
 | claim is an item branch (anything but the default branch) with no open or merged PR and no commits ahead | item not yet shipped on `<branch>` |
 
-CI still running with nothing else wrong is neither: skip it with reason "CI running". A PR with
-`mergeable` `UNKNOWN` is GitHub still computing; treat it as mergeable for this pass and say so in the
-table.
+CI still running with nothing else wrong is neither: skip it with reason "CI running". Likewise a PR
+that is pending, not mergeable (no conflict, but `mergeStateStatus` `BLOCKED` or `UNSTABLE` with nothing
+else wrong, such as a required review still missing): skip it with reason "pending (<mergeStateStatus>)",
+never "mergeable". A PR with
+`mergeable` or `mergeStateStatus` `UNKNOWN` is GitHub still computing: skip it with reason
+"pending (UNKNOWN)" and say so in the table.
 
 A workspace whose matched session is `busy` is still sent to: the message queues until its turn ends.
 Note `busy` in the table.

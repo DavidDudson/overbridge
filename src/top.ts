@@ -103,7 +103,7 @@ export interface PrView extends ReviewerView {
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]);
 const PENDING = new Set(["PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"]);
 
-/** Merged, failing build, conflicts, pending build, then whether it can merge: the first that applies. */
+/** Merged, failing build, conflicts, then pending (checks outstanding or not yet CLEAN) or mergeable (CLEAN): the first that applies. */
 export function classifyPr(pr: PrView): PrStatus {
   if (pr.state === "MERGED") return "merged";
 
@@ -116,11 +116,15 @@ export function classifyPr(pr: PrView): PrStatus {
 
   if (checks.some((c) => PENDING.has(c.state ?? "") || (c.status !== undefined && c.status !== "COMPLETED"))) return "pending";
 
-  if (["CLEAN", "UNSTABLE", "HAS_HOOKS"].includes(pr.mergeStateStatus ?? "")) return "mergeable";
+  // A draft is never mergeable, whatever GitHub's merge state says.
+  if (pr.isDraft || pr.mergeStateStatus === "DRAFT") return "blocked";
 
-  if (["BLOCKED", "BEHIND", "DRAFT"].includes(pr.mergeStateStatus ?? "")) return "blocked";
+  // Mergeable means squash-mergeable right now: CLEAN, or HAS_HOOKS (clean, with pre-receive hooks). No conflict but not mergeable (required review missing, behind, unstable) is pending.
+  if (pr.mergeStateStatus === "CLEAN" || pr.mergeStateStatus === "HAS_HOOKS") return "mergeable";
 
-  return pr.mergeable === "MERGEABLE" ? "mergeable" : "unknown";
+  if (["BLOCKED", "BEHIND", "UNSTABLE"].includes(pr.mergeStateStatus ?? "")) return "pending";
+
+  return pr.mergeable === "MERGEABLE" ? "pending" : "unknown";
 }
 
 export const PR_LOOK: Record<PrStatus, { icon: string; color: Color }> = {

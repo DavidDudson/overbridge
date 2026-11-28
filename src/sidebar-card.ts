@@ -42,7 +42,7 @@ export const isExpanded = (e: Entry, view: CardView): boolean => view.expanded?.
 
 const CI_RANK: Partial<Record<PrStatus, { rank: number; text: string }>> = {
   failing: { rank: 3, text: "failing" },
-  pending: { rank: 2, text: "running" },
+  pending: { rank: 2, text: "pending" },
   mergeable: { rank: 1, text: "passing" },
   merged: { rank: 1, text: "passing" },
 };
