@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runHooks } from "../src/hooks";
+import { runHooks, runHooksReport } from "../src/hooks";
 import { parseConfig } from "../src/project-config";
 
 const CLI = join(import.meta.dir, "..", "src", "cli.ts");
@@ -134,6 +134,21 @@ describe("lifecycle", () => {
     }
 
     expect(hookLog()).toBe(`post-pr w3 app branch=topic pr=42 pwd=${join(root, "w3", "app")}\n`);
+  });
+
+  test("a failing hook's report names its command and what it printed to stderr", () => {
+    writeRoot(`defaults:\n  hooks:\n    pre-remove: 'echo "unpushed work" >&2; exit 1'\n`);
+    const saved = process.env.OVERBRIDGE_ROOT;
+    process.env.OVERBRIDGE_ROOT = root;
+
+    try {
+      const report = runHooksReport("pre-remove", { ws: "w3", repo: "app" });
+      expect(report.ok).toBe(false);
+      expect(report.detail).toContain("unpushed work");
+      expect(runHooksReport("post-pr", { ws: "w3", repo: "app" })).toEqual({ ok: true, detail: "" });
+    } finally {
+      saved === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = saved);
+    }
   });
 
   test("hooks are told the work item id in the branch, or nothing when there is none", () => {

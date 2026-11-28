@@ -8,6 +8,18 @@ import { serverRefreshAll } from "./server-client";
 import { claimedCache, noUnsavedWork, readTopCache, refreshTop, type TopCache } from "./top";
 import { errorMessage, log } from "./util";
 
+/** How long a failed removal's error holds the sweep off before it tries that workspace again. */
+export const REMOVE_RETRY_MS = 30 * 60_000;
+
+/** Whether a recorded removal failure still holds the sweep off; an error with no time (an older build's) never does. */
+const errorHolds = (w: WorkspaceState, now: number): boolean => {
+  if (w.removeError === undefined) return false;
+
+  const at = w.removeErrorAt === undefined ? Number.NaN : Date.parse(w.removeErrorAt);
+
+  return now - at < REMOVE_RETRY_MS;
+};
+
 /** What the merged-PR sweep does with one workspace. */
 export const Verdict = {
   /** Not every PR has merged, or the workspace is not the sweep's to remove. */
@@ -28,13 +40,14 @@ export interface VerdictInput {
   agent: AgentState | undefined;
   /** Whether git holds no unsaved work; called only once every PR has merged. */
   clean: () => boolean;
+  now?: number;
 }
 
-/** Decide one workspace. Orchestration tabs, workspaces being removed and ones whose last removal failed are kept. */
+/** Decide one workspace. Orchestration tabs, workspaces being removed and ones whose last removal failed less than `REMOVE_RETRY_MS` ago are kept. */
 export function verdictFor(input: VerdictInput): Verdict {
-  const { ws, workspace, cache, agent, clean } = input;
+  const { ws, workspace, cache, agent, clean, now = Date.now() } = input;
 
-  if (isOrchestrationTab(ws) || isRemoving(workspace) || workspace.removeError !== undefined || !cache.merged) {
+  if (isOrchestrationTab(ws) || isRemoving(workspace) || errorHolds(workspace, now) || !cache.merged) {
     return Verdict.Keep;
   }
 
@@ -121,7 +134,7 @@ function checkOne(ws: string, deps: SweepDeps): Verdict {
 
     const cache = claimedCache(ws);
 
-    return verdictFor({ ws, workspace, cache, agent: readAgentState(ws), clean: () => noUnsavedWork(ws, cache) });
+    return verdictFor({ ws, workspace, cache, agent: readAgentState(ws), clean: () => noUnsavedWork(ws, cache), now: deps.now });
   } catch (e) {
     log(`${ws}: merged-PR check failed: ${errorMessage(e)}`);
 

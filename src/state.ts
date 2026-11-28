@@ -40,6 +40,8 @@ export type WorkspaceState = {
   removing?: Removing;
   /** Why the last background removal failed; shown on the workspace's sidebar card. */
   removeError?: string;
+  /** When `removeError` was recorded (ISO); the merged-PR sweep retries once it is `REMOVE_RETRY_MS` old. Unset on errors from older builds. */
+  removeErrorAt?: string;
   /** Set by the merged-PR sweep when the workspace would be removed but holds unsaved work. */
   removalBlocked?: RemovalBlock;
   /** Set by `overbridge icebox`; cleared by `thaw`. The workspace has no tab while it is set. */
@@ -111,6 +113,10 @@ export function workspaceFault(w: Json | undefined): string | undefined {
   }
 
   if (w.removeError !== undefined && !isString(w.removeError)) return `state record has removeError as ${describeValue(w.removeError)}`;
+
+  if (w.removeErrorAt !== undefined && (!isString(w.removeErrorAt) || Number.isNaN(Date.parse(w.removeErrorAt)))) {
+    return `state record has removeErrorAt as ${describeValue(w.removeErrorAt)}`;
+  }
 
   if (w.removalBlocked !== undefined && !Object.values<unknown>(RemovalBlock).includes(w.removalBlocked)) {
     return `state record has removalBlocked as ${JSON.stringify(w.removalBlocked)}`;

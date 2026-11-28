@@ -18,6 +18,20 @@ export interface HookContext {
  * hooks with a warning.
  */
 export function runHooks(name: HookName, ctx: HookContext): boolean {
+  return runHooksReport(name, ctx).ok;
+}
+
+/** How many trailing characters of a failed hook's output go into the failure report. */
+const OUTPUT_TAIL = 400;
+
+export interface HookReport {
+  ok: boolean;
+  /** The failed hook's command and the tail of its stderr; empty when every hook passed. */
+  detail: string;
+}
+
+/** `runHooks` that also says what the failing hook printed, so a removal can show why it was refused. */
+export function runHooksReport(name: HookName, ctx: HookContext): HookReport {
   const dir = worktreePath(ctx.ws, ctx.repo);
   let config: ProjectConfig;
 
@@ -26,7 +40,7 @@ export function runHooks(name: HookName, ctx: HookContext): boolean {
   } catch (e) {
     log(`${name} hooks skipped for ${ctx.ws}/${ctx.repo}: ${errorMessage(e)}`);
 
-    return true;
+    return { ok: true, detail: "" };
   }
 
   const commands = config.hooks?.[name] ?? [];
@@ -45,14 +59,16 @@ export function runHooks(name: HookName, ctx: HookContext): boolean {
 
   for (const command of commands) {
     log(`${name} (${ctx.ws}/${ctx.repo}): ${command}`);
-    const p = Bun.spawnSync({ cmd: ["sh", "-c", `exec 1>&2\n${command}`], cwd: dir, env, stdin: "ignore", stdout: "inherit", stderr: "inherit" });
+    const p = Bun.spawnSync({ cmd: ["sh", "-c", `exec 1>&2\n${command}`], cwd: dir, env, stdin: "ignore", stdout: "inherit", stderr: "pipe" });
+    const stderr = p.stderr.toString();
+    process.stderr.write(stderr);
 
     if (p.exitCode !== 0) {
       log(`${name} hook failed with exit code ${p.exitCode ?? "?"}: ${command}`);
 
-      return false;
+      return { ok: false, detail: `${command.split("\n")[0]}: ${stderr.trim().slice(-OUTPUT_TAIL)}` };
     }
   }
 
-  return true;
+  return { ok: true, detail: "" };
 }
