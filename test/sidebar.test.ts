@@ -284,6 +284,19 @@ describe("click focuses Claude", () => {
     expect(stepFor(key("down"), 0, 0, h, 20).clicked).toBeUndefined();
   });
 
+  test("with pinned rows, a click maps to the right frame and the current pinned tab still reports clicked", () => {
+    // heights 2 each, 2 pinned: pinned frame rows 0..5, body below
+    const pinnedHit = stepFor(click(1), 5, 0, h, 20, 2);
+    expect(pinnedHit.clicked).toBe(0);
+    expect(pinnedHit.target).toBe(0);
+    const current = stepFor(click(1), 0, 0, h, 20, 2);
+    expect(current.clicked).toBe(0);
+    expect(current.target).toBeUndefined();
+    const body = stepFor(click(8), 0, 2, h, 20, 2);
+    expect(body.clicked).toBeGreaterThanOrEqual(2);
+    expect(body.target).toBe(body.clicked);
+  });
+
   const fakeZellij = (calls: string[][]) =>
     zellijMux((c) => {
       calls.push(c);

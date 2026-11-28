@@ -1054,15 +1054,13 @@ export function stepFor(input: Input, current: number, offset: number, heights: 
     return { travel: Travel.Forward, pending: "" };
   }
 
-  const target = targetFor(input, current, offset, heights, rows, pinned);
-
   if (input.kind === "click") {
     const clicked = clickTarget(input.row, offset, heights, rows, pinned);
 
-    return { ...(target === undefined ? {} : { target }), ...(clicked === undefined ? {} : { clicked }), pending: "" };
+    return { ...(clicked === undefined ? {} : { clicked }), target: inRange(clicked, count, current), pending: "" };
   }
 
-  return { target, pending: "" };
+  return { target: targetFor(input, current, offset, heights, rows, pinned), pending: "" };
 }
 
 /**
