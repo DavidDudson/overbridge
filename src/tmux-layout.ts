@@ -1,15 +1,12 @@
 import type { PaneSpec, TabSpec } from "./layout";
 import { DEFAULT_LEADER, type Leader, tmuxLeaderLines } from "./leader";
+import { SIDEBAR_PERCENT } from "./pane-widths";
 import { shellQuote } from "./util";
 
-/**
- * The sidebar takes a quarter of the window, the rest holds the agent and the extra panes. A percentage survives a
- * window resize, so under tmux this replaces `[sidebar] width` and the sidebar pane's `size`.
- */
-export const SIDEBAR_PERCENT = 25;
+export { SIDEBAR_PERCENT };
 
-/** Shell run by tmux hooks: size every pane titled `sidebar` to its share. `##` keeps run-shell from expanding the formats. */
-const SIDEBAR_RESIZE = `tmux list-panes -a -F '##{pane_id} ##{pane_title}' | awk '$2=="sidebar"{print $1}' | xargs -r -I{} tmux resize-pane -t {} -x ${SIDEBAR_PERCENT}%`;
+/** tmux events after which the widths are re-fitted: a client attaching or resizing, and a pane opening or closing. */
+const FIT_HOOKS = ["client-attached", "client-resized", "after-split-window", "after-kill-pane", "after-new-window"];
 
 /** The border text of a pane with a border status: its title in bold between corners, as the Workspaces frame has it. */
 const BORDER_FORMAT = "╭─ #[bold]#{pane_title}#[nobold] ─╮";
@@ -103,9 +100,10 @@ export function tmuxConf(self: string[], leader: Leader | null = DEFAULT_LEADER)
     "set -g pane-border-lines single",
     `set -g pane-border-format ${tmuxQuote(BORDER_FORMAT)}`,
     "set -g escape-time 10",
-    // no dragging a border with the mouse, and the sidebar goes back to its share when a client attaches or resizes
+    // no dragging a border with the mouse, and `widths` puts the sidebar (a quarter) and the Claude and diff panes
+    // (an even split of the rest) back whenever a client attaches or resizes or a pane opens or closes
     "unbind -n MouseDrag1Border",
-    ...["client-attached", "client-resized"].map((hook) => `set-hook -g ${hook} ${tmuxQuote(`run-shell ${tmuxQuote(SIDEBAR_RESIZE)}`)}`),
+    ...FIT_HOOKS.map((hook) => `set-hook -g ${hook} ${tmuxQuote(`run-shell -b ${tmuxQuote(`${cmd} widths`)}`)}`),
     ...Array.from({ length: 9 }, (_, i) => `bind -n M-${i + 1} ${go(String(i + 1))}`),
     `bind -n M-, ${go("prev")}`,
     `bind -n M-. ${go("next")}`,

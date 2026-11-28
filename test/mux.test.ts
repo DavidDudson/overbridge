@@ -235,6 +235,20 @@ describe("tmuxMux argv", () => {
     expect(tmuxMux(recorder().exec, { env: {} }).inSession()).toBe(false);
   });
 
+  test("fitWidths sets the sidebar to a quarter and Claude to half the rest, leaving panes already right", () => {
+    const row = (...f: (string | number)[]) => f.join("|||");
+    const r = recorder((cmd) =>
+      cmd[1] === "list-panes"
+        ? ok([row("%1", "@1", 200, "sidebar", 0, 80), row("%2", "@1", 200, "top", 81, 119), row("%3", "@1", 200, "w · claude", 81, 88), row("%4", "@1", 200, "w · diff", 170, 30)].join("\n"))
+        : ok(),
+    );
+    tmuxMux(r.exec, { session: "s" }).fitWidths();
+    expect(r.calls.filter((c) => c[1] === "resize-pane")).toEqual([
+      ["tmux", "resize-pane", "-t", "%1", "-x", "50"],
+      ["tmux", "resize-pane", "-t", "%3", "-x", "74"],
+    ]);
+  });
+
   test("resizes a pane one row at a time: -D grows a top pane, -U shrinks it", () => {
     const t = mux();
     expect(t.mux.resizePane("%2", PaneResize.Grow)).toBe(true);
@@ -300,7 +314,11 @@ describe("tmux layout script", () => {
     expect(conf.split("\n").filter((l) => l.startsWith("bind -n")).every((l) => l.startsWith("bind -n M-") || l === "bind -n C-Space switch-client -T overbridge")).toBe(true);
     expect(conf).toContain('bind -T overbridge m run-shell -b "ob top press m"\n');
     expect(conf).toContain("unbind -n MouseDrag1Border\n");
-    expect(conf).toContain(`resize-pane -t {} -x ${SIDEBAR_PERCENT}%`);
+
+    for (const hook of ["client-attached", "client-resized", "after-split-window", "after-kill-pane", "after-new-window"]) {
+      expect(conf).toContain(`set-hook -g ${hook} "run-shell -b \\"ob widths\\""\n`);
+    }
+
     expect(conf).toContain('bind -n M-3 run-shell -b "ob go 3"');
     expect(conf).toContain('bind -n M-w run-shell -b "ob next"');
   });
