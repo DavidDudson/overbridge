@@ -126,6 +126,33 @@ describe("noise classification", () => {
     expect(noises(hunkDiff("a.ts", ["+/*", " code()", "+*/"]))).toEqual([undefined, undefined]);
   });
 
+  test("code beside a comment, directives, empty statements and line endings are signal", () => {
+    expect(noises(hunkDiff("a.ts", ["+/* t */ grantAdmin();"]))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.ts", ["+*/ grantAdmin(); /*"]))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.ts", ["+/* t */"]))).toEqual([Noise.Comments]);
+    expect(noises(hunkDiff("a.sh", ["-#!/bin/sh", "+#!/bin/bash"]))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.go", ["-//go:build linux", "+//go:build windows"]))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.ts", ["-if (!ok);", "+if (!ok)", " foo();"]))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.sh", ["-set -e\r", "+set -e"]))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.ts", [" total = base", "   * rate", "-  * fee", "+  * 0"]))).toEqual([undefined]);
+  });
+
+  test("a moved run cannot take a deleted brace with it", () => {
+    const run = MOVED_LINES.map((l) => `-${l}`);
+    const back = MOVED_LINES.map((l) => `+${l}`);
+
+    expect(noises(hunkDiff("a.ts", [...run, "-}", ...FILLER, ...back]))[0]).toBeUndefined();
+  });
+
+  test("bidi and zero-width characters never reach the output", () => {
+    expect(focusedDiff(hunkDiff("a.ts", ["+const ok = 1; // \u202e\u200b"]))).not.toMatch(/[\u202e\u200b]/);
+  });
+
+  test("a rename with a mode change is not collapsed as a plain rename", () => {
+    const text = ["diff --git a/o.sh b/n.sh", "old mode 100755", "new mode 100644", "similarity index 100%", "rename from o.sh", "rename to n.sh", ""].join("\n");
+    expect(analyze(parseDiff(text)).map((f) => f.noise)).toEqual([Noise.Mode]);
+  });
+
   test("a bare quoted line is an import only inside a Go import block", () => {
     expect(noises(hunkDiff("a.go", [" want := []string{", '-\t"alpha",', '+\t"beta",', " }"]))).toEqual([undefined]);
   });

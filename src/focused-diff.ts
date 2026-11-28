@@ -73,8 +73,10 @@ export interface FocusOptions {
   maxWholeFileLines?: number;
 }
 
-/** A line from a file, safe to print: CR dropped (CRLF reads as LF), other control characters (ESC could recolour or hide output) replaced. */
-const clean = (line: string) => line.replace(/\r$/, "").replace(/(?![\t])\p{Cc}/gu, "\uFFFD");
+/** A line from a file, safe to print: control characters (ESC could recolour or hide output) and bidi or zero-width characters replaced. A trailing CR stays until render. */
+const clean = (line: string) => line.replace(/(?![\t\r])[\p{Cc}\p{Cf}]/gu, "\uFFFD");
+
+const noCr = (line: string) => line.replace(/\r$/, "");
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
@@ -280,10 +282,13 @@ const JUMP = /\b(?:return|throw|break|continue|yield)\s*$/;
  * `;` is optional only line for line, so a block whose line count changed with either at stake is signal.
  */
 /** A line starting like this continues the line before it unless that line ends in `;`. */
-const CONTINUES = /^\s*[([`+\-/*.]/;
+const CONTINUES = /^\s*(?:[([`+\-/*.]|(?:if|while|for|else|do)\b)/;
 
 function formatOnly(removed: readonly string[], added: readonly string[], next: string, lang: Lang): boolean {
   const sameLines = removed.length === added.length;
+  const crlf = (ls: readonly string[]) => ls.some((l) => l.endsWith("\r"));
+
+  if (crlf(removed) !== crlf(added)) return false;
 
   if (!sameLines && [...removed, ...added].some((l) => COMMENT_OPENER.test(l) || JUMP.test(l))) return false;
 
@@ -378,6 +383,43 @@ function analyzeHunk(file: FileDiff, hunk: Hunk, lang: Lang, removedPool: Pool, 
 
 const STAR_LINE = /^\*(\s|$)/;
 
+/** Comments that act on tools or the runtime: not prose. */
+const DIRECTIVE = /^(?:#!|\/\/\s*(?:go:|#|@ts-|eslint|prettier|nolint|nosec|biome|istanbul)|\/\*\s*(?:eslint|prettier|istanbul|webpack)|#\s*(?:type:|noqa|pragma|nosec|shellcheck|pylint|pyright|mypy|fmt:|isort:))/;
+
+/** True when the line is nothing but comment: no code after a closing star-slash or before an opener. */
+function commentOnly(line: string, lang: Lang): boolean {
+  let t = line.trim();
+
+  if (DIRECTIVE.test(t)) return false;
+
+  if (lang.block) {
+    if (t.startsWith("*/")) t = t.slice(2).trim();
+
+    t = t.replace(/\/\*.*?\*\//g, " ").trim();
+
+    const open = t.indexOf("/*");
+
+    if (open >= 0) t = t.slice(0, open).trim();
+  }
+
+  return t === "" || (lang.comment.test(t) && !t.startsWith("/*") && !t.startsWith("*/"));
+}
+
+/** True when `before` leaves a block comment open. */
+function inBlockComment(before: readonly string[]): boolean {
+  let open = false;
+
+  for (const l of before) {
+    const a = l.lastIndexOf("/*");
+    const b = l.lastIndexOf("*/");
+
+    if (a > b) open = true;
+    else if (b > a) open = false;
+  }
+
+  return open;
+}
+
 /** True when every line is a comment and each `/*` closes inside the block; `*` lines count only inside a comment. */
 function onlyComments(real: readonly string[], before: readonly string[], lang: Lang): boolean {
   if (!real.length) return false;
@@ -387,11 +429,9 @@ function onlyComments(real: readonly string[], before: readonly string[], lang: 
 
   if (lang.block && opens !== closes) return false;
 
-  const last = before.findLast((l) => l.trim())?.trim() ?? "";
-  const inBlock = last.startsWith("/*") ? !last.includes("*/") : STAR_LINE.test(last);
-  const starOk = !!lang.block && (inBlock || real.some((l) => l.trim().startsWith("/*")));
+  const starOk = !!lang.block && (inBlockComment(before) || real.some((l) => l.trim().startsWith("/*")));
 
-  return real.every((l) => lang.comment.test(l.trim()) || (starOk && STAR_LINE.test(l.trim())));
+  return real.every((l) => (starOk && STAR_LINE.test(l.trim()) && !DIRECTIVE.test(l.trim())) || (lang.comment.test(l.trim()) && commentOnly(l, lang)));
 }
 
 function classify(removed: string[], added: string[], next: string, before: readonly string[], lang: Lang, removedPool: Pool, addedPool: Pool): Noise | undefined {
@@ -399,8 +439,8 @@ function classify(removed: string[], added: string[], next: string, before: read
 
   if (onlyImports([...removed, ...added], before, lang)) return Noise.Imports;
 
-  // every line with a word in it must keep its count across the file, so a short changed line is never hidden with a moved one
-  const keys = nonBlank([...removed, ...added]).map((l) => lineKey(l, lang)).filter((k) => /\w/.test(k));
+  // every non-blank line must keep its count across the file, so a short changed line is never hidden with a moved one
+  const keys = nonBlank([...removed, ...added]).map((l) => lineKey(l, lang));
   const moved = keys.length > 0 && keys.every((k) => (removedPool.get(k) ?? 0) === (addedPool.get(k) ?? 0));
 
   if (moved && keys.filter((k) => k.length >= MOVED_MIN_KEY).length >= MOVED_MIN_LINES) return Noise.Moved;
@@ -421,7 +461,7 @@ export function analyze(files: FileDiff[], options: FocusOptions = {}): Analyzed
     if (isGenerated(file.path) && !file.binary) return { ...base, noise: unlessKept(Noise.Generated), hunks: analyzeAll(file, lang, new Map(), new Map(), keep) };
 
     if (!file.hunks.length && !file.binary) {
-      if (file.status === "renamed") return { ...base, noise: unlessKept(Noise.Renamed) };
+      if (file.status === "renamed" && !file.modeChange) return { ...base, noise: unlessKept(Noise.Renamed) };
 
       if (file.modeChange) return { ...base, noise: unlessKept(Noise.Mode) };
     }
@@ -487,13 +527,13 @@ function renderHunk(hunk: AnalyzedHunk): string[] {
       const head = i > 0 ? p.lines.slice(0, CONTEXT_LINES) : [];
       const tail = i < parts.length - 1 ? p.lines.slice(Math.max(head.length, p.lines.length - CONTEXT_LINES)) : [];
 
-      for (const l of [...head, ...tail]) out.push(` ${l}`);
+      for (const l of [...head, ...tail]) out.push(` ${noCr(l)}`);
     } else if (p.noise) {
       out.push(`${DIM} ${marker(p, p.noise)}${RESET}`);
     } else {
-      for (const l of p.removed) out.push(`${RED}-${l}${RESET}`);
+      for (const l of p.removed) out.push(`${RED}-${noCr(l)}${RESET}`);
 
-      for (const l of p.added) out.push(`${GREEN}+${l}${RESET}`);
+      for (const l of p.added) out.push(`${GREEN}+${noCr(l)}${RESET}`);
     }
   });
 
@@ -557,7 +597,7 @@ export function renderFocused(files: AnalyzedFile[], options: FocusOptions = {})
       const color = f.status === "added" ? GREEN : RED;
       const lines = cs.flatMap((c) => (f.status === "added" ? c.added : c.removed));
 
-      for (const l of lines.slice(0, maxWhole)) body.push(`${color}${sign}${l}${RESET}`);
+      for (const l of lines.slice(0, maxWhole)) body.push(`${color}${sign}${noCr(l)}${RESET}`);
 
       if (lines.length > maxWhole) body.push(`${DIM} ⋯ ${lines.length - maxWhole} more lines${RESET}`);
       body.push("");
