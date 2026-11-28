@@ -36,7 +36,7 @@ describe("buttons and layout", () => {
       apps: [app("web", AppStatus.Running, 3000), app("db", AppStatus.Stopped), app("api", AppStatus.Starting, 3001), app("job", AppStatus.Exited, 3002)],
     });
 
-    expect(buttons(s).map((b) => b.label)).toEqual(["📋 PR #3", "🟢 web :3000", "⚫ db", "🟡 api :3001", "🔴 job :3002", "📝 zed", "🤖 claude", "💻 terminal", "🔀 diff"]);
+    expect(buttons(s).map((b) => b.label)).toEqual(["📋 PR #3", "🟢 web :3000", "⚫ db", "🟡 api :3001", "🔴 job :3002", "📝 zed", "💻 terminal", "🔀 diff"]);
     expect(buttons(s).filter((b) => b.side === "left")).toHaveLength(1);
     expect(buttons(s).find((b) => b.label.includes("web"))!.color).toBe("green");
     expect(buttons(s).find((b) => b.label.includes("job"))!.color).toBe("red");
@@ -55,7 +55,7 @@ describe("buttons and layout", () => {
     expect(f.placed[0]!.col).toBe(2);
     const last = f.placed.at(-1)!;
     expect(last.col + last.width).toBe(78);
-    expect(f.placed.map((p) => p.button.label)).toEqual(["📋 PR #3", "🤖 claude", "💻 terminal", "🔀 diff"]);
+    expect(f.placed.map((p) => p.button.label)).toEqual(["📋 PR #3", "💻 terminal", "🔀 diff"]);
   });
 
   test("falls back to the workspace name without a title", () => {
@@ -671,7 +671,6 @@ describe("button keys", () => {
       "🟢 web :3000": "1",
       "⚫ db": "2",
       "📝 zed": "e",
-      "🤖 claude": "c",
       "💻 terminal": "t",
       "🔀 diff": "d",
     });

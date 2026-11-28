@@ -8,11 +8,12 @@ import { slugOfDir } from "./repo-slug";
 import { CheckScopeMode, checkClassNames, configPath, getConfigValue, loadConfigFile, loadRepoConfig, loadRootLayers, type ProjectConfig, rootConfigPath } from "./project-config";
 import { aheadRows } from "./ahead";
 import { clearPhase, parseLayer, PHASES, writePhase } from "./task-status";
-import { agentDirOf, chooseLayout, userLayoutPath } from "./layout";
+import { agentDirOf, canResume, chooseLayout, userLayoutPath } from "./layout";
 import { isOrchestrationTab, orchestrationRemoveMessage, type OrchestrationTab } from "./orchestration";
 import { isOrphan, strayFiles, worktreesIn } from "./orphan";
 import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
-import { clearSubagents } from "./agent-state";
+import { clearSubagents, sessionEndedForGood } from "./agent-state";
+import { afterAgentExit, launchArgs } from "./agent-restart";
 import { barePath, currentWorkspace, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, sessionName, worktreePath, wsDir } from "./paths";
 import { type HookContext, runHooks } from "./hooks";
 import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, workspaceSettingsPath } from "./scaffold";
@@ -551,7 +552,7 @@ export const workspaceClaudeArgs = (ws: string, settings: string, extra: readonl
  */
 export async function claude(ws: string, extra: string[]): Promise<never> {
   if (process.env[NO_SUPERVISOR_ENV]) {
-    const inv = agentInvocation(ws, extra);
+    const inv = agentInvocation(ws, launchArgs(extra, canResume(ws), extra));
     process.exit(exec(inv.cmd, { cwd: inv.cwd, env: inv.env }));
   }
 
@@ -569,21 +570,50 @@ export async function claude(ws: string, extra: string[]): Promise<never> {
     });
   }
 
-  const session = async (args: string[]): Promise<never> => {
-    const code = await runAgent(ws, args, agent);
+  const session = async (wanted: string[], streak: number): Promise<never> => {
+    const startedMs = Date.now();
+    const args = launchArgs(wanted, canResume(ws), extra);
+    let ran: { code: number; signal: string | null };
+
+    try {
+      ran = await runAgent(ws, args, agent);
+    } catch (e) {
+      // a launch that cannot start (a folder not there yet, a dev shell failing) must not end the supervisor and
+      // close the pane: that leaves a tab with no agent
+      const failed = restartAfter(Date.now() - startedMs, streak);
+      log(`${ws}: the agent did not start (${errorMessage(e)}); trying again in ${Math.max(failed.delayMs, SPAWN_RETRY_MS) / 1_000}s`);
+      await Bun.sleep(Math.max(failed.delayMs, SPAWN_RETRY_MS));
+
+      return session(extra, failed.streak);
+    }
+
+    const { code, signal } = ran;
     const request = takeRelaunchRequest(ws);
 
-    if (!request) {
+    if (request) {
+      log(`${ws}: relaunching the agent`);
+
+      return session(relaunchExtra(request), 0);
+    }
+
+    const next = afterAgentExit({ elapsedMs: Date.now() - startedMs, streak, endedForGood: sessionEndedForGood(ws), signal });
+
+    if (!next.restart) {
       process.exit(code);
     }
 
-    log(`${ws}: relaunching the agent`);
+    log(`${ws}: the agent exited (${signal ?? code}); starting it again${next.delayMs ? ` in ${next.delayMs / 1_000}s` : ""}`);
 
-    return session(relaunchExtra(request));
+    if (next.delayMs) await Bun.sleep(next.delayMs);
+
+    return session(next.args, next.streak);
   };
 
-  return session(extra);
+  return session(extra, 0);
 }
+
+/** How long a launch that threw (no process started) waits before the next try. */
+const SPAWN_RETRY_MS = 2_000;
 
 /** Set to run the agent the old way, as a plain child with no supervisor; `relaunch` then reopens the tab instead. */
 export const NO_SUPERVISOR_ENV = "OVERBRIDGE_NO_SUPERVISOR";
@@ -650,7 +680,7 @@ async function waitTreeGone(agent: RunningAgent) {
 }
 
 /** Run the agent once, recording this supervisor and its child so `overbridge relaunch` can restart it. */
-async function runAgent(ws: string, extra: string[], agent: RunningAgent): Promise<number> {
+async function runAgent(ws: string, extra: string[], agent: RunningAgent): Promise<{ code: number; signal: string | null }> {
   const inv = agentInvocation(ws, extra);
   const child = Bun.spawn({ cmd: inv.cmd, cwd: spawnCwd(inv.cwd), env: { ...process.env, ...inv.env }, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
   agent.child = child;
@@ -664,7 +694,7 @@ async function runAgent(ws: string, extra: string[], agent: RunningAgent): Promi
     clearLauncher(ws, process.pid);
   }
 
-  return child.exitCode ?? 1;
+  return { code: child.exitCode ?? 1, signal: child.signalCode?.toString() ?? null };
 }
 
 function agentInvocation(ws: string, extra: string[]) {

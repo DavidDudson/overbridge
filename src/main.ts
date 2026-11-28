@@ -65,7 +65,7 @@ Setup
                                         then finished with background tasks (zellij binds it to a key)
   overbridge go <n>|<name>|next|prev            switch tab by sidebar number, name, or neighbour (wrapping);
                                         works outside zellij too, so a window-manager key can call it
-  overbridge diff [--ws name]                   changes since the default branch, whitespace ignored, via delta
+  overbridge diff [--ws name] [--follow]        changes since the default branch, via difftastic (else delta)
   overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
   overbridge serve                              the one long-running process that owns network refreshes and the shared
@@ -277,8 +277,8 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case "diff": {
-      const { values } = opts(rest, ws);
-      diff(cmd.requireWs(values.ws));
+      const { values } = opts(rest, { ...ws, follow: { type: "boolean" as const } });
+      diff(cmd.requireWs(values.ws), values.follow ?? false);
       break;
     }
 

@@ -1,3 +1,4 @@
+import { transcriptDir } from "../src/layout";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -371,7 +372,8 @@ describe("dev shells", () => {
     return Bun.spawnSync({
       cmd: [process.execPath, CLI, "claude", "dsa"],
       cwd: tmp,
-      env: { ...env(), PATH: `${bin}:${process.env.PATH}` },
+      // the fake agent exits at once, which a supervisor would start again for ever
+      env: { ...env(), PATH: `${bin}:${process.env.PATH}`, OVERBRIDGE_NO_SUPERVISOR: "1" },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -764,6 +766,7 @@ describe("relaunch", () => {
         "#!/bin/sh",
         'echo "CM=${CLAUDE_CODE_EXPERIMENTAL_CODE_MODE-unset} NAME=$OVERBRIDGE_NAME ARGS=$*" >> "$RUNS"',
         'if [ -n "$ACTION" ] && [ ! -e "$RUNS.acted" ]; then touch "$RUNS.acted"; "$BUN" "$CLI" $ACTION > "$RUNS.out" 2>&1; echo "exit=$?" >> "$RUNS.out"; fi',
+        'if [ -n "$EXIT_FIRST" ] && [ ! -e "$RUNS.exited" ]; then touch "$RUNS.exited"; exit 1; fi',
         'if [ -n "$WRAP" ]; then sleep 30 & echo $! >> "$RUNS.pids"; wait; else exec sleep 30; fi',
         "",
       ].join("\n"),
@@ -787,6 +790,12 @@ describe("relaunch", () => {
     return { p, runs };
   };
 
+  /** Give `name`'s agent a conversation on disk, so `--continue` has something to resume. */
+  const withConversation = (name: string) => {
+    mkdirSync(transcriptDir(join(root, name)), { recursive: true });
+    writeFileSync(join(transcriptDir(join(root, name)), "s.jsonl"), "{}\n");
+  };
+
   const stop = async (name: string, p: Bun.Subprocess) => {
     p.kill("SIGTERM");
     await p.exited;
@@ -795,6 +804,7 @@ describe("relaunch", () => {
 
   test("restarts the agent in place with the new env and args, resuming on /read-handoff", async () => {
     expect(ws(["new", "rl"]).code).toBe(0);
+    withConversation("rl");
     const { p, runs } = supervise("rl");
     await until(() => lines(runs).length === 1 && launcherChild("rl") !== undefined);
     const first = launcherChild("rl");
@@ -828,8 +838,35 @@ describe("relaunch", () => {
     await stop("rl", p);
   }, 30_000);
 
+  test("an agent with no conversation yet starts fresh on a relaunch and after an early exit, never with --continue", async () => {
+    expect(ws(["new", "nc"]).code).toBe(0);
+    const early = supervise("nc", { EXIT_FIRST: "1" }, ["--", "--", "/start-item 7"]);
+    await until(() => lines(early.runs).length === 2 && launcherChild("nc") !== undefined);
+    expect(lines(early.runs)[0]).toEndWith("--name nc -- /start-item 7");
+    // the failed first launch is repeated with its prompt, not resumed
+    expect(lines(early.runs)[1]).toEndWith("--name nc -- /start-item 7");
+    expect(lines(early.runs).join("\n")).not.toContain("--continue");
+
+    expect(ws(["relaunch", "nc"]).code).toBe(0);
+    await until(() => lines(early.runs).length === 3);
+    expect(lines(early.runs)[2]).toEndWith("--name nc -- /read-handoff");
+    expect(lines(early.runs)[2]).not.toContain("--continue");
+    await stop("nc", early.p);
+  }, 30_000);
+
+  test("an agent that exits on its own is started again, resuming its conversation", async () => {
+    expect(ws(["new", "rx"]).code).toBe(0);
+    withConversation("rx");
+    const { p, runs } = supervise("rx", { EXIT_FIRST: "1" });
+    await until(() => lines(runs).length === 2 && launcherChild("rx") !== undefined);
+    expect(lines(runs)[0]).not.toContain("--continue");
+    expect(lines(runs)[1]).toEndWith("--name rx --continue");
+    await stop("rx", p);
+  }, 30_000);
+
   test("overbridge model restarts the agent on the model, keeps its other settings, and an agent may run it", async () => {
     expect(ws(["new", "md"]).code).toBe(0);
+    withConversation("md");
     const { p, runs } = supervise("md", { ACTION: "model md opus" });
     await until(() => lines(runs).length === 2);
     expect(lines(runs)[1]).toContain("--model opus --continue -- /read-handoff");
@@ -859,6 +896,7 @@ describe("relaunch", () => {
     expect(lines(target.runs)).toHaveLength(1);
 
     expect(ws(["new", "rl4"]).code).toBe(0);
+    withConversation("rl4");
     const self = supervise("rl4", { ACTION: "relaunch rl4 --chrome" });
     await until(() => lines(self.runs).length === 2);
     expect(lines(self.runs)[1]).toContain("--chrome --continue -- /read-handoff");

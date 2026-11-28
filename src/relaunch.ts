@@ -9,6 +9,7 @@ import { isOrchestrationTab } from "./orchestration";
 import { pidAlive, readProc } from "./proc";
 import { leaveTab } from "./remove";
 import { agentOf, getWorkspace, isIceboxed, isRemoving, readState, withState } from "./state";
+import { liveLauncher, requireAgent } from "./agent-verify";
 import { requireTab, TabFocus } from "./tab";
 import { errorMessage, fail, log } from "./util";
 
@@ -48,12 +49,8 @@ export interface RelaunchDeps {
   agentState: (ws: string) => AgentState | undefined;
   /** Open `ws`'s tab with its agent starting on `prompt`. */
   open: (ws: string, prompt: string, session: SessionMode) => void;
-}
-
-function liveLauncher(ws: string): Launcher | undefined {
-  const l = readLauncher(ws);
-
-  return l && pidAlive(l.pid) && pidAlive(l.child) ? l : undefined;
+  /** Fail when `ws`'s agent did not come up. */
+  verify: (ws: string) => void;
 }
 
 /**
@@ -81,6 +78,7 @@ export const relaunchDeps = (mux: Mux = defaultMux()): RelaunchDeps => ({
   signal: (pid, signal) => process.kill(pid, signal),
   agentState: (ws) => readAgentState(ws),
   open: (ws, prompt, session) => requireTab(ws, prompt, TabFocus.Foreground, mux, session === SessionMode.Continue),
+  verify: (ws) => requireAgent(ws, mux),
 });
 
 /**
@@ -175,6 +173,9 @@ export function relaunch(ws: string, opts: RelaunchOptions, deps: RelaunchDeps =
   const prompt = thawFirstMessage(opts.prompt);
 
   if (launcher && signalSupervisor(ws, launcher, prompt, opts, deps)) {
+    // from the agent's own tab the restart stops this very process, so there is nothing left to wait with
+    if (!inOwnTab) deps.verify(ws);
+
     return handoff;
   }
 
@@ -187,6 +188,7 @@ export function relaunch(ws: string, opts: RelaunchOptions, deps: RelaunchDeps =
   }
 
   deps.open(ws, prompt, opts.session);
+  deps.verify(ws);
 
   return handoff;
 }

@@ -27,7 +27,7 @@
               --set-default OVERBRIDGE_SELF overbridge \
               --set OVERBRIDGE_VERSION ${self.shortRev or self.dirtyShortRev or "dev"} \
               --set OVERBRIDGE_BUILD_TIME ${toString (self.lastModified or 0)} \
-              --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.git pkgs.gh pkgs.zellij pkgs.tmux ]}
+              --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.git pkgs.gh pkgs.zellij pkgs.tmux pkgs.difftastic ]}
             ln -s overbridge $out/bin/ws
           '';
           meta.mainProgram = "overbridge";

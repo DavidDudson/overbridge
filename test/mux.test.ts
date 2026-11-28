@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { sessionName } from "../src/paths";
 import { layoutSpecs, workspaceTabSpec } from "../src/layout";
 import { defaultMux, type MuxExec, MuxKind, muxKind, PaneResize, TabFocus, tmuxMux, zellijMux } from "../src/mux";
-import { layoutScript, tmuxConf, tmuxQuote } from "../src/tmux-layout";
+import { layoutScript, SIDEBAR_PERCENT, tmuxConf, tmuxQuote } from "../src/tmux-layout";
 
 const self = ["ob"];
 const ok = (stdout = ""): ReturnType<MuxExec> => ({ ok: true, stdout });
@@ -251,10 +251,13 @@ describe("tmux layout script", () => {
 
   test("each tab gets the sidebar full-height at the left, the top panel above the agent, and titled panes", () => {
     const w1 = lines.filter((l) => l.includes(`workspaces:${w1Index}`));
-    expect(w1.map((l) => l.split(" ")[0])).toEqual(['"select-pane"', '"split-window"', '"select-pane"', '"split-window"', '"select-pane"']);
-    expect(w1[1]).toContain('"-b" "-v" "-l" "5"');
-    expect(w1[3]).toContain('"-f" "-b" "-h" "-l" "40"');
-    expect(w1.filter((l) => l.startsWith('"select-pane"')).map((l) => l.split('"').at(-2))).toEqual(["w1 · claude", "top", "sidebar"]);
+    expect(w1.map((l) => l.split(" ")[0])).toEqual(['"select-pane"', '"split-window"', '"select-pane"', '"select-pane"', '"split-window"', '"select-pane"', '"split-window"', '"select-pane"']);
+    // the diff splits off the agent first, then the top panel spans both of them
+    expect(w1[1]).toContain('"-h" "-l" "50%"');
+    expect(w1[3]).toContain('"-L"');
+    expect(w1[4]).toContain('"-f" "-b" "-v" "-l" "5"');
+    expect(w1[6]).toContain(`"-f" "-b" "-h" "-l" "${SIDEBAR_PERCENT}%"`);
+    expect(w1.filter((l) => l.startsWith('"select-pane"') && !l.includes('"-L"')).map((l) => l.split('"').at(-2))).toEqual(["w1 · claude", "w1 · diff", "top", "sidebar"]);
   });
 
   test("quotes what the shell and tmux would otherwise expand", () => {
@@ -275,6 +278,8 @@ describe("tmux layout script", () => {
     }
 
     expect(conf.split("\n").filter((l) => l.startsWith("bind")).every((l) => l.startsWith("bind -n M-"))).toBe(true);
+    expect(conf).toContain("unbind -n MouseDrag1Border\n");
+    expect(conf).toContain(`resize-pane -t {} -x ${SIDEBAR_PERCENT}%`);
     expect(conf).toContain('bind -n M-3 run-shell -b "ob go 3"');
     expect(conf).toContain('bind -n M-w run-shell -b "ob next"');
   });
@@ -334,7 +339,7 @@ describe.skipIf(!Bun.which("tmux"))("tmuxMux against a real tmux", () => {
     expect(mux.currentTab()).toBe(work);
 
     const titles = mux.listPanes().filter((p) => p.tab === "c").map((p) => p.title).sort();
-    expect(titles).toEqual(["c · claude", "sidebar", "top"]);
+    expect(titles).toEqual(["c · claude", "c · diff", "sidebar", "top"]);
 
     mux.moveTab("c", 1);
     expect(mux.tabs()).toEqual([root, "c", work, ...rest]);

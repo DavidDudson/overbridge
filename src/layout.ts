@@ -55,11 +55,13 @@ export interface TabSpec {
   sidebar: PaneSpec;
   top?: PaneSpec;
   main: PaneSpec;
+  /** A pane open to the main pane's right from the start: a workspace tab's diff. */
+  side?: PaneSpec;
 }
 
 /**
  * One workspace's tab: the sidebar down the left; the rest holds the top panel across the
- * top, then the agent. Terminal and diff panes open to the agent's right from the top panel's buttons.
+ * top, then the agent with the diff open to its right. The diff and terminal buttons toggle those panes.
  */
 export function workspaceTabSpec(ws: string, self: string[], opts: TabOptions = {}): TabSpec {
   const width = opts.sidebarWidth ?? SIDEBAR_WIDTH;
@@ -73,6 +75,8 @@ export function workspaceTabSpec(ws: string, self: string[], opts: TabOptions = 
     sidebar: { name: "sidebar", cwd: wsDir(ws), command: [...self, "sidebar", "--ws", ws], size: width, borderless: true },
     top: { name: "top", cwd: wsDir(ws), command: [...self, "top", "--ws", ws], size: TOP_ROWS, borderless: true },
     main: { name: `${ws} · claude`, cwd: opts.agentCwd ?? wsDir(ws), command: [...self, "claude", ws, ...extra] },
+    // same title `paneTitle(ws, "diff")` gives, so the diff button finds it and a press closes it
+    side: { name: `${ws} · diff`, cwd: wsDir(ws), command: [...self, "diff", "--ws", ws, "--follow"] },
   };
 }
 
@@ -103,12 +107,20 @@ ${indent}}`;
 
 /** A tab spec as a zellij `tab` node. */
 export function specKdl(t: TabSpec): string {
+  const agent = (indent: string) =>
+    t.side
+      ? `${indent}pane split_direction="vertical" {
+${kdlPane(t.main, `${indent}  `)}
+${kdlPane(t.side, `${indent}  `)}
+${indent}}`
+      : kdlPane(t.main, indent);
+
   const main = t.top
     ? `      pane split_direction="horizontal" {
 ${kdlPane(t.top, "        ")}
-${kdlPane(t.main, "        ")}
+${agent("        ")}
       }`
-    : kdlPane(t.main, "      ");
+    : agent("      ");
 
   return `  tab name=${q(t.name)}${t.focus ? " focus=true" : ""} {
     pane split_direction="vertical" {
@@ -181,10 +193,13 @@ export function zellijConfigDir(env: Record<string, string | undefined> = proces
 /** A layout file here replaces the generated one. */
 export const userLayoutPath = (configDir = zellijConfigDir()) => join(configDir, "layouts", "overbridge.kdl");
 
-/** The directory Claude keeps transcripts in for sessions started in `dir`. */
-export const transcriptDir = (dir: string, home = homedir()) => join(home, ".claude", "projects", dir.replace(/[^A-Za-z0-9]/g, "-"));
+/**
+ * The directory Claude keeps transcripts in for sessions started in `dir`: under `$CLAUDE_CONFIG_DIR` when it is
+ * set (Claude reads it too), else `<home>/.claude`. A `home` passed in always wins, so tests stay in their own folder.
+ */
+export const transcriptDir = (dir: string, home?: string) => join(home === undefined ? process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude") : join(home, ".claude"), "projects", dir.replace(/[^A-Za-z0-9]/g, "-"));
 
-const hasTranscript = (dir: string, home: string) => {
+export const hasTranscript = (dir: string, home?: string) => {
   const transcripts = transcriptDir(dir, home);
 
   return existsSync(transcripts) && readdirSync(transcripts).some((f) => f.endsWith(".jsonl"));
@@ -195,7 +210,7 @@ const hasTranscript = (dir: string, home: string) => {
  * repo's worktree. Several: the first claimed, which is the repo `overbridge start` was given. None: the workspace
  * root. A workspace whose only transcripts are in its root keeps starting there, so `--continue` still resumes it.
  */
-export function agentDir(ws: string, repos: readonly string[], home = homedir(), agent: AgentKind = AgentKind.Claude): string {
+export function agentDir(ws: string, repos: readonly string[], home?: string, agent: AgentKind = AgentKind.Claude): string {
   const [first] = repos;
 
   // agy reads AGENTS.md and .agents/ only from its start folder up to the repo root, so it starts above the repos
@@ -208,17 +223,28 @@ export function agentDir(ws: string, repos: readonly string[], home = homedir(),
 }
 
 /** `agentDir` for a workspace in the state file; the root for one that is not in it. */
-export const agentDirOf = (ws: string, home = homedir()) => {
+export const agentDirOf = (ws: string, home?: string) => {
   const w = readState().workspaces[ws];
 
   return agentDir(ws, Object.keys(w?.repos ?? {}), home, agentOf(w));
 };
 
 /**
+ * Whether `ws`'s agent has a conversation to `--continue`. Claude exits at once with "no conversation found" when
+ * there is none, so a first launch, or a relaunch of a workspace that never got a message, must start fresh. agy
+ * starts afresh by itself when it has nothing to continue.
+ */
+export const canResume = (ws: string, home?: string) => {
+  const w = readState().workspaces[ws];
+
+  return agentOf(w) === AgentKind.Agy || hasTranscript(agentDirOf(ws, home), home);
+};
+
+/**
  * Workspaces and orchestration tabs with a Claude transcript to resume. Reads the disk, so callers pass the
  * result to `layoutKdl`.
  */
-export function resumable(workspaces: string[], home = homedir(), agentDirs: Readonly<Record<string, string>> = {}, agyWorkspaces: ReadonlySet<string> = new Set()): Set<string> {
+export function resumable(workspaces: string[], home?: string, agentDirs: Readonly<Record<string, string>> = {}, agyWorkspaces: ReadonlySet<string> = new Set()): Set<string> {
   return new Set([
     // agy keeps its conversations in its own store, and its --continue starts afresh when there is none
     ...workspaces.filter((ws) => agyWorkspaces.has(ws) || hasTranscript(agentDirs[ws] ?? wsDir(ws), home)),
@@ -238,7 +264,7 @@ export function chooseLayout(workspaces: string[], self: string[], kind: MuxKind
   const agentDirs = Object.fromEntries(workspaces.map((ws) => [ws, agentDirOf(ws)]));
   const state = readState();
   const agyWorkspaces = new Set(workspaces.filter((ws) => agentOf(state.workspaces[ws]) === AgentKind.Agy));
-  const opts = { resume: resumable(workspaces, homedir(), agentDirs, agyWorkspaces), sidebarWidth: sidebarWidth(), agentDirs };
+  const opts = { resume: resumable(workspaces, undefined, agentDirs, agyWorkspaces), sidebarWidth: sidebarWidth(), agentDirs };
 
   return kind === "tmux"
     ? { source: "generated", text: layoutScript(session, layoutSpecs(workspaces, self, opts)), conf: tmuxConf(self) }

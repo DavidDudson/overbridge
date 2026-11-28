@@ -13,6 +13,7 @@ import { CONFIG_FILE, loadRootLayers, type ProjectConfig, parseYaml, ROOT_CONFIG
 import { scaffold } from "./scaffold";
 import { switchTab } from "./sidebar";
 import { defaultMux, type Mux } from "./mux";
+import { requireAgent } from "./agent-verify";
 import { requireTab, TabFocus } from "./tab";
 import { cover, hasGhStack, localStacks } from "./stack";
 import { agentOf, type Claim, claimOwner, isIceboxed, isRemoving, isTaskClaim, readState, type ReboundFrom, type State, TASK_BRANCH_PREFIX } from "./state";
@@ -62,6 +63,7 @@ export function showTab(ws: string, prompts: TabPrompt = {}, mux: Mux = defaultM
   }
 
   requireTab(ws, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Foreground, mux);
+  requireAgent(ws, mux);
 }
 
 /** What `start` may inject: the provider, the multiplexer, the plugin check, `--here` and `--agent`. */
@@ -384,4 +386,5 @@ function openWorkspace(name: string, repo: string, branch: string, prompts: NewT
   scaffold(name);
   requireTab(name, prompts.prompt ?? prompts.defaultPrompt, TabFocus.Background, mux);
   console.log(name);
+  requireAgent(name, mux);
 }
