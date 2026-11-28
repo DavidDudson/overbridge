@@ -8,7 +8,7 @@ import { Motion, sidebarMotion, sidebarWidth } from "../src/config";
 import { animate, BUSY_FRAMES, busyFrame, FRAME_MS } from "../src/sidebar-motion";
 import { layoutKdl, SIDEBAR_WIDTH } from "../src/layout";
 import { metaDir, reposFile } from "../src/paths";
-import { BusyVerb, bodyRowsFor, KILL_KEY, killStep, KillStepKind, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
+import { BusyVerb, bodyRowsFor, KILL_KEY, killStep, KillStepKind, clampScroll, commitDigit, EMPTY_PROMPT, type Entry, entryAt, entryHeight, entryLines, type Footer, FooterKind, footerRow, legend, LEGEND_FOOTER, parseStart, pinnedCount, pinnedRowsFor, promptInput, queueRows, PromptStepKind, renderSidebar, runFreeze, runStart, scrollFor, Section, sidebarLabel, StartPlanKind, clickTab, stepFor, stripConventional, switchTab, targetFor, travelTab, visitTab, wrapText } from "../src/sidebar";
 import { readHistory, Travel, writeHistory } from "../src/sidebar-history";
 import type { Finished } from "../src/child";
 import { type Input, textWidth } from "../src/term";
@@ -269,6 +269,52 @@ describe("agent state", () => {
     expect(readAgentState("w1")).toBeUndefined();
     writeFileSync(agentStateFile("w1"), "not json");
     expect(readAgentState("w1")).toBeUndefined();
+  });
+});
+
+describe("click focuses Claude", () => {
+  const h = Array(12).fill(2);
+  const click = (row: number): Input => ({ kind: "click", col: 3, row });
+
+  test("stepFor reports the clicked entry, the current one too", () => {
+    expect(stepFor(click(3), 0, 4, h, 20)).toEqual({ target: 5, clicked: 5, pending: "" });
+    expect(stepFor(click(1), 0, 0, h, 20).clicked).toBe(0);
+    expect(stepFor(click(1), 0, 0, h, 20).target).toBeUndefined();
+    expect(stepFor(click(40), 0, 0, h, 20).clicked).toBeUndefined();
+    expect(stepFor(key("down"), 0, 0, h, 20).clicked).toBeUndefined();
+  });
+
+  const fakeZellij = (calls: string[][]) =>
+    zellijMux((c) => {
+      calls.push(c);
+
+      return c[2] === "list-panes"
+        ? { ok: true, stdout: JSON.stringify([{ id: 5, is_plugin: false, title: "w2 · claude", tab_name: "w2", exited: false }]) }
+        : { ok: true, stdout: "" };
+    });
+
+  test("goes to the tab, then focuses its Claude pane", () => {
+    const calls: string[][] = [];
+    const mux = fakeZellij(calls);
+    expect(clickTab("w1", "w2", mux)).toBe(true);
+    expect(calls[0]).toEqual(["zellij", "action", "go-to-tab-name", "w2"]);
+    expect(calls.at(-1)).toEqual(["zellij", "action", "focus-pane-id", "terminal_5"]);
+  });
+
+  test("a click on the current tab still focuses Claude, without switching", () => {
+    const calls: string[][] = [];
+    expect(clickTab("w2", "w2", fakeZellij(calls))).toBe(true);
+    expect(calls.some((c) => c[2] === "go-to-tab-name")).toBe(false);
+    expect(calls.at(-1)).toEqual(["zellij", "action", "focus-pane-id", "terminal_5"]);
+  });
+
+  test("a failed switch does not focus anything", () => {
+    const calls: string[][] = [];
+    const mux = zellijMux((c) => { calls.push(c);
+
+ return { ok: false, stdout: "" }; });
+    expect(clickTab("w1", "w2", mux)).toBe(false);
+    expect(calls.some((c) => c[2] === "focus-pane-id")).toBe(false);
   });
 });
 
