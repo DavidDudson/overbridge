@@ -115,3 +115,25 @@ export function descendants(pid: number, procs: readonly Proc[]): number[] {
 
   return [...children, ...children.flatMap((c) => descendants(c, procs))];
 }
+
+/**
+ * Stop `ws`'s agent when its tab is not enough: the supervisor first (so it does not restart the agent), then the
+ * agent. A pane the multiplexer did not close, or a removal from a shell outside the session, would otherwise leave
+ * Claude running in a folder that is gone. Returns the pids signalled.
+ */
+export function stopAgent(ws: string, alive: (pid: number) => boolean, kill: (pid: number) => void): number[] {
+  const l = readLauncher(ws);
+
+  if (!l) return [];
+  const pids = [l.pid, l.child].filter(alive);
+
+  for (const pid of pids) {
+    try {
+      kill(pid);
+    } catch {
+      // already gone
+    }
+  }
+
+  return pids;
+}

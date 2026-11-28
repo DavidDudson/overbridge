@@ -30,8 +30,9 @@ export function placement(panes: MuxPane[], ws: string): { anchor: string; direc
 /**
  * Bring Claude back into `ws`'s tab when its pane was closed or left behind exited. Does nothing unless the tab's
  * sidebar pane is listed, so a failed multiplexer query never opens panes. The caller decides when it is safe.
+ * With `prompt` the new Claude starts a fresh conversation on it instead of continuing one.
  */
-export function ensureAgentPane(ws: string, deps: AgentKeepDeps = {}): boolean {
+export function ensureAgentPane(ws: string, deps: AgentKeepDeps = {}, prompt?: string): boolean {
   const mux = deps.mux ?? defaultMux();
   const now = (deps.now ?? Date.now)();
   const panes = mux.listPanes();
@@ -56,7 +57,8 @@ export function ensureAgentPane(ws: string, deps: AgentKeepDeps = {}): boolean {
     ...where,
     title: paneTitle(ws, "claude"),
     cwd: (deps.cwd ?? agentDirOf)(ws),
-    command: [...self, "claude", ws, "--", "--continue"],
+    // a pane that never came up has no conversation to continue, so it starts fresh on the prompt it lost
+    command: prompt ? [...self, "claude", ws, "--", prompt] : [...self, "claude", ws, "--", "--continue"],
     closeOnExit: false,
   });
 }

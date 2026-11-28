@@ -32,8 +32,8 @@ import { AgentKind } from "./agent-kind";
 import { agyArgs, agyTrust, agyUntrust } from "./agy";
 import { errorMessage, exec, fail, isRecord, log, must, naturalSort, run, shellQuote, spawnCwd } from "./util";
 import { type AgentLaunch, layerLaunch } from "./agent-launch";
-import { clearLauncher, descendants, RELAUNCH_SIGNAL, relaunchExtra, takeRelaunchRequest, writeLauncher } from "./agent-supervisor";
-import { listProcs, pidsAlive } from "./proc";
+import { clearLauncher, descendants, stopAgent, RELAUNCH_SIGNAL, relaunchExtra, takeRelaunchRequest, writeLauncher } from "./agent-supervisor";
+import { listProcs, pidAlive, pidsAlive } from "./proc";
 import { constants } from "node:os";
 import type { Subprocess } from "bun";
 
@@ -181,6 +181,12 @@ export function removeWorkspace(ws: string, force: boolean) {
     if (!ok && !force) fail(`a pre-remove hook for ${ws}/${repo} failed; nothing was removed (use --force to remove anyway)`);
   }
 
+  // the tab may still be open (a plain `rm`, unlike the sidebar's, closes nothing), and its agent with it
+  const mux = defaultMux();
+
+  if (mux.inSession() && mux.tabs().includes(ws)) mux.closeTab(ws);
+  stopAgent(ws, pidAlive, (pid) => process.kill(pid, "SIGTERM"));
+
   const removed: string[] = [];
 
   for (const r of Object.keys(w.repos)) {
@@ -219,7 +225,7 @@ function removeFolder(ws: string) {
 
   rmSync(wsDir(ws), { recursive: true, force: true });
   clearSubagents(metaDir(), ws);
-  [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.shell`), join("agent", `${ws}.turn.json`), join("context", `${ws}.json`), join("phase", `${ws}.json`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`), join("pr-view", ws)].forEach((f) =>
+  [join("top", `${ws}.json`), join("agent", `${ws}.json`), join("agent", `${ws}.launcher.json`), join("agent", `${ws}.relaunch.json`), join("agent", `${ws}.shell`), join("agent", `${ws}.turn.json`), join("context", `${ws}.json`), join("phase", `${ws}.json`), join("sidebars", ws), join("tabs", `${ws}.kdl`), join("workspaces", `${ws}.settings.json`), join("pr-view", ws)].forEach((f) =>
     rmSync(join(metaDir(), f), { recursive: true, force: true }),
   );
 }
