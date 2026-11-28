@@ -1,6 +1,8 @@
-import { SIDEBAR_WIDTH } from "./config";
 import type { PaneSpec, TabSpec } from "./layout";
 import { shellQuote } from "./util";
+
+/** The sidebar takes a quarter of the window, the rest holds the agent and the extra panes. */
+export const SIDEBAR_PERCENT = 25;
 
 /** A tmux command as argv, without the leading `tmux`. */
 export type TmuxCommand = string[];
@@ -21,7 +23,7 @@ export function tabOpen(session: string, t: TabSpec, opts: { first: boolean; pri
 
 /**
  * The commands that fill the window `win` after `tabOpen`: the main pane is the agent; the top panel is split above
- * it and the sidebar is split full-height at the left, each titled while it is the active pane, so no pane id is
+ * it and the sidebar is split full-height at the left, as 25% of the window (like zellij, not `sidebar.size`), each titled while it is the active pane, so no pane id is
  * needed. The sidebar ends up focused, like zellij. `win` is a window id or index, never a name: tmux reads
  * `=@root` as a window id and finds nothing, and orchestration tabs are named `@...`.
  */
@@ -31,7 +33,7 @@ export function tabFill(win: string, t: TabSpec): TmuxCommand[] {
   return [
     title(t.main),
     ...(t.top ? [["split-window", "-b", "-v", "-l", String(t.top.size ?? 5), "-t", win, "-c", t.top.cwd, word(t.top)], title(t.top)] : []),
-    ["split-window", "-f", "-b", "-h", "-l", String(t.sidebar.size ?? SIDEBAR_WIDTH), "-t", win, "-c", t.sidebar.cwd, word(t.sidebar)],
+    ["split-window", "-f", "-b", "-h", "-l", `${SIDEBAR_PERCENT}%`, "-t", win, "-c", t.sidebar.cwd, word(t.sidebar)],
     title(t.sidebar),
   ];
 }
@@ -76,6 +78,8 @@ export function tmuxConf(self: string[]): string {
     "set -g pane-border-style fg=black",
     "set -g pane-active-border-style fg=black",
     "set -g escape-time 10",
+    // the sidebar stays at its share: no dragging a border with the mouse
+    "unbind -n MouseDrag1Border",
     ...Array.from({ length: 9 }, (_, i) => `bind -n M-${i + 1} ${go(String(i + 1))}`),
     `bind -n M-, ${go("prev")}`,
     `bind -n M-. ${go("next")}`,

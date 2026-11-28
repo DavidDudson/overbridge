@@ -253,7 +253,7 @@ describe("tmux layout script", () => {
     const w1 = lines.filter((l) => l.includes(`workspaces:${w1Index}`));
     expect(w1.map((l) => l.split(" ")[0])).toEqual(['"select-pane"', '"split-window"', '"select-pane"', '"split-window"', '"select-pane"']);
     expect(w1[1]).toContain('"-b" "-v" "-l" "5"');
-    expect(w1[3]).toContain('"-f" "-b" "-h" "-l" "40"');
+    expect(w1[3]).toContain('"-f" "-b" "-h" "-l" "25%"');
     expect(w1.filter((l) => l.startsWith('"select-pane"')).map((l) => l.split('"').at(-2))).toEqual(["w1 · claude", "top", "sidebar"]);
   });
 
