@@ -288,6 +288,7 @@ async function main(argv: string[]): Promise<number> {
         focused: { type: "boolean" as const },
         keep: { type: "string" as const },
       });
+
       const name = cmd.requireWs(values.ws);
       const keep = (values.keep ?? "").split(",").filter(Boolean);
       const bad = keep.find((k) => !isNoise(k));
