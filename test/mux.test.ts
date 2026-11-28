@@ -297,7 +297,8 @@ describe("tmux layout script", () => {
       expect(conf).toContain(`${line}\n`);
     }
 
-    expect(conf.split("\n").filter((l) => l.startsWith("bind")).every((l) => l.startsWith("bind -n M-"))).toBe(true);
+    expect(conf.split("\n").filter((l) => l.startsWith("bind -n")).every((l) => l.startsWith("bind -n M-") || l === "bind -n C-Space switch-client -T overbridge")).toBe(true);
+    expect(conf).toContain('bind -T overbridge m run-shell -b "ob top press m"\n');
     expect(conf).toContain("unbind -n MouseDrag1Border\n");
     expect(conf).toContain(`resize-pane -t {} -x ${SIDEBAR_PERCENT}%`);
     expect(conf).toContain('bind -n M-3 run-shell -b "ob go 3"');

@@ -79,7 +79,9 @@ Setup
   overbridge server stop [--force]              stop it (it finishes what runs first; --force kills it)
   overbridge server restart                     stop it and start a fresh one
   overbridge top [refresh] [--ws name]          top panel (links, editor, app toggles); refresh updates its cache (--force reruns button status)
-  overbridge top sweep                          remove every workspace whose PRs have all merged (sidebars run it every minute)
+  overbridge keys [--zellij]                    the shared key table; --zellij prints the keybinds block for the leader chord
+  overbridge top press <key>                    press a top panel button from outside it (the leader chord runs this)
+  overbridge top sweep                         remove every workspace whose PRs have all merged (sidebars run it every minute)
   overbridge worklist [refresh|show]            work list pane (the @work tab); refresh reads every board into its cache; show prints it
   overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
   overbridge checks                             the check queue (the @checks tab); K/J/t/b move, x kills, v recent runs
@@ -274,6 +276,13 @@ async function main(argv: string[]): Promise<number> {
     case "next":
       console.log(next(currentTab()));
       break;
+    case "keys": {
+      const { values } = opts(rest, { zellij: { type: "boolean" as const } });
+      const { keysCommand } = await import("./keys-cmd");
+      console.log(keysCommand(values.zellij === true));
+      break;
+    }
+
     case "go": {
       const { positionals } = opts(rest, {});
 
@@ -464,9 +473,10 @@ async function main(argv: string[]): Promise<number> {
     case "top": {
       const { values, positionals } = opts(rest, { ...ws, force: { type: "boolean" as const } });
 
-      if (positionals[0] === "refresh") topRefresh(values.ws, values.force === true);
+      if (positionals[0] === "press") (await import("./top-press")).topPress(positionals[1], values.ws);
+      else if (positionals[0] === "refresh") topRefresh(values.ws, values.force === true);
       else if (positionals[0] === "sweep") await sweepWithServer();
-      else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh|sweep] [--ws name] [--force]");
+      else if (positionals.length) throw new OverbridgeError("usage: overbridge top [refresh|sweep|press <key>] [--ws name] [--force]");
       else await topPanel(values.ws);
       break;
     }

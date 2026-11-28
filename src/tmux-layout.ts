@@ -1,4 +1,5 @@
 import type { PaneSpec, TabSpec } from "./layout";
+import { DEFAULT_LEADER, type Leader, parseLeader, tmuxLeaderLines } from "./leader";
 import { shellQuote } from "./util";
 
 /**
@@ -76,9 +77,10 @@ export function layoutScript(session: string, tabs: TabSpec[]): string {
 /**
  * The server config: no prefix and no status bar (so no key is taken from the apps), the mouse on, extended keys
  * forwarded so Shift+Enter and Ctrl+Enter reach Claude, pane titles left to overbridge, and truecolour. The only
- * bindings are the root-table Alt keys that run the CLI's `go` and `next`.
+ * bindings are the root-table Alt keys that run the CLI's `go` and `next`, and the leader chord (Ctrl+Space by default),
+ * which opens a key table whose keys run `overbridge top press`.
  */
-export function tmuxConf(self: string[]): string {
+export function tmuxConf(self: string[], leader: Leader = parseLeader(DEFAULT_LEADER)!): string {
   const cmd = self.map(shellQuote).join(" ");
   const go = (arg: string) => `run-shell -b ${tmuxQuote(`${cmd} go ${arg}`)}`;
 
@@ -108,5 +110,6 @@ export function tmuxConf(self: string[]): string {
     `bind -n M-, ${go("prev")}`,
     `bind -n M-. ${go("next")}`,
     `bind -n M-w run-shell -b ${tmuxQuote(`${cmd} next`)}`,
+    ...tmuxLeaderLines(self, leader),
   ].join("\n")}\n`;
 }

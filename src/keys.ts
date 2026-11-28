@@ -160,6 +160,13 @@ export const Keyset = {
 } as const satisfies Record<string, readonly Action[]>;
 
 /**
+ * Keys `overbridge top press` accepts and the multiplexer chord binds: every key a top-panel button can have
+ * (`1`-`9` apps, `i p u w c` links, `e` editor, `t` `D` panes, `C` Cleanup, `b` back, `y` ready/draft, `m` merge)
+ * plus the panel's `r` refresh and `o` open.
+ */
+export const PRESS_KEYS: readonly string[] = [..."123456789", ..."ipuwcetDCbymro"];
+
+/**
  * Keys a button of the top panel may not take: every key of the table, `a` (the sidebar's next-tab) and the
  * panel's own `r` refresh, `o` open, `L` log, `q` quit. Buttons use what is left (`i p u w c e t D C b m y`, digits).
  */

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { SIDEBAR_WIDTH, sidebarWidth } from "./config";
+import { leaderKey, SIDEBAR_WIDTH, sidebarWidth } from "./config";
 import type { MuxKind } from "./mux";
 import { ORCHESTRATION_TABS, type OrchestrationTab } from "./orchestration";
 import { sessionName, worktreePath, wsDir } from "./paths";
@@ -299,6 +299,6 @@ export function chooseLayout(workspaces: string[], self: string[], kind: MuxKind
   const opts = { resume: resumable(workspaces, undefined, agentDirs, agyWorkspaces), sidebarWidth: sidebarWidth(), agentDirs };
 
   return kind === "tmux"
-    ? { source: "generated", text: layoutScript(session, layoutSpecs(workspaces, self, opts)), conf: tmuxConf(self) }
+    ? { source: "generated", text: layoutScript(session, layoutSpecs(workspaces, self, opts)), conf: tmuxConf(self, leaderKey()) }
     : { source: "generated", text: layoutKdl(workspaces, self, opts) };
 }

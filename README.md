@@ -1042,6 +1042,14 @@ and its footer legend is built from the same table.
 | `v` | cycle view | `a` | sidebar: next tab that needs you |
 | `f` | cycle source filter | `n` | new (sidebar: workspace; `@work`: start item) |
 
+**Pressing a top panel button while Claude has the keyboard.** The multiplexer takes one chord, the leader
+(`Ctrl+Space`; set `[keys] leader = "alt-x"` in `repos.toml` for another), before Claude sees it; the next key is a
+button key of the panel (`i p u w c e t D C b m y`, `1`-`9`, plus `r` and `o`) and runs `overbridge top press <key>`,
+which hands the key to the panel of the current tab through `<meta>/top-press/`. Any other key cancels. tmux gets the
+bindings in its generated config. zellij has no user-defined modes, so `overbridge keys --zellij` prints a `keybinds`
+block (the chord borrows its `tmux` mode) to merge into `config.kdl`; its syntax is checked with `zellij setup --check`,
+but a press there opens a floating pane that closes at once. `overbridge keys` prints the table and the leader.
+
 Pane-only keys: `K`/`J`/`T`/`B` reorder a waiting check, `w` cycles the `@perf` window and `b` its grouping.
 
 Two more orchestration tabs list GitHub PRs through `gh search`: `@prs` (open PRs you opened) and `@reviews` (open PRs

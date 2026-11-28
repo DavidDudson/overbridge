@@ -10,6 +10,7 @@ import { ALT_COMMANDS, type ActDeps, activate, applyOptimistic, type PaneKind, t
 import { afterStep, type FitState, planFit, settle } from "./top-fit";
 import { TOP_ROWS } from "./layout";
 import { defaultMux } from "./mux";
+import { watchPresses } from "./top-press";
 import { ENTER_SCREEN, LEAVE_SCREEN } from "./term";
 import { errorMessage, log, spawnCwd } from "./util";
 import { subscribeEvents } from "./events-client";
@@ -77,6 +78,7 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions): Promise<Pa
   let snap: TopSnapshot = await snapshot();
 
   let leave = (_exit: PanelExit) => {};
+  let stopPress = () => {};
 
   /** Set once the panel quits, so a reload still in flight draws nothing over what comes next. */
   let hasLeft = false;
@@ -270,6 +272,7 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions): Promise<Pa
   const done = new Promise<PanelExit>((resolve) => {
     const quit = (exit: PanelExit = PanelExit.Quit) => {
       hasLeft = true;
+      stopPress();
       // a caller may draw in this process next, so the panel stops listening to the terminal before it resolves
       process.stdin.removeAllListeners("data");
       process.stdout.removeAllListeners("resize");
@@ -284,24 +287,9 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions): Promise<Pa
     painter.invalidate();
     process.stdin.setRawMode(true);
     process.stdin.resume();
-    process.stdin.on("data", (buf) => {
-      const key = buf.toString();
-      const mouse = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/.exec(key);
 
-      if (mouse) {
-        // left-button press only
-        if (mouse[1] === "0" && mouse[4] === "M") {
-          const i = hit(frame, Number(mouse[2]) - 1, Number(mouse[3]) - 1);
-
-          if (i !== undefined) {
-            cursor = i;
-            void act(current());
-          }
-        }
-
-        return;
-      }
-
+    /** One key, from the terminal or from `overbridge top press`. */
+    const onKey = (key: string) => {
       note = undefined;
       const n = frame.placed.length;
 
@@ -329,6 +317,30 @@ export async function topPanel(wsOpt?: string, panel?: PanelOptions): Promise<Pa
       }
 
       draw();
+    };
+
+    // a chord bound in the multiplexer presses a button through here, while Claude has the keyboard
+    stopPress = watchPresses(ws, onKey);
+
+    process.stdin.on("data", (buf) => {
+      const key = buf.toString();
+      const mouse = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/.exec(key);
+
+      if (mouse) {
+        // left-button press only
+        if (mouse[1] === "0" && mouse[4] === "M") {
+          const i = hit(frame, Number(mouse[2]) - 1, Number(mouse[3]) - 1);
+
+          if (i !== undefined) {
+            cursor = i;
+            void act(current());
+          }
+        }
+
+        return;
+      }
+
+      onKey(key);
     });
     process.stdout.on("resize", () => {
       painter.invalidate();
