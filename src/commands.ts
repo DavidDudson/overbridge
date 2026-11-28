@@ -32,8 +32,8 @@ import { AgentKind } from "./agent-kind";
 import { agyArgs, agyTrust, agyUntrust } from "./agy";
 import { errorMessage, exec, fail, isRecord, log, must, naturalSort, run, shellQuote, spawnCwd } from "./util";
 import { type AgentLaunch, layerLaunch } from "./agent-launch";
-import { clearLauncher, descendants, stopAgent, RELAUNCH_SIGNAL, relaunchExtra, takeRelaunchRequest, writeLauncher } from "./agent-supervisor";
-import { listProcs, pidAlive, pidsAlive } from "./proc";
+import { clearLauncher, ancestry, descendants, stopLauncherProcs, RELAUNCH_SIGNAL, relaunchExtra, takeRelaunchRequest, writeLauncher } from "./agent-supervisor";
+import { listEnvProcs, listProcs, pidAlive, pidsAlive, readProc } from "./proc";
 import { constants } from "node:os";
 import type { Subprocess } from "bun";
 
@@ -181,12 +181,6 @@ export function removeWorkspace(ws: string, force: boolean) {
     if (!ok && !force) fail(`a pre-remove hook for ${ws}/${repo} failed; nothing was removed (use --force to remove anyway)`);
   }
 
-  // the tab may still be open (a plain `rm`, unlike the sidebar's, closes nothing), and its agent with it
-  const mux = defaultMux();
-
-  if (mux.inSession() && mux.tabs().includes(ws)) mux.closeTab(ws);
-  stopAgent(ws, pidAlive, (pid) => process.kill(pid, "SIGTERM"));
-
   const removed: string[] = [];
 
   for (const r of Object.keys(w.repos)) {
@@ -200,12 +194,27 @@ export function removeWorkspace(ws: string, force: boolean) {
     removed.push(r);
   }
 
+  stopWorkspaceAgent(ws);
   for (const repo of Object.keys(w.repos)) untrustFolder(worktreePath(ws, repo)); // the agent may have started in one
   removeFolder(ws);
   withState((s) => {
     delete s.workspaces[ws];
   });
   log(`removed ${ws}`);
+}
+
+/**
+ * Close `ws`'s tab and stop its agent once the removal is certain to go ahead (a plain `rm` closes nothing itself).
+ * Never touches the caller: not its own tab, and not a supervisor or agent it runs under. A launcher file left by a
+ * crash can name a reused pid, so only a process carrying this workspace's `OVERBRIDGE_NAME` is signalled.
+ */
+function stopWorkspaceAgent(ws: string) {
+  const mux = defaultMux();
+
+  if (process.env.OVERBRIDGE_NAME !== ws && mux.inSession() && mux.tabs().includes(ws)) mux.closeTab(ws);
+  const mine = new Set((listEnvProcs("OVERBRIDGE_NAME") ?? []).filter((p) => p.env === ws).map((p) => p.pid));
+  const self = new Set(ancestry(process.pid, (pid) => readProc(pid)?.ppid));
+  stopLauncherProcs(ws, (pid) => pidAlive(pid) && mine.has(pid) && !self.has(pid), (pid) => process.kill(pid, "SIGTERM"));
 }
 
 /** Delete `ws`'s folder and its per-workspace files outside it: top cache, PR views, agent state, phase, sidebar pane, tab layout. */

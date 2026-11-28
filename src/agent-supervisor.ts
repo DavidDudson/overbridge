@@ -121,7 +121,7 @@ export function descendants(pid: number, procs: readonly Proc[]): number[] {
  * agent. A pane the multiplexer did not close, or a removal from a shell outside the session, would otherwise leave
  * Claude running in a folder that is gone. Returns the pids signalled.
  */
-export function stopAgent(ws: string, alive: (pid: number) => boolean, kill: (pid: number) => void): number[] {
+export function stopLauncherProcs(ws: string, alive: (pid: number) => boolean, kill: (pid: number) => void): number[] {
   const l = readLauncher(ws);
 
   if (!l) return [];

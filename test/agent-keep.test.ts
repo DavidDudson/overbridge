@@ -79,7 +79,7 @@ describe("ensureAgentPane", () => {
   test("with a prompt, the reopened Claude starts fresh on it instead of continuing", () => {
     const f = fakeMux([pane("1", "sidebar"), pane("3", "w1 · diff")]);
     expect(ensureAgentPane("w1", deps(f.mux), "/start-item 5")).toBe(true);
-    expect(f.opened[0]?.command).toEqual(["ob", "claude", "w1", "--", "/start-item 5"]);
+    expect(f.opened[0]?.command).toEqual(["ob", "claude", "w1", "--", "--", "/start-item 5"]);
   });
 
   test("falls back to the terminal, then under the top panel", () => {

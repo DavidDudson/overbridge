@@ -4,7 +4,7 @@ import { defaultMux, type Mux } from "./mux";
 import { pidAlive } from "./proc";
 import { fail, log } from "./util";
 
-/** How long a new agent has to come up, and how long it must stay up to count as started. */
+/** How long a new agent has to come up (a burst of starts under load is slow, not broken), and how long it must stay up to count as started. */
 export const AGENT_UP_MS = 60_000;
 export const AGENT_STABLE_MS = 2_000;
 const POLL_MS = 500;

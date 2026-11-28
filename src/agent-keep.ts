@@ -58,7 +58,7 @@ export function ensureAgentPane(ws: string, deps: AgentKeepDeps = {}, prompt?: s
     title: paneTitle(ws, "claude"),
     cwd: (deps.cwd ?? agentDirOf)(ws),
     // a pane that never came up has no conversation to continue, so it starts fresh on the prompt it lost
-    command: prompt ? [...self, "claude", ws, "--", prompt] : [...self, "claude", ws, "--", "--continue"],
+    command: prompt ? [...self, "claude", ws, "--", "--", prompt] : [...self, "claude", ws, "--", "--continue"],
     closeOnExit: false,
   });
 }
