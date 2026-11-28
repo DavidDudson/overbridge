@@ -195,6 +195,7 @@ export function removeWorkspace(ws: string, force: boolean) {
   }
 
   stopWorkspaceAgent(ws);
+
   for (const repo of Object.keys(w.repos)) untrustFolder(worktreePath(ws, repo)); // the agent may have started in one
   removeFolder(ws);
   withState((s) => {
