@@ -116,12 +116,13 @@ export function classifyPr(pr: PrView): PrStatus {
 
   if (checks.some((c) => PENDING.has(c.state ?? "") || (c.status !== undefined && c.status !== "COMPLETED"))) return "pending";
 
-  // Mergeable means squash-mergeable right now: GitHub's CLEAN. No conflict but not CLEAN (required review missing, branch protection, behind, unstable) is pending.
-  if (pr.mergeStateStatus === "CLEAN") return "mergeable";
+  // A draft is never mergeable, whatever GitHub's merge state says.
+  if (pr.isDraft || pr.mergeStateStatus === "DRAFT") return "blocked";
 
-  if (pr.mergeStateStatus === "DRAFT") return "blocked";
+  // Mergeable means squash-mergeable right now: CLEAN, or HAS_HOOKS (clean, with pre-receive hooks). No conflict but not mergeable (required review missing, behind, unstable) is pending.
+  if (pr.mergeStateStatus === "CLEAN" || pr.mergeStateStatus === "HAS_HOOKS") return "mergeable";
 
-  if (["BLOCKED", "BEHIND", "UNSTABLE", "HAS_HOOKS"].includes(pr.mergeStateStatus ?? "")) return "pending";
+  if (["BLOCKED", "BEHIND", "UNSTABLE"].includes(pr.mergeStateStatus ?? "")) return "pending";
 
   return pr.mergeable === "MERGEABLE" ? "pending" : "unknown";
 }
