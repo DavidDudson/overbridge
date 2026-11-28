@@ -163,6 +163,18 @@ describe("workflow", () => {
     expect(ws(["rm", "empty"]).code).toBe(0);
   });
 
+  test("rm refuses unpushed commits unless --force", () => {
+    expect(ws(["new", "unpushed"]).code).toBe(0);
+    expect(ws(["checkout", "app", "unpushed-br"], join(root, "unpushed")).code).toBe(0);
+    const wt = join(root, "unpushed", "app");
+    sh(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-m", "local only"], wt);
+    const r = ws(["rm", "unpushed"]);
+    expect(r.code).not.toBe(0);
+    expect(r.err).toContain("unpushed commits");
+    expect(existsSync(wt)).toBe(true);
+    expect(ws(["rm", "--force", "unpushed"]).code).toBe(0);
+  });
+
   test("rm refuses an orchestration tab, with or without --force", () => {
     for (const tab of ["@root", "@work"]) {
       for (const args of [["rm", tab], ["rm", "--force", tab], ["rm", "--background-finish", tab]]) {
