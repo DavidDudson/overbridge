@@ -66,7 +66,13 @@ export function resolve(keyset: readonly Action[], key: string): Action | undefi
 }
 
 /** The key the legend shows for `action`. */
-export const keyOf = (action: Action): string => KEYS.find(([a]) => a === action)![1][0]!;
+export const keyOf = (action: Action): string => {
+  const key = KEYS.find(([a]) => a === action)?.[1][0];
+
+  if (key === undefined) throw new Error(`no key for ${action}`);
+
+  return key;
+};
 
 const KEY_LABEL = new Map([
   ["enter", "⏎"],
@@ -158,6 +164,13 @@ export const Keyset = {
   frozen: [A.Down, A.Up, A.Top, A.Bottom, A.Freeze, A.Refresh, A.Quit],
   explore: [A.Down, A.Up, A.Top, A.Bottom, A.Enter, A.Quit],
 } as const satisfies Record<string, readonly Action[]>;
+
+/**
+ * Keys `overbridge top press` accepts and the multiplexer chord binds: every key a top-panel button can have
+ * (`1`-`9` apps, `i p u w c` links, `e` editor, `t` `D` panes, `C` Cleanup, `b` back, `y` ready/draft, `m` merge)
+ * plus the panel's `r` refresh and `o` open.
+ */
+export const PRESS_KEYS: readonly string[] = [..."123456789", ..."ipuwcetDCbymro"];
 
 /**
  * Keys a button of the top panel may not take: every key of the table, `a` (the sidebar's next-tab) and the

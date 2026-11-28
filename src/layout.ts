@@ -1,15 +1,17 @@
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { SIDEBAR_WIDTH, sidebarWidth } from "./config";
+import { leaderKey, SIDEBAR_WIDTH, sidebarWidth } from "./config";
 import type { MuxKind } from "./mux";
 import { ORCHESTRATION_TABS, type OrchestrationTab } from "./orchestration";
 import { sessionName, worktreePath, wsDir } from "./paths";
 import { agentOf, readState } from "./state";
 import { AgentKind } from "./agent-kind";
+import { DEFAULT_LEADER } from "./leader";
 import { layoutScript, tmuxConf } from "./tmux-layout";
 import { frameEdges } from "./frame";
 import type { PaneKind } from "./top";
+import { errorMessage } from "./util";
 
 export { SIDEBAR_WIDTH };
 
@@ -215,6 +217,17 @@ ${orchestrationTabKdl(t, self, { ...opts, focus: true })}
 `;
 }
 
+/** The configured leader; a bad `[keys] leader` warns and falls back to the default, so it never stops the session from starting. */
+function leaderOrDefault() {
+  try {
+    return leaderKey();
+  } catch (e) {
+    process.stderr.write(`overbridge: ${errorMessage(e)}; using the default leader\n`);
+
+    return DEFAULT_LEADER;
+  }
+}
+
 /** Zellij's config dir: `$ZELLIJ_CONFIG_DIR`, else `$XDG_CONFIG_HOME/zellij`, else `~/.config/zellij`. */
 export function zellijConfigDir(env: Record<string, string | undefined> = process.env, home = homedir()): string {
   if (env.ZELLIJ_CONFIG_DIR) return env.ZELLIJ_CONFIG_DIR;
@@ -299,6 +312,6 @@ export function chooseLayout(workspaces: string[], self: string[], kind: MuxKind
   const opts = { resume: resumable(workspaces, undefined, agentDirs, agyWorkspaces), sidebarWidth: sidebarWidth(), agentDirs };
 
   return kind === "tmux"
-    ? { source: "generated", text: layoutScript(session, layoutSpecs(workspaces, self, opts)), conf: tmuxConf(self) }
+    ? { source: "generated", text: layoutScript(session, layoutSpecs(workspaces, self, opts)), conf: tmuxConf(self, leaderOrDefault()) }
     : { source: "generated", text: layoutKdl(workspaces, self, opts) };
 }

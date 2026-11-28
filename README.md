@@ -39,8 +39,8 @@ Multi-repo workspaces for parallel Claude Code sessions, laid out in zellij.
   (inside a session, whichever multiplexer you are in is used). With tmux, `overbridge layout` prints a tmux command
   script rather than KDL and there is no user layout file. `overbridge up` starts the server with a generated config
   (`.overbridge/tmux.conf`): no prefix key, no status bar, mouse on, extended keys on so Shift+Enter and Ctrl+Enter
-  reach Claude, and pane titles left alone. Its only bindings are Alt+1…9, Alt+`,`, Alt+`.` and Alt+w, which run
-  `overbridge go` and `overbridge next`.
+  reach Claude, and pane titles left alone. Its bindings are Alt+1…9, Alt+`,`, Alt+`.` and Alt+w, which run
+  `overbridge go` and `overbridge next`, plus the leader chord (Ctrl+Space by default, `[keys] leader`, `off` to disable; see Keys).
 
 ## Quick start
 
@@ -1041,6 +1041,14 @@ and its footer legend is built from the same table.
 | `s` | cycle sort | `q` | quit |
 | `v` | cycle view | `a` | sidebar: next tab that needs you |
 | `f` | cycle source filter | `n` | new (sidebar: workspace; `@work`: start item) |
+
+**Pressing a top panel button while Claude has the keyboard.** The multiplexer takes one chord, the leader
+(`Ctrl+Space`; set `[keys] leader = "alt-x"` in `repos.toml` for another), before Claude sees it; the next key is a
+button key of the panel (`i p u w c e t D C b m y`, `1`-`9`, plus `r` and `o`) and runs `overbridge top press <key>`,
+which hands the key to the panel of the current tab through `<meta>/top-press/`. Any other key cancels. tmux gets the
+bindings in its generated config. zellij has no user-defined modes, so `overbridge keys --zellij` prints a `keybinds`
+block (the chord borrows its `tmux` mode) to merge into `config.kdl`; its syntax is checked with `zellij setup --check`,
+but a press there opens a floating pane that closes at once. `overbridge keys` prints the table and the leader.
 
 Pane-only keys: `K`/`J`/`T`/`B` reorder a waiting check, `w` cycles the `@perf` window and `b` its grouping.
 

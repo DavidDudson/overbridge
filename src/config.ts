@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { DEFAULT_LEADER, DEFAULT_LEADER_TEXT, type Leader, LEADER_OFF, parseLeader } from "./leader";
 import { reposFile } from "./paths";
 import { fail, isNumber, isRecord, isString, type Json } from "./util";
 
@@ -16,6 +17,9 @@ const HEADER = `# overbridge repo registry. Add with \`overbridge repo add <name
 # width = 60                # columns of the tab sidebar, 12 to 200
 # motion = "while-active"   # "while-active" animates the busy glyph, "off" keeps it still
 # layout = "auto"           # auto (compact when narrow), compact or wide
+#
+# [keys]
+# leader = "ctrl-space"     # chord that presses a top panel button while Claude has focus: ctrl- or alt-, then space or a letter; "off" binds none
 `;
 
 export function initReposFile() {
@@ -65,6 +69,19 @@ export function appendRepo(spec: RepoSpec) {
 
   if (spec.defaultBranch) block += `default_branch = ${JSON.stringify(spec.defaultBranch)}\n`;
   appendFileSync(reposFile(), block);
+}
+
+/** `[keys] leader` in repos.toml: the chord that presses a top panel button from any pane (`ctrl-space` by default); null for `off`. */
+export function leaderKey(): Leader | null {
+  const data = existsSync(reposFile()) ? Bun.TOML.parse(readFileSync(reposFile(), "utf8")) : {};
+  const keys = isRecord(data) && isRecord(data.keys) ? data.keys : {};
+  const text = keys.leader;
+
+  if (text === undefined) return DEFAULT_LEADER;
+
+  if (text === LEADER_OFF) return null;
+
+  return (isString(text) ? parseLeader(text) : undefined) ?? fail(`repos.toml: keys.leader must be "off", or "ctrl-" or "alt-" and then "space" or a free letter (not ctrl-c, d, z, h, i, j, l, m or alt-w), such as "${DEFAULT_LEADER_TEXT}"`);
 }
 
 /** `[sidebar] motion` in repos.toml: `off` keeps every glyph still, `while-active` animates a card only while its agent works. */

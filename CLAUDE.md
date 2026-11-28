@@ -128,8 +128,8 @@ Bun + TypeScript CLI, no runtime deps. `just check` = typecheck + tests.
   and closes the tab last (`leaveTab`); `thaw` reopens it with `--continue` and `/read-handoff`. `entries()` leaves iceboxed
   workspaces out (they have no tab, so no digit; the sidebar lists them under `icedRows`), and `workspaceNames()` skips them for
   `up`/`layout`. Any new code that lists workspaces for tabs must skip `isIceboxed`.
-  `f` in a sidebar runs `icebox` on its own workspace in a child (`runFreeze`); the `@frozen` tab (`src/frozen.ts` pure rows and
-  render, `src/frozen-run.ts` pane) lists iceboxed workspaces from state and `t` runs `thaw` in a child (`runThaw`).
+  `z` in a sidebar runs `icebox` on its own workspace in a child (`runFreeze`); the `@frozen` tab (`src/frozen.ts` pure rows and
+  render, `src/frozen-run.ts` pane) lists iceboxed workspaces from state and `z` runs `thaw` in a child (`runThaw`).
 - `src/relaunch.ts` is `overbridge relaunch`: a handoff, the workspace's `WorkspaceState.launch`, then a restart. `claude()` in
   `src/commands.ts` supervises the agent (async spawn, one `RELAUNCH_SIGNAL` handler for its life, `<meta>/agent/<ws>.launcher.json`)
   and restarts it when that signal arrives with a request file; it stops the agent's whole process tree, since a dev-shell
