@@ -120,7 +120,7 @@ describe("context legend", () => {
 
 describe("expanded card PR and CI rows", () => {
   const rows = (prs: Entry["prs"]) => detailRows(entry("a", { prs }), [], 0);
-  test.each([["failing", "CI failing"], ["pending", "CI running"], ["mergeable", "CI passing"], ["merged", "CI passing"]] as const)("%s shows %s", (status, ci) => {
+  test.each([["failing", "CI failing"], ["pending", "CI pending"], ["mergeable", "CI passing"], ["merged", "CI passing"]] as const)("%s shows %s", (status, ci) => {
     expect(rows([{ number: 1, status }])).toContain(ci);
   });
   test("a draft, conflict or unknown PR has no CI row", () => {
