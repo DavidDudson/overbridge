@@ -349,6 +349,7 @@ describe("click focuses Claude", () => {
 
   test("a failed switch does not focus anything", () => {
     const calls: string[][] = [];
+
     const mux = zellijMux((c) => {
       calls.push(c);
 
