@@ -1030,8 +1030,10 @@ function editorFromEnv(editor: string | undefined): { label: string; cmd: string
 }
 
 /**
- * Give each button its key: `i` the work item, `p` the PR (then u, y, w, z), `1` to `9` the apps,
- * `e` the editor, `t` `d` the panes, `x` Cleanup, `b` back, and on the first PR's row `g` ready/draft, `m` merge. Buttons past the available keys get none.
+ * Give each button its key: `i` the work item, `p` the PR (then u, w, c), `1` to `9` the apps,
+ * `e` the editor, `t` `D` the panes, `C` Cleanup, `b` back, and on the first PR's row `y` ready/draft, `m` merge. Buttons past the available keys get none.
+ * None is a key of the shared table (`RESERVED_KEYS` in `keys.ts`), which keeps `j`/`k`, `s`, `x`, `d`, `z` and the rest
+ * the same here as in every list; `h`/`l`, `r`, `o` and `L` are the panel's own and stay out too.
  */
 function withKeys(list: Button[]): Button[] {
   let app = 0;
@@ -1041,13 +1043,13 @@ function withKeys(list: Button[]): Button[] {
     let key: string | undefined;
 
     if (a.kind === "link" || a.kind === "custom") return b;
-    else if (a.kind === "ready") key = b.prRow === 0 ? "g" : undefined;
+    else if (a.kind === "ready") key = b.prRow === 0 ? "y" : undefined;
     else if (a.kind === "merge") key = b.prRow === 0 ? "m" : undefined;
     else if (a.kind === "app") key = app < 9 ? String(++app) : undefined;
     else if (a.kind === "editor") key = "e";
-    else if (a.kind === "pane") key = { claude: undefined, terminal: "t", diff: "d" }[a.pane];
+    else if (a.kind === "pane") key = { claude: undefined, terminal: "t", diff: "D" }[a.pane];
     else if (a.kind === "back") key = "b";
-    else key = "x";
+    else key = "C";
 
     return key ? { ...b, key } : b;
   });
@@ -1075,7 +1077,7 @@ export function applyOptimistic(snap: TopSnapshot, change: PrChange): TopSnapsho
 }
 
 /** Keys for extra PR buttons after `p`; none clash with the panel's own keys. */
-const PR_KEYS = ["p", "u", "y", "w", "z"];
+const PR_KEYS = ["p", "u", "w", "c"];
 
 export function buttons(snap: TopSnapshot): Button[] {
   const prKeys = [...PR_KEYS];

@@ -1174,8 +1174,9 @@ globs, never read from a repo's own file) marks more files as generated; lockfil
 Claude comes back by itself: when its process exits the supervisor starts it again with `--continue` (a session you ended
 with `/exit` stays closed, and quick repeated exits back off), and the focused tab's sidebar reopens a Claude pane that was closed. Click or Enter to
 activate, arrows or Tab to move, `o` open a running app, `L` show its log, `r` refresh,
-`q` quit. Every button shows its key and the key presses it: `i` the work item, `p` the PR (`u`, `y`, `w`, `z` for more),
-`1`-`9` the apps, `e` the editor, `t` `d` terminal and diff, `x` Cleanup. It reads caches and local app records only; `overbridge top refresh` rebuilds
+`q` quit. Every button shows its key and the key presses it: `i` the work item, `p` the PR (`u`, `w`, `c` for more),
+`1`-`9` the apps, `e` the editor, `t` `D` terminal and diff, `C` Cleanup, `y` ready/draft, `m` merge. No button takes a key of the
+shared table above, so those keys keep their meaning. It reads caches and local app records only; `overbridge top refresh` rebuilds
 the cache and the panel refreshes it every minute (`r` forces one).
 
 ### The server
