@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getRepo } from "./config";
+import { difftFacts } from "./difft-facts";
+import { focusedDiff, focusedStats, type Noise } from "./focused-diff";
 import * as git from "./git";
 import { selfCommand, worktreePath, wsDir } from "./paths";
 import { loadRepoConfig } from "./project-config";
@@ -160,6 +162,27 @@ function renderRepo(dir: string, base: string, columns: number, tool: DiffTool, 
   return piped.exitCode === 0 ? piped.stdout.toString() : raw.stdout.toString();
 }
 
+/** One repo's focused diff (noise collapsed); the plain renderer's output if git fails, so a failure never reads as no changes. */
+function renderRepoFocused(dir: string, base: string, columns: number, tool: DiffTool, focus: FocusMode): string {
+  const raw = Bun.spawnSync({ cmd: ["git", "-C", dir, "-c", "core.quotepath=off", "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--submodule=short", "--ignore-submodules=none", "-M", "-U3", base, "--"], cwd: spawnCwd(), stdout: "pipe", stderr: "pipe" });
+
+  if (raw.exitCode !== 0) return renderRepo(dir, base, columns, tool, false);
+
+  const options = { keep: focus.keep, facts: difftFacts(dir, base), generated: generatedGlobs(dir) };
+  const text = raw.stdout.toString();
+
+  return focus.stats ? focusedStats(text, options) : focusedDiff(text, options);
+}
+
+/** The repo's configured generated-file globs; none when its config does not load, so a bad config never hides a diff. */
+function generatedGlobs(dir: string): string[] {
+  try {
+    return loadRepoConfig(dir).diff.generated;
+  } catch {
+    return [];
+  }
+}
+
 /** How long a following diff waits before it looks for changes again. */
 export const FOLLOW_POLL_MS = 5_000;
 
@@ -240,13 +263,14 @@ export function openDiffOverlay(ws: string, deps: PaneDeps = defaultDeps()): str
  * `overbridge diff [--follow]`: each claimed repo's changes since it left the default branch (committed
  * and uncommitted), rendered inline with difftastic (else delta, else plain git) and paged. With `follow` it never
  * exits: it waits for changes, and `q` in the pager refreshes. `sideBySide` renders the one-shot overlay that `d` opens.
+ * With `focus` it prints the focused diff instead (see `src/focused-diff.ts`); that has no side-by-side view, so no `d` overlay.
  */
-export function diff(ws: string, follow = false, sideBySide = false) {
+export function diff(ws: string, follow = false, sideBySide = false, focus?: FocusMode) {
   const self = selfCommand();
-  const overlayCommand = sideBySide ? undefined : [...self, "diff", "--ws", ws, "--overlay"].map(shellQuote).join(" ");
+  const overlayCommand = sideBySide || focus ? undefined : [...self, "diff", "--ws", ws, "--overlay"].map(shellQuote).join(" ");
 
   for (;;) {
-    const out = renderDiff(ws, process.stdout.columns ?? 80, undefined, sideBySide);
+    const out = renderDiff(ws, process.stdout.columns ?? 80, undefined, sideBySide, focus);
 
     if (out) {
       const startedMs = Date.now();
@@ -263,12 +287,20 @@ export function diff(ws: string, follow = false, sideBySide = false) {
   }
 }
 
+/** Focused mode: show the diff without its noise; `keep` lists the noise kinds to show anyway. */
+export interface FocusMode {
+  keep: ReadonlySet<Noise>;
+  /** Print the counts (files and lines before and after, what hid the rest) instead of the diff. */
+  stats?: boolean;
+}
+
 /** Every claimed repo's changes since it left the default branch (committed and uncommitted), rendered; empty when none. */
 export function renderDiff(
   ws: string,
   columns: number,
   tool: DiffTool = pickDiffTool({ difft: !!Bun.which("difft"), delta: !!Bun.which("delta") }),
   sideBySide = false,
+  focus?: FocusMode,
 ): string {
   const repos = Object.keys(getWorkspace(readState(), ws).repos);
   let out = "";
@@ -285,7 +317,7 @@ export function renderDiff(
     })();
 
     const base = (def && run(["git", "-C", dir, "merge-base", "HEAD", `origin/${def}`]).stdout) || "HEAD";
-    const text = renderRepo(dir, base, columns, tool, sideBySide);
+    const text = focus ? renderRepoFocused(dir, base, columns, tool, focus) : renderRepo(dir, base, columns, tool, sideBySide);
 
     if (!text.trim()) continue;
 

@@ -19,6 +19,7 @@ import { historyStore } from "./history";
 import { commandLine, commandRows, mergeSummaries, repoLines, repoSummaries, summaries, summaryLines } from "./history-report";
 import { defaultMux } from "./mux";
 import { next } from "./next";
+import { isNoise, NOISE_KINDS } from "./focused-diff";
 import { diff, openDiffOverlay } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
@@ -65,7 +66,10 @@ Setup
                                         then finished with background tasks (zellij binds it to a key)
   overbridge go <n>|<name>|next|prev            switch tab by sidebar number, name, or neighbour (wrapping);
                                         works outside zellij too, so a window-manager key can call it
-  overbridge diff [--ws name] [--follow]        changes since the default branch, inline, via difftastic (else delta); d opens a side-by-side overlay
+  overbridge diff [--ws name] [--follow] [--focused [--keep kinds] [--stats]]
+                                                changes since the default branch, inline, via difftastic (else delta); d opens a side-by-side overlay;
+                                                --focused hides noise (format, imports, moved, comments, generated, renamed, mode, tests);
+                                                --stats prints files and lines before and after, per noise kind
   overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
   overbridge serve                              the one long-running process that owns network refreshes and the shared
@@ -277,15 +281,32 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case "diff": {
-      const { values } = opts(rest, { ...ws, follow: { type: "boolean" as const }, "side-by-side": { type: "boolean" as const }, overlay: { type: "boolean" as const } });
+      const { values } = opts(rest, {
+        ...ws,
+        follow: { type: "boolean" as const },
+        "side-by-side": { type: "boolean" as const },
+        overlay: { type: "boolean" as const },
+        focused: { type: "boolean" as const },
+        keep: { type: "string" as const },
+        stats: { type: "boolean" as const },
+      });
+
       const name = cmd.requireWs(values.ws);
+      const keep = (values.keep ?? "").split(",").filter(Boolean);
+      const bad = keep.find((k) => !isNoise(k));
+
+      if (bad) throw new OverbridgeError(`--keep: unknown noise ${JSON.stringify(bad)}; use ${NOISE_KINDS.join(", ")}`);
+
+      if (keep.length && !values.focused) throw new OverbridgeError("--keep needs --focused");
+
+      if (values.stats && !values.focused) throw new OverbridgeError("--stats needs --focused");
 
       if (values.overlay) {
         const err = openDiffOverlay(name);
 
         if (err) throw new OverbridgeError(err);
       } else {
-        diff(name, values.follow ?? false, values["side-by-side"] ?? false);
+        diff(name, values.follow ?? false, values["side-by-side"] ?? false, values.focused ? { keep: new Set(keep.filter(isNoise)), stats: values.stats ?? false } : undefined);
       }
 
       break;

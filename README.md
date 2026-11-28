@@ -1131,6 +1131,18 @@ buttons. PR buttons are coloured by status: 🟣 merged, 🟢 mergeable (GitHub 
 beside the agent (`overbridge diff --follow`: it waits for changes and `q` in the pager refreshes it); terminal opens a shell in
 the first repo and diff opens the changes since the default branch, rendered inline by [difftastic](https://difftastic.wilfred.me.uk) (`difft`;
 else `delta` from your git config, else plain git) in a column to the agent's right, and a second press closes them. `d` in the diff pager opens the same changes side by side in a floating overlay; `d` or `q` closes it.
+`overbridge diff --focused` prints a mini diff instead: the blocks that are not noise, with a `⋯ imports +zod −lodash` marker where
+a block was hidden, a summary of everything hidden and how many of the files still need a read (`12 of 47 files`). Noise is
+formatting only, import statements, code that only moved within its file, comments, lockfiles and generated files, pure renames
+and mode changes, new test and story files (listed with their size; a changed test file is shown), and files that carry the same
+edit, line for line, as another file (three or more: shown once, the rest listed). A new file prints as an outline: its top two
+nesting levels, without imports, comments or closers. Where `difft` is installed it parses the files (tree-sitter, about fifty
+languages) and says which lines really changed, so re-indented and reflowed code and comment edits are judged by syntax; a file it
+cannot parse, or no `difft`, falls back to a language-agnostic lexer (no grammar, so no parse failures). Either way it is
+deterministic and shows anything it cannot prove is noise. `--keep comments,imports` shows those kinds anyway; `--stats` prints
+the files and changed lines before and after, and which noise hid how many. `diff.generated` in the root `config.yml` (a list of
+globs, never read from a repo's own file) marks more files as generated; lockfiles, minified files and a file whose own unchanged
+`@generated` header sits in its first lines always are.
 Claude comes back by itself: when its process exits the supervisor starts it again with `--continue` (a session you ended
 with `/exit` stays closed, and quick repeated exits back off), and the focused tab's sidebar reopens a Claude pane that was closed. Click or Enter to
 activate, arrows or Tab to move, `o` open a running app, `L` show its log, `r` refresh,
