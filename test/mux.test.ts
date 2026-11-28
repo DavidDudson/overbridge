@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { sessionName } from "../src/paths";
 import { layoutSpecs, workspaceTabSpec } from "../src/layout";
 import { defaultMux, type MuxExec, MuxKind, muxKind, PaneResize, TabFocus, tmuxMux, zellijMux } from "../src/mux";
-import { layoutScript, SIDEBAR_PERCENT, tmuxConf, tmuxQuote } from "../src/tmux-layout";
+import { SIDEBAR_PERCENT } from "../src/pane-widths";
+import { layoutScript, tmuxConf, tmuxQuote } from "../src/tmux-layout";
 
 const self = ["ob"];
 const ok = (stdout = ""): ReturnType<MuxExec> => ({ ok: true, stdout });
@@ -247,6 +248,15 @@ describe("tmuxMux argv", () => {
       ["tmux", "resize-pane", "-t", "%1", "-x", "50"],
       ["tmux", "resize-pane", "-t", "%3", "-x", "74"],
     ]);
+  });
+
+  test("fitWidths resizes nothing when list-panes fails, and zellij has nothing to fit", () => {
+    const r = recorder(() => ({ ok: false, stdout: "" }));
+    tmuxMux(r.exec, { session: "s" }).fitWidths();
+    expect(r.calls.some((c) => c[1] === "resize-pane")).toBe(false);
+    const z = recorder();
+    zellijMux(z.exec, { session: "s" }).fitWidths();
+    expect(z.calls).toEqual([]);
   });
 
   test("resizes a pane one row at a time: -D grows a top pane, -U shrinks it", () => {

@@ -32,6 +32,32 @@ describe("planWidths", () => {
     ]);
   });
 
+  test("an odd remainder gives Claude the smaller half", () => {
+    // 201 columns: sidebar 50, content 149
+    expect(planWidths([box("%1", "sidebar", 0, 50, 201), box("%3", "w · claude", 51, 90, 201), box("%4", "w · diff", 142, 59, 201)])).toEqual([{ id: "%3", width: 74 }]);
+  });
+
+  test("a diff that drifted alone still gets Claude's step", () => {
+    expect(planWidths([box("%1", "sidebar", 0, 50), box("%3", "w · claude", 51, 74), box("%4", "w · diff", 126, 40)])).toEqual([{ id: "%3", width: 74 }]);
+  });
+
+  test("a diff not to the right of Claude, or a sidebar off column 0, is left alone", () => {
+    expect(planWidths([box("%1", "sidebar", 0, 50), box("%3", "w · claude", 51, 30), box("%4", "w · diff", 51, 30)])).toEqual([]);
+    expect(planWidths([box("%1", "sidebar", 0, 50), box("%3", "w · claude", 126, 30), box("%4", "w · diff", 51, 30)])).toEqual([]);
+    expect(planWidths([box("%1", "sidebar", 5, 10)])).toEqual([]);
+  });
+
+  test("Claude is set whenever the sidebar moves, even if its measured width looks right", () => {
+    expect(planWidths([box("%1", "sidebar", 0, 80), box("%3", "w · claude", 81, 74), box("%4", "w · diff", 156, 44)])).toEqual([
+      { id: "%1", width: 50 },
+      { id: "%3", width: 74 },
+    ]);
+  });
+
+  test("a window too narrow to split plans no negative widths", () => {
+    expect(planWidths([box("%1", "sidebar", 0, 2, 6), box("%3", "w · claude", 3, 1, 6), box("%4", "w · diff", 5, 1, 6)])).toEqual([{ id: "%1", width: 1 }]);
+  });
+
   test("the sidebar share matches tmux's own percentage", () => {
     expect(sidebarWidth(200)).toBe(50);
     expect(sidebarWidth(81)).toBe(20);

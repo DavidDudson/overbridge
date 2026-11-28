@@ -37,7 +37,12 @@ export function planWidths(panes: PaneBox[]): WidthStep[] {
   const steps: WidthStep[] = [];
   const windows = new Map<string, PaneBox[]>();
 
-  for (const p of panes) windows.set(p.window, [...(windows.get(p.window) ?? []), p]);
+  for (const p of panes) {
+    const group = windows.get(p.window);
+
+    if (group) group.push(p);
+    else windows.set(p.window, [p]);
+  }
 
   for (const group of windows.values()) {
     const sidebar = group.find((p) => p.title === SIDEBAR_TITLE && p.left === 0);
@@ -46,7 +51,9 @@ export function planWidths(panes: PaneBox[]): WidthStep[] {
     const total = sidebar.windowWidth;
     const side = sidebarWidth(total);
 
-    if (sidebar.width !== side) steps.push({ id: sidebar.id, width: side });
+    const sidebarMoves = sidebar.width !== side;
+
+    if (sidebarMoves) steps.push({ id: sidebar.id, width: side });
     const claude = group.find((p) => isKind(p, "claude"));
     const diff = group.find((p) => isKind(p, "diff"));
 
@@ -55,7 +62,10 @@ export function planWidths(panes: PaneBox[]): WidthStep[] {
     const content = total - side - 2;
     const want = Math.floor(content / 2);
 
-    if (claude.width !== want || diff.width !== content - want) steps.push({ id: claude.id, width: want });
+    // moving the sidebar changes its neighbour's width, so the measured widths are stale and Claude is set regardless
+    if (want < 1) continue;
+
+    if (sidebarMoves || claude.width !== want || diff.width !== content - want) steps.push({ id: claude.id, width: want });
   }
 
   return steps;

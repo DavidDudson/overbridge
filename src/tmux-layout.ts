@@ -3,8 +3,6 @@ import { DEFAULT_LEADER, type Leader, tmuxLeaderLines } from "./leader";
 import { SIDEBAR_PERCENT } from "./pane-widths";
 import { shellQuote } from "./util";
 
-export { SIDEBAR_PERCENT };
-
 /** tmux events after which the widths are re-fitted: a client attaching or resizing, and a pane opening or closing. */
 const FIT_HOOKS = ["client-attached", "client-resized", "after-split-window", "after-kill-pane", "after-new-window"];
 
