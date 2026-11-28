@@ -68,12 +68,16 @@ export function resolve(keyset: readonly Action[], key: string): Action | undefi
 /** The key the legend shows for `action`. */
 export const keyOf = (action: Action): string => KEYS.find(([a]) => a === action)![1][0]!;
 
-const KEY_LABEL: Partial<Record<string, string>> = { enter: "⏎", " ": "␣", escape: "esc" };
+const KEY_LABEL = new Map([
+  ["enter", "⏎"],
+  [" ", "␣"],
+  ["escape", "esc"],
+]);
 
 const keyLabel = (action: Action): string => {
   const key = keyOf(action);
 
-  return KEY_LABEL[key] ?? key;
+  return KEY_LABEL.get(key) ?? key;
 };
 
 /** What each action is called in a legend. `Down`/`Up` print together as `j/k move`; `Top`/`Bottom` as `g/G ends`. */
