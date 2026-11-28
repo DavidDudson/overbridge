@@ -33,6 +33,8 @@ export interface NewPane {
   command: string[];
   /** Close the pane when its command exits (tmux always does). */
   closeOnExit: boolean;
+  /** Open as an overlay on top of the tab (zellij floating pane, tmux popup) instead of a split. */
+  floating?: boolean;
 }
 
 /** Where focus ends up after a tab opens: back on the tab you were on, or on the new tab. */
@@ -215,8 +217,9 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
     resizePane: (id, change) => act("resize", change === PaneResize.Grow ? "increase" : "decrease", "down", "--pane-id", target(id)).ok,
     sendText: (id, text) => act("paste", "--pane-id", target(id), "--", text).ok && settle() && act("send-keys", "--pane-id", target(id), "Enter").ok,
     newPane(req) {
-      act("focus-pane-id", target(req.anchor));
-      const args = ["new-pane", "--direction", req.direction, "--name", req.title, "--cwd", req.cwd];
+      // a floating pane has no side to open on, and zellij rejects --direction together with --floating
+      if (!req.floating) act("focus-pane-id", target(req.anchor));
+      const args = ["new-pane", ...(req.floating ? ["--floating"] : ["--direction", req.direction]), "--name", req.title, "--cwd", req.cwd];
 
       if (req.closeOnExit) args.push("--close-on-exit");
 
@@ -329,6 +332,7 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
     resizePane: (id, change) => tmux("resize-pane", "-t", id, change === PaneResize.Grow ? "-D" : "-U", "1").ok,
     sendText: (id, text) => tmux("send-keys", "-t", id, "-l", "--", text).ok && settle() && tmux("send-keys", "-t", id, "Enter").ok,
     newPane(req) {
+      if (req.floating) return tmux("display-popup", "-E", "-w", "90%", "-h", "90%", "-T", req.title, "-d", req.cwd, req.command.map(shellQuote).join(" ")).ok;
       const args = ["split-window", "-P", "-F", "#{pane_id}", "-t", req.anchor, ...SPLIT_FLAGS[req.direction], "-c", req.cwd];
 
       if (req.command.length) args.push(req.command.map(shellQuote).join(" "));

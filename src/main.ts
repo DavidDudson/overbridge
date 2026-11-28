@@ -19,7 +19,7 @@ import { historyStore } from "./history";
 import { commandLine, commandRows, mergeSummaries, repoLines, repoSummaries, summaries, summaryLines } from "./history-report";
 import { defaultMux } from "./mux";
 import { next } from "./next";
-import { diff } from "./panes";
+import { diff, openDiffOverlay } from "./panes";
 import { orchestrationTab } from "./orchestration";
 import { currentTab, sidebar } from "./sidebar";
 import { FINISH_FLAG, finishRemoval } from "./remove";
@@ -65,7 +65,7 @@ Setup
                                         then finished with background tasks (zellij binds it to a key)
   overbridge go <n>|<name>|next|prev            switch tab by sidebar number, name, or neighbour (wrapping);
                                         works outside zellij too, so a window-manager key can call it
-  overbridge diff [--ws name] [--follow]        changes since the default branch, via difftastic (else delta)
+  overbridge diff [--ws name] [--follow]        changes since the default branch, inline, via difftastic (else delta); d opens a side-by-side overlay
   overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
   overbridge serve                              the one long-running process that owns network refreshes and the shared
@@ -277,8 +277,17 @@ async function main(argv: string[]): Promise<number> {
     }
 
     case "diff": {
-      const { values } = opts(rest, { ...ws, follow: { type: "boolean" as const } });
-      diff(cmd.requireWs(values.ws), values.follow ?? false);
+      const { values } = opts(rest, { ...ws, follow: { type: "boolean" as const }, "side-by-side": { type: "boolean" as const }, overlay: { type: "boolean" as const } });
+      const name = cmd.requireWs(values.ws);
+
+      if (values.overlay) {
+        const err = openDiffOverlay(name);
+
+        if (err) throw new OverbridgeError(err);
+      } else {
+        diff(name, values.follow ?? false, values["side-by-side"] ?? false);
+      }
+
       break;
     }
 

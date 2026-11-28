@@ -89,6 +89,12 @@ describe("zellijMux", () => {
     ]);
   });
 
+  test("a floating pane gets --floating and no --direction, which zellij rejects with it", () => {
+    const r = recorder();
+    zellijMux(r.exec).newPane({ anchor: "7", direction: "right", title: "w · diff", cwd: "/d", command: ["ob", "diff"], closeOnExit: true, floating: true });
+    expect(r.calls).toEqual([["zellij", "action", "new-pane", "--floating", "--name", "w · diff", "--cwd", "/d", "--close-on-exit", "--", "ob", "diff"]]);
+  });
+
   test("builds and attaches sessions with zellij's own commands", () => {
     const r = recorder((cmd) => (cmd[1] === "list-sessions" ? ok("a\nworkspaces\n") : ok()));
     const mux = zellijMux(r.exec);
@@ -148,6 +154,12 @@ describe("tmuxMux argv", () => {
       ["tmux", "swap-window", "-d", "-s", "@2", "-t", "@1"],
       ["tmux", "swap-window", "-d", "-s", "@2", "-t", "@0"],
     ]);
+  });
+
+  test("a floating pane is a tmux popup that closes with its command, not a split", () => {
+    const t = mux(() => ok());
+    expect(t.mux.newPane({ anchor: "%3", direction: "right", title: "w · diff", cwd: "/d", command: ["ob", "diff", "a b"], closeOnExit: true, floating: true })).toBe(true);
+    expect(t.calls).toEqual([["tmux", "display-popup", "-E", "-w", "90%", "-h", "90%", "-T", "w · diff", "-d", "/d", "ob diff 'a b'"]]);
   });
 
   test("a new pane is split from its anchor, then titled by the id tmux printed", () => {

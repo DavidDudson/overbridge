@@ -1129,8 +1129,8 @@ second press within five seconds, and merges a stack atomically with `gh stack m
 buttons. PR buttons are coloured by status: 🟣 merged, 🟢 mergeable (GitHub `CLEAN` or `HAS_HOOKS`: could be squash-merged now), 🟡 pending (no conflict, but checks running or not `CLEAN`: review missing, behind, unstable), 🔴 failing build or conflicts,
 🔵 draft, ⚫ closed. Every workspace tab opens with the diff already
 beside the agent (`overbridge diff --follow`: it waits for changes and `q` in the pager refreshes it); terminal opens a shell in
-the first repo and diff opens the changes since the default branch, rendered by [difftastic](https://difftastic.wilfred.me.uk) (`difft`;
-else `delta` from your git config, else plain git) in a column to the agent's right, and a second press closes them.
+the first repo and diff opens the changes since the default branch, rendered inline by [difftastic](https://difftastic.wilfred.me.uk) (`difft`;
+else `delta` from your git config, else plain git) in a column to the agent's right, and a second press closes them. `d` in the diff pager opens the same changes side by side in a floating overlay; `d` or `q` closes it.
 Claude comes back by itself: when its process exits the supervisor starts it again with `--continue` (a session you ended
 with `/exit` stays closed, and quick repeated exits back off), and the focused tab's sidebar reopens a Claude pane that was closed. Click or Enter to
 activate, arrows or Tab to move, `o` open a running app, `L` show its log, `r` refresh,
