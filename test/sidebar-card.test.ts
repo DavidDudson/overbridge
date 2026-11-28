@@ -99,8 +99,8 @@ describe("context legend", () => {
     expect(contextLegend(entry("a", { prs: [{ number: 1, status: "mergeable" }] }), base, false)).toStartWith("✓ mergeable");
     expect(contextLegend(entry("a"), base, true)).toStartWith("␣ close");
     expect(contextLegend(undefined, base, false)).toBe(base);
-    expect(plain(renderSidebar([entry("a")], 0, 0, 20, 40, undefined, 0, "", [], undefined, "1").at(-2)!)).toContain("1…");
-    expect(plain(renderSidebar([entry("a")], 0, 0, 20, 40, undefined, 0, "", [], undefined, "1").at(-2)!)).not.toContain("more");
+    expect(plain(renderSidebar([entry("a")], 0, 0, 20, 40, undefined, 0, "", [], undefined, "1").at(-3)!)).toContain("1…");
+    expect(plain(renderSidebar([entry("a")], 0, 0, 20, 40, undefined, 0, "", [], undefined, "1").at(-3)!)).not.toContain("more");
   });
 
   test.each([["fault", "fault"], ["error", "cleanup failed"], ["blocked", "blocked"], ["unsaved", "unsaved"]] as const)("a card with %s says %s, and keeps its status row when compact", (flag, word) => {

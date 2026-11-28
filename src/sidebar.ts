@@ -331,9 +331,9 @@ export function clampScroll(offset: number, heights: number[], rows: number): nu
   return start;
 }
 
-/** Rows above the workspace list (top border) and below it (divider, two limit rows, key legend, bottom border). */
+/** Rows above the workspace list (top border) and below it (divider, two limit rows, two key legend rows, bottom border). */
 export const CHROME_TOP = 1;
-export const CHROME_BOTTOM = 5;
+export const CHROME_BOTTOM = 6;
 
 /** Longest a title may wrap to. */
 const MAX_TITLE_ROWS = 3;
@@ -773,7 +773,7 @@ export function renderSidebar(list: Entry[], current: number, offset: number, he
     boxDivider(width),
     ...queue.map(boxRow),
     ...limitRows(limits, inner, now).map(boxRow),
-    boxRow(footerRow(footer, inner, pending ? legend(list.length, pending) : contextLegend(selected, legend(list.length), selected !== undefined && isExpanded(selected, view)))),
+    ...footerRows(footer, inner, pending ? legend(list.length, pending) : contextLegend(selected, legend(list.length), selected !== undefined && isExpanded(selected, view))).map(boxRow),
     boxBottom(width, version, "grey"),
   ];
 }
@@ -825,6 +825,25 @@ function fitTail(text: string, width: number): string {
   const tail = [...text].reduceRight((kept, ch) => (textWidth(ch + kept) <= width - 1 ? ch + kept : kept), "");
 
   return fit(`…${tail}`, width);
+}
+
+/** `text` (items split by two spaces) as two rows of `inner` columns: as many whole items as fit on the first, the rest on the second. */
+export function legendRows(text: string, inner: number): [string, string] {
+  const items = text.split("  ").filter(Boolean);
+  let first = items[0] ?? "";
+  let i = 1;
+
+  while (i < items.length && textWidth(`${first}  ${items[i]}`) <= inner) first += `  ${items[i++]}`;
+
+  return [fit(first, inner), fit(items.slice(i).join("  "), inner)];
+}
+
+/** The footer as two rows: the legend wrapped over both, any other footer on the first with the second blank. */
+export function footerRows(footer: Footer, inner: number, legendText = legend(0)): [string, string] {
+  if (footer.kind !== FooterKind.Legend) return [footerRow(footer, inner, legendText), " ".repeat(inner)];
+  const [a, b] = legendRows(legendText, inner);
+
+  return [dim(a), dim(b)];
 }
 
 /** The footer as one row `inner` columns wide; the legend kind shows `legendText`. */
