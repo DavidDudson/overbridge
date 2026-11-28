@@ -1064,7 +1064,7 @@ export function stepFor(input: Input, current: number, offset: number, heights: 
 }
 
 /**
- * A click on `tab`'s card: go there and focus its Claude pane, on the first click. `switchTab` leaves the sidebar
+ * A click on `tab`'s card: go there and focus its Claude pane. `switchTab` leaves the sidebar
  * focused so keys keep stepping; a click wants the agent, so it focuses Claude after the switch (also on the current tab,
  * where focus may sit in the sidebar or another pane). False when the switch failed.
  */

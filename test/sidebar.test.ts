@@ -323,9 +323,11 @@ describe("click focuses Claude", () => {
 
   test("a failed switch does not focus anything", () => {
     const calls: string[][] = [];
-    const mux = zellijMux((c) => { calls.push(c);
+    const mux = zellijMux((c) => {
+      calls.push(c);
 
- return { ok: false, stdout: "" }; });
+      return { ok: false, stdout: "" };
+    });
     expect(clickTab("w1", "w2", mux)).toBe(false);
     expect(calls.some((c) => c[2] === "focus-pane-id")).toBe(false);
   });
