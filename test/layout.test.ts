@@ -255,12 +255,14 @@ describe("the diff pane a workspace tab opens with", () => {
     expect(specKdl(orchestrationTabSpec(own!, self))).not.toContain("frame-edge");
   });
 
-  test("tmux splits it off the agent first, then spans the top panel across both, and draws no frame edges (it titles borders instead)", () => {
+  test("tmux splits it off the agent first, then spans the top panel across both; it gives the agent and the diff a titled border row instead of frame edges", () => {
     const cmds = tabFill("@3", workspaceTabSpec("w1", self));
     const verbs = cmds.map((c) => `${c[0]}${c.includes("-f") ? " -f" : ""}${c.includes("-L") ? " -L" : ""}`);
-    expect(verbs).toEqual(["select-pane", "split-window", "select-pane", "select-pane -L", "split-window -f", "select-pane", "split-window -f", "select-pane"]);
-    expect(cmds[1]).toContain("-h");
-    expect(cmds[2]).toEqual(["select-pane", "-t", "@3", "-T", "w1 · diff"]);
+    expect(verbs).toEqual(["select-pane", "set-option", "split-window", "select-pane", "set-option", "select-pane -L", "split-window -f", "select-pane", "split-window -f", "select-pane"]);
+    expect(cmds[2]).toContain("-h");
+    expect(cmds[3]).toEqual(["select-pane", "-t", "@3", "-T", "w1 · diff"]);
+    expect(cmds[1]).toEqual(["set-option", "-p", "-t", "@3", "pane-border-status", "top"]);
+    expect(cmds[4]).toEqual(cmds[1]);
     expect(JSON.stringify(cmds)).not.toContain("frame-edge");
   });
 });

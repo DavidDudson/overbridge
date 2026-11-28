@@ -19,46 +19,60 @@ export function edgeRows(side: FrameSide, title: string, width: number, height: 
 /** The screen text for one repaint: each row placed by cursor position, so the last row never scrolls the pane. */
 export const paint = (rows: string[]): string => `\x1b[H\x1b[2J${rows.map((r, i) => `\x1b[${i + 1};1H${r}`).join("")}`;
 
-/** Polls that find the framed pane missing before an edge exits, and the grace after it starts (the pane's title lands late). */
+/**
+ * Polls that find the framed pane missing before an edge exits, and the grace after it starts (the pane's title lands
+ * late). Each edge polls the multiplexer and a workspace has eight, so the interval is long: a closed pane's frame
+ * lingers a few seconds at most.
+ */
 const GONE_POLLS = 3;
-const POLL_MS = 1_000;
+const POLL_MS = 5_000;
 const GRACE_MS = 10_000;
 
 /**
  * The count of polls that have missed the framed pane after one more poll: unchanged while the multiplexer gave no
  * answer (an empty listing) or the edge is still within its grace, reset when the pane is there, else one higher.
- * An edge exits at `GONE_POLLS`.
+ * A pane with the title but not the `pinned` id is a replacement the frame does not surround, so it counts as
+ * missing. An edge exits at `GONE_POLLS`.
  */
-export function missedPolls(missed: number, panes: MuxPane[], ws: string, kind: PaneKind, sinceStartMs: number): number {
+export function missedPolls(missed: number, panes: MuxPane[], ws: string, kind: PaneKind, sinceStartMs: number, pinned?: string): number {
   if (!panes.length || sinceStartMs < GRACE_MS) return missed;
+  const pane = findPane(panes, ws, kind);
 
-  return findPane(panes, ws, kind) ? 0 : missed + 1;
+  return pane && (pinned === undefined || pane.id === pinned) ? 0 : missed + 1;
 }
 
 export const edgeIsGone = (missed: number) => missed >= GONE_POLLS;
 
 /**
  * `overbridge frame-edge --side S --ws W --kind K [--title T]`: one side of the frame around the `K` pane of tab `W`.
- * Redraws on resize and exits once that pane has been gone for a few polls, so closing the pane takes its frame with
- * it. Reads no input and asks for no mouse, so every click goes to the multiplexer.
+ * Redraws on resize and exits once that pane (the one it first found, by id) has been gone for a few polls, so closing
+ * the pane takes its frame with it. Reads no input and asks for no mouse, so every click goes to the multiplexer.
  */
 export async function frameEdge(side: FrameSide, ws: string, kind: PaneKind, title: string, mux: Mux = defaultMux()) {
   const draw = () => process.stdout.write(paint(edgeRows(side, title, process.stdout.columns ?? 80, process.stdout.rows ?? 24)));
   const started = Date.now();
   let gone = 0;
+  let pinned: string | undefined;
+
+  const leave = () => {
+    process.stdout.write("\x1b[?25h");
+    process.exit(0);
+  };
 
   process.stdout.write("\x1b[?25l");
   process.on("SIGWINCH", draw);
-  process.on("SIGTERM", () => process.exit(0));
+  process.on("SIGTERM", leave);
+  process.on("SIGINT", leave);
   draw();
 
   for (;;) {
     await Bun.sleep(POLL_MS);
-    draw();
-    gone = missedPolls(gone, mux.listPanes(), ws, kind, Date.now() - started);
+    const panes = mux.listPanes();
+    pinned ??= findPane(panes, ws, kind)?.id;
+    gone = missedPolls(gone, panes, ws, kind, Date.now() - started, pinned);
 
     if (edgeIsGone(gone)) break;
   }
 
-  process.stdout.write("\x1b[?25h");
+  leave();
 }

@@ -83,8 +83,9 @@ Setup
   overbridge worklist [refresh|show]            work list pane (the @work tab); refresh reads every board into its cache; show prints it
   overbridge prs [refresh]                      PRs you opened (the @prs tab); reviews [refresh]: PRs waiting for your review (@reviews)
   overbridge checks                             the check queue (the @checks tab); K/J/t/b move, x kills, v recent runs
-  overbridge frame-edge --side S --ws NAME --kind K   one side of the frame around a Claude or diff pane (run by the generated layout)
-  overbridge frozen                            iceboxed workspaces (the @frozen tab); t thaws the selected one
+  overbridge frame-edge --side S --ws NAME --kind K
+                                        one side of the frame around a Claude or diff pane (run by the generated layout)
+  overbridge frozen                             iceboxed workspaces (the @frozen tab); t thaws the selected one
   overbridge explore [sync <repo>|shell <repo>] the @explore tab: pick a repo, then its apps, editor and a terminal on a
                                         checkout of its default branch; sync fast-forwards that checkout when clean
   overbridge perf                               performance pane (the @perf tab): dashboard, sessions, commands (v switches)

@@ -69,6 +69,13 @@ describe("when an edge exits", () => {
     expect(poll(poll(poll(0, miss), here), miss)).toBe(1);
   });
 
+  test("a replacement with the same title but another id is not the pane the frame surrounds", () => {
+    const replacement = [{ ...pane("w1 · claude"), id: "9" }];
+    expect(poll(0, replacement)).toBe(0);
+    expect(missedPolls(0, replacement, "w1", "claude", GRACE, "1")).toBe(1);
+    expect(missedPolls(2, here, "w1", "claude", GRACE, "1")).toBe(0);
+  });
+
   test("a pane that exited counts as gone", () => {
     expect(poll(0, [pane("w1 · claude", true)])).toBe(1);
   });
