@@ -1,6 +1,14 @@
-import { SIDEBAR_WIDTH } from "./config";
 import type { PaneSpec, TabSpec } from "./layout";
 import { shellQuote } from "./util";
+
+/**
+ * The sidebar takes a quarter of the window, the rest holds the agent and the extra panes. A percentage survives a
+ * window resize, so under tmux this replaces `[sidebar] width` and the sidebar pane's `size`.
+ */
+export const SIDEBAR_PERCENT = 25;
+
+/** Shell run by tmux hooks: size every pane titled `sidebar` to its share. `##` keeps run-shell from expanding the formats. */
+const SIDEBAR_RESIZE = `tmux list-panes -a -F '##{pane_id} ##{pane_title}' | awk '$2=="sidebar"{print $1}' | xargs -r -I{} tmux resize-pane -t {} -x ${SIDEBAR_PERCENT}%`;
 
 /** A tmux command as argv, without the leading `tmux`. */
 export type TmuxCommand = string[];
@@ -21,8 +29,8 @@ export function tabOpen(session: string, t: TabSpec, opts: { first: boolean; pri
 
 /**
  * The commands that fill the window `win` after `tabOpen`: the main pane is the agent; the top panel is split above
- * it and the sidebar is split full-height at the left, each titled while it is the active pane, so no pane id is
- * needed. The sidebar ends up focused, like zellij. `win` is a window id or index, never a name: tmux reads
+ * it and the sidebar is split full-height at the left (`SIDEBAR_PERCENT` of the window), each titled while it is the
+ * active pane, so no pane id is needed. The sidebar ends up focused, like zellij. `win` is a window id or index, never a name: tmux reads
  * `=@root` as a window id and finds nothing, and orchestration tabs are named `@...`.
  */
 export function tabFill(win: string, t: TabSpec): TmuxCommand[] {
@@ -31,7 +39,7 @@ export function tabFill(win: string, t: TabSpec): TmuxCommand[] {
   return [
     title(t.main),
     ...(t.top ? [["split-window", "-b", "-v", "-l", String(t.top.size ?? 5), "-t", win, "-c", t.top.cwd, word(t.top)], title(t.top)] : []),
-    ["split-window", "-f", "-b", "-h", "-l", String(t.sidebar.size ?? SIDEBAR_WIDTH), "-t", win, "-c", t.sidebar.cwd, word(t.sidebar)],
+    ["split-window", "-f", "-b", "-h", "-l", `${SIDEBAR_PERCENT}%`, "-t", win, "-c", t.sidebar.cwd, word(t.sidebar)],
     title(t.sidebar),
   ];
 }
@@ -76,6 +84,9 @@ export function tmuxConf(self: string[]): string {
     "set -g pane-border-style fg=black",
     "set -g pane-active-border-style fg=black",
     "set -g escape-time 10",
+    // no dragging a border with the mouse, and the sidebar goes back to its share when a client attaches or resizes
+    "unbind -n MouseDrag1Border",
+    ...["client-attached", "client-resized"].map((hook) => `set-hook -g ${hook} ${tmuxQuote(`run-shell ${tmuxQuote(SIDEBAR_RESIZE)}`)}`),
     ...Array.from({ length: 9 }, (_, i) => `bind -n M-${i + 1} ${go(String(i + 1))}`),
     `bind -n M-, ${go("prev")}`,
     `bind -n M-. ${go("next")}`,
