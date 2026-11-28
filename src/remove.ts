@@ -95,7 +95,7 @@ export function beginRemoval(ws: string, opts: { previous?: string; landing?: La
       return false;
     }
 
-    const { removeError: _, ...rest } = current;
+    const { removeError: _, removeErrorAt: __, ...rest } = current;
     s.workspaces[ws] = { ...rest, removing: { since: new Date().toISOString(), cause: opts.cause ?? CleanupCause.Cleanup } };
 
     return true;
@@ -196,7 +196,7 @@ function restore(ws: string, error: string) {
     }
 
     const { removing: _, ...rest } = w;
-    s.workspaces[ws] = { ...rest, removeError: error };
+    s.workspaces[ws] = { ...rest, removeError: error, removeErrorAt: new Date().toISOString(), removeFailures: (rest.removeFailures ?? 0) + 1 };
 
     return true;
   });

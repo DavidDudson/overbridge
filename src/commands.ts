@@ -16,7 +16,7 @@ import { restartAfter, STOP_SIGNALS } from "./orchestration-keep";
 import { clearSubagents, sessionEndedForGood } from "./agent-state";
 import { afterAgentExit, launchArgs } from "./agent-restart";
 import { barePath, currentWorkspace, isInside, metaDir, NAME_RE, ORCHESTRATION_ENV, repoOf, root, selfCommand, sessionName, worktreePath, wsDir } from "./paths";
-import { type HookContext, runHooks } from "./hooks";
+import { type HookContext, runHooks, runHooksReport } from "./hooks";
 import { orchestratorPrompt, scaffold, scaffoldOrchestration, scaffoldPlugins, workspaceSettingsPath } from "./scaffold";
 import { defaultMux, layoutPath, type Mux, MuxKind, tmuxConfPath } from "./mux";
 import { requireTab, TabFocus } from "./tab";
@@ -176,9 +176,9 @@ export function removeWorkspace(ws: string, force: boolean) {
     if (claim.branch) hookCtx.branch = claim.branch;
 
     if (claim.pr) hookCtx.pr = claim.pr;
-    const ok = runHooks("pre-remove", hookCtx);
+    const { ok, detail } = runHooksReport("pre-remove", hookCtx);
 
-    if (!ok && !force) fail(`a pre-remove hook for ${ws}/${repo} failed; nothing was removed (use --force to remove anyway)`);
+    if (!ok && !force) fail(`a pre-remove hook for ${ws}/${repo} failed; nothing was removed (use --force to remove anyway): ${detail}`);
   }
 
   const removed: string[] = [];

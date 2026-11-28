@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentState } from "../src/agent-state";
 import { agentStateFile } from "../src/agent-state";
-import { everyClaimHasPr, type SweepDeps, sweepMerged, Verdict, type VerdictInput, verdictFor } from "../src/merge-sweep";
+import { everyClaimHasPr, REMOVE_RETRY_MAX_MS, REMOVE_RETRY_MS, type SweepDeps, sweepMerged, Verdict, type VerdictInput, verdictFor } from "../src/merge-sweep";
 import { entries, entryLines } from "../src/sidebar";
 import { readState, RemovalBlock, withState, type WorkspaceState } from "../src/state";
 import { claimSweep, MERGE_SWEEP_MS } from "../src/sweep-trigger";
@@ -142,7 +142,27 @@ describe("verdictFor", () => {
 
   test("keeps a workspace already being removed, or whose last removal failed", () => {
     expect(verdictFor(input({ workspace: workspace({ removing: { since: new Date().toISOString() } }) }))).toBe(Verdict.Keep);
-    expect(verdictFor(input({ workspace: workspace({ removeError: "boom" }) }))).toBe(Verdict.Keep);
+    const now = Date.now();
+    const failed = (agoMs: number, failures = 1) => workspace({ removeError: "boom", removeErrorAt: new Date(now - agoMs).toISOString(), removeFailures: failures });
+    expect(verdictFor(input({ now, workspace: failed(1000) }))).toBe(Verdict.Keep);
+  });
+
+  test("a failed removal holds for exactly the retry window, doubling per failure up to the cap", () => {
+    const now = Date.now();
+    const failed = (agoMs: number, failures: number) => workspace({ removeError: "boom", removeErrorAt: new Date(now - agoMs).toISOString(), removeFailures: failures });
+    expect(verdictFor(input({ now, workspace: failed(REMOVE_RETRY_MS - 1, 1) }))).toBe(Verdict.Keep);
+    expect(verdictFor(input({ now, workspace: failed(REMOVE_RETRY_MS, 1) }))).toBe(Verdict.Remove);
+    expect(verdictFor(input({ now, workspace: failed(REMOVE_RETRY_MS, 2) }))).toBe(Verdict.Keep);
+    expect(verdictFor(input({ now, workspace: failed(2 * REMOVE_RETRY_MS, 2) }))).toBe(Verdict.Remove);
+    expect(verdictFor(input({ now, workspace: failed(REMOVE_RETRY_MAX_MS - 1, 50) }))).toBe(Verdict.Keep);
+    expect(verdictFor(input({ now, workspace: failed(REMOVE_RETRY_MAX_MS, 50) }))).toBe(Verdict.Remove);
+  });
+
+  test("retries a failed removal once the error is old, and one recorded without a time", () => {
+    const now = Date.now();
+    const old = workspace({ removeError: "boom", removeErrorAt: new Date(now - REMOVE_RETRY_MS - 1).toISOString() });
+    expect(verdictFor(input({ now, workspace: old }))).toBe(Verdict.Remove);
+    expect(verdictFor(input({ now, workspace: workspace({ removeError: "boom" }) }))).toBe(Verdict.Remove);
   });
 });
 
