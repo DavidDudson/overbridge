@@ -1,3 +1,4 @@
+import { RESERVED_KEYS } from "../src/keys";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -99,7 +100,7 @@ describe("PR rows", () => {
   test("a PR is named by repo, number and title, with draft and merge actions at its right", () => {
     const b = buttons(withPr("mergeable", info()));
     expect(b.filter((x) => x.prRow === 0).map((x) => x.label)).toEqual(["🟢 api #7 feat: add x", "📝 Draft", "🟣 Merge"]);
-    expect(b.find((x) => x.label === "📝 Draft")!.key).toBe("g");
+    expect(b.find((x) => x.label === "📝 Draft")!.key).toBe("y");
     expect(b.find((x) => x.label === "🟣 Merge")!.key).toBe("m");
   });
 
@@ -673,12 +674,12 @@ describe("button keys", () => {
     expect(keys).toEqual({
       "📋 12": "i",
       "🟢 PR #3": "p",
-      "🧹 Cleanup": "x",
+      "🧹 Cleanup": "C",
       "🟢 web :3000": "1",
       "⚫ db": "2",
       "📝 zed": "e",
       "💻 terminal": "t",
-      "🔀 diff": "d",
+      "🔀 diff": "D",
     });
     expect(cell(buttons(s)[1]!)).toBe("[ 🟢 PR #3 · p ]");
   });
@@ -710,10 +711,14 @@ describe("button keys", () => {
     expect(new Set(f.placed.slice(1).map((p) => p.row))).toEqual(new Set([2]));
   });
 
-  test("several PRs get p, u, y...; no key clashes with the panel's own", () => {
+  test("several PRs get p, u, w...; no button takes a key of the shared table or the panel's own", () => {
     const links = ["a #1", "b #2", "c #3"].map((label) => ({ label, url: label, status: "pending" as const }));
+    const all = buttons(snap({ links: [...links, { label: "PR #7", url: "u7", status: "mergeable", pr: { repo: "api", number: 7, title: "t", draft: false, dir: "/w", stack: [] } }], ide: "zed", cleanup: true, apps: [app("web", AppStatus.Running, 3000)], panes: ["claude", "terminal", "diff"] }));
+
+    for (const b of all) if (b.key) expect(RESERVED_KEYS.has(b.key)).toBe(false);
+
     const keys = buttons(snap({ links })).map((b) => b.key).slice(0, 3);
-    expect(keys).toEqual(["p", "u", "y"]);
+    expect(keys).toEqual(["p", "u", "w"]);
 
     for (const k of ["q", "r", "o", "l", "h", "L"]) expect(buttons(snap({ links, ide: "zed", cleanup: true })).map((b) => b.key)).not.toContain(k);
   });

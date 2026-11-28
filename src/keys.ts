@@ -158,3 +158,9 @@ export const Keyset = {
   frozen: [A.Down, A.Up, A.Top, A.Bottom, A.Freeze, A.Refresh, A.Quit],
   explore: [A.Down, A.Up, A.Top, A.Bottom, A.Enter, A.Quit],
 } as const satisfies Record<string, readonly Action[]>;
+
+/**
+ * Keys a button of the top panel may not take: every key of the table, `a` (the sidebar's next-tab) and the
+ * panel's own `r` refresh, `o` open, `L` log, `q` quit. Buttons use what is left (`i p u w c e t D C b m y`, digits).
+ */
+export const RESERVED_KEYS: ReadonlySet<string> = new Set([...KEYS.flatMap(([, keys]) => keys.filter((k) => k.length === 1)), "a", "L"]);
