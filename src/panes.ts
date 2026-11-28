@@ -112,8 +112,8 @@ export const SIDE_BY_SIDE_MIN_COLUMNS = 140;
 
 /** The pager command for a diff: the user's `delta` (git config styles), whitespace hidden by the caller's `-w`. */
 export function deltaCommand(columns: number, sideBySide = false): string[] {
-  // the user's git config may turn side-by-side on, so the inline view says so explicitly
-  return ["delta", "--paging=never", `--width=${columns}`, sideBySide && columns >= SIDE_BY_SIDE_MIN_COLUMNS ? "--side-by-side" : "--no-side-by-side"];
+  // delta has no --no-side-by-side, and the user's git config may turn side-by-side on, so the inline view removes the feature
+  return ["delta", "--paging=never", `--width=${columns}`, sideBySide && columns >= SIDE_BY_SIDE_MIN_COLUMNS ? "--side-by-side" : "--features=-side-by-side"];
 }
 
 /** difftastic's side-by-side layout needs at least this many columns; narrower views get its inline display. */

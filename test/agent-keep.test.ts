@@ -114,10 +114,10 @@ describe("diff tool", () => {
   });
 
   test("delta is inline unless the side-by-side overlay asks and it is wide enough", () => {
-    expect(deltaCommand(80)).toContain("--no-side-by-side");
-    expect(deltaCommand(200)).toContain("--no-side-by-side");
+    expect(deltaCommand(80)).toContain("--features=-side-by-side");
+    expect(deltaCommand(200)).toContain("--features=-side-by-side");
     expect(deltaCommand(200, true)).toContain("--side-by-side");
-    expect(deltaCommand(80, true)).toContain("--no-side-by-side");
+    expect(deltaCommand(80, true)).toContain("--features=-side-by-side");
   });
 });
 
