@@ -287,6 +287,7 @@ async function main(argv: string[]): Promise<number> {
       } else {
         diff(name, values.follow ?? false, values["side-by-side"] ?? false);
       }
+
       break;
     }
 

@@ -202,7 +202,7 @@ function diffPager(out: string, overlayCommand: string | undefined) {
   const keyFile = join(dir, "keys");
 
   // the command travels in the environment: less rewrites `%`/`#` and lesskey `\\`/`^` in a typed command, and the shell expands it intact
-  const env: Record<string, string | undefined> = { ...process.env };
+  const env = { ...process.env };
 
   if (overlayCommand !== undefined) env[OVERLAY_ENV] = overlayCommand;
 
