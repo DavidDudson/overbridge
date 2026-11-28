@@ -105,16 +105,19 @@ describe("diff tool", () => {
     expect(pickDiffTool({ difft: false, delta: false })).toBe("git");
   });
 
-  test("difft runs through git's external diff, side by side only when wide enough", () => {
-    const wide = difftCommand("abc", DIFFT_SIDE_BY_SIDE_MIN_COLUMNS);
+  test("difft runs through git's external diff, inline unless the side-by-side overlay asks and it is wide enough", () => {
+    const wide = difftCommand("abc", DIFFT_SIDE_BY_SIDE_MIN_COLUMNS, true);
     expect(wide.args).toEqual(["-c", "diff.external=difft", "diff", "--ext-diff", "abc"]);
     expect(wide.env).toEqual({ DFT_COLOR: "always", DFT_WIDTH: "100", DFT_DISPLAY: "side-by-side-show-both" });
-    expect(difftCommand("abc", DIFFT_SIDE_BY_SIDE_MIN_COLUMNS - 1).env.DFT_DISPLAY).toBe("inline");
+    expect(difftCommand("abc", DIFFT_SIDE_BY_SIDE_MIN_COLUMNS - 1, true).env.DFT_DISPLAY).toBe("inline");
+    expect(difftCommand("abc", 300).env.DFT_DISPLAY).toBe("inline");
   });
 
-  test("delta keeps its width rule", () => {
+  test("delta is inline unless the side-by-side overlay asks and it is wide enough", () => {
     expect(deltaCommand(80)).toContain("--no-side-by-side");
-    expect(deltaCommand(200)).not.toContain("--no-side-by-side");
+    expect(deltaCommand(200)).toContain("--no-side-by-side");
+    expect(deltaCommand(200, true)).toContain("--side-by-side");
+    expect(deltaCommand(80, true)).toContain("--no-side-by-side");
   });
 });
 

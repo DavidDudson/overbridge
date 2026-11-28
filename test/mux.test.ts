@@ -89,6 +89,12 @@ describe("zellijMux", () => {
     ]);
   });
 
+  test("a floating pane gets zellij's --floating flag", () => {
+    const r = recorder();
+    zellijMux(r.exec).newPane({ anchor: "7", direction: "right", title: "w · diff", cwd: "/d", command: ["ob", "diff"], closeOnExit: true, floating: true });
+    expect(r.calls[1]).toEqual(["zellij", "action", "new-pane", "--direction", "right", "--name", "w · diff", "--cwd", "/d", "--floating", "--close-on-exit", "--", "ob", "diff"]);
+  });
+
   test("builds and attaches sessions with zellij's own commands", () => {
     const r = recorder((cmd) => (cmd[1] === "list-sessions" ? ok("a\nworkspaces\n") : ok()));
     const mux = zellijMux(r.exec);
