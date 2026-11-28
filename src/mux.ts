@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { specKdl, type TabSpec } from "./layout";
+import { type PaneBox, planWidths } from "./pane-widths";
 import { metaDir, sessionName as configuredSession } from "./paths";
 import { tabFill, tabOpen } from "./tmux-layout";
 import { run, shellQuote } from "./util";
@@ -81,6 +82,8 @@ export interface Mux {
   closePane(id: string): boolean;
   /** Move pane `id`'s bottom border by one multiplexer step: down to grow the pane, up to shrink it. */
   resizePane(id: string, change: PaneResize): boolean;
+  /** Put the sidebar at its share of each tab and the Claude and diff panes at an even split of the rest. */
+  fitWidths(): void;
   /** Type `text` into pane `id` as one paste, then press Enter, as if the user had sent it. */
   sendText(id: string, text: string): boolean;
   newPane(req: NewPane): boolean;
@@ -215,6 +218,8 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
     focusPane: (id) => act("focus-pane-id", target(id)).ok,
     closePane: (id) => act("close-pane", "--pane-id", target(id)).ok,
     resizePane: (id, change) => act("resize", change === PaneResize.Grow ? "increase" : "decrease", "down", "--pane-id", target(id)).ok,
+    // zellij sizes its layout panes itself (`size=` in the KDL) and has no resize-by-width action
+    fitWidths() {},
     sendText: (id, text) => act("paste", "--pane-id", target(id), "--", text).ok && settle() && act("send-keys", "--pane-id", target(id), "Enter").ok,
     newPane(req) {
       // a floating pane has no side to open on, and zellij rejects --direction together with --floating
@@ -330,6 +335,18 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
     focusPane: (id) => tmux("select-window", "-t", id).ok && tmux("select-pane", "-t", id).ok,
     closePane: (id) => tmux("kill-pane", "-t", id).ok,
     resizePane: (id, change) => tmux("resize-pane", "-t", id, change === PaneResize.Grow ? "-D" : "-U", "1").ok,
+    fitWidths() {
+      const r = tmux("list-panes", "-s", "-t", `=${session}`, "-F", ["#{pane_id}", "#{window_id}", "#{window_width}", "#{pane_title}", "#{pane_left}", "#{pane_width}"].join(SEP));
+
+      if (!r.ok) return;
+      const boxes: PaneBox[] = lines(r.stdout).map((l) => {
+        const [id = "", window = "", windowWidth = "0", title = "", left = "0", width = "0"] = l.split(SEP);
+
+        return { id, window, windowWidth: Number(windowWidth), title, left: Number(left), width: Number(width) };
+      });
+
+      for (const step of planWidths(boxes)) tmux("resize-pane", "-t", step.id, "-x", String(step.width));
+    },
     sendText: (id, text) => tmux("send-keys", "-t", id, "-l", "--", text).ok && settle() && tmux("send-keys", "-t", id, "Enter").ok,
     newPane(req) {
       if (req.floating) return tmux("display-popup", "-E", "-w", "90%", "-h", "90%", "-T", req.title, "-d", req.cwd, req.command.map(shellQuote).join(" ")).ok;

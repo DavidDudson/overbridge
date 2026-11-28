@@ -62,6 +62,7 @@ Setup
                                         know, e.g. config set defaults.ide zed; put -- before a value
                                         that starts with -
   overbridge app [id [action]]                  list or start|stop|restart|status|log repo apps
+  overbridge widths                             refit tmux tab widths: sidebar 25%, Claude and diff split the rest evenly
   overbridge next                               go to the next tab needing you: waiting for input, then finished,
                                         then finished with background tasks (zellij binds it to a key)
   overbridge go <n>|<name>|next|prev            switch tab by sidebar number, name, or neighbour (wrapping);
@@ -275,6 +276,9 @@ async function main(argv: string[]): Promise<number> {
 
     case "next":
       console.log(next(currentTab()));
+      break;
+    case "widths":
+      defaultMux().fitWidths();
       break;
     case "keys": {
       const { values } = opts(rest, { zellij: { type: "boolean" as const } });
