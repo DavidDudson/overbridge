@@ -85,6 +85,9 @@ describe("workspace records", () => {
     expect(workspaceFault({ created: "now", repos: {}, removing: { since: "yesterday" } })).toContain("no valid since");
     expect(workspaceFault({ created: "now", repos: {}, removeError: "hook failed", removalBlocked: "merged-unsaved" })).toBeUndefined();
     expect(workspaceFault({ created: "now", repos: {}, removeError: { msg: "x" } })).toContain("removeError as an object");
+    expect(workspaceFault({ created: "now", repos: {}, removeErrorAt: "garbage" })).toContain("removeErrorAt");
+    expect(workspaceFault({ created: "now", repos: {}, removeErrorAt: "2026-01-01T00:00:00.000Z", removeFailures: 2 })).toBeUndefined();
+    expect(workspaceFault({ created: "now", repos: {}, removeFailures: -1 })).toContain("removeFailures");
     expect(workspaceFault({ created: "now", repos: {}, removalBlocked: "nope" })).toContain('removalBlocked as "nope"');
   });
 

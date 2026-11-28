@@ -145,7 +145,30 @@ describe("lifecycle", () => {
       const report = runHooksReport("pre-remove", { ws: "w3", repo: "app" });
       expect(report.ok).toBe(false);
       expect(report.detail).toContain("unpushed work");
+      expect(report.detail).toContain("(exit 1)");
       expect(runHooksReport("post-pr", { ws: "w3", repo: "app" })).toEqual({ ok: true, detail: "" });
+    } finally {
+      saved === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = saved);
+    }
+  });
+
+  test("the report names the hook that failed, keeps the tail of long output on one line and says so when it printed nothing", () => {
+    const saved = process.env.OVERBRIDGE_ROOT;
+    process.env.OVERBRIDGE_ROOT = root;
+
+    try {
+      writeRoot(`defaults:\n  hooks:\n    pre-remove:\n      - 'true'\n      - |\n        echo "BEGINMARK$(printf 'x%.0s' $(seq 1 500))" >&2\n        printf '\\033[31mred\\nend-marker' >&2\n        exit 3\n`);
+      const report = runHooksReport("pre-remove", { ws: "w3", repo: "app" });
+      expect(report.ok).toBe(false);
+      expect(report.detail.startsWith("echo ")).toBe(true);
+      expect(report.detail).toContain("(exit 3)");
+      expect(report.detail.endsWith("red end-marker")).toBe(true);
+      expect(report.detail).not.toContain("xBEGINMARK");
+      expect(report.detail).not.toMatch(/[\x00-\x1f\x7f]/);
+      expect(report.detail.length).toBeLessThan(500);
+
+      writeRoot(`defaults:\n  hooks:\n    pre-remove: 'exit 2'\n`);
+      expect(runHooksReport("pre-remove", { ws: "w3", repo: "app" }).detail).toBe("exit 2 (exit 2)");
     } finally {
       saved === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = saved);
     }

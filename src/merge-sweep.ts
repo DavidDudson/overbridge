@@ -8,16 +8,17 @@ import { serverRefreshAll } from "./server-client";
 import { claimedCache, noUnsavedWork, readTopCache, refreshTop, type TopCache } from "./top";
 import { errorMessage, log } from "./util";
 
-/** How long a failed removal's error holds the sweep off before it tries that workspace again. */
+/** How long the first failed removal holds the sweep off; each further failure in a row doubles it, up to `REMOVE_RETRY_MAX_MS`. */
 export const REMOVE_RETRY_MS = 30 * 60_000;
+export const REMOVE_RETRY_MAX_MS = 24 * 60 * 60_000;
 
 /** Whether a recorded removal failure still holds the sweep off; an error with no time (an older build's) never does. */
 const errorHolds = (w: WorkspaceState, now: number): boolean => {
-  if (w.removeError === undefined) return false;
+  if (w.removeError === undefined || w.removeErrorAt === undefined) return false;
 
-  const at = w.removeErrorAt === undefined ? Number.NaN : Date.parse(w.removeErrorAt);
+  const hold = Math.min(REMOVE_RETRY_MS * 2 ** Math.max((w.removeFailures ?? 1) - 1, 0), REMOVE_RETRY_MAX_MS);
 
-  return now - at < REMOVE_RETRY_MS;
+  return now - Date.parse(w.removeErrorAt) < hold;
 };
 
 /** What the merged-PR sweep does with one workspace. */
@@ -43,7 +44,7 @@ export interface VerdictInput {
   now?: number;
 }
 
-/** Decide one workspace. Orchestration tabs, workspaces being removed and ones whose last removal failed less than `REMOVE_RETRY_MS` ago are kept. */
+/** Decide one workspace. Orchestration tabs, workspaces being removed and ones whose last removal failed within its backoff are kept. */
 export function verdictFor(input: VerdictInput): Verdict {
   const { ws, workspace, cache, agent, clean, now = Date.now() } = input;
 

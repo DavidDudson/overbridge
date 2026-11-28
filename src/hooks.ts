@@ -22,7 +22,10 @@ export function runHooks(name: HookName, ctx: HookContext): boolean {
 }
 
 /** How many trailing characters of a failed hook's output go into the failure report. */
-const OUTPUT_TAIL = 400;
+const OUTPUT_TAIL_CHARS = 400;
+
+/** Control characters (escape codes, newlines) become spaces, so a hook's output can sit on one sidebar line. */
+const oneLine = (text: string): string => text.replace(/[\x00-\x1f\x7f]+/g, " ").trim();
 
 export interface HookReport {
   ok: boolean;
@@ -66,7 +69,9 @@ export function runHooksReport(name: HookName, ctx: HookContext): HookReport {
     if (p.exitCode !== 0) {
       log(`${name} hook failed with exit code ${p.exitCode ?? "?"}: ${command}`);
 
-      return { ok: false, detail: `${command.split("\n")[0]}: ${stderr.trim().slice(-OUTPUT_TAIL)}` };
+      const tail = oneLine(stderr).slice(-OUTPUT_TAIL_CHARS);
+
+      return { ok: false, detail: `${command.split("\n")[0]} (exit ${p.exitCode ?? "signal"})${tail ? `: ${tail}` : ""}` };
     }
   }
 

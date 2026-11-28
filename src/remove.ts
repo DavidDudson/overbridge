@@ -196,7 +196,7 @@ function restore(ws: string, error: string) {
     }
 
     const { removing: _, ...rest } = w;
-    s.workspaces[ws] = { ...rest, removeError: error, removeErrorAt: new Date().toISOString() };
+    s.workspaces[ws] = { ...rest, removeError: error, removeErrorAt: new Date().toISOString(), removeFailures: (rest.removeFailures ?? 0) + 1 };
 
     return true;
   });

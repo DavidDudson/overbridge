@@ -382,6 +382,8 @@ describe("the background worker", () => {
     const w = readState().workspaces.f1!;
     expect(w.removing).toBeUndefined();
     expect(w.removeError).toContain("pre-remove hook for f1/app failed");
+    expect(Number.isNaN(Date.parse(w.removeErrorAt!))).toBe(false);
+    expect(w.removeFailures).toBe(1);
     expect(existsSync(join(root, "f1", "app", ".git"))).toBe(true);
     const card = entries().find((e) => e.tab === "f1")!;
     expect(card.error).toContain("pre-remove");
@@ -404,8 +406,13 @@ describe("the background worker", () => {
 
   test("a new Cleanup clears the old error", () => {
     const { deps } = fakeDeps("");
+    withState((s) => {
+      s.workspaces.f1 = { ...s.workspaces.f1!, removeError: "old", removeErrorAt: new Date().toISOString(), removeFailures: 2 };
+    });
     beginRemoval("f1", { deps });
     expect(readState().workspaces.f1!.removeError).toBeUndefined();
+    expect(readState().workspaces.f1!.removeErrorAt).toBeUndefined();
+    expect(readState().workspaces.f1!.removeFailures).toBe(2);
     withState((s) => {
       const { removing: _, ...rest } = s.workspaces.f1!;
       s.workspaces.f1 = rest;
