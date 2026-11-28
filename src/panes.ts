@@ -201,13 +201,17 @@ function diffPager(out: string, overlayCommand: string | undefined) {
   const dir = mkdtempSync(join(tmpdir(), "overbridge-less-"));
   const keyFile = join(dir, "keys");
 
+  // the command travels in the environment: less rewrites `%`/`#` and lesskey `\\`/`^` in a typed command, and the shell expands it intact
+  const env: Record<string, string | undefined> = { ...process.env };
+
+  if (overlayCommand !== undefined) env[OVERLAY_ENV] = overlayCommand;
+
   try {
-    // the command travels in the environment: less rewrites `%`/`#` and lesskey `\\`/`^` in a typed command, and the shell expands it intact
     writeFileSync(keyFile, diffLesskey(overlayCommand !== undefined));
     Bun.spawnSync({
       cmd: ["less", "-R", `--lesskey-src=${keyFile}`],
       cwd: spawnCwd(),
-      env: { ...process.env, ...(overlayCommand === undefined ? {} : { [OVERLAY_ENV]: overlayCommand }) },
+      env,
       stdin: Buffer.from(out),
       stdout: "inherit",
       stderr: "inherit",
