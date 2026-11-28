@@ -1,17 +1,6 @@
 /**
- * Focused diff: a unified diff in, an analysis, a mini diff out. Pure and deterministic (no parser
- * downloads, no I/O, no model): the same diff text always gives the same output.
- *
- * 1. `parseDiff` reads `git diff -U3` into files, hunks and lines.
- * 2. `analyze` splits each hunk into change blocks and tags each block that is noise: formatting only
- *    (token-equal after dropping whitespace, `;`, trailing commas and quote style), imports, code that
- *    only moved within its file, comments. Whole files can be noise too: lockfiles and generated
- *    output, pure renames, mode changes.
- * 3. `renderFocused` prints only the blocks that are not noise, with a one-line marker where a noise
- *    block was, and a summary of what was hidden.
- *
- * Tokens come from a language-agnostic lexer, not a grammar, so it never fails on a parse error and
- * costs nothing to run. It is conservative: a block it cannot prove is noise is shown.
+ * Focused diff: unified diff text in, analysis, mini diff out. Pure and deterministic, and conservative:
+ * a block it cannot prove is noise is shown. The lexer is language-agnostic, so it never fails to parse.
  */
 
 export enum Noise {
@@ -84,6 +73,9 @@ export interface FocusOptions {
   maxWholeFileLines?: number;
 }
 
+/** A line from a file, safe to print: CR dropped (CRLF reads as LF), other control characters (ESC could recolour or hide output) replaced. */
+const clean = (line: string) => line.replace(/\r$/, "").replace(/(?![\t])\p{Cc}/gu, "\uFFFD");
+
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
 /** Reads unified diff text (`git diff`, with or without `-M`) into files. Unknown lines are skipped. */
@@ -126,24 +118,24 @@ export function parseDiff(text: string): FileDiff[] {
 
       if (!m) continue;
 
-      let old = m[2] === undefined ? 1 : Number(m[2]);
-      let now = m[4] === undefined ? 1 : Number(m[4]);
+      let oldLeft = m[2] === undefined ? 1 : Number(m[2]);
+      let newLeft = m[4] === undefined ? 1 : Number(m[4]);
       const hunk: Hunk = { header: l, lines: [] };
 
-      while ((old > 0 || now > 0) && i + 1 < lines.length) {
+      while ((oldLeft > 0 || newLeft > 0) && i + 1 < lines.length) {
         const b = lines[i + 1]!;
         const k = b === "" ? " " : b[0];
 
         if (k === " ") {
-          old--;
-          now--;
-          hunk.lines.push({ kind: " ", text: b.slice(1) });
+          oldLeft--;
+          newLeft--;
+          hunk.lines.push({ kind: " ", text: clean(b.slice(1)) });
         } else if (k === "-") {
-          old--;
-          hunk.lines.push({ kind: "-", text: b.slice(1) });
+          oldLeft--;
+          hunk.lines.push({ kind: "-", text: clean(b.slice(1)) });
         } else if (k === "+") {
-          now--;
-          hunk.lines.push({ kind: "+", text: b.slice(1) });
+          newLeft--;
+          hunk.lines.push({ kind: "+", text: clean(b.slice(1)) });
         } else if (k !== "\\") break;
 
         i++;
@@ -166,13 +158,22 @@ interface Lang {
   opener?: RegExp;
   /** Leading indentation is meaning here, so it stays in the comparison. */
   indent?: boolean;
+  /** 'x' and "x" are the same string. */
+  quotes?: boolean;
+  /** A trailing `;` is optional. */
+  semicolons?: boolean;
+  /** C-style block comments, whose continuation lines start with `*`. */
+  block?: boolean;
 }
 
 const NEVER = /(?!)/;
-const SLASH_COMMENT = /^(\/\/|\/\*|\*\/|\*(\s|$))/;
+const SLASH_COMMENT = /^(\/\/|\/\*|\*\/)/;
 
 const JS: Lang = {
   comment: SLASH_COMMENT,
+  block: true,
+  quotes: true,
+  semicolons: true,
   imports:
     /^\s*(?:import\s+(?:type\s+)?(?:[^;'"]*?\sfrom\s*)?['"][^'"]+['"]|export\s+(?:type\s+)?(?:\*|\{[^}]*\})(?:\s+as\s+\w+)?\s+from\s*['"][^'"]+['"]|(?:const|let|var)\s+[^=;]+=\s*require\(\s*['"][^'"]+['"]\s*\))\s*;?\s*$/gm,
   opener: /^(?:import|export)\s+(?:type\s+)?(?:[\w$]+\s*,\s*)?\{$/,
@@ -183,6 +184,7 @@ const PY: Lang = {
   imports: /^\s*(?:from\s+[\w.]+\s+import\s+(?:\([^)]*\)|[^\n(]+)|import\s+[^\n]+)\s*$/gm,
   opener: /^from\s+\S+\s+import\s*\($/,
   indent: true,
+  quotes: true,
 };
 
 const RUST: Lang = {
@@ -193,15 +195,15 @@ const RUST: Lang = {
 
 const GO: Lang = {
   comment: /^\/\//,
-  imports: /^\s*(?:import\s*(?:\([^)]*\)|(?:[\w.]+\s+)?"[^"]+")|(?:[\w.]+\s+)?"[^"]+")\s*$/gm,
+  imports: /^\s*import\s*(?:\([^)]*\)|(?:[\w.]+\s+)?"[^"]+")\s*$/gm,
   opener: /^import\s*\($/,
 };
 
-const JVM: Lang = { comment: SLASH_COMMENT, imports: /^\s*(?:import|using|package)\s+[^\n;]+;?\s*$/gm };
-const C: Lang = { comment: SLASH_COMMENT, imports: /^\s*#\s*(?:include|import)\s+[<"][^>"]+[>"]\s*$/gm };
+const JVM: Lang = { comment: SLASH_COMMENT, block: true, imports: /^\s*(?:import|using|package)\s+[^\n;]+;?\s*$/gm };
+const C: Lang = { comment: SLASH_COMMENT, block: true, imports: /^\s*#\s*(?:include|import)\s+[<"][^>"]+[>"]\s*$/gm };
 const HASH: Lang = { comment: /^#/ };
 const HASH_INDENT: Lang = { comment: /^#/, indent: true };
-const DATA: Lang = { comment: NEVER };
+const PLAIN: Lang = { comment: NEVER };
 
 /** Unknown files: whitespace at the start of a line may matter, nothing is a comment. */
 const UNKNOWN: Lang = { comment: NEVER, indent: true };
@@ -213,7 +215,7 @@ const LANGS = new Map<string, Lang>(Object.entries({
   c: C, h: C, cc: C, cpp: C, hpp: C,
   sh: HASH, bash: HASH, rb: HASH, nix: HASH, toml: HASH,
   yml: HASH_INDENT, yaml: HASH_INDENT,
-  json: DATA, css: DATA, scss: DATA,
+  json: PLAIN, css: PLAIN, scss: PLAIN,
 } satisfies Record<string, Lang>));
 
 const langOf = (path: string): Lang => LANGS.get(path.slice(path.lastIndexOf(".") + 1).toLowerCase()) ?? UNKNOWN;
@@ -227,20 +229,28 @@ const GENERATED = [
 
 const isGenerated = (path: string) => GENERATED.some((re) => re.test(path));
 
-const TOKEN = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|[A-Za-z_$][\w$]*|\d[\w.]*|\S/g;
+const TOKEN = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|[A-Za-z_$][\w$]*|\d[\w.]*|[-+*/%=!<>&|^~?.:]{2,3}|\S/g;
 const CLOSERS = new Set([")", "]", "}"]);
 
 /** 'x' and "x" are the same token when neither needs an escape. */
-const unquote = (t: string) => (t[0] === "'" && !t.includes('"') && !t.includes("\\") ? `"${t.slice(1, -1)}"` : t);
+const unquote = (t: string, on: boolean) => (on && t[0] === "'" && !t.includes('"') && !t.includes("\\") ? `"${t.slice(1, -1)}"` : t);
+
+interface Style {
+  indent: boolean;
+  quotes: boolean;
+  semicolons: boolean;
+}
+
+const styleOf = (lang: Lang, semicolons = true): Style => ({ indent: !!lang.indent, quotes: !!lang.quotes, semicolons: semicolons && !!lang.semicolons });
 
 /** What a formatter cannot change: tokens without `;`, trailing commas, whitespace and quote style. */
-function tokens(lines: readonly string[], indent: boolean): string[] {
+function tokens(lines: readonly string[], style: Style): string[] {
   const all: string[] = [];
 
   for (const line of lines) {
-    if (indent && line.trim()) all.push(`⇥${line.length - line.trimStart().length}`);
+    if (style.indent && line.trim()) all.push(`⇥${line.length - line.trimStart().length}`);
 
-    for (const m of line.matchAll(TOKEN)) all.push(unquote(m[0]));
+    for (const m of line.matchAll(TOKEN)) all.push(unquote(m[0], style.quotes));
   }
 
   const nextReal = (from: number) => {
@@ -252,7 +262,7 @@ function tokens(lines: readonly string[], indent: boolean): string[] {
   };
 
   return all.filter((t, i) => {
-    if (t === ";") return false;
+    if (t === ";" && style.semicolons) return false;
 
     if (t !== ",") return true;
 
@@ -262,12 +272,27 @@ function tokens(lines: readonly string[], indent: boolean): string[] {
   });
 }
 
-const sameTokens = (a: readonly string[], b: readonly string[], indent: boolean) => {
-  const x = tokens(a, indent);
-  const y = tokens(b, indent);
+const COMMENT_OPENER = /\/\/|\/\*|#|--/;
+const JUMP = /\b(?:return|throw|break|continue|yield)\s*$/;
+
+/**
+ * True when only layout changed. Joining lines can change meaning (onto a line comment, after `return`) and
+ * `;` is optional only line for line, so a block whose line count changed with either at stake is signal.
+ */
+/** A line starting like this continues the line before it unless that line ends in `;`. */
+const CONTINUES = /^\s*[([`+\-/*.]/;
+
+function formatOnly(removed: readonly string[], added: readonly string[], next: string, lang: Lang): boolean {
+  const sameLines = removed.length === added.length;
+
+  if (!sameLines && [...removed, ...added].some((l) => COMMENT_OPENER.test(l) || JUMP.test(l))) return false;
+
+  const style = styleOf(lang, sameLines && ![...removed, ...added, next].some((l) => CONTINUES.test(l)));
+  const x = tokens(removed, style);
+  const y = tokens(added, style);
 
   return x.length === y.length && x.every((t, i) => t === y[i]);
-};
+}
 
 const nonBlank = (lines: readonly string[]) => lines.filter((l) => l.trim());
 
@@ -305,12 +330,21 @@ export function importTarget(line: string): string {
   return word ? word[1]! : line.trim().replace(/,$/, "");
 }
 
-const lineKey = (line: string, indent: boolean) => tokens([line], indent).join(" ");
+const lineKey = (line: string, lang: Lang) => tokens([line], styleOf(lang)).join(" ");
 
 /** A line must be at least this long, normalised, to count as moved: `}` and `return;` appear everywhere. */
 const MOVED_MIN_KEY = 16;
 
-function analyzeHunk(file: FileDiff, hunk: Hunk, lang: Lang, removedPool: Set<string>, addedPool: Set<string>, keep: ReadonlySet<Noise>): AnalyzedHunk {
+/** A move hides only a run of this many such lines: one relocated guard clause must stay visible. */
+const MOVED_MIN_LINES = 3;
+
+type Pool = Map<string, number>;
+
+function bump<K>(m: Map<K, number>, k: K) {
+  m.set(k, (m.get(k) ?? 0) + 1);
+}
+
+function analyzeHunk(file: FileDiff, hunk: Hunk, lang: Lang, removedPool: Pool, addedPool: Pool, keep: ReadonlySet<Noise>): AnalyzedHunk {
   const parts: Part[] = [];
   const seen: string[] = []; // the new-side lines before the current part, for imports inside braces
   const lines = hunk.lines;
@@ -332,7 +366,7 @@ function analyzeHunk(file: FileDiff, hunk: Hunk, lang: Lang, removedPool: Set<st
 
     const change: Change = { removed, added };
     const wholeFile = file.status === "added" || file.status === "deleted";
-    const noise = wholeFile ? undefined : classify(removed, added, seen, lang, removedPool, addedPool);
+    const noise = wholeFile ? undefined : classify(removed, added, lines[i]?.text ?? "", seen, lang, removedPool, addedPool);
 
     if (noise && !keep.has(noise)) change.noise = noise;
     parts.push(change);
@@ -342,22 +376,36 @@ function analyzeHunk(file: FileDiff, hunk: Hunk, lang: Lang, removedPool: Set<st
   return { header: hunk.header, parts };
 }
 
-function classify(removed: string[], added: string[], before: readonly string[], lang: Lang, removedPool: Set<string>, addedPool: Set<string>): Noise | undefined {
-  const indent = !!lang.indent;
+const STAR_LINE = /^\*(\s|$)/;
 
-  if (sameTokens(removed, added, indent)) return Noise.Format;
+/** True when every line is a comment and each `/*` closes inside the block; `*` lines count only inside a comment. */
+function onlyComments(real: readonly string[], before: readonly string[], lang: Lang): boolean {
+  if (!real.length) return false;
+
+  const opens = real.filter((l) => l.includes("/*")).length;
+  const closes = real.filter((l) => l.includes("*/")).length;
+
+  if (lang.block && opens !== closes) return false;
+
+  const last = before.findLast((l) => l.trim())?.trim() ?? "";
+  const inBlock = last.startsWith("/*") ? !last.includes("*/") : STAR_LINE.test(last);
+  const starOk = !!lang.block && (inBlock || real.some((l) => l.trim().startsWith("/*")));
+
+  return real.every((l) => lang.comment.test(l.trim()) || (starOk && STAR_LINE.test(l.trim())));
+}
+
+function classify(removed: string[], added: string[], next: string, before: readonly string[], lang: Lang, removedPool: Pool, addedPool: Pool): Noise | undefined {
+  if (formatOnly(removed, added, next, lang)) return Noise.Format;
 
   if (onlyImports([...removed, ...added], before, lang)) return Noise.Imports;
 
-  const keyed = (lines: string[]) => nonBlank(lines).map((l) => lineKey(l, indent)).filter((k) => k.length >= MOVED_MIN_KEY);
-  const gone = keyed(removed);
-  const came = keyed(added);
+  // every line with a word in it must keep its count across the file, so a short changed line is never hidden with a moved one
+  const keys = nonBlank([...removed, ...added]).map((l) => lineKey(l, lang)).filter((k) => /\w/.test(k));
+  const moved = keys.length > 0 && keys.every((k) => (removedPool.get(k) ?? 0) === (addedPool.get(k) ?? 0));
 
-  if (gone.length + came.length > 0 && gone.every((k) => addedPool.has(k)) && came.every((k) => removedPool.has(k))) return Noise.Moved;
+  if (moved && keys.filter((k) => k.length >= MOVED_MIN_KEY).length >= MOVED_MIN_LINES) return Noise.Moved;
 
-  const real = nonBlank([...removed, ...added]);
-
-  if (real.length && real.every((l) => lang.comment.test(l.trim()))) return Noise.Comments;
+  if (onlyComments(nonBlank([...removed, ...added]), before, lang)) return Noise.Comments;
 }
 
 /** Tags the noise in each file. Whole-file noise first (generated, rename, mode), then block by block. */
@@ -366,31 +414,30 @@ export function analyze(files: FileDiff[], options: FocusOptions = {}): Analyzed
 
   return files.map((file): AnalyzedFile => {
     const lang = langOf(file.path);
-    const noisy = (kind: Noise) => (keep.has(kind) ? undefined : kind);
+    const unlessKept = (kind: Noise) => (keep.has(kind) ? undefined : kind);
     const noHunks: AnalyzedHunk[] = [];
     const base = { ...file, hunks: noHunks };
 
-    if (isGenerated(file.path) && !file.binary) return { ...base, noise: noisy(Noise.Generated), hunks: analyzeAll(file, lang, new Set(), new Set(), keep) };
+    if (isGenerated(file.path) && !file.binary) return { ...base, noise: unlessKept(Noise.Generated), hunks: analyzeAll(file, lang, new Map(), new Map(), keep) };
 
     if (!file.hunks.length && !file.binary) {
-      if (file.status === "renamed") return { ...base, noise: noisy(Noise.Renamed) };
+      if (file.status === "renamed") return { ...base, noise: unlessKept(Noise.Renamed) };
 
-      if (file.modeChange) return { ...base, noise: noisy(Noise.Mode) };
+      if (file.modeChange) return { ...base, noise: unlessKept(Noise.Mode) };
     }
 
-    const removedPool = new Set<string>();
-    const addedPool = new Set<string>();
-    const indent = !!lang.indent;
+    const removedPool: Pool = new Map();
+    const addedPool: Pool = new Map();
 
     for (const h of file.hunks) {
-      for (const l of h.lines) if (l.kind !== " " && l.text.trim()) (l.kind === "-" ? removedPool : addedPool).add(lineKey(l.text, indent));
+      for (const l of h.lines) if (l.kind !== " " && l.text.trim()) bump(l.kind === "-" ? removedPool : addedPool, lineKey(l.text, lang));
     }
 
     return { ...base, hunks: analyzeAll(file, lang, removedPool, addedPool, keep) };
   });
 }
 
-const analyzeAll = (file: FileDiff, lang: Lang, removedPool: Set<string>, addedPool: Set<string>, keep: ReadonlySet<Noise>) =>
+const analyzeAll = (file: FileDiff, lang: Lang, removedPool: Pool, addedPool: Pool, keep: ReadonlySet<Noise>) =>
   file.hunks.map((h) => analyzeHunk(file, h, lang, removedPool, addedPool, keep));
 
 const DIM = "\x1b[2m";
@@ -409,13 +456,12 @@ const changes = (file: AnalyzedFile): Change[] => file.hunks.flatMap((h) => h.pa
 const isSignal = (c: Change) => !c.noise;
 
 /** A file prints in full when it is not noise and has a signal change, or has nothing line-based to say (binary, empty add). */
-const showsFile = (f: AnalyzedFile) => !f.noise && (f.binary || changes(f).some(isSignal) || (!f.hunks.length && f.status !== "renamed"));
+const showsFile = (f: AnalyzedFile) => !f.noise && (f.binary || changes(f).some(isSignal) || !f.hunks.length);
 
 const count = (cs: Change[]) => ({ added: cs.reduce((n, c) => n + c.added.length, 0), removed: cs.reduce((n, c) => n + c.removed.length, 0) });
 
 /** `⋯ imports +zod −lodash`: what a hidden block was, short enough to scan. */
-function marker(c: Change): string {
-  const kind = c.noise!;
+function marker(c: Change, kind: Noise): string {
 
   if (kind === Noise.Imports) {
     const gone = new Set(c.removed.filter((l) => l.trim()).map(importTarget));
@@ -443,7 +489,7 @@ function renderHunk(hunk: AnalyzedHunk): string[] {
 
       for (const l of [...head, ...tail]) out.push(` ${l}`);
     } else if (p.noise) {
-      out.push(`${DIM} ${marker(p)}${RESET}`);
+      out.push(`${DIM} ${marker(p, p.noise)}${RESET}`);
     } else {
       for (const l of p.removed) out.push(`${RED}-${l}${RESET}`);
 
@@ -453,6 +499,16 @@ function renderHunk(hunk: AnalyzedHunk): string[] {
 
   return out;
 }
+
+const countKinds = (cs: Iterable<Change>) => {
+  const kinds = new Map<Noise, number>();
+
+  for (const c of cs) if (c.noise) bump(kinds, c.noise);
+
+  return kinds;
+};
+
+const fileName = (f: AnalyzedFile) => (f.status === "renamed" ? `${f.oldPath} \u2192 ${f.path}` : f.path);
 
 const tally = (kinds: Map<Noise, number>) => [...kinds].map(([k, n]) => `${k} ${n}`).join(" · ");
 
@@ -474,7 +530,7 @@ export function renderFocused(files: AnalyzedFile[], options: FocusOptions = {})
     if (f.noise) {
       hide(f.noise);
       const { added, removed } = count(cs);
-      const name = f.status === "renamed" ? `${f.oldPath} → ${f.path}` : f.path;
+      const name = fileName(f);
       collapsed.push(`  ${name}  ${f.noise}${added + removed ? ` +${added} −${removed}` : ""}`);
       continue;
     }
@@ -483,10 +539,7 @@ export function renderFocused(files: AnalyzedFile[], options: FocusOptions = {})
 
     if (!showsFile(f)) {
       // nothing here but noise blocks; reported as one collapsed line
-      const kinds = new Map<Noise, number>();
-
-      for (const c of cs) if (c.noise) kinds.set(c.noise, (kinds.get(c.noise) ?? 0) + 1);
-      collapsed.push(`  ${f.path}  ${tally(kinds)}`);
+      collapsed.push(`  ${fileName(f)}  ${tally(countKinds(cs))}`);
       continue;
     }
 

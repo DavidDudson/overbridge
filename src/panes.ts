@@ -159,7 +159,7 @@ function renderRepo(dir: string, base: string, columns: number, tool: DiffTool):
 
 /** One repo's focused diff (noise collapsed); the plain renderer's output if git fails, so a failure never reads as no changes. */
 function renderRepoFocused(dir: string, base: string, columns: number, tool: DiffTool, keep: ReadonlySet<Noise>): string {
-  const raw = Bun.spawnSync({ cmd: ["git", "-C", dir, "-c", "core.quotepath=off", "diff", "--no-ext-diff", "--no-color", "-M", "-U3", base], cwd: spawnCwd(), stdout: "pipe", stderr: "pipe" });
+  const raw = Bun.spawnSync({ cmd: ["git", "-C", dir, "-c", "core.quotepath=off", "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "-M", "-U3", base], cwd: spawnCwd(), stdout: "pipe", stderr: "pipe" });
 
   return raw.exitCode === 0 ? focusedDiff(raw.stdout.toString(), { keep }) : renderRepo(dir, base, columns, tool);
 }

@@ -72,7 +72,7 @@ describe("noise classification", () => {
     expect(noises(hunkDiff("a.ts", ["+const fs = require('fs');"]))).toEqual([Noise.Imports]);
     expect(noises(hunkDiff("a.py", ["+from os import path", "+import sys"]))).toEqual([Noise.Imports]);
     expect(noises(hunkDiff("a.rs", ["+use std::io;"]))).toEqual([Noise.Imports]);
-    expect(noises(hunkDiff("a.go", ['+\t"fmt"']))).toEqual([Noise.Imports]);
+    expect(noises(hunkDiff("a.go", [" import (", '+\t"fmt"', " )"]))).toEqual([Noise.Imports]);
     expect(noises(hunkDiff("A.java", ["+import java.util.List;"]))).toEqual([Noise.Imports]);
     expect(noises(hunkDiff("a.c", ["+#include <stdio.h>"]))).toEqual([Noise.Imports]);
     expect(noises(hunkDiff("a.ts", [" import {", "+  useState,", " } from 'react';"]))).toEqual([Noise.Imports]);
@@ -83,16 +83,57 @@ describe("noise classification", () => {
     expect(noises(hunkDiff("a.ts", [" const o = {", "+  useState,", " };"]))).toEqual([undefined]);
   });
 
-  test("code that only moved within its file is hidden at both ends; new code is not", () => {
-    const moved = hunkDiff("a.ts", ["-function helper(a: number) { return a * 2; }", " keep", " keep2", " keep3", " keep4", " keep5", " keep6", " keep7", "+function helper(a: number) { return a * 2; }"]);
-    expect(noises(moved)).toEqual([Noise.Moved, Noise.Moved]);
+  const FILLER = [" k1", " k2", " k3", " k4", " k5", " k6", " k7"];
+  const MOVED_LINES = ["function helper1(a: number) { return a * 1; }","function helper2(a: number) { return a * 2; }","function helper3(a: number) { return a * 3; }"];
 
-    const edited = hunkDiff("a.ts", ["-function helper(a: number) { return a * 2; }", " keep", "+function helper(a: number) { return a * 3; }"]);
-    expect(noises(edited)).toEqual([undefined, undefined]);
+  test("a run of lines that only moved within its file is hidden at both ends", () => {
+    expect(noises(hunkDiff("a.ts", [...MOVED_LINES.map((l) => `-${l}`), ...FILLER, ...MOVED_LINES.map((l) => `+${l}`)]))).toEqual([Noise.Moved, Noise.Moved]);
+  });
+
+  test("a moved run does not hide a changed short line, an edit, a single line, or a duplicated copy", () => {
+    const base = MOVED_LINES.map((l) => `-${l}`);
+    const moved = MOVED_LINES.map((l) => `+${l}`);
+
+    expect(noises(hunkDiff("a.ts", [...base, "-limit = 1", ...FILLER, ...moved]))[0]).toBeUndefined();
+    expect(noises(hunkDiff("a.ts", ["-function helper(a: number) { return a * 2; }", " keep", "+function helper(a: number) { return a * 3; }"]))).toEqual([undefined, undefined]);
+    expect(noises(hunkDiff("a.ts", [`-${MOVED_LINES[0]}`, ...FILLER, `+${MOVED_LINES[0]}`]))).toEqual([undefined, undefined]);
+    expect(noises(hunkDiff("a.ts", [...base, ...FILLER, ...moved, ...FILLER, ...moved]))).toEqual([undefined, undefined, undefined]);
   });
 
   test("short generic lines are never moved", () => {
     expect(noises(hunkDiff("a.ts", ["-  return;", " x", "+  return;"]))).toEqual([undefined, undefined]);
+  });
+
+  test("quote style and semicolons are cosmetic only where the language says so", () => {
+    expect(noises(hunkDiff("a.rs", ["-let c = 'a';", '+let c = "a";']))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.go", ["-r := 'a'", '+r := "a"']))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.sh", ["-echo '$HOME'", '+echo "$HOME"']))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.rs", ["-x", "+x;"]))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.py", ["-s = 'a'", '+s = "a"']))).toEqual([Noise.Format]);
+    expect(noises(hunkDiff("a.ts", ["-s = 'a\"b'", '+s = "a"b"']))).toEqual([undefined]);
+  });
+
+  test("joining lines is signal when it comments code out or ends a statement early", () => {
+    expect(noises(hunkDiff("a.ts", ["-check(user); // ok", "-deny();", "+check(user); // ok deny();"]))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.ts", ["-return", "-value;", "+return value;"]))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.ts", ["-a", "-(b)", "+a;", "+(b)"]))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.ts", ["-a + +b", "+a ++ b"]))).toEqual([undefined]);
+  });
+
+  test("star lines are comments only inside a comment", () => {
+    expect(noises(hunkDiff("a.ts", [" total = base", "-  * 2", "+  * 3"]))).toEqual([undefined]);
+    expect(noises(hunkDiff("a.ts", [" /**", " * a", "-* b", "+* c"]))).toEqual([Noise.Comments]);
+    expect(noises(hunkDiff("a.ts", ["+/*", " code()", "+*/"]))).toEqual([undefined, undefined]);
+  });
+
+  test("a bare quoted line is an import only inside a Go import block", () => {
+    expect(noises(hunkDiff("a.go", [" want := []string{", '-\t"alpha",', '+\t"beta",', " }"]))).toEqual([undefined]);
+  });
+
+  test("control characters and CRs in file text never reach the output", () => {
+    const out = focusedDiff(hunkDiff("a.ts", ["+run(\u001b[8m1);\r"]));
+    expect(out).not.toContain("\u001b[8m");
+    expect(out).not.toContain("\r");
   });
 
   test("comments", () => {
@@ -169,6 +210,14 @@ describe("renderFocused", () => {
   test("renamed with edits shows the rename and the edit", () => {
     const diff = ["diff --git a/o.ts b/n.ts", "similarity index 80%", "rename from o.ts", "rename to n.ts", "--- a/o.ts", "+++ b/n.ts", "@@ -1 +1 @@", "-a()", "+b()", ""].join("\n");
     expect(strip(focusedDiff(diff))).toContain("── n.ts (renamed from o.ts, 80%) +1 −1");
+  });
+
+  test("--keep renamed shows a pure rename; an all-noise rename collapses under both names", () => {
+    const rename = ["diff --git a/o.ts b/n.ts", "similarity index 100%", "rename from o.ts", "rename to n.ts", ""].join("\n");
+    expect(strip(focusedDiff(rename, { keep: new Set([Noise.Renamed]) }))).toContain("── n.ts (renamed from o.ts, 100%)");
+
+    const noisy = ["diff --git a/o.ts b/n.ts", "similarity index 90%", "rename from o.ts", "rename to n.ts", "--- a/o.ts", "+++ b/n.ts", "@@ -1 +1 @@", "-foo(1)", "+foo(1);", ""].join("\n");
+    expect(strip(focusedDiff(noisy))).toContain("o.ts → n.ts  format 1");
   });
 
   test("empty input renders nothing", () => {
