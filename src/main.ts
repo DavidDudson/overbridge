@@ -390,10 +390,10 @@ async function main(argv: string[]): Promise<number> {
     case "frame-edge": {
       const { values } = opts(rest, { ...ws, side: { type: "string" as const }, kind: { type: "string" as const }, title: { type: "string" as const } });
       const { frameEdge } = await import("./frame-edge");
-      const { isFrameSide } = await import("./frame");
+      const { isFrameSide, isPaneKind } = await import("./frame");
       const kind = values.kind;
 
-      if (!values.side || !isFrameSide(values.side) || !values.ws || (kind !== "claude" && kind !== "diff" && kind !== "terminal")) {
+      if (!values.side || !isFrameSide(values.side) || !values.ws || !kind || !isPaneKind(kind)) {
         throw new OverbridgeError("usage: overbridge frame-edge --side top|bottom|left|right --ws NAME --kind claude|diff|terminal [--title TEXT]");
       }
 

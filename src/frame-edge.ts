@@ -1,5 +1,5 @@
-import { defaultMux, type Mux } from "./mux";
-import { findPane } from "./panes";
+import { defaultMux, type Mux, type MuxPane } from "./mux";
+import { findPane } from "./pane-title";
 import { boxBottom, boxSide, boxTop } from "./term";
 import type { FrameSide } from "./frame";
 import type { PaneKind } from "./top";
@@ -25,6 +25,19 @@ const POLL_MS = 1_000;
 const GRACE_MS = 10_000;
 
 /**
+ * The count of polls that have missed the framed pane after one more poll: unchanged while the multiplexer gave no
+ * answer (an empty listing) or the edge is still within its grace, reset when the pane is there, else one higher.
+ * An edge exits at `GONE_POLLS`.
+ */
+export function missedPolls(missed: number, panes: MuxPane[], ws: string, kind: PaneKind, sinceStartMs: number): number {
+  if (!panes.length || sinceStartMs < GRACE_MS) return missed;
+
+  return findPane(panes, ws, kind) ? 0 : missed + 1;
+}
+
+export const edgeIsGone = (missed: number) => missed >= GONE_POLLS;
+
+/**
  * `overbridge frame-edge --side S --ws W --kind K [--title T]`: one side of the frame around the `K` pane of tab `W`.
  * Redraws on resize and exits once that pane has been gone for a few polls, so closing the pane takes its frame with
  * it. Reads no input and asks for no mouse, so every click goes to the multiplexer.
@@ -42,13 +55,9 @@ export async function frameEdge(side: FrameSide, ws: string, kind: PaneKind, tit
   for (;;) {
     await Bun.sleep(POLL_MS);
     draw();
-    const panes = mux.listPanes();
+    gone = missedPolls(gone, mux.listPanes(), ws, kind, Date.now() - started);
 
-    // an empty listing means the multiplexer could not answer, which says nothing about the pane
-    if (!panes.length || Date.now() - started < GRACE_MS) continue;
-    gone = findPane(panes, ws, kind) ? 0 : gone + 1;
-
-    if (gone >= GONE_POLLS) break;
+    if (edgeIsGone(gone)) break;
   }
 
   process.stdout.write("\x1b[?25h");
