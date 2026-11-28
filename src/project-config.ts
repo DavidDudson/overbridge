@@ -184,6 +184,12 @@ export interface ReviewConfig {
   shipPr: boolean;
 }
 
+/** What `overbridge diff --focused` treats as generated; from the root `config.yml` only, so a branch can't hide its own files from a reviewer. */
+export interface DiffConfig {
+  /** Globs (matched against repo-relative paths) of files that are generated: their changes collapse to one line. */
+  generated: string[];
+}
+
 export const WORK_STATUSES = ["todo", "in-progress", "blocked", "done"] as const satisfies readonly WorkStatus[];
 
 /** What `overbridge icebox` may delete with `--prune` (repo-relative paths git ignores, such as `node_modules`), and when the sidebar suggests it. */
@@ -201,6 +207,7 @@ export interface ProjectConfig {
   apps: AppSpec[];
   commands: Commands;
   review: ReviewConfig;
+  diff: DiffConfig;
   ide?: IdeConfig;
   /** The repo's dev shell, if it declares one. */
   shell?: ShellSpec;
@@ -224,6 +231,7 @@ export const defaultConfig = (): ProjectConfig => ({
   apps: [],
   commands: {},
   review: { exclude: [], localDir: DEFAULT_PERSONA_DIR, shipPr: true },
+  diff: { generated: [] },
   checkQueue: defaultCheckQueue(),
   checkScope: defaultCheckScope(),
   icebox: { prune: [] },
@@ -231,12 +239,13 @@ export const defaultConfig = (): ProjectConfig => ({
   mcpServers: [],
 });
 
-const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "check-scope", "icebox", "hooks", "buttons", "mcp-servers"];
+const TOP_KEYS = ["version", "project-management", "board", "apps", "commands", "review", "ide", "shell", "check-queue", "check-scope", "icebox", "diff", "hooks", "buttons", "mcp-servers"];
 const CHECK_SCOPE_KEYS = ["mode", "max-projects"];
 const SHELL_KEYS = ["enter", "env", "key"];
 const CHECK_QUEUE_KEYS = ["max-load-percent", "max-cpu-percent", "max-parallel", "timeout-seconds", "stall-seconds", "wait-seconds", "skip-queue-seconds", "bin-dirs", "priority", "priority-rules"];
 const PRIORITY_RULE_KEYS = ["priority", "branch", "item", "type", "label"];
 const ICEBOX_KEYS = ["prune", "idle-days"];
+const DIFF_KEYS = ["generated"];
 const REVIEW_KEYS = ["personas", "exclude", "local-dir", "ship-pr"];
 const BOARD_KEYS = ["columns"];
 const PM_KEYS = ["name", "project", "url", "tech-debt", "branch", "workspace", "branch-types", "issue-type", "worklist-jql", "worklist-scope", "worklist-project", "worklist-statuses"];
@@ -638,6 +647,20 @@ export function validateConfig(raw: Json | undefined, file = CONFIG_FILE, { part
       const maxProjects = p.positiveInt(checkScope, "max-projects", "check-scope");
 
       config.checkScope = { mode: mode ?? config.checkScope.mode, maxProjects: maxProjects ?? config.checkScope.maxProjects };
+    }
+  }
+
+  const diffConfig = raw.diff;
+
+  // a repo file's `diff: null` would drop a root layer's globs in the overlay, so it is refused too
+  if (!root && diffConfig !== undefined) {
+    p.add("diff", "only allowed in the root config.yml, so a checked-out branch can't hide its own files from a reviewer");
+  } else if (diffConfig !== undefined && diffConfig !== null) {
+    if (!isRecord(diffConfig)) {
+      p.add("diff", `expected a mapping with ${DIFF_KEYS.join(", ")}`);
+    } else {
+      p.unknownKeys(diffConfig, DIFF_KEYS, "diff");
+      config.diff.generated = p.stringList(diffConfig, "generated", "diff") ?? [];
     }
   }
 

@@ -11,6 +11,10 @@ export enum Noise {
   Generated = "generated",
   Renamed = "renamed",
   Mode = "mode",
+  /** A new test or story file: listed with its size, its lines are not shown. */
+  Tests = "tests",
+  /** The same edit, line for line, as a file shown above: listed, not repeated. */
+  Repeated = "repeated",
 }
 
 export const NOISE_KINDS: readonly string[] = Object.values(Noise);
@@ -20,6 +24,8 @@ export const isNoise = (s: string): s is Noise => NOISE_KINDS.includes(s);
 export interface DiffLine {
   kind: " " | "+" | "-";
   text: string;
+  /** 1-based line number: in the old file for `-`, in the new file for `+` and context. */
+  no: number;
 }
 
 export interface Hunk {
@@ -51,6 +57,8 @@ export interface Change {
   removed: string[];
   added: string[];
   noise?: Noise;
+  /** Lines the syntax-aware differ says only changed in layout, left out of `removed` and `added`. */
+  layout?: number;
 }
 
 export type Part = Context | Change;
@@ -63,12 +71,31 @@ export interface AnalyzedHunk {
 export interface AnalyzedFile extends Omit<FileDiff, "hunks"> {
   /** Set when the whole file is noise. */
   noise?: Noise;
+  /** On a file hidden as repeated: the file whose identical change is shown. */
+  sameAs?: string;
+  /** On the file that shows a change: the other files that carry the same one. */
+  repeats?: string[];
   hunks: AnalyzedHunk[];
+}
+
+/**
+ * What a syntax-aware differ (difftastic) says about one file: the 1-based lines it reports as changed on each side,
+ * and, of those, the lines where every changed token is a comment. A line it does not report only changed in layout.
+ */
+export interface FileFacts {
+  oldChanged: ReadonlySet<number>;
+  newChanged: ReadonlySet<number>;
+  oldComment: ReadonlySet<number>;
+  newComment: ReadonlySet<number>;
 }
 
 export interface FocusOptions {
   /** Noise kinds to show anyway. */
   keep?: ReadonlySet<Noise>;
+  /** Per new path, what the syntax-aware differ found; a file with no entry is judged by the lexer alone. */
+  facts?: ReadonlyMap<string, FileFacts>;
+  /** Globs of generated files (repo config): their changes collapse to one line. */
+  generated?: readonly string[];
   /** Added or deleted files print this many lines, then a count. */
   maxWholeFileLines?: number;
 }
@@ -122,6 +149,8 @@ export function parseDiff(text: string): FileDiff[] {
 
       let oldLeft = m[2] === undefined ? 1 : Number(m[2]);
       let newLeft = m[4] === undefined ? 1 : Number(m[4]);
+      let oldNo = Number(m[1]);
+      let newNo = Number(m[3]);
       const hunk: Hunk = { header: l, lines: [] };
 
       while ((oldLeft > 0 || newLeft > 0) && i + 1 < lines.length) {
@@ -131,13 +160,15 @@ export function parseDiff(text: string): FileDiff[] {
         if (k === " ") {
           oldLeft--;
           newLeft--;
-          hunk.lines.push({ kind: " ", text: clean(b.slice(1)) });
+          hunk.lines.push({ kind: " ", text: clean(b.slice(1)), no: newNo });
+          oldNo++;
+          newNo++;
         } else if (k === "-") {
           oldLeft--;
-          hunk.lines.push({ kind: "-", text: clean(b.slice(1)) });
+          hunk.lines.push({ kind: "-", text: clean(b.slice(1)), no: oldNo++ });
         } else if (k === "+") {
           newLeft--;
-          hunk.lines.push({ kind: "+", text: clean(b.slice(1)) });
+          hunk.lines.push({ kind: "+", text: clean(b.slice(1)), no: newNo++ });
         } else if (k !== "\\") break;
 
         i++;
@@ -229,7 +260,24 @@ const GENERATED = [
   /(^|\/)(dist|__generated__)\//,
 ];
 
-const isGenerated = (path: string) => GENERATED.some((re) => re.test(path));
+/** An unchanged line in the first lines of a file that says so. A line the diff adds proves nothing: its author could write it. */
+const GENERATED_HEADER = /@generated|\bDO NOT EDIT\b|\bauto-?generated\b|\bgenerated (?:by|file|code)\b/i;
+const HEADER_LINES = 10;
+
+const hasGeneratedHeader = (file: FileDiff) => file.hunks.some((h) => h.lines.some((l) => l.kind === " " && l.no <= HEADER_LINES && GENERATED_HEADER.test(l.text)));
+
+const isGenerated = (file: FileDiff, globs: readonly Bun.Glob[]) =>
+  GENERATED.some((re) => re.test(file.path)) || globs.some((g) => g.match(file.path)) || hasGeneratedHeader(file);
+
+const TESTS = [
+  /(^|\/)(__tests__|tests?|specs?|e2e)\//,
+  /\.(test|spec|stories)\.[\w]+$/,
+  /[_-]tests?\.[\w]+$/,
+  /(^|\/)test_[^/]+\.py$/,
+  /Tests?\.(kt|java|cs|swift)$/,
+];
+
+const isTestFile = (path: string) => TESTS.some((re) => re.test(path));
 
 const TOKEN = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|[A-Za-z_$][\w$]*|\d[\w.]*|[-+*/%=!<>&|^~?.:]{2,3}|\S/g;
 const CLOSERS = new Set([")", "]", "}"]);
@@ -349,7 +397,7 @@ function bump<K>(m: Map<K, number>, k: K) {
   m.set(k, (m.get(k) ?? 0) + 1);
 }
 
-function analyzeHunk(file: FileDiff, hunk: Hunk, lang: Lang, removedPool: Pool, addedPool: Pool, keep: ReadonlySet<Noise>): AnalyzedHunk {
+function analyzeHunk(file: FileDiff, hunk: Hunk, lang: Lang, removedPool: Pool, addedPool: Pool, keep: ReadonlySet<Noise>, facts: FileFacts | undefined): AnalyzedHunk {
   const parts: Part[] = [];
   const seen: string[] = []; // the new-side lines before the current part, for imports inside braces
   const lines = hunk.lines;
@@ -364,16 +412,20 @@ function analyzeHunk(file: FileDiff, hunk: Hunk, lang: Lang, removedPool: Pool, 
       continue;
     }
 
-    const removed: string[] = [];
-    const added: string[] = [];
+    const removedLines: DiffLine[] = [];
+    const addedLines: DiffLine[] = [];
 
-    for (; i < lines.length && lines[i]!.kind !== " "; i++) (lines[i]!.kind === "-" ? removed : added).push(lines[i]!.text);
+    for (; i < lines.length && lines[i]!.kind !== " "; i++) (lines[i]!.kind === "-" ? removedLines : addedLines).push(lines[i]!);
 
+    const removed = removedLines.map((l) => l.text);
+    const added = addedLines.map((l) => l.text);
     const change: Change = { removed, added };
     const wholeFile = file.status === "added" || file.status === "deleted";
-    const noise = wholeFile ? undefined : classify(removed, added, lines[i]?.text ?? "", seen, lang, removedPool, addedPool);
+    const noise = wholeFile ? undefined : (facts && factsVerdict(facts, removedLines, addedLines)) ?? classify(removed, added, lines[i]?.text ?? "", seen, lang, removedPool, addedPool, !facts);
 
     if (noise && !keep.has(noise)) change.noise = noise;
+    else if (!noise && facts && !wholeFile) trimLayout(change, removedLines, addedLines, facts);
+
     parts.push(change);
     seen.push(...added);
   }
@@ -434,7 +486,36 @@ function onlyComments(real: readonly string[], before: readonly string[], lang: 
   return real.every((l) => (starOk && STAR_LINE.test(l.trim()) && !DIRECTIVE.test(l.trim())) || (lang.comment.test(l.trim()) && commentOnly(l, lang)));
 }
 
-function classify(removed: string[], added: string[], next: string, before: readonly string[], lang: Lang, removedPool: Pool, addedPool: Pool): Noise | undefined {
+/** Drops from a signal block the lines the syntax-aware differ did not report: they only changed in layout. */
+function trimLayout(change: Change, removed: readonly DiffLine[], added: readonly DiffLine[], facts: FileFacts) {
+  const keepRemoved = removed.filter((l) => facts.oldChanged.has(l.no));
+  const keepAdded = added.filter((l) => facts.newChanged.has(l.no));
+  const dropped = removed.length - keepRemoved.length + (added.length - keepAdded.length);
+
+  if (!dropped || (!keepRemoved.length && !keepAdded.length)) return;
+
+  change.removed = keepRemoved.map((l) => l.text);
+  change.added = keepAdded.map((l) => l.text);
+  change.layout = dropped;
+}
+
+/**
+ * The syntax-aware differ's verdict on a block: no line of it reported as changed means only layout moved,
+ * and changed lines that are all comments (and not tool directives) are a comment edit. Else undefined.
+ */
+function factsVerdict(facts: FileFacts, removed: readonly DiffLine[], added: readonly DiffLine[]): Noise | undefined {
+  const changedRemoved = removed.filter((l) => facts.oldChanged.has(l.no));
+  const changedAdded = added.filter((l) => facts.newChanged.has(l.no));
+
+  if (!changedRemoved.length && !changedAdded.length) return Noise.Format;
+
+  const comments = changedRemoved.every((l) => facts.oldComment.has(l.no)) && changedAdded.every((l) => facts.newComment.has(l.no));
+
+  if (comments && ![...changedRemoved, ...changedAdded].some((l) => DIRECTIVE.test(l.text.trim()))) return Noise.Comments;
+}
+
+/** With `lexComments` off the syntax-aware differ owns the comment call, so the lexer's guess at it is skipped. */
+function classify(removed: string[], added: string[], next: string, before: readonly string[], lang: Lang, removedPool: Pool, addedPool: Pool, lexComments: boolean): Noise | undefined {
   if (formatOnly(removed, added, next, lang)) return Noise.Format;
 
   if (onlyImports([...removed, ...added], before, lang)) return Noise.Imports;
@@ -445,20 +526,74 @@ function classify(removed: string[], added: string[], next: string, before: read
 
   if (moved && keys.filter((k) => k.length >= MOVED_MIN_KEY).length >= MOVED_MIN_LINES) return Noise.Moved;
 
-  if (onlyComments(nonBlank([...removed, ...added]), before, lang)) return Noise.Comments;
+  if (lexComments && onlyComments(nonBlank([...removed, ...added]), before, lang)) return Noise.Comments;
 }
 
 /** Tags the noise in each file. Whole-file noise first (generated, rename, mode), then block by block. */
 export function analyze(files: FileDiff[], options: FocusOptions = {}): AnalyzedFile[] {
   const keep = options.keep ?? new Set<Noise>();
+  const globs = (options.generated ?? []).map((g) => new Bun.Glob(g));
 
+  return groupRepeats(analyzeFiles(files, options, keep, globs), keep);
+}
+
+/** Files that carry the same edit, line for line, as a file above show it once; this many make a group. */
+const MIN_REPEATS = 3;
+
+/** The edit a modified file carries, as text; undefined when it has none worth comparing. */
+function signature(f: AnalyzedFile): string | undefined {
+  if (f.noise || f.status !== "modified" || f.binary || f.modeChange) return undefined;
+
+  const sig = changes(f)
+    .flatMap((c) => (isSignal(c) ? [JSON.stringify([c.removed.map((l) => l.trim()), c.added.map((l) => l.trim())])] : []))
+    .join("|");
+
+  return sig || undefined;
+}
+
+function groupRepeats(files: AnalyzedFile[], keep: ReadonlySet<Noise>): AnalyzedFile[] {
+  if (keep.has(Noise.Repeated)) return files;
+
+  const groups = new Map<string, AnalyzedFile[]>();
+
+  for (const f of files) {
+    const sig = signature(f);
+
+    if (sig !== undefined) groups.set(sig, [...(groups.get(sig) ?? []), f]);
+  }
+
+  const first = new Map<AnalyzedFile, AnalyzedFile[]>();
+  const rest = new Map<AnalyzedFile, AnalyzedFile>();
+
+  for (const g of groups.values()) {
+    if (g.length < MIN_REPEATS) continue;
+
+    first.set(g[0]!, g.slice(1));
+
+    for (const f of g.slice(1)) rest.set(f, g[0]!);
+  }
+
+  return files.map((f) => {
+    const head = rest.get(f);
+
+    if (head) return { ...f, noise: Noise.Repeated, sameAs: head.path };
+
+    const others = first.get(f);
+
+    return others ? { ...f, repeats: others.map((o) => o.path) } : f;
+  });
+}
+
+function analyzeFiles(files: FileDiff[], options: FocusOptions, keep: ReadonlySet<Noise>, globs: readonly Bun.Glob[]): AnalyzedFile[] {
   return files.map((file): AnalyzedFile => {
     const lang = langOf(file.path);
     const unlessKept = (kind: Noise) => (keep.has(kind) ? undefined : kind);
     const noHunks: AnalyzedHunk[] = [];
     const base = { ...file, hunks: noHunks };
 
-    if (isGenerated(file.path) && !file.binary) return { ...base, noise: unlessKept(Noise.Generated), hunks: analyzeAll(file, lang, new Map(), new Map(), keep) };
+    if (!file.binary && isGenerated(file, globs)) return { ...base, noise: unlessKept(Noise.Generated), hunks: analyzeAll(file, lang, new Map(), new Map(), keep, undefined) };
+
+    if (file.status === "added" && !file.binary && isTestFile(file.path)) return { ...base, noise: unlessKept(Noise.Tests), hunks: analyzeAll(file, lang, new Map(), new Map(), keep, undefined) };
 
     if (!file.hunks.length && !file.binary) {
       if (file.status === "renamed" && !file.modeChange) return { ...base, noise: unlessKept(Noise.Renamed) };
@@ -473,12 +608,12 @@ export function analyze(files: FileDiff[], options: FocusOptions = {}): Analyzed
       for (const l of h.lines) if (l.kind !== " " && l.text.trim()) bump(l.kind === "-" ? removedPool : addedPool, lineKey(l.text, lang));
     }
 
-    return { ...base, hunks: analyzeAll(file, lang, removedPool, addedPool, keep) };
+    return { ...base, hunks: analyzeAll(file, lang, removedPool, addedPool, keep, options.facts?.get(file.path)) };
   });
 }
 
-const analyzeAll = (file: FileDiff, lang: Lang, removedPool: Pool, addedPool: Pool, keep: ReadonlySet<Noise>) =>
-  file.hunks.map((h) => analyzeHunk(file, h, lang, removedPool, addedPool, keep));
+const analyzeAll = (file: FileDiff, lang: Lang, removedPool: Pool, addedPool: Pool, keep: ReadonlySet<Noise>, facts: FileFacts | undefined) =>
+  file.hunks.map((h) => analyzeHunk(file, h, lang, removedPool, addedPool, keep, facts));
 
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
@@ -534,10 +669,54 @@ function renderHunk(hunk: AnalyzedHunk): string[] {
       for (const l of p.removed) out.push(`${RED}-${noCr(l)}${RESET}`);
 
       for (const l of p.added) out.push(`${GREEN}+${noCr(l)}${RESET}`);
+
+      if (p.layout) out.push(`${DIM} ⋯ ${Noise.Format} ${p.layout} more line${p.layout === 1 ? "" : "s"} re-indented or reflowed${RESET}`);
     }
   });
 
   return out;
+}
+
+const indentOf = (line: string) => line.length - line.trimStart().length;
+
+const CLOSERS_ONLY = /^[)\]}>,;\s]+$/;
+
+/**
+ * A whole file in at most `max` lines: the top two nesting levels, without imports, comments, closers or blank
+ * lines (declarations, class members, test titles, top keys). A file that fits is returned as is.
+ */
+function outline(lines: readonly string[], lang: Lang, max: number): string[] {
+  if (lines.length <= max) return [...lines];
+
+  const imported = new Set<number>();
+
+  if (lang.imports) {
+    const text = lines.join("\n");
+    const starts: number[] = [];
+    let at = 0;
+
+    for (const l of lines) {
+      starts.push(at);
+      at += l.length + 1;
+    }
+
+    let row = 0;
+
+    for (const m of text.matchAll(lang.imports)) {
+      while (row + 1 < starts.length && starts[row + 1]! <= m.index) row++;
+
+      for (let n = row; n < row + m[0].split("\n").length; n++) imported.add(n);
+    }
+  }
+
+  const unit = Math.min(...lines.flatMap((l) => (l.trim() && indentOf(l) > 0 ? [indentOf(l)] : [])));
+  const level = (l: string) => (Number.isFinite(unit) ? Math.floor(indentOf(l) / unit) : 0);
+
+  const isComment = (t: string) => lang.comment.test(t) || (!!lang.block && STAR_LINE.test(t));
+
+  const kept = lines.filter((l, i) => l.trim() && !imported.has(i) && level(l) <= 1 && !CLOSERS_ONLY.test(l) && !isComment(l.trim()));
+
+  return (kept.length ? kept : lines).slice(0, max);
 }
 
 const countKinds = (cs: Iterable<Change>) => {
@@ -571,7 +750,7 @@ export function renderFocused(files: AnalyzedFile[], options: FocusOptions = {})
       hide(f.noise);
       const { added, removed } = count(cs);
       const name = fileName(f);
-      collapsed.push(`  ${name}  ${f.noise}${added + removed ? ` +${added} −${removed}` : ""}`);
+      collapsed.push(`  ${name}  ${f.noise}${f.sameAs ? ` of ${f.sameAs}` : ""}${added + removed ? ` +${added} −${removed}` : ""}`);
       continue;
     }
 
@@ -587,7 +766,8 @@ export function renderFocused(files: AnalyzedFile[], options: FocusOptions = {})
     shownChanges += cs.filter(isSignal).length;
 
     const shown = count(cs.filter(isSignal));
-    const tag = f.status === "modified" ? "" : f.status === "renamed" ? ` (renamed from ${f.oldPath}${f.similarity !== undefined ? `, ${f.similarity}%` : ""})` : ` (${f.status})`;
+    const same = f.repeats?.length ? ` (the same change in ${f.repeats.length} more file${f.repeats.length === 1 ? "" : "s"}, listed below)` : "";
+    const tag = same || (f.status === "modified" ? "" : f.status === "renamed" ? ` (renamed from ${f.oldPath}${f.similarity !== undefined ? `, ${f.similarity}%` : ""})` : ` (${f.status})`);
     body.push(`${BOLD}── ${f.path}${RESET}${DIM}${tag} ${RESET}${GREEN}+${shown.added}${RESET} ${RED}−${shown.removed}${RESET}`);
 
     if (f.binary) body.push(`${DIM} binary file differs${RESET}`);
@@ -596,10 +776,11 @@ export function renderFocused(files: AnalyzedFile[], options: FocusOptions = {})
       const sign = f.status === "added" ? "+" : "-";
       const color = f.status === "added" ? GREEN : RED;
       const lines = cs.flatMap((c) => (f.status === "added" ? c.added : c.removed));
+      const outlined = outline(lines, langOf(f.path), maxWhole);
 
-      for (const l of lines.slice(0, maxWhole)) body.push(`${color}${sign}${noCr(l)}${RESET}`);
+      for (const l of outlined) body.push(`${color}${sign}${noCr(l)}${RESET}`);
 
-      if (lines.length > maxWhole) body.push(`${DIM} ⋯ ${lines.length - maxWhole} more lines${RESET}`);
+      if (lines.length > outlined.length) body.push(`${DIM} ⋯ ${lines.length - outlined.length} more lines${lines.length > maxWhole ? " (outline)" : ""}${RESET}`);
       body.push("");
       continue;
     }
@@ -615,7 +796,7 @@ export function renderFocused(files: AnalyzedFile[], options: FocusOptions = {})
     body.push("");
   }
 
-  const summary = `${BOLD}focused diff${RESET} ${CYAN}${shownFiles} file${shownFiles === 1 ? "" : "s"}, ${shownChanges} change${shownChanges === 1 ? "" : "s"}${RESET}${hidden.size ? `${DIM} · hidden: ${tally(hidden)}${RESET}` : ""}`;
+  const summary = `${BOLD}focused diff${RESET} ${CYAN}${shownFiles} of ${files.length} file${files.length === 1 ? "" : "s"}, ${shownChanges} change${shownChanges === 1 ? "" : "s"}${RESET}${hidden.size ? `${DIM} · hidden: ${tally(hidden)}${RESET}` : ""}`;
   const tail = collapsed.length ? [`${DIM}collapsed${RESET}`, ...collapsed.map((l) => `${DIM}${l}${RESET}`), ""] : [];
 
   return [summary, "", ...body, ...tail].join("\n");
@@ -623,3 +804,84 @@ export function renderFocused(files: AnalyzedFile[], options: FocusOptions = {})
 
 /** Unified diff text in, mini diff out. */
 export const focusedDiff = (diffText: string, options: FocusOptions = {}): string => renderFocused(analyze(parseDiff(diffText), options), options);
+
+export interface HiddenStats {
+  /** Files hidden whole (generated, new tests, renames, mode changes). */
+  files: number;
+  blocks: number;
+  lines: number;
+}
+
+export interface Stats {
+  files: number;
+  /** Files with something left to read. */
+  review: number;
+  lines: number;
+  /** Changed lines in the files with something left to read, less the noise blocks inside them. */
+  reviewLines: number;
+  hidden: Map<Noise, HiddenStats>;
+}
+
+const lineCount = (cs: readonly Change[]) => cs.reduce((n, c) => n + c.added.length + c.removed.length, 0);
+
+const layoutCount = (cs: readonly Change[]) => cs.reduce((n, c) => n + (c.layout ?? 0), 0);
+
+/** How much of the diff is left to read: files and changed lines before and after, and what hid the rest. */
+export function statsOf(files: AnalyzedFile[]): Stats {
+  const hidden = new Map<Noise, HiddenStats>();
+
+  const slot = (k: Noise) => {
+    const have = hidden.get(k) ?? { files: 0, blocks: 0, lines: 0 };
+
+    hidden.set(k, have);
+
+    return have;
+  };
+
+  let review = 0;
+  let lines = 0;
+  let reviewLines = 0;
+
+  for (const f of files) {
+    const cs = changes(f);
+    lines += lineCount(cs) + layoutCount(cs);
+
+    if (f.noise) {
+      const h = slot(f.noise);
+      h.files++;
+      h.lines += lineCount(cs);
+      continue;
+    }
+
+    if (layoutCount(cs)) slot(Noise.Format).lines += layoutCount(cs);
+
+    for (const c of cs) {
+      if (!c.noise) continue;
+
+      const h = slot(c.noise);
+      h.blocks++;
+      h.lines += lineCount([c]);
+    }
+
+    if (showsFile(f)) {
+      review++;
+      reviewLines += lineCount(cs.filter(isSignal));
+    }
+  }
+
+  return { files: files.length, review, lines, reviewLines, hidden };
+}
+
+const pct = (before: number, after: number) => (before ? `${Math.round((100 * (after - before)) / before)}%` : "-");
+
+/** `overbridge diff --focused --stats`: the numbers behind the mini diff. */
+export function renderStats(s: Stats): string {
+  const rows = [`files  ${s.files} \u2192 ${s.review}  (${pct(s.files, s.review)})`, `lines  ${s.lines} \u2192 ${s.reviewLines}  (${pct(s.lines, s.reviewLines)})`];
+
+  for (const [kind, h] of s.hidden) rows.push(`  ${kind.padEnd(10)} ${h.files ? `${h.files} file${h.files === 1 ? "" : "s"}, ` : ""}${h.blocks ? `${h.blocks} block${h.blocks === 1 ? "" : "s"}, ` : ""}${h.lines} lines`);
+
+  return rows.join("\n");
+}
+
+/** The stats of a unified diff. */
+export const focusedStats = (diffText: string, options: FocusOptions = {}): string => renderStats(statsOf(analyze(parseDiff(diffText), options)));

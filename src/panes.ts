@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getRepo } from "./config";
-import { focusedDiff, type Noise } from "./focused-diff";
+import { difftFacts } from "./difft-facts";
+import { focusedDiff, focusedStats, type Noise } from "./focused-diff";
 import * as git from "./git";
 import { selfCommand, worktreePath, wsDir } from "./paths";
 import { loadRepoConfig } from "./project-config";
@@ -162,10 +163,24 @@ function renderRepo(dir: string, base: string, columns: number, tool: DiffTool, 
 }
 
 /** One repo's focused diff (noise collapsed); the plain renderer's output if git fails, so a failure never reads as no changes. */
-function renderRepoFocused(dir: string, base: string, columns: number, tool: DiffTool, keep: ReadonlySet<Noise>): string {
+function renderRepoFocused(dir: string, base: string, columns: number, tool: DiffTool, focus: FocusMode): string {
   const raw = Bun.spawnSync({ cmd: ["git", "-C", dir, "-c", "core.quotepath=off", "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "--submodule=short", "--ignore-submodules=none", "-M", "-U3", base, "--"], cwd: spawnCwd(), stdout: "pipe", stderr: "pipe" });
 
-  return raw.exitCode === 0 ? focusedDiff(raw.stdout.toString(), { keep }) : renderRepo(dir, base, columns, tool, false);
+  if (raw.exitCode !== 0) return renderRepo(dir, base, columns, tool, false);
+
+  const options = { keep: focus.keep, facts: difftFacts(dir, base), generated: generatedGlobs(dir) };
+  const text = raw.stdout.toString();
+
+  return focus.stats ? focusedStats(text, options) : focusedDiff(text, options);
+}
+
+/** The repo's configured generated-file globs; none when its config does not load, so a bad config never hides a diff. */
+function generatedGlobs(dir: string): string[] {
+  try {
+    return loadRepoConfig(dir).diff.generated;
+  } catch {
+    return [];
+  }
 }
 
 /** How long a following diff waits before it looks for changes again. */
@@ -275,6 +290,8 @@ export function diff(ws: string, follow = false, sideBySide = false, focus?: Foc
 /** Focused mode: show the diff without its noise; `keep` lists the noise kinds to show anyway. */
 export interface FocusMode {
   keep: ReadonlySet<Noise>;
+  /** Print the counts (files and lines before and after, what hid the rest) instead of the diff. */
+  stats?: boolean;
 }
 
 /** Every claimed repo's changes since it left the default branch (committed and uncommitted), rendered; empty when none. */
@@ -300,7 +317,7 @@ export function renderDiff(
     })();
 
     const base = (def && run(["git", "-C", dir, "merge-base", "HEAD", `origin/${def}`]).stdout) || "HEAD";
-    const text = focus ? renderRepoFocused(dir, base, columns, tool, focus.keep) : renderRepo(dir, base, columns, tool, sideBySide);
+    const text = focus ? renderRepoFocused(dir, base, columns, tool, focus) : renderRepo(dir, base, columns, tool, sideBySide);
 
     if (!text.trim()) continue;
 

@@ -66,9 +66,10 @@ Setup
                                         then finished with background tasks (zellij binds it to a key)
   overbridge go <n>|<name>|next|prev            switch tab by sidebar number, name, or neighbour (wrapping);
                                         works outside zellij too, so a window-manager key can call it
-  overbridge diff [--ws name] [--follow] [--focused [--keep kinds]]
+  overbridge diff [--ws name] [--follow] [--focused [--keep kinds] [--stats]]
                                                 changes since the default branch, inline, via difftastic (else delta); d opens a side-by-side overlay;
-                                                --focused hides noise (format, imports, moved, comments, generated, renamed, mode)
+                                                --focused hides noise (format, imports, moved, comments, generated, renamed, mode, tests);
+                                                --stats prints files and lines before and after, per noise kind
   overbridge sync                            fetch every bare repo
   overbridge sidebar [--ws name|@tab]           tab sidebar pane (run by the generated layout)
   overbridge serve                              the one long-running process that owns network refreshes and the shared
@@ -287,6 +288,7 @@ async function main(argv: string[]): Promise<number> {
         overlay: { type: "boolean" as const },
         focused: { type: "boolean" as const },
         keep: { type: "string" as const },
+        stats: { type: "boolean" as const },
       });
 
       const name = cmd.requireWs(values.ws);
@@ -297,12 +299,14 @@ async function main(argv: string[]): Promise<number> {
 
       if (keep.length && !values.focused) throw new OverbridgeError("--keep needs --focused");
 
+      if (values.stats && !values.focused) throw new OverbridgeError("--stats needs --focused");
+
       if (values.overlay) {
         const err = openDiffOverlay(name);
 
         if (err) throw new OverbridgeError(err);
       } else {
-        diff(name, values.follow ?? false, values["side-by-side"] ?? false, values.focused ? { keep: new Set(keep.filter(isNoise)) } : undefined);
+        diff(name, values.follow ?? false, values["side-by-side"] ?? false, values.focused ? { keep: new Set(keep.filter(isNoise)), stats: values.stats ?? false } : undefined);
       }
 
       break;

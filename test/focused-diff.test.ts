@@ -39,7 +39,7 @@ describe("parseDiff", () => {
     ].join("\n");
 
     const [a, r, n] = parseDiff(text);
-    expect(a!.hunks[0]!.lines).toEqual([
+    expect(a!.hunks[0]!.lines).toMatchObject([
       { kind: "-", text: "-- not a header" },
       { kind: "+", text: "++ also content" },
     ]);
@@ -202,7 +202,7 @@ describe("renderFocused", () => {
 
   test("shows the signal, marks hidden blocks in place, and summarises the rest", () => {
     const out = strip(focusedDiff(text));
-    expect(out).toContain("focused diff 1 file, 1 change");
+    expect(out).toContain("focused diff 1 of 3 files, 1 change");
     expect(out).toContain("hidden: imports 1 · comments 1 · generated 1 · format 1");
     expect(out).toContain("── src/a.ts +1 −1");
     expect(out).toContain("-const x = 1");
@@ -215,7 +215,7 @@ describe("renderFocused", () => {
 
   test("a diff that is all noise still reports it", () => {
     const out = strip(focusedDiff(hunkDiff("a.ts", ["-foo(1)", "+foo(1);"])));
-    expect(out).toContain("focused diff 0 files, 0 changes · hidden: format 1");
+    expect(out).toContain("focused diff 0 of 1 file, 0 changes · hidden: format 1");
   });
 
   test("a file with signal in one hunk and noise in another notes the hidden hunk", () => {
