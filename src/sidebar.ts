@@ -830,12 +830,14 @@ function fitTail(text: string, width: number): string {
 /** `text` (items split by two spaces) as two rows of `inner` columns: as many whole items as fit on the first, the rest on the second. */
 export function legendRows(text: string, inner: number): [string, string] {
   const items = text.split("  ").filter(Boolean);
-  let first = items[0] ?? "";
-  let i = 1;
+  let count = 1;
 
-  while (i < items.length && textWidth(`${first}  ${items[i]}`) <= inner) first += `  ${items[i++]}`;
+  while (count < items.length && textWidth(items.slice(0, count + 1).join("  ")) <= inner) count++;
 
-  return [fit(first, inner), fit(items.slice(i).join("  "), inner)];
+  const first = items.slice(0, count).join("  ");
+  const rest = items.slice(count).join("  ");
+
+  return [fit(first, inner), fit(rest, inner)];
 }
 
 /** The footer as two rows: the legend wrapped over both, any other footer on the first with the second blank. */

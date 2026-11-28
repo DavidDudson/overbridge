@@ -246,6 +246,11 @@ describe("legend rows", () => {
     expect(`${a.trimEnd()}  ${b.trimEnd()}`).toBe(legend(14));
   });
 
+  test("an item that exactly fills the row stays on it", () => {
+    expect(legendRows("aaaa  bbbb  cc", 10)[0].trimEnd()).toBe("aaaa  bbbb");
+    expect(legendRows("aaaa  bbbb  cc", 9)[0].trimEnd()).toBe("aaaa");
+  });
+
   test("a wide pane keeps all on the first row", () => {
     expect(legendRows(legend(3), 200)[1].trim()).toBe("");
   });
