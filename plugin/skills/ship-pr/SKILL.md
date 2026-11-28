@@ -175,6 +175,14 @@ The body summarises in `**Label:** value` lines with no `##` headings and never 
 
 The PR isn't done until CI passes. The push already happened, so CI is running.
 
+**Single PR: hand the watch to Claude Code's `/steward`.** After step 9 and the bot requests at the top of step 11, run `/steward <pr>` (a PR number or URL). It is the watch half of `/ship` ([docs](https://code.claude.com/docs/en/ship-command)): it fixes failing checks, reruns failed ones, merges the base branch into the branch, answers review comments, resolves threads and re-requests reviews, and says so in the session when checks pass and comments are answered. Never run `/ship` here: it would commit and review again, duplicating step 5, and it cannot make a draft, use `TEMPLATE.md` or set a base, which steps 8 and 9 already did. The watch pushes to the checked-out branch, so stay on it. Then:
+
+1. Check it started: `/tasks` lists a scheduled task whose name starts with `/steward --tend`. Tell the user it runs for up to 7 days or until the PR merges, and that `/ship stop` ends it.
+2. Wait for its "checks pass and comments answered" report. A human-approval gate (see the poll below) is the user's, not the watch's: hand them its link.
+3. Still confirm on GitHub that the checks passed (`overbridge pr-checks`, below) before reporting done, and skip the rest of this step and step 11's polling and `resolve-feedback` round.
+
+Use the manual loop below instead when: the PR is on a stack or a split (a watch follows one checked-out branch and a second watch ends the first), `/steward` is missing or refused (Claude Code below v2.1.330, `CLAUDE_CODE_DISABLE_SHIP=1`, `gh` below 2.63, git below 2.38), the session is in `bypassPermissions`, plan mode or a background session (no watch starts), or the PR is on a fork or not on github.com.
+
 1. **Watch the checks, but not the human-approval gates.** A check that waits for a person (a policy or approval bot, a visual-review check) stays `pending` until someone acts, so `gh pr checks --watch` would hang. Identify such checks once, by name, tell the user which you are treating as gates, and poll a filtered view:
    ```sh
    GATES='policy-bot'     # regex of gate names for this repo, case-insensitive; extend it as you learn them
@@ -215,6 +223,8 @@ gh pr comment "$pr" --body "@coderabbitai review"
 Do it again after every later push to a draft PR: its pushes are not reviewed automatically either. If CodeRabbit answers that it is rate limited (a comment containing `rate limited by coderabbit.ai`, which says when it is back), note it and skip its wait below; that is quota, not a failure.
 
 Then record in the report: Copilot and CodeRabbit reviews requested (or why not).
+
+On a single PR the `/steward` watch from step 10 answers what the bots post and re-requests reviews: stop here, and do not poll or run `resolve-feedback` yourself. The numbered loop below is the manual path (stacks, splits, no watch).
 
 1. Poll until each reviewer's review lands, every ~20 to 30s. Copilot usually takes a few minutes, CodeRabbit up to about ten:
    ```sh
@@ -380,7 +390,8 @@ Turn one big branch into a stack of smaller PRs, one slice per layer. This rewri
 - **Cut anything that would not change a reviewer's decision**: long verbatim changelogs, notes about which local check caught what, commentary on how the work went. Keep the diff's intent, the callsites, the risks and the evidence.
 - **Never commit a screenshot.** Never paste an empty or `null` attachment URL into a body. Never drive an SSO or MFA login yourself.
 - **Never declare the build green without confirming the checks passed on GitHub.** Fix branch-caused failures, rerun suspected flakes at most twice per job, surface unrelated ones. The final summary names every check that is not green.
-- **Always wait for Copilot's and CodeRabbit's reviews and resolve them** with `resolve-feedback` before calling a PR done, unless a reviewer is unavailable (say which, and why).
+- **Always wait for Copilot's and CodeRabbit's reviews and resolve them** before calling a PR done, unless a reviewer is unavailable (say which, and why): a single PR through the `/steward` watch, otherwise with `resolve-feedback`.
+- **Never run `/ship` from this skill.** It commits, pushes and reviews on its own terms. Only `/steward` (the watch alone), after the PR exists.
 - **A base field is not a stack.** Before reporting a stacked PR done, `gh stack view` must show the chain.
 - **Never `gh stack push` over a stale lower branch**, and never plain-rebase one mid-stack branch.
 - **State the split plan, then build it**; keep the `-presplit-backup` branch until the user says otherwise, and require an identical tree at the top of the stack.
