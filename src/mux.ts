@@ -217,10 +217,9 @@ export function zellijMux(exec: MuxExec = safeExec, opts: ZellijOptions = {}): M
     resizePane: (id, change) => act("resize", change === PaneResize.Grow ? "increase" : "decrease", "down", "--pane-id", target(id)).ok,
     sendText: (id, text) => act("paste", "--pane-id", target(id), "--", text).ok && settle() && act("send-keys", "--pane-id", target(id), "Enter").ok,
     newPane(req) {
-      act("focus-pane-id", target(req.anchor));
-      const args = ["new-pane", "--direction", req.direction, "--name", req.title, "--cwd", req.cwd];
-
-      if (req.floating) args.push("--floating");
+      // a floating pane has no side to open on, and zellij rejects --direction together with --floating
+      if (!req.floating) act("focus-pane-id", target(req.anchor));
+      const args = ["new-pane", ...(req.floating ? ["--floating"] : ["--direction", req.direction]), "--name", req.title, "--cwd", req.cwd];
 
       if (req.closeOnExit) args.push("--close-on-exit");
 

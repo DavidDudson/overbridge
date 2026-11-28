@@ -7,7 +7,7 @@ import { clearCompact, COMPACT_MARKER_MS, markCompact, nextState, recordState, t
 import { limitColor, limitRows, readLimits, timeLeft, WEEK_SECS } from "../src/limits";
 import { landingTab, pickNext } from "../src/next";
 import { zellijMux } from "../src/mux";
-import { findPane, renderDiff, togglePane } from "../src/panes";
+import { diffLesskey, findPane, openDiffOverlay, renderDiff, togglePane } from "../src/panes";
 import { fit, textWidth } from "../src/term";
 import { withState } from "../src/state";
 
@@ -198,6 +198,25 @@ describe("pane toggles", () => {
     togglePane("w1", "claude", f.deps);
     expect(f.calls[1]).toEqual(["focus-pane-id", "terminal_1"]);
     expect(togglePane("w1", "claude", fake([]).deps)).toBe("no claude pane in this tab");
+  });
+
+  test("the side-by-side overlay opens as a floating pane running the side-by-side viewer", () => {
+    const f = fake([pane(1, "claude")]);
+    expect(openDiffOverlay("w1", f.deps)).toBeUndefined();
+    const open = f.calls.find((c) => c[0] === "new-pane")!;
+    expect(open).toContain("--floating");
+    expect(open).not.toContain("--direction");
+    expect(open.slice(open.indexOf("--close-on-exit") + 1)).toEqual(["--", "ob", "diff", "--ws", "w1", "--side-by-side"]);
+  });
+
+  test("the overlay reports a pane the multiplexer would not open", () => {
+    const failing = { self: ["ob"], mux: zellijMux(() => ({ ok: false, stdout: "" })) };
+    expect(openDiffOverlay("w1", failing)).toBe("could not open the side-by-side overlay");
+  });
+
+  test("d runs the overlay command in the inline pager and quits in the overlay", () => {
+    expect(diffLesskey(true)).toBe('#command\nd noaction !eval "$OVERBRIDGE_DIFF_OVERLAY"\\n\\n\n');
+    expect(diffLesskey(false)).toBe("#command\nd quit\n");
   });
 });
 

@@ -166,20 +166,52 @@ export const FOLLOW_POLL_MS = 5_000;
 /** A pager that exits sooner than this was not shown (no `less` on PATH): wait before looking again instead of spinning. */
 const PAGER_MIN_MS = 200;
 
-/** The pager `diff` shows its output in; `key` is bound to `d` (see `diffPager`). */
-const pagerLesskey = (action: string) => `#command\nd noaction ${action}\n`;
+/** Environment variable carrying the shell command `d` runs in the inline pager. */
+const OVERLAY_ENV = "OVERBRIDGE_DIFF_OVERLAY";
+
+/** `--lesskey-src` arrived in less 582; an older less rejects it and exits without paging. */
+const LESSKEY_SRC_MIN_VERSION = 582;
+
+/** Whether the installed `less` takes `--lesskey-src`; without it the pager runs plain and `d` does nothing. */
+function lessTakesLesskey(): boolean {
+  try {
+    const version = /^less (\d+)/.exec(Bun.spawnSync({ cmd: ["less", "--version"], stdout: "pipe", stderr: "pipe" }).stdout.toString());
+
+    return version !== null && Number(version[1]) >= LESSKEY_SRC_MIN_VERSION;
+  } catch {
+    return false;
+  }
+}
 
 /**
- * Page `out`. In the inline pane `d` opens the side-by-side overlay (`!` runs it from inside less); in the
- * overlay itself `d` quits, so the same key toggles it away.
+ * The less key file for the diff pager: in the inline pane `d` runs the shell command in `OVERLAY_ENV` (`!` runs it
+ * from inside less, and the second newline answers its "press RETURN"); in the overlay itself `d` quits, so the same
+ * key toggles it away.
  */
+export const diffLesskey = (opensOverlay: boolean) => `#command\n${opensOverlay ? `d noaction !eval "$${OVERLAY_ENV}"\\n\\n` : "d quit"}\n`;
+
+/** Page `out`, with the `d` key when `overlayCommand` is given and less supports it. */
 function diffPager(out: string, overlayCommand: string | undefined) {
+  if (!lessTakesLesskey()) {
+    Bun.spawnSync({ cmd: ["less", "-R"], cwd: spawnCwd(), stdin: Buffer.from(out), stdout: "inherit", stderr: "inherit" });
+
+    return;
+  }
+
   const dir = mkdtempSync(join(tmpdir(), "overbridge-less-"));
   const keyFile = join(dir, "keys");
 
   try {
-    writeFileSync(keyFile, pagerLesskey(overlayCommand ? `!${overlayCommand}\\n` : "quit"));
-    Bun.spawnSync({ cmd: ["less", "-R", `--lesskey-src=${keyFile}`], cwd: spawnCwd(), stdin: Buffer.from(out), stdout: "inherit", stderr: "inherit" });
+    // the command travels in the environment: less rewrites `%`/`#` and lesskey `\\`/`^` in a typed command, and the shell expands it intact
+    writeFileSync(keyFile, diffLesskey(overlayCommand !== undefined));
+    Bun.spawnSync({
+      cmd: ["less", "-R", `--lesskey-src=${keyFile}`],
+      cwd: spawnCwd(),
+      env: { ...process.env, ...(overlayCommand === undefined ? {} : { [OVERLAY_ENV]: overlayCommand }) },
+      stdin: Buffer.from(out),
+      stdout: "inherit",
+      stderr: "inherit",
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -203,8 +235,7 @@ export function openDiffOverlay(ws: string, deps: PaneDeps = defaultDeps()): str
 /**
  * `overbridge diff [--follow]`: each claimed repo's changes since it left the default branch (committed
  * and uncommitted), rendered inline with difftastic (else delta, else plain git) and paged. With `follow` it never
- * exits: it waits for changes, and `q` in the pager refreshes. `d` in the pager opens the same diff side by side
- * in an overlay (`sideBySide` is that overlay: one view, `d` or `q` closes it).
+ * exits: it waits for changes, and `q` in the pager refreshes. `sideBySide` renders the one-shot overlay that `d` opens.
  */
 export function diff(ws: string, follow = false, sideBySide = false) {
   const self = selfCommand();
