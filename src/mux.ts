@@ -23,7 +23,7 @@ export interface MuxPane {
 export interface NewPane {
   /** The pane the new one opens beside. */
   anchor: string;
-  direction: "right" | "down";
+  direction: "right" | "down" | "left";
   title: string;
   cwd: string;
   /** Empty: the multiplexer's default shell. */
@@ -326,7 +326,7 @@ export function tmuxMux(exec: MuxExec = safeExec, opts: TmuxOptions = {}): Mux {
     resizePane: (id, change) => tmux("resize-pane", "-t", id, change === PaneResize.Grow ? "-D" : "-U", "1").ok,
     sendText: (id, text) => tmux("send-keys", "-t", id, "-l", "--", text).ok && settle() && tmux("send-keys", "-t", id, "Enter").ok,
     newPane(req) {
-      const args = ["split-window", "-P", "-F", "#{pane_id}", "-t", req.anchor, req.direction === "right" ? "-h" : "-v", "-c", req.cwd];
+      const args = ["split-window", "-P", "-F", "#{pane_id}", "-t", req.anchor, ...(req.direction === "down" ? ["-v"] : req.direction === "left" ? ["-h", "-b"] : ["-h"]), "-c", req.cwd];
 
       if (req.command.length) args.push(req.command.map(shellQuote).join(" "));
       const r = tmux(...args);

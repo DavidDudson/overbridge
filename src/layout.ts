@@ -55,11 +55,13 @@ export interface TabSpec {
   sidebar: PaneSpec;
   top?: PaneSpec;
   main: PaneSpec;
+  /** A pane open to the main pane's right from the start: a workspace tab's diff. */
+  side?: PaneSpec;
 }
 
 /**
  * One workspace's tab: the sidebar down the left; the rest holds the top panel across the
- * top, then the agent. Terminal and diff panes open to the agent's right from the top panel's buttons.
+ * top, then the agent with the diff open to its right. The diff and terminal buttons toggle those panes.
  */
 export function workspaceTabSpec(ws: string, self: string[], opts: TabOptions = {}): TabSpec {
   const width = opts.sidebarWidth ?? SIDEBAR_WIDTH;
@@ -73,6 +75,8 @@ export function workspaceTabSpec(ws: string, self: string[], opts: TabOptions = 
     sidebar: { name: "sidebar", cwd: wsDir(ws), command: [...self, "sidebar", "--ws", ws], size: width, borderless: true },
     top: { name: "top", cwd: wsDir(ws), command: [...self, "top", "--ws", ws], size: TOP_ROWS, borderless: true },
     main: { name: `${ws} · claude`, cwd: opts.agentCwd ?? wsDir(ws), command: [...self, "claude", ws, ...extra] },
+    // same title `paneTitle(ws, "diff")` gives, so the diff button finds it and a press closes it
+    side: { name: `${ws} · diff`, cwd: wsDir(ws), command: [...self, "diff", "--ws", ws, "--follow"] },
   };
 }
 
@@ -103,12 +107,20 @@ ${indent}}`;
 
 /** A tab spec as a zellij `tab` node. */
 export function specKdl(t: TabSpec): string {
+  const agent = (indent: string) =>
+    t.side
+      ? `${indent}pane split_direction="vertical" {
+${kdlPane(t.main, `${indent}  `)}
+${kdlPane(t.side, `${indent}  `)}
+${indent}}`
+      : kdlPane(t.main, indent);
+
   const main = t.top
     ? `      pane split_direction="horizontal" {
 ${kdlPane(t.top, "        ")}
-${kdlPane(t.main, "        ")}
+${agent("        ")}
       }`
-    : kdlPane(t.main, "      ");
+    : agent("      ");
 
   return `  tab name=${q(t.name)}${t.focus ? " focus=true" : ""} {
     pane split_direction="vertical" {

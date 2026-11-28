@@ -36,9 +36,15 @@ export function tabOpen(session: string, t: TabSpec, opts: { first: boolean; pri
 export function tabFill(win: string, t: TabSpec): TmuxCommand[] {
   const title = (p: PaneSpec): TmuxCommand => ["select-pane", "-t", win, "-T", p.name];
 
+  // with a side pane the top panel spans both (`-f`), and the side split comes first so it targets the main pane
+  const side: TmuxCommand[] = t.side
+    ? [["split-window", "-h", "-l", "50%", "-t", win, "-c", t.side.cwd, word(t.side)], title(t.side), ["select-pane", "-t", win, "-L"]]
+    : [];
+
   return [
     title(t.main),
-    ...(t.top ? [["split-window", "-b", "-v", "-l", String(t.top.size ?? 5), "-t", win, "-c", t.top.cwd, word(t.top)], title(t.top)] : []),
+    ...side,
+    ...(t.top ? [["split-window", ...(t.side ? ["-f"] : []), "-b", "-v", "-l", String(t.top.size ?? 5), "-t", win, "-c", t.top.cwd, word(t.top)], title(t.top)] : []),
     ["split-window", "-f", "-b", "-h", "-l", `${SIDEBAR_PERCENT}%`, "-t", win, "-c", t.sidebar.cwd, word(t.sidebar)],
     title(t.sidebar),
   ];

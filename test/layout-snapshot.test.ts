@@ -32,7 +32,7 @@ describe("generated layout", () => {
 
     for (const tab of tabs) {
       const order = [...tab.matchAll(/pane name="([^"]+)"/g)].map((m) => m[1]!.replace(/^\w+ · /, ""));
-      expect(order).toEqual(["sidebar", "top", "claude"]);
+      expect(order).toEqual(["sidebar", "top", "claude", "diff"]);
     }
   });
 });

@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ORCHESTRATION_TABS } from "../src/orchestration";
 import { root, worktreePath, wsDir } from "../src/paths";
-import { agentDir, chooseLayout, layoutKdl, newTabKdl, resumable, SIDEBAR_WIDTH, TOP_ROWS, transcriptDir, userLayoutPath, zellijConfigDir } from "../src/layout";
+import { agentDir, chooseLayout, layoutKdl, newTabKdl, orchestrationTabSpec, resumable, SIDEBAR_WIDTH, specKdl, TOP_ROWS, transcriptDir, userLayoutPath, workspaceTabSpec, zellijConfigDir } from "../src/layout";
+import { tabFill } from "../src/tmux-layout";
 
 const self = ["overbridge"];
 const tabs = (kdl: string) => kdl.match(/\btab name=/g)?.length ?? 0;
@@ -187,5 +188,29 @@ describe("agentDir", () => {
     transcript(worktreePath("a", "app"));
     expect([...resumable(["a"], home(), { a: worktreePath("a", "app") })]).toEqual(["a"]);
     expect([...resumable(["a"], home())]).toEqual([]);
+  });
+});
+
+describe("the diff pane a workspace tab opens with", () => {
+  test("the spec holds a diff pane titled the way the diff button finds it", () => {
+    const spec = workspaceTabSpec("w1", self);
+    expect(spec.side).toEqual({ name: "w1 · diff", cwd: wsDir("w1"), command: ["overbridge", "diff", "--ws", "w1", "--follow"] });
+    expect(orchestrationTabSpec(ORCHESTRATION_TABS[0]!, self).side).toBeUndefined();
+  });
+
+  test("zellij puts it beside the agent, under the top panel", () => {
+    const kdl = specKdl(workspaceTabSpec("w1", self));
+    expect(kdl).toContain('args "diff" "--ws" "w1" "--follow"');
+    expect(kdl.indexOf('"top"')).toBeLessThan(kdl.indexOf('"w1 · claude"'));
+    expect(kdl.indexOf('"w1 · claude"')).toBeLessThan(kdl.indexOf('"w1 · diff"'));
+    expect(kdl.match(/split_direction="vertical"/g)?.length).toBe(2);
+  });
+
+  test("tmux splits it off the agent first, then spans the top panel across both", () => {
+    const cmds = tabFill("@3", workspaceTabSpec("w1", self));
+    const verbs = cmds.map((c) => `${c[0]}${c.includes("-f") ? " -f" : ""}${c.includes("-L") ? " -L" : ""}`);
+    expect(verbs).toEqual(["select-pane", "split-window", "select-pane", "select-pane -L", "split-window -f", "select-pane", "split-window -f", "select-pane"]);
+    expect(cmds[1]).toContain("-h");
+    expect(cmds[2]).toEqual(["select-pane", "-t", "@3", "-T", "w1 · diff"]);
   });
 });

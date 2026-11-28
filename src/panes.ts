@@ -112,12 +112,71 @@ export function deltaCommand(columns: number): string[] {
   return ["delta", "--paging=never", `--width=${columns}`, ...(columns < SIDE_BY_SIDE_MIN_COLUMNS ? ["--no-side-by-side"] : [])];
 }
 
+/** difftastic's side-by-side layout needs at least this many columns; narrower panes get its inline display. */
+export const DIFFT_SIDE_BY_SIDE_MIN_COLUMNS = 100;
+
+/** The diff renderers `diff` can use, best first. */
+export type DiffTool = "difft" | "delta" | "git";
+
+/** The renderer to use given which programs are on PATH: difftastic, else delta, else git's own colours. */
+export const pickDiffTool = (have: { difft: boolean; delta: boolean }): DiffTool => (have.difft ? "difft" : have.delta ? "delta" : "git");
+
+/** `git` arguments and extra environment that make git render `base` against the worktree with difftastic at `columns` wide. */
+export interface DifftCommand {
+  args: string[];
+  env: Record<string, string>;
+}
+
+export function difftCommand(base: string, columns: number): DifftCommand {
+  return {
+    args: ["-c", "diff.external=difft", "diff", "--ext-diff", base],
+    env: { DFT_COLOR: "always", DFT_WIDTH: String(columns), DFT_DISPLAY: columns >= DIFFT_SIDE_BY_SIDE_MIN_COLUMNS ? "side-by-side-show-both" : "inline" },
+  };
+}
+
+/** One repo's diff, rendered; empty when nothing changed. */
+function renderRepo(dir: string, base: string, columns: number, tool: DiffTool): string {
+  if (tool === "difft") {
+    const { args, env } = difftCommand(base, columns);
+    const out = Bun.spawnSync({ cmd: ["git", "-C", dir, ...args], cwd: spawnCwd(), env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" });
+
+    return out.exitCode === 0 ? out.stdout.toString() : "";
+  }
+
+  const raw = Bun.spawnSync({ cmd: ["git", "-C", dir, "diff", "-w", "--color=always", base], cwd: spawnCwd(), stdout: "pipe", stderr: "pipe" });
+
+  if (!raw.stdout.length || tool === "git") return raw.stdout.toString();
+
+  return Bun.spawnSync({ cmd: deltaCommand(columns), cwd: dir, stdin: raw.stdout, stdout: "pipe", stderr: "pipe" }).stdout.toString();
+}
+
+/** How long a following diff waits before it looks for changes again. */
+export const FOLLOW_POLL_MS = 5_000;
+
 /**
- * `overbridge diff [--ws]`: each claimed repo's changes since it left the default branch (committed
- * and uncommitted), whitespace ignored, rendered with delta from the user's git config and paged.
+ * `overbridge diff [--follow]`: each claimed repo's changes since it left the default branch (committed
+ * and uncommitted), rendered with difftastic (else delta from the user's git config, else plain git) and paged.
+ * With `follow` it never exits: it waits for changes and re-renders when the pager is quit (`q` refreshes), which
+ * is how the diff pane a workspace tab opens with stays useful.
  */
-export function diff(ws: string) {
-  const columns = process.stdout.columns ?? 80;
+export function diff(ws: string, follow = false) {
+  for (;;) {
+    const out = renderDiff(ws, process.stdout.columns ?? 80);
+
+    if (out) {
+      Bun.spawnSync({ cmd: ["less", "-R"], cwd: spawnCwd(), stdin: Buffer.from(out), stdout: "inherit", stderr: "inherit" });
+    } else {
+      if (follow) process.stdout.write("\x1b[2J\x1b[H");
+      console.log("no changes");
+      Bun.sleepSync(follow ? FOLLOW_POLL_MS : 2_000);
+    }
+
+    if (!follow) return;
+  }
+}
+
+/** Every claimed repo's changes since it left the default branch (committed and uncommitted), rendered; empty when none. */
+export function renderDiff(ws: string, columns: number, tool: DiffTool = pickDiffTool({ difft: !!Bun.which("difft"), delta: !!Bun.which("delta") })): string {
   const repos = Object.keys(getWorkspace(readState(), ws).repos);
   let out = "";
 
@@ -133,23 +192,12 @@ export function diff(ws: string) {
     })();
 
     const base = (def && run(["git", "-C", dir, "merge-base", "HEAD", `origin/${def}`]).stdout) || "HEAD";
-    const raw = Bun.spawnSync({ cmd: ["git", "-C", dir, "diff", "-w", "--color=always", base], cwd: spawnCwd(), stdout: "pipe", stderr: "pipe" });
+    const text = renderRepo(dir, base, columns, tool);
 
-    if (!raw.stdout.length) continue;
-
-    const text = Bun.which("delta")
-      ? Bun.spawnSync({ cmd: deltaCommand(columns), cwd: dir, stdin: raw.stdout, stdout: "pipe", stderr: "pipe" }).stdout.toString()
-      : raw.stdout.toString();
+    if (!text.trim()) continue;
 
     out += `${repos.length > 1 ? `\x1b[1m── ${repo} ──\x1b[0m\n` : ""}${text}\n`;
   }
 
-  if (!out) {
-    console.log("no changes (whitespace ignored)");
-    Bun.sleepSync(2_000);
-
-    return;
-  }
-
-  Bun.spawnSync({ cmd: ["less", "-R"], cwd: spawnCwd(), stdin: Buffer.from(out), stdout: "inherit", stderr: "inherit" });
+  return out;
 }

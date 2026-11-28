@@ -998,7 +998,6 @@ const APP_COLORS: Record<AppStatus, Color | undefined> = {
 };
 
 export const PANE_BUTTONS: { pane: PaneKind; label: string }[] = [
-  { pane: "claude", label: "🤖 claude" },
   { pane: "terminal", label: "💻 terminal" },
   { pane: "diff", label: "🔀 diff" },
 ];
@@ -1028,7 +1027,7 @@ function editorFromEnv(editor: string | undefined): { label: string; cmd: string
 
 /**
  * Give each button its key: `i` the work item, `p` the PR (then u, y, w, z), `1` to `9` the apps,
- * `e` the editor, `c` `t` `d` the panes, `x` Cleanup, `b` back, and on the first PR's row `g` ready/draft, `m` merge. Buttons past the available keys get none.
+ * `e` the editor, `t` `d` the panes, `x` Cleanup, `b` back, and on the first PR's row `g` ready/draft, `m` merge. Buttons past the available keys get none.
  */
 function withKeys(list: Button[]): Button[] {
   let app = 0;
@@ -1042,7 +1041,7 @@ function withKeys(list: Button[]): Button[] {
     else if (a.kind === "merge") key = b.prRow === 0 ? "m" : undefined;
     else if (a.kind === "app") key = app < 9 ? String(++app) : undefined;
     else if (a.kind === "editor") key = "e";
-    else if (a.kind === "pane") key = { claude: "c", terminal: "t", diff: "d" }[a.pane];
+    else if (a.kind === "pane") key = { claude: undefined, terminal: "t", diff: "d" }[a.pane];
     else if (a.kind === "back") key = "b";
     else key = "x";
 
@@ -1052,7 +1051,7 @@ function withKeys(list: Button[]): Button[] {
 
 /**
  * Buttons in display order. Left: work item and PR links (coloured by PR status), then Cleanup when the
- * workspace can be wiped. Right: apps, the editor, then the claude / terminal / diff pane toggles.
+ * workspace can be wiped. Right: apps, the editor, then the terminal / diff pane toggles.
  * Apps ruled out by `when:` are left out.
  */
 /** A Ready/Draft or Merge press the panel shows at once, before the refetch confirms it. */

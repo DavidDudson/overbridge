@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { userLayoutPath } from "./layout";
 import { dirname, join } from "node:path";
 import { readPhase, taskStatus } from "./task-status";
-import { ATTENTION, type AgentState, glyphFor, readAgentDetail, UNKNOWN_GLYPH } from "./agent-state";
+import { ATTENTION, type AgentState, glyphFor, readAgentDetail, sessionEndedForGood, UNKNOWN_GLYPH } from "./agent-state";
+import { ensureAgentPane } from "./agent-keep";
 import { iceboxHint } from "./icebox-suggest";
 import { type SidebarLayout, sidebarLayout } from "./config";
 import { prHealthInput, timeTint, titleTone } from "./card-look";
@@ -38,7 +39,7 @@ import { beginRemoval } from "./remove";
 import { cardLabel, CLEANUP_ARM_MS, pressCleanup, readTopCache, readTopCacheChecked, sidebarLabel, type PrStatus, type TopCache } from "./top";
 import { defaultMux, type Mux } from "./mux";
 import { currentTab, tabOrder } from "./tab";
-import { createPainter, readView, shouldPoll } from "./zellij-view";
+import { createPainter, isFocused, readView, shouldPoll } from "./zellij-view";
 import { errorMessage, naturalSort } from "./util";
 import { overbridgeVersion } from "./version";
 
@@ -657,6 +658,8 @@ export interface SidebarReaders {
   tabOrder: () => string[];
   /** Reopen a closed orchestration tab (a no-op under a user layout). */
   keepOrchestration: (order: string[]) => void;
+  /** Reopen this tab's Claude pane when it was closed; absent for an orchestration tab, which has its own keeper. */
+  keepAgent?: (state: State) => void;
   /** Start the merged-PR sweep when this sidebar's turn comes. */
   sweep: () => void;
   readState: (fallback: State) => { state: State; fault?: string };
@@ -712,6 +715,10 @@ export function gather(readers: SidebarReaders, inner: number, last: Model): Mod
   const state = stateUnreadable ? last.state : read.state;
   const order = attempt("tabs", readers.tabOrder, []);
   attempt("orchestration tabs", () => readers.keepOrchestration(order), undefined);
+
+  if (!stateUnreadable) {
+    attempt("agent pane", () => readers.keepAgent?.(state), undefined);
+  }
 
   if (!stateUnreadable) {
     attempt("merge sweep", readers.sweep, undefined);
@@ -1127,6 +1134,15 @@ export async function sidebar(wsOpt?: string) {
     tabOrder: () => readView().order,
     // a user layout decides its own tabs, so only the generated one gets its orchestration tabs back
     keepOrchestration: (order) => { if (!userLayout) ensureOrchestrationTabs(order); },
+    // only on the tab being looked at: opening a pane focuses it, and whoever closed Claude's pane is there
+    keepAgent: orchestrationTab(self)
+      ? undefined
+      : (state) => {
+          const w = state.workspaces[self];
+
+          if (!w || w.removing || isIceboxed(w) || sessionEndedForGood(self) || !isFocused(self, readView())) return;
+          ensureAgentPane(self);
+        },
     // with the server down, the sidebar that takes the sweep also runs the CPU priority pass the server would
     sweep: createSweepTrigger({ serverOwns: () => serverOwnsSweep(), claim: claimSweep, start: () => {
         startSweep();
