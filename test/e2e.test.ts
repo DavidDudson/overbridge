@@ -371,7 +371,8 @@ describe("dev shells", () => {
     return Bun.spawnSync({
       cmd: [process.execPath, CLI, "claude", "dsa"],
       cwd: tmp,
-      env: { ...env(), PATH: `${bin}:${process.env.PATH}` },
+      // the fake agent exits at once, which a supervisor would start again for ever
+      env: { ...env(), PATH: `${bin}:${process.env.PATH}`, OVERBRIDGE_NO_SUPERVISOR: "1" },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -764,6 +765,7 @@ describe("relaunch", () => {
         "#!/bin/sh",
         'echo "CM=${CLAUDE_CODE_EXPERIMENTAL_CODE_MODE-unset} NAME=$OVERBRIDGE_NAME ARGS=$*" >> "$RUNS"',
         'if [ -n "$ACTION" ] && [ ! -e "$RUNS.acted" ]; then touch "$RUNS.acted"; "$BUN" "$CLI" $ACTION > "$RUNS.out" 2>&1; echo "exit=$?" >> "$RUNS.out"; fi',
+        'if [ -n "$EXIT_FIRST" ] && [ ! -e "$RUNS.exited" ]; then touch "$RUNS.exited"; exit 1; fi',
         'if [ -n "$WRAP" ]; then sleep 30 & echo $! >> "$RUNS.pids"; wait; else exec sleep 30; fi',
         "",
       ].join("\n"),
@@ -826,6 +828,15 @@ describe("relaunch", () => {
 
     expect(ws(["relaunch", "rl", "--env", "OVERBRIDGE_NAME=other"]).err).toContain("OVERBRIDGE_* variables are set by overbridge");
     await stop("rl", p);
+  }, 30_000);
+
+  test("an agent that exits on its own is started again, resuming its conversation", async () => {
+    expect(ws(["new", "rx"]).code).toBe(0);
+    const { p, runs } = supervise("rx", { EXIT_FIRST: "1" });
+    await until(() => lines(runs).length === 2 && launcherChild("rx") !== undefined);
+    expect(lines(runs)[0]).not.toContain("--continue");
+    expect(lines(runs)[1]).toEndWith("--name rx --continue");
+    await stop("rx", p);
   }, 30_000);
 
   test("overbridge model restarts the agent on the model, keeps its other settings, and an agent may run it", async () => {

@@ -111,7 +111,7 @@ describe("top panel on screen", () => {
     expect(s.line(1)).toMatch(/^│ \[ 📋 12.*\] +│$/);
     expect(s.line(2)).toMatch(/^╰─ refresh failed ─+╯$/);
     expect(new Set(f.placed.map((p) => p.row))).toEqual(new Set([1]));
-    expect(f.placed.map((p) => p.button.label)).toEqual(["📋 12", "📋 PR #3", "🟢 web :3000", "⚫ db", "📝 zed", "🤖 claude", "💻 terminal", "🔀 diff"]);
+    expect(f.placed.map((p) => p.button.label)).toEqual(["📋 12", "📋 PR #3", "🟢 web :3000", "⚫ db", "📝 zed", "💻 terminal", "🔀 diff"]);
 
     for (const p of f.placed) expect(s.line(1)).toContain(cell(p.button));
   });

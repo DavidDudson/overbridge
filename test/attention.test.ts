@@ -7,7 +7,7 @@ import { clearCompact, COMPACT_MARKER_MS, markCompact, nextState, recordState, t
 import { limitColor, limitRows, readLimits, timeLeft, WEEK_SECS } from "../src/limits";
 import { landingTab, pickNext } from "../src/next";
 import { zellijMux } from "../src/mux";
-import { findPane, togglePane } from "../src/panes";
+import { findPane, renderDiff, togglePane } from "../src/panes";
 import { fit, textWidth } from "../src/term";
 import { withState } from "../src/state";
 
@@ -190,7 +190,7 @@ describe("pane toggles", () => {
     expect(f.calls[1]).toEqual(["focus-pane-id", "terminal_5"]);
     const open = f.calls[2]!;
     expect(open.slice(0, 3)).toEqual(["new-pane", "--direction", "down"]);
-    expect(open.slice(open.indexOf("--") + 1)).toEqual(["ob", "diff", "--ws", "w1"]);
+    expect(open.slice(open.indexOf("--") + 1)).toEqual(["ob", "diff", "--ws", "w1", "--follow"]);
   });
 
   test("claude focuses its pane, or says it is missing", () => {
@@ -300,5 +300,50 @@ describe("auto-compact restart", () => {
     markCompact(meta, "w1", 1_000);
     expect(takeCompactRestart(meta, "w2", 1_500)).toBe(false);
     expect(takeCompactRestart(meta, "w1", 1_500)).toBe(true);
+  });
+});
+
+describe("renderDiff", () => {
+  let tmp: string;
+  const saved = process.env.OVERBRIDGE_ROOT;
+  const git = (dir: string, ...args: string[]) => Bun.spawnSync({ cmd: ["git", "-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args], stdout: "pipe", stderr: "pipe" });
+
+  beforeEach(() => {
+    tmp = realpathSync(mkdtempSync(join(tmpdir(), "overbridge-diff-")));
+    process.env.OVERBRIDGE_ROOT = tmp;
+    withState((s) => {
+      s.workspaces.w1 = { created: "now", repos: { r: { branch: "b" }, q: { branch: "c" } } };
+    });
+
+    for (const repo of ["r", "q"]) {
+      const dir = join(tmp, "w1", repo);
+      mkdirSync(dir, { recursive: true });
+      git(dir, "init", "-q");
+      writeFileSync(join(dir, "a.txt"), "one\n");
+      git(dir, "add", "a.txt");
+      git(dir, "commit", "-qm", "init");
+    }
+  });
+  afterEach(() => {
+    saved === undefined ? delete process.env.OVERBRIDGE_ROOT : (process.env.OVERBRIDGE_ROOT = saved);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test("a clean tree renders nothing", () => {
+    expect(renderDiff("w1", 80, "git")).toBe("");
+  });
+
+  test("a changed file shows, with a header per repo when there are several", () => {
+    writeFileSync(join(tmp, "w1", "r", "a.txt"), "two\n");
+    const out = renderDiff("w1", 80, "git");
+    expect(out).toContain("── r ──");
+    expect(out).toContain("two");
+    expect(out).not.toContain("── q ──");
+  });
+
+  test("difftastic missing falls back to the plain diff instead of reading as no changes", () => {
+    writeFileSync(join(tmp, "w1", "r", "a.txt"), "two\n");
+    // git runs, but `difft` is not found, so diff.external fails
+    expect(renderDiff("w1", 80, "difft")).toContain("two");
   });
 });

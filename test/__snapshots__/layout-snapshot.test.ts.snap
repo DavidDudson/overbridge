@@ -91,8 +91,13 @@ exports[`generated layout two workspaces, one resuming 1`] = `
         pane name="top" command="overbridge" cwd="/ws-root/ws1" size=5 borderless=true {
           args "top" "--ws" "ws1"
         }
-        pane name="ws1 · claude" command="overbridge" cwd="/ws-root/ws1" {
-          args "claude" "ws1"
+        pane split_direction="vertical" {
+          pane name="ws1 · claude" command="overbridge" cwd="/ws-root/ws1" {
+            args "claude" "ws1"
+          }
+          pane name="ws1 · diff" command="overbridge" cwd="/ws-root/ws1" {
+            args "diff" "--ws" "ws1" "--follow"
+          }
         }
       }
     }
@@ -106,8 +111,13 @@ exports[`generated layout two workspaces, one resuming 1`] = `
         pane name="top" command="overbridge" cwd="/ws-root/ws2" size=5 borderless=true {
           args "top" "--ws" "ws2"
         }
-        pane name="ws2 · claude" command="overbridge" cwd="/ws-root/ws2" {
-          args "claude" "ws2" "--" "--continue"
+        pane split_direction="vertical" {
+          pane name="ws2 · claude" command="overbridge" cwd="/ws-root/ws2" {
+            args "claude" "ws2" "--" "--continue"
+          }
+          pane name="ws2 · diff" command="overbridge" cwd="/ws-root/ws2" {
+            args "diff" "--ws" "ws2" "--follow"
+          }
         }
       }
     }
@@ -207,8 +217,13 @@ exports[`generated layout a wide sidebar and a self command with arguments 1`] =
         pane name="top" command="/usr/bin/bun" cwd="/ws-root/ws1" size=5 borderless=true {
           args "/opt/overbridge/src/cli.ts" "top" "--ws" "ws1"
         }
-        pane name="ws1 · claude" command="/usr/bin/bun" cwd="/ws-root/ws1" {
-          args "/opt/overbridge/src/cli.ts" "claude" "ws1"
+        pane split_direction="vertical" {
+          pane name="ws1 · claude" command="/usr/bin/bun" cwd="/ws-root/ws1" {
+            args "/opt/overbridge/src/cli.ts" "claude" "ws1"
+          }
+          pane name="ws1 · diff" command="/usr/bin/bun" cwd="/ws-root/ws1" {
+            args "/opt/overbridge/src/cli.ts" "diff" "--ws" "ws1" "--follow"
+          }
         }
       }
     }
